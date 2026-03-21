@@ -1,4 +1,5 @@
-import { FormEvent, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
+import type { ComponentProps } from "react"
 import {
   AlertTriangle,
   CheckCircle2,
@@ -479,7 +480,9 @@ export function App() {
     [missingCards, resolvedCards]
   )
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  const handleSubmit: NonNullable<ComponentProps<"form">["onSubmit"]> = async (
+    event
+  ) => {
     event.preventDefault()
 
     const cleanedCommanders = [commanderOneInput, commanderTwoInput]
