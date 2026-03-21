@@ -300,6 +300,7 @@ export function App() {
               completedCards={completedCards}
               fuzzyMatchCount={fuzzyMatchCount}
               missingCardCount={missingCardCount}
+              isProcessing={isProcessing}
             />
             <FuzzyMatchesPanel
               fuzzyMatches={fuzzyMatches}

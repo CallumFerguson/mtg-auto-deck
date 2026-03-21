@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Search } from "lucide-react"
+import { AlertTriangle, CheckCircle2, LoaderCircle, Search } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
@@ -9,12 +9,14 @@ type ProcessedCardsPanelProps = {
   completedCards: ResolvedCard[]
   fuzzyMatchCount: number
   missingCardCount: number
+  isProcessing: boolean
 }
 
 export function ProcessedCardsPanel({
   completedCards,
   fuzzyMatchCount,
   missingCardCount,
+  isProcessing,
 }: ProcessedCardsPanelProps) {
   const fuzzyMatchLabel =
     fuzzyMatchCount === 1 ? "1 fuzzy match" : `${fuzzyMatchCount} fuzzy matches`
@@ -22,7 +24,16 @@ export function ProcessedCardsPanel({
     missingCardCount === 1 ? "1 missing card" : `${missingCardCount} missing cards`
 
   const statusBadges =
-    fuzzyMatchCount || missingCardCount
+    isProcessing
+      ? [
+          {
+            icon: LoaderCircle,
+            className: "bg-stone-900 text-stone-100",
+            iconClassName: "animate-spin",
+            label: "Processing",
+          },
+        ]
+      : fuzzyMatchCount || missingCardCount
       ? [
           fuzzyMatchCount
             ? {
@@ -70,7 +81,9 @@ export function ProcessedCardsPanel({
                   statusBadge.className
                 )}
               >
-                <statusBadge.icon className="size-3.5" />
+                <statusBadge.icon
+                  className={cn("size-3.5", statusBadge.iconClassName)}
+                />
                 {statusBadge.label}
               </div>
             ))}
