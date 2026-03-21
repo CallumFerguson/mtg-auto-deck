@@ -4,11 +4,20 @@ type StatLineProps = Pick<ResolvedCard, "power" | "toughness" | "loyalty">
 
 export function StatLine({ power, toughness, loyalty }: StatLineProps) {
   if (power && toughness) {
-    return <span>{power}/{toughness}</span>
+    return (
+      <p>
+        <span className="font-medium text-stone-100">Power/Toughness:</span>{" "}
+        {power}/{toughness}
+      </p>
+    )
   }
 
   if (loyalty) {
-    return <span>Loyalty {loyalty}</span>
+    return (
+      <p>
+        <span className="font-medium text-stone-100">Loyalty:</span> {loyalty}
+      </p>
+    )
   }
 
   return null
