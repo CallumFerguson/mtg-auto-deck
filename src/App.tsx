@@ -21,6 +21,12 @@ import type {
   ResolvedCard,
 } from "@/features/deck-intake/types"
 
+const MIN_PROCESSING_DURATION_MS = 250
+
+function delay(milliseconds: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
+}
+
 export function App() {
   const [commanderOneName, setCommanderOneName] =
     useState(DEFAULT_COMMANDER_ONE)
@@ -181,9 +187,11 @@ export function App() {
         quantity: 1,
       }))
       const allEntries = [...commanderEntries, ...entries]
-      const { results, fuzzyMatches, notFound } = await fetchCardsByName(
-        allEntries.map((entry) => entry.name)
-      )
+      const [lookupResponse] = await Promise.all([
+        fetchCardsByName(allEntries.map((entry) => entry.name)),
+        delay(MIN_PROCESSING_DURATION_MS),
+      ])
+      const { results, fuzzyMatches, notFound } = lookupResponse
 
       const nextResolvedCards: ResolvedCard[] = []
       const nextFuzzyMatches: FuzzyMatch[] = []
