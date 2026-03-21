@@ -28,7 +28,65 @@ npm run dev
 npm run build
 npm run typecheck
 npm run lint
+npm run mcp:dev
+npm run mcp:build
 ```
+
+## MCP Server
+
+This repo now includes a standalone HTTP MCP server for deck goldfishing experiments.
+
+Current tools:
+
+- `create_game`: creates a new in-memory game and returns a `gameId`.
+- `draw_card`: draws one or more cards from the preloaded deck for the supplied `gameId` and `count`.
+
+Behavior:
+
+- Each new game starts with the same preloaded deck.
+- Games are stored in memory only.
+- Any game older than 1 hour is automatically removed.
+- The MCP endpoint is served over HTTP at `/mcp`.
+
+### Run locally
+
+Development:
+
+```bash
+npm run mcp:dev
+```
+
+Production-style local run:
+
+```bash
+npm run mcp:build
+npm run mcp:server
+```
+
+By default the server listens on `http://127.0.0.1:3001/mcp`.
+
+Optional environment variables:
+
+```bash
+PORT=3001
+HOST=127.0.0.1
+```
+
+### LM Studio configuration
+
+Configure LM Studio to connect to the running HTTP MCP server instead of spawning it.
+
+```json
+{
+  "mtg-auto-goldfish": {
+    "url": "http://127.0.0.1:3001/mcp"
+  }
+}
+```
+
+### OpenAI API path
+
+This HTTP MCP shape is also a better fit for later OpenAI API usage, because the model can connect to a remote MCP server over HTTP instead of requiring a locally spawned stdio process.
 
 ## Development
 
