@@ -1,5 +1,5 @@
 import type { ComponentProps } from "react"
-import { AlertTriangle, LoaderCircle, Search } from "lucide-react"
+import { AlertTriangle, LoaderCircle, RotateCcw, Search } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 
@@ -12,11 +12,13 @@ type DeckIntakeFormProps = {
   expectedDecklistCount: number
   canProcess: boolean
   isProcessing: boolean
+  isResetDisabled: boolean
   validationMessage: string
   lookupError: string
   onCommanderOneChange: (value: string) => void
   onCommanderTwoChange: (value: string) => void
   onDecklistChange: (value: string) => void
+  onResetToSampleDeck: () => void
   onSubmit: NonNullable<ComponentProps<"form">["onSubmit"]>
 }
 
@@ -27,11 +29,13 @@ export function DeckIntakeForm({
   expectedDecklistCount,
   canProcess,
   isProcessing,
+  isResetDisabled,
   validationMessage,
   lookupError,
   onCommanderOneChange,
   onCommanderTwoChange,
   onDecklistChange,
+  onResetToSampleDeck,
   onSubmit,
 }: DeckIntakeFormProps) {
   return (
@@ -108,6 +112,17 @@ export function DeckIntakeForm({
                 Process with Scryfall
               </>
             )}
+          </Button>
+          <Button
+            type="button"
+            size="lg"
+            variant="outline"
+            className="h-11 rounded-full border-white/15 bg-white/5 px-5 text-stone-200 hover:bg-white/10 hover:text-stone-50"
+            onClick={onResetToSampleDeck}
+            disabled={isResetDisabled}
+          >
+            <RotateCcw />
+            Reset to sample deck
           </Button>
           <p className="text-sm text-stone-400">
             Commander decks are 100 cards total, so the deck box should contain{" "}

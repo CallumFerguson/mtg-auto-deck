@@ -1,13 +1,10 @@
 import { useEffect, useMemo, useState } from "react"
 import type { ComponentProps } from "react"
 
-import {
-  DEFAULT_COMMANDER_ONE,
-  DEFAULT_DECKLIST,
-} from "@/features/deck-intake/constants"
 import { DeckIntakeForm } from "@/features/deck-intake/components/deck-intake-form"
 import { HeroSection } from "@/features/deck-intake/components/hero-section"
 import { ProcessedCardsPanel } from "@/features/deck-intake/components/processed-cards-panel"
+import { ResetDeckModal } from "@/features/deck-intake/components/reset-deck-modal"
 import {
   clearCardOverride,
   clearCardOverrides,
@@ -16,6 +13,11 @@ import {
   saveManualCardText,
 } from "@/features/deck-intake/lib/card-overrides"
 import { parseCommanderInput, parseDecklist } from "@/features/deck-intake/lib/deck-parser"
+import {
+  DEFAULT_DECK_INPUT,
+  loadStoredDeckInput,
+  saveStoredDeckInput,
+} from "@/features/deck-intake/lib/deck-storage"
 import {
   areCardsAvailableInCache,
   fetchCardsByName,
@@ -34,15 +36,20 @@ function delay(milliseconds: number) {
 }
 
 export function App() {
-  const [commanderOneName, setCommanderOneName] =
-    useState(DEFAULT_COMMANDER_ONE)
-  const [commanderTwoName, setCommanderTwoName] = useState("")
-  const [decklistText, setDecklistText] = useState(DEFAULT_DECKLIST)
+  const [storedDeckInput] = useState(() => loadStoredDeckInput())
+  const [commanderOneName, setCommanderOneName] = useState(
+    storedDeckInput.commanderOneName
+  )
+  const [commanderTwoName, setCommanderTwoName] = useState(
+    storedDeckInput.commanderTwoName
+  )
+  const [decklistText, setDecklistText] = useState(storedDeckInput.decklistText)
   const [resolvedCards, setResolvedCards] = useState<ResolvedCard[]>([])
   const [fuzzyMatches, setFuzzyMatches] = useState<FuzzyMatch[]>([])
   const [missingCards, setMissingCards] = useState<MissingCard[]>([])
   const [lookupError, setLookupError] = useState("")
   const [isProcessing, setIsProcessing] = useState(false)
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false)
 
   const parsedDeck = useMemo(() => parseDecklist(decklistText), [decklistText])
   const totalCards = parsedDeck.reduce(
@@ -122,6 +129,10 @@ export function App() {
   )
   const fuzzyMatchCount = fuzzyMatches.length
   const missingCardCount = missingCards.filter((card) => !card.isAccepted).length
+  const isSampleDeckActive =
+    commanderOneName === DEFAULT_DECK_INPUT.commanderOneName &&
+    commanderTwoName === DEFAULT_DECK_INPUT.commanderTwoName &&
+    decklistText === DEFAULT_DECK_INPUT.decklistText
 
   const handleSubmit: NonNullable<ComponentProps<"form">["onSubmit"]> = async (
     event
@@ -283,6 +294,14 @@ export function App() {
   }
 
   useEffect(() => {
+    saveStoredDeckInput({
+      commanderOneName,
+      commanderTwoName,
+      decklistText,
+    })
+  }, [commanderOneName, commanderTwoName, decklistText])
+
+  useEffect(() => {
     if (!canProcess) {
       return
     }
@@ -299,6 +318,26 @@ export function App() {
 
     void processDeck({ skipMinProcessingDuration: true })
   }, [])
+
+  function requestResetToSampleDeck() {
+    if (isSampleDeckActive) {
+      return
+    }
+
+    setIsResetModalOpen(true)
+  }
+
+  function resetToSampleDeck() {
+    setCommanderOneName(DEFAULT_DECK_INPUT.commanderOneName)
+    setCommanderTwoName(DEFAULT_DECK_INPUT.commanderTwoName)
+    setDecklistText(DEFAULT_DECK_INPUT.decklistText)
+    setResolvedCards([])
+    setFuzzyMatches([])
+    setMissingCards([])
+    setLookupError("")
+    setIsProcessing(false)
+    setIsResetModalOpen(false)
+  }
 
   function updateManualText(name: string, manualText: string) {
     setMissingCards((currentCards) =>
@@ -483,11 +522,13 @@ export function App() {
             expectedDecklistCount={expectedDecklistCount}
             canProcess={canProcess}
             isProcessing={isProcessing}
+            isResetDisabled={isSampleDeckActive}
             validationMessage={validationMessage}
             lookupError={lookupError}
             onCommanderOneChange={setCommanderOneName}
             onCommanderTwoChange={setCommanderTwoName}
             onDecklistChange={setDecklistText}
+            onResetToSampleDeck={requestResetToSampleDeck}
             onSubmit={handleSubmit}
           />
 
@@ -512,6 +553,12 @@ export function App() {
           </section>
         </div>
       </div>
+
+      <ResetDeckModal
+        isOpen={isResetModalOpen}
+        onCancel={() => setIsResetModalOpen(false)}
+        onConfirm={resetToSampleDeck}
+      />
     </main>
   )
 }
