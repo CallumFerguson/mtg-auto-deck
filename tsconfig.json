@@ -3,7 +3,7 @@
   "references": [
     { "path": "./tsconfig.app.json" },
     { "path": "./tsconfig.node.json" },
-    { "path": "./tsconfig.mcp.json" }
+    { "path": "./tsconfig.server.json" }
   ],
   "compilerOptions": {
     "baseUrl": ".",

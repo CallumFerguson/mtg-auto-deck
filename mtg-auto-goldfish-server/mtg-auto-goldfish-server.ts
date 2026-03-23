@@ -8,13 +8,14 @@ import { GameStore } from './game-store.js'
 
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_PORT = 3001
+const SERVER_NAME = 'mtg-auto-goldfish-server'
 
 const gameStore = new GameStore()
 
 function createServer() {
   const server = new McpServer(
     {
-      name: 'mtg-auto-goldfish-mcp',
+      name: SERVER_NAME,
       version: '0.0.1',
     },
     {
@@ -25,43 +26,17 @@ function createServer() {
   )
 
   server.registerTool(
-    'create_game',
-    {
-      title: 'Create Game',
-      description:
-        'Create a new in-memory MTG game using the server preloaded deck and return its game ID.',
-      outputSchema: {
-        gameId: z.uuid(),
-        createdAt: z.iso.datetime(),
-        cardsRemaining: z.number().int().nonnegative(),
-        totalGames: z.number().int().nonnegative(),
-      },
-    },
-    async () => {
-      const game = gameStore.createGame()
-
-      logInfo('new', `${shortId(game.gameId)} games=${game.totalGames}`)
-
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Created game ${game.gameId}. Library has ${game.cardsRemaining} cards remaining.`,
-          },
-        ],
-        structuredContent: game,
-      }
-    },
-  )
-
-  server.registerTool(
     'draw_card',
     {
       title: 'Draw Card',
       description:
-        'Draw one or more cards from the preloaded library for an existing game ID.',
+        'Draw one or more cards from the preloaded library for an existing game ID that was created outside MCP.',
       inputSchema: {
-        gameId: z.uuid().describe('The game ID returned by create_game.'),
+        gameId: z
+          .uuid()
+          .describe(
+            'The game ID returned by the regular HTTP create-game endpoint, not by an MCP tool.',
+          ),
         count: z.number().int().positive().describe('How many cards to draw.'),
       },
       outputSchema: {
@@ -78,7 +53,7 @@ function createServer() {
 
         const message =
           drawResult.reason === 'game_not_found'
-            ? 'Game not found. It may be invalid or it may have expired after one hour.'
+            ? 'Game not found. It may be invalid, may not have been created yet, or may have expired after one hour.'
             : 'That game has no cards left in its library.'
 
         return {
@@ -126,8 +101,16 @@ async function main() {
   app.get('/health', (_req: Request, res: Response) => {
     res.status(200).json({
       ok: true,
-      service: 'mtg-auto-goldfish-mcp',
+      service: SERVER_NAME,
     })
+  })
+
+  app.post('/games', (_req: Request, res: Response) => {
+    const game = gameStore.createGame()
+
+    logInfo('new', `${shortId(game.gameId)} games=${game.totalGames}`)
+
+    res.status(201).json(game)
   })
 
   app.post('/mcp', async (req: Request, res: Response) => {
@@ -185,13 +168,12 @@ async function main() {
 
   app.listen(port, host, (error?: Error) => {
     if (error) {
-      console.error('Failed to start MCP server:', error)
+      console.error('Failed to start server:', error)
       process.exit(1)
     }
 
-    console.error(
-      `mtg-auto-goldfish MCP server listening at http://${host}:${port}/mcp`,
-    )
+    console.error(`${SERVER_NAME} listening at http://${host}:${port}`)
+    console.error(`MCP endpoint available at http://${host}:${port}/mcp`)
   })
 }
 
@@ -222,6 +204,6 @@ function logWarn(event: string, message: string) {
 }
 
 main().catch(error => {
-  console.error('MCP server error:', error)
+  console.error('Server error:', error)
   process.exit(1)
 })

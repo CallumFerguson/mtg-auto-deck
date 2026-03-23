@@ -28,24 +28,25 @@ npm run dev
 npm run build
 npm run typecheck
 npm run lint
-npm run mcp:dev
-npm run mcp:build
+npm run server:dev
+npm run server:build
 ```
 
-## MCP Server
+## Server
 
-This repo now includes a standalone HTTP MCP server for deck goldfishing experiments.
+This repo now includes a standalone HTTP server for deck goldfishing experiments. Its source lives in `mtg-auto-goldfish-server/`. It still exposes an MCP endpoint, but it can also serve regular HTTP endpoints alongside it.
 
-Current tools:
+Current API surface:
 
-- `create_game`: creates a new in-memory game and returns a `gameId`.
-- `draw_card`: draws one or more cards from the preloaded deck for the supplied `gameId` and `count`.
+- `POST /games`: creates a new in-memory game and returns a `gameId`.
+- MCP tool `draw_card`: draws one or more cards from the preloaded deck for the supplied `gameId` and `count`.
 
 Behavior:
 
 - Each new game starts with the same preloaded deck.
 - Games are stored in memory only.
 - Any game older than 1 hour is automatically removed.
+- The app is expected to create the game over HTTP first, then pass that `gameId` into the LLM prompt.
 - The MCP endpoint is served over HTTP at `/mcp`.
 
 ### Run locally
@@ -53,17 +54,17 @@ Behavior:
 Development:
 
 ```bash
-npm run mcp:dev
+npm run server:dev
 ```
 
 Production-style local run:
 
 ```bash
-npm run mcp:build
-npm run mcp:server
+npm run server:build
+npm run server:start
 ```
 
-By default the server listens on `http://127.0.0.1:3001/mcp`.
+By default the server listens on `http://127.0.0.1:3001`.
 
 Optional environment variables:
 
@@ -74,7 +75,7 @@ HOST=127.0.0.1
 
 ### LM Studio configuration
 
-Configure LM Studio to connect to the running HTTP MCP server instead of spawning it.
+Configure LM Studio to connect to the running HTTP MCP endpoint instead of spawning it.
 
 ```json
 {
@@ -84,9 +85,13 @@ Configure LM Studio to connect to the running HTTP MCP server instead of spawnin
 }
 ```
 
-### OpenAI API path
+### App flow
 
-This HTTP MCP shape is also a better fit for later OpenAI API usage, because the model can connect to a remote MCP server over HTTP instead of requiring a locally spawned stdio process.
+The intended flow is:
+
+1. The app calls `POST /games` and receives a `gameId`.
+2. The app includes that `gameId` in the model prompt or tool context.
+3. The model can call `draw_card`, but it cannot create a game through MCP.
 
 ## Development
 

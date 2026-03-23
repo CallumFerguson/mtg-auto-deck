@@ -21,7 +21,7 @@ export default defineConfig([
     },
   },
   {
-    files: ['vite.config.ts', 'mcp/**/*.ts'],
+    files: ['vite.config.ts', 'mtg-auto-goldfish-server/**/*.ts'],
     extends: [js.configs.recommended, tseslint.configs.recommended],
     languageOptions: {
       ecmaVersion: 2023,
