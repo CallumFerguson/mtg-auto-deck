@@ -199,6 +199,13 @@ function getCachedCard(cache: CardCache, key: string) {
   return entry
 }
 
+export function areCardsAvailableInCache(names: string[]) {
+  const uniqueNames = Array.from(new Set(names.map((name) => name.toLowerCase())))
+  const cache = loadCache()
+
+  return uniqueNames.every((lookupKey) => Boolean(getCachedCard(cache, lookupKey)))
+}
+
 function setCachedFoundCard(cache: CardCache, key: string, card: ScryfallCard) {
   cache[key] = {
     status: "found",

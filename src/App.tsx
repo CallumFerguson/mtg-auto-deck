@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import type { ComponentProps } from "react"
 
 import {
@@ -18,6 +18,7 @@ import {
 } from "@/features/deck-intake/lib/card-overrides"
 import { parseCommanderInput, parseDecklist } from "@/features/deck-intake/lib/deck-parser"
 import {
+  areCardsAvailableInCache,
   fetchCardsByName,
   toResolvedCard,
 } from "@/features/deck-intake/lib/scryfall"
@@ -140,7 +141,10 @@ export function App() {
     event
   ) => {
     event.preventDefault()
+    await processDeck()
+  }
 
+  async function processDeck(options?: { skipMinProcessingDuration?: boolean }) {
     const cleanedCommanders = [commanderOneInput, commanderTwoInput]
       .map((commander) => commander.name)
       .filter(Boolean)
@@ -210,10 +214,10 @@ export function App() {
         quantity: 1,
       }))
       const allEntries = [...commanderEntries, ...entries]
-      const [lookupResponse] = await Promise.all([
-        fetchCardsByName(allEntries.map((entry) => entry.name)),
-        delay(MIN_PROCESSING_DURATION_MS),
-      ])
+      const lookupPromise = fetchCardsByName(allEntries.map((entry) => entry.name))
+      const [lookupResponse] = options?.skipMinProcessingDuration
+        ? [await lookupPromise]
+        : await Promise.all([lookupPromise, delay(MIN_PROCESSING_DURATION_MS)])
       const { results, fuzzyMatches, notFound } = lookupResponse
       const commanderLookup = new Set(
         cleanedCommanders.map((name) => name.trim().toLowerCase())
@@ -289,6 +293,24 @@ export function App() {
       setIsProcessing(false)
     }
   }
+
+  useEffect(() => {
+    if (!canProcess) {
+      return
+    }
+
+    const cleanedCommanders = [commanderOneInput, commanderTwoInput]
+      .map((commander) => commander.name)
+      .filter(Boolean)
+    const entries = parseDecklist(decklistText)
+    const allNames = cleanedCommanders.concat(entries.map((entry) => entry.name))
+
+    if (!allNames.length || !areCardsAvailableInCache(allNames)) {
+      return
+    }
+
+    void processDeck({ skipMinProcessingDuration: true })
+  }, [])
 
   function updateManualText(name: string, manualText: string) {
     saveManualCardText(name, manualText)
