@@ -210,7 +210,7 @@ export function createLmStudioPromptProcessor(
             onEvent({
               type: "tool",
               event: eventName,
-              tool: asStringRecord(payload).tool,
+              tool: extractToolName(payload),
               provider: extractProviderLabel(payload),
             })
             break
@@ -218,7 +218,7 @@ export function createLmStudioPromptProcessor(
             onEvent({
               type: "tool",
               event: eventName,
-              tool: asStringRecord(payload).tool,
+              tool: extractToolName(payload),
               provider: extractProviderLabel(payload),
               argumentsText: safeJsonStringify(
                 asObjectRecord(payload).arguments
@@ -229,7 +229,7 @@ export function createLmStudioPromptProcessor(
             onEvent({
               type: "tool",
               event: eventName,
-              tool: asStringRecord(payload).tool,
+              tool: extractToolName(payload),
               provider: extractProviderLabel(payload),
               argumentsText: safeJsonStringify(
                 asObjectRecord(payload).arguments
@@ -474,6 +474,29 @@ function extractProviderLabel(value: unknown) {
 
   if (typeof providerInfo.plugin_id === "string") {
     return providerInfo.plugin_id
+  }
+
+  return undefined
+}
+
+function extractToolName(value: unknown) {
+  const payload = asObjectRecord(value)
+  const functionRecord = asObjectRecord(payload.function)
+
+  if (typeof payload.tool === "string") {
+    return payload.tool
+  }
+
+  if (typeof payload.tool_name === "string") {
+    return payload.tool_name
+  }
+
+  if (typeof payload.name === "string") {
+    return payload.name
+  }
+
+  if (typeof functionRecord.name === "string") {
+    return functionRecord.name
   }
 
   return undefined

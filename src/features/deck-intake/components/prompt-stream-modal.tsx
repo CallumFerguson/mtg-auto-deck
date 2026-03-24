@@ -1,0 +1,96 @@
+import { useEffect } from "react"
+import { Eye, X } from "lucide-react"
+
+import { Button } from "@/components/ui/button"
+
+type PromptStreamModalProps = {
+  isOpen: boolean
+  streamText: string
+  onClose: () => void
+}
+
+export function PromptStreamModal({
+  isOpen,
+  streamText,
+  onClose,
+}: PromptStreamModalProps) {
+  useEffect(() => {
+    if (!isOpen) {
+      return
+    }
+
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose()
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [isOpen, onClose])
+
+  if (!isOpen) {
+    return null
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        className="flex max-h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-[28px] border border-sky-300/15 bg-[linear-gradient(180deg,rgba(15,23,42,0.98)_0%,rgba(12,10,9,0.97)_100%)] shadow-[0_30px_120px_rgba(0,0,0,0.65)]"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="prompt-stream-modal-title"
+      >
+        <div className="border-b border-white/10 bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.15),transparent_55%)] p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="mb-4 flex size-12 items-center justify-center rounded-2xl border border-sky-300/20 bg-sky-400/10 text-sky-200">
+                <Eye className="size-5" />
+              </div>
+              <h3
+                id="prompt-stream-modal-title"
+                className="text-xl font-semibold tracking-tight text-stone-50"
+              >
+                Full prompt stream
+              </h3>
+              <p className="mt-2 text-sm leading-6 text-stone-300">
+                This is the raw live stream coming back through the local prompt
+                pipeline.
+              </p>
+            </div>
+
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 rounded-full border-white/15 bg-white/5 px-4 text-stone-200 hover:bg-white/10 hover:text-stone-50"
+              onClick={onClose}
+            >
+              <X />
+              Close
+            </Button>
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 p-6">
+          <div className="h-full overflow-auto rounded-[24px] border border-white/10 bg-black/35 p-4">
+            <pre className="font-mono text-xs leading-6 break-words whitespace-pre-wrap text-stone-200">
+              {streamText.trim() || "No prompt stream yet."}
+            </pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

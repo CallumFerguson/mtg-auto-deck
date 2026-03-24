@@ -5,6 +5,7 @@ import { DeckIntakeForm } from "@/features/deck-intake/components/deck-intake-fo
 import { GoldfishSimulationPanel } from "@/features/deck-intake/components/goldfish-simulation-panel"
 import { HeroSection } from "@/features/deck-intake/components/hero-section"
 import { ProcessedCardsPanel } from "@/features/deck-intake/components/processed-cards-panel"
+import { PromptStreamModal } from "@/features/deck-intake/components/prompt-stream-modal"
 import { ResetDeckModal } from "@/features/deck-intake/components/reset-deck-modal"
 import {
   clearCardOverride,
@@ -83,6 +84,13 @@ type PromptStreamEvent =
       reasoning: string
     }
 
+type SimulationActivity = {
+  id: string
+  kind: "thinking" | "tool"
+  title: string
+  status: "active" | "done" | "error"
+}
+
 function delay(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 }
@@ -108,92 +116,199 @@ function expandResolvedCard(card: ResolvedCard) {
   }))
 }
 
-function appendSimulationLine(
-  setSimulationResult: Dispatch<SetStateAction<string>>,
-  line: string
-) {
-  setSimulationResult((current) => `${current}${line}\n`)
+function createActivityId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-function appendSimulationText(
-  setSimulationResult: Dispatch<SetStateAction<string>>,
-  text: string
-) {
-  setSimulationResult((current) => `${current}${text}`)
+function createThinkingActivity(): SimulationActivity {
+  return {
+    id: createActivityId(),
+    kind: "thinking",
+    title: "Thinking",
+    status: "active",
+  }
 }
 
-function formatProgress(progress: number | undefined) {
-  if (typeof progress !== "number" || Number.isNaN(progress)) {
-    return ""
+function createToolActivity(toolName: string | undefined): SimulationActivity {
+  return {
+    id: createActivityId(),
+    kind: "tool",
+    title: toolName ? `Calling ${toolName}` : "Calling tool",
+    status: "active",
+  }
+}
+
+function appendRawPromptStream(currentStream: string, chunk: string) {
+  return `${currentStream}${chunk}`
+}
+
+function completeActiveActivity(
+  currentActivities: SimulationActivity[],
+  status: SimulationActivity["status"] = "done"
+) {
+  const nextActivities = [...currentActivities]
+
+  for (let index = nextActivities.length - 1; index >= 0; index -= 1) {
+    if (nextActivities[index].status === "active") {
+      nextActivities[index] = {
+        ...nextActivities[index],
+        status,
+      }
+      break
+    }
   }
 
-  return ` ${Math.round(progress * 100)}%`
+  return nextActivities
+}
+
+function ensureThinkingActivity(currentActivities: SimulationActivity[]) {
+  const lastActivity = currentActivities.at(-1)
+
+  if (lastActivity?.kind === "thinking" && lastActivity.status === "active") {
+    return currentActivities
+  }
+
+  return [
+    ...completeActiveActivity(currentActivities),
+    createThinkingActivity(),
+  ]
+}
+
+function updateLatestToolActivity(
+  currentActivities: SimulationActivity[],
+  changes: Partial<SimulationActivity>
+) {
+  const nextActivities = [...currentActivities]
+
+  for (let index = nextActivities.length - 1; index >= 0; index -= 1) {
+    if (nextActivities[index].kind === "tool") {
+      nextActivities[index] = {
+        ...nextActivities[index],
+        ...changes,
+      }
+      break
+    }
+  }
+
+  return nextActivities
+}
+
+function getToolActivityTitle(toolName: string | undefined) {
+  return toolName ? `Calling ${toolName}` : "Calling tool"
 }
 
 function handlePromptStreamEvent(
   event: PromptStreamEvent,
+  setSimulationActivities: Dispatch<SetStateAction<SimulationActivity[]>>,
+  setRawPromptStream: Dispatch<SetStateAction<string>>,
   setSimulationResult: Dispatch<SetStateAction<string>>
 ) {
   switch (event.type) {
     case "start":
-      appendSimulationLine(
-        setSimulationResult,
-        `[model] ${event.model.displayName} (${event.model.key})`
+      setRawPromptStream((currentStream) =>
+        appendRawPromptStream(
+          currentStream,
+          `[model] ${event.model.displayName} (${event.model.key})\n\n`
+        )
       )
-      appendSimulationLine(setSimulationResult, "")
+      setSimulationActivities([createThinkingActivity()])
       return
     case "status":
-      appendSimulationLine(
-        setSimulationResult,
-        `[${event.event}]${formatProgress(event.progress)}`
+      setRawPromptStream((currentStream) =>
+        appendRawPromptStream(
+          currentStream,
+          `[${event.event}${typeof event.progress === "number" ? ` ${Math.round(event.progress * 100)}%` : ""}]\n`
+        )
       )
-      return
-    case "reasoning":
-      appendSimulationText(setSimulationResult, event.delta)
-      return
-    case "message":
-      appendSimulationText(setSimulationResult, event.delta)
-      return
-    case "tool": {
-      const label = event.tool ? `${event.event} ${event.tool}` : event.event
-      appendSimulationLine(setSimulationResult, "")
-      appendSimulationLine(setSimulationResult, `[${label}]`)
 
-      if (event.provider) {
-        appendSimulationLine(setSimulationResult, `provider: ${event.provider}`)
-      }
-
-      if (event.argumentsText) {
-        appendSimulationLine(
-          setSimulationResult,
-          `arguments: ${event.argumentsText}`
+      if (
+        event.event === "reasoning.start" ||
+        event.event === "message.start"
+      ) {
+        setSimulationActivities((currentActivities) =>
+          ensureThinkingActivity(currentActivities)
         )
       }
-
-      if (event.output) {
-        appendSimulationLine(setSimulationResult, `output: ${event.output}`)
-      }
-
-      if (event.error) {
-        appendSimulationLine(setSimulationResult, `error: ${event.error}`)
-      }
-
-      appendSimulationLine(setSimulationResult, "")
       return
-    }
+    case "reasoning":
+      setRawPromptStream((currentStream) =>
+        appendRawPromptStream(currentStream, event.delta)
+      )
+      return
+    case "message":
+      setRawPromptStream((currentStream) =>
+        appendRawPromptStream(currentStream, event.delta)
+      )
+      setSimulationResult((currentResult) => `${currentResult}${event.delta}`)
+      return
+    case "tool":
+      setRawPromptStream((currentStream) =>
+        appendRawPromptStream(
+          currentStream,
+          `${JSON.stringify(event, null, 2)}\n\n`
+        )
+      )
+
+      if (event.event === "tool_call.start") {
+        setSimulationActivities((currentActivities) => [
+          ...completeActiveActivity(currentActivities),
+          createToolActivity(event.tool),
+        ])
+        return
+      }
+
+      if (event.event === "tool_call.arguments") {
+        setSimulationActivities((currentActivities) =>
+          updateLatestToolActivity(currentActivities, {
+            title: getToolActivityTitle(event.tool),
+          })
+        )
+        return
+      }
+
+      if (event.event === "tool_call.success") {
+        setSimulationActivities((currentActivities) =>
+          updateLatestToolActivity(currentActivities, {
+            status: "done",
+            title: getToolActivityTitle(event.tool),
+          })
+        )
+        return
+      }
+
+      if (event.event === "tool_call.failure") {
+        setSimulationActivities((currentActivities) =>
+          updateLatestToolActivity(currentActivities, {
+            status: "error",
+            title: getToolActivityTitle(event.tool),
+          })
+        )
+      }
+      return
     case "error":
-      appendSimulationLine(setSimulationResult, "")
-      appendSimulationLine(setSimulationResult, `[error] ${event.error}`)
+      setRawPromptStream((currentStream) =>
+        appendRawPromptStream(currentStream, `[error] ${event.error}\n`)
+      )
+      setSimulationActivities((currentActivities) =>
+        completeActiveActivity(currentActivities, "error")
+      )
       return
     case "done":
-      appendSimulationLine(setSimulationResult, "")
-      appendSimulationLine(setSimulationResult, "[chat.end]")
+      setRawPromptStream((currentStream) =>
+        appendRawPromptStream(currentStream, "\n[chat.end]\n")
+      )
+      setSimulationActivities((currentActivities) =>
+        completeActiveActivity(currentActivities)
+      )
+      setSimulationResult(event.result)
       return
   }
 }
 
 async function readPromptStream(
   response: Response,
+  setSimulationActivities: Dispatch<SetStateAction<SimulationActivity[]>>,
+  setRawPromptStream: Dispatch<SetStateAction<string>>,
   setSimulationResult: Dispatch<SetStateAction<string>>
 ) {
   if (!response.body) {
@@ -223,7 +338,12 @@ async function readPromptStream(
       }
 
       const event = JSON.parse(trimmedLine) as PromptStreamEvent
-      handlePromptStreamEvent(event, setSimulationResult)
+      handlePromptStreamEvent(
+        event,
+        setSimulationActivities,
+        setRawPromptStream,
+        setSimulationResult
+      )
     }
   }
 
@@ -231,7 +351,12 @@ async function readPromptStream(
 
   if (trailing) {
     const event = JSON.parse(trailing) as PromptStreamEvent
-    handlePromptStreamEvent(event, setSimulationResult)
+    handlePromptStreamEvent(
+      event,
+      setSimulationActivities,
+      setRawPromptStream,
+      setSimulationResult
+    )
   }
 }
 
@@ -250,10 +375,15 @@ export function App() {
   const [lookupError, setLookupError] = useState("")
   const [isProcessing, setIsProcessing] = useState(false)
   const [isResetModalOpen, setIsResetModalOpen] = useState(false)
+  const [isPromptStreamModalOpen, setIsPromptStreamModalOpen] = useState(false)
   const [isStartingSimulation, setIsStartingSimulation] = useState(false)
   const [simulationError, setSimulationError] = useState("")
   const [gameId, setGameId] = useState("")
   const [simulationResult, setSimulationResult] = useState("")
+  const [rawPromptStream, setRawPromptStream] = useState("")
+  const [simulationActivities, setSimulationActivities] = useState<
+    SimulationActivity[]
+  >([])
 
   const parsedDeck = useMemo(() => parseDecklist(decklistText), [decklistText])
   const totalCards = parsedDeck.reduce(
@@ -548,6 +678,8 @@ export function App() {
     setSimulationError("")
     setGameId("")
     setSimulationResult("")
+    setRawPromptStream("")
+    setSimulationActivities([])
 
     try {
       const response = await fetch(`${GOLDFISH_SERVER_URL}/games`, {
@@ -621,7 +753,12 @@ export function App() {
         )
       }
 
-      await readPromptStream(promptResponse, setSimulationResult)
+      await readPromptStream(
+        promptResponse,
+        setSimulationActivities,
+        setRawPromptStream,
+        setSimulationResult
+      )
     } catch (error) {
       setSimulationError(
         error instanceof Error ? error.message : "Failed to create a game."
@@ -663,6 +800,9 @@ export function App() {
     setGameId("")
     setSimulationError("")
     setSimulationResult("")
+    setRawPromptStream("")
+    setSimulationActivities([])
+    setIsPromptStreamModalOpen(false)
   }, [commanderOneName, commanderTwoName, decklistText])
 
   function requestResetToSampleDeck() {
@@ -686,6 +826,9 @@ export function App() {
     setGameId("")
     setSimulationError("")
     setSimulationResult("")
+    setRawPromptStream("")
+    setSimulationActivities([])
+    setIsPromptStreamModalOpen(false)
   }
 
   function updateManualText(name: string, manualText: string) {
@@ -907,7 +1050,10 @@ export function App() {
           isStarting={isStartingSimulation}
           gameId={gameId}
           result={simulationResult}
+          rawPromptStream={rawPromptStream}
+          activities={simulationActivities}
           errorMessage={simulationError}
+          onOpenPromptStream={() => setIsPromptStreamModalOpen(true)}
           onStart={startSimulation}
         />
       </div>
@@ -916,6 +1062,12 @@ export function App() {
         isOpen={isResetModalOpen}
         onCancel={() => setIsResetModalOpen(false)}
         onConfirm={resetToSampleDeck}
+      />
+
+      <PromptStreamModal
+        isOpen={isPromptStreamModalOpen}
+        streamText={rawPromptStream}
+        onClose={() => setIsPromptStreamModalOpen(false)}
       />
     </main>
   )
