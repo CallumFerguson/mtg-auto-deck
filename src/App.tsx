@@ -82,6 +82,7 @@ export function App() {
   const [isStartingSimulation, setIsStartingSimulation] = useState(false)
   const [simulationError, setSimulationError] = useState("")
   const [gameId, setGameId] = useState("")
+  const [simulationResult, setSimulationResult] = useState("")
 
   const parsedDeck = useMemo(() => parseDecklist(decklistText), [decklistText])
   const totalCards = parsedDeck.reduce(
@@ -373,6 +374,8 @@ export function App() {
 
     setIsStartingSimulation(true)
     setSimulationError("")
+    setGameId("")
+    setSimulationResult("")
 
     try {
       const response = await fetch(`${GOLDFISH_SERVER_URL}/games`, {
@@ -406,7 +409,49 @@ export function App() {
         throw new Error("The server response did not include a game ID.")
       }
 
-      setGameId(payload.gameId)
+      const nextGameId = payload.gameId
+
+      setGameId(nextGameId)
+
+      const promptResponse = await fetch(`${GOLDFISH_SERVER_URL}/process-prompt`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          prompt: `draw 7 cards with game id ${nextGameId}`,
+        }),
+      })
+
+      const promptPayload = (await promptResponse.json()) as
+        | { result?: string; error?: string }
+        | { details?: Array<{ message?: string }> }
+
+      if (!promptResponse.ok) {
+        const detailMessage =
+          "details" in promptPayload && Array.isArray(promptPayload.details)
+            ? promptPayload.details
+                .map((detail) => detail.message)
+                .filter(Boolean)
+                .join(" ")
+            : ""
+        throw new Error(
+          detailMessage ||
+            ("error" in promptPayload && promptPayload.error) ||
+            "Failed to process the simulation prompt."
+        )
+      }
+
+      if (
+        !("result" in promptPayload) ||
+        typeof promptPayload.result !== "string"
+      ) {
+        throw new Error(
+          "The server response did not include a simulation result."
+        )
+      }
+
+      setSimulationResult(promptPayload.result)
     } catch (error) {
       setSimulationError(
         error instanceof Error
@@ -447,6 +492,7 @@ export function App() {
   useEffect(() => {
     setGameId("")
     setSimulationError("")
+    setSimulationResult("")
   }, [commanderOneName, commanderTwoName, decklistText])
 
   function requestResetToSampleDeck() {
@@ -469,6 +515,7 @@ export function App() {
     setIsResetModalOpen(false)
     setGameId("")
     setSimulationError("")
+    setSimulationResult("")
   }
 
   function updateManualText(name: string, manualText: string) {
@@ -689,6 +736,7 @@ export function App() {
           canStart={isDeckReady}
           isStarting={isStartingSimulation}
           gameId={gameId}
+          result={simulationResult}
           errorMessage={simulationError}
           onStart={startSimulation}
         />

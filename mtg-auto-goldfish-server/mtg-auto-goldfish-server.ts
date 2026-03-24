@@ -5,6 +5,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { z } from 'zod/v4'
 
 import { GameStore } from './game-store.js'
+import { createPromptProcessor } from './llm/index.js'
 
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_PORT = 3001
@@ -18,6 +19,9 @@ const gameStore = new GameStore()
 const gameCardSchema = z.object({
   name: z.string().trim().min(1).describe('The card name.'),
   cardText: z.string().trim().min(1).describe('The gameplay-relevant card text.'),
+})
+const processPromptSchema = z.object({
+  prompt: z.string().trim().min(1).describe('The prompt to run locally.'),
 })
 const createGameSchema = z
   .object({
@@ -126,6 +130,12 @@ async function main() {
   const port = getPort(process.env.PORT)
   const app = createMcpExpressApp({ host })
   const allowedOrigins = getAllowedOrigins(process.env.ALLOWED_ORIGINS)
+  const promptProcessor = createPromptProcessor({
+    baseUrl: process.env.LM_STUDIO_BASE_URL,
+    apiToken: process.env.LM_STUDIO_API_TOKEN,
+    mcpServerUrl:
+      process.env.GOLDFISH_MCP_SERVER_URL ?? getLocalMcpServerUrl(host, port),
+  })
 
   app.use((req: Request, res: Response, next) => {
     applyCors(req, res, allowedOrigins)
@@ -167,6 +177,40 @@ async function main() {
     )
 
     res.status(201).json(game)
+  })
+
+  app.post('/process-prompt', async (req: Request, res: Response) => {
+    const parsedRequest = processPromptSchema.safeParse(req.body)
+
+    if (!parsedRequest.success) {
+      res.status(400).json({
+        error: 'Invalid request body.',
+        details: parsedRequest.error.issues,
+      })
+      return
+    }
+
+    const { prompt } = parsedRequest.data
+
+    try {
+      const response = await promptProcessor.processPrompt(prompt)
+
+      logInfo(
+        'prompt',
+        `len=${prompt.length} model=${response.model.key} size=${response.model.sizeBytes}`,
+      )
+
+      res.status(200).json(response)
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Failed to process prompt.'
+
+      logWarn('prompt', message)
+
+      res.status(502).json({
+        error: message,
+      })
+    }
   })
 
   app.post('/mcp', async (req: Request, res: Response) => {
@@ -256,6 +300,18 @@ function getAllowedOrigins(rawOrigins: string | undefined) {
     .split(',')
     .map(origin => origin.trim())
     .filter(Boolean)
+}
+
+function getLocalMcpServerUrl(host: string, port: number) {
+  return `http://${normalizeLocalHost(host)}:${port}/mcp`
+}
+
+function normalizeLocalHost(host: string) {
+  if (host === '0.0.0.0' || host === '::') {
+    return '127.0.0.1'
+  }
+
+  return host
 }
 
 function applyCors(

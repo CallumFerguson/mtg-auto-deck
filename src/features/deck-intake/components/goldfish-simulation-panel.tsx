@@ -6,6 +6,7 @@ type GoldfishSimulationPanelProps = {
   canStart: boolean
   isStarting: boolean
   gameId: string
+  result: string
   errorMessage: string
   onStart: () => void
 }
@@ -14,6 +15,7 @@ export function GoldfishSimulationPanel({
   canStart,
   isStarting,
   gameId,
+  result,
   errorMessage,
   onStart,
 }: GoldfishSimulationPanelProps) {
@@ -31,7 +33,8 @@ export function GoldfishSimulationPanel({
             </h2>
             <p className="max-w-3xl text-sm leading-6 text-stone-400">
               Once the full commander and deck package is resolved, create a game
-              on the local goldfish server and capture its game ID.
+              on the local goldfish server, then ask the local model to draw a
+              seven-card starting hand for that game.
             </p>
           </div>
         </div>
@@ -46,7 +49,7 @@ export function GoldfishSimulationPanel({
           {isStarting ? (
             <>
               <LoaderCircle className="animate-spin" />
-              Creating game
+              Running
             </>
           ) : (
             <>
@@ -63,6 +66,24 @@ export function GoldfishSimulationPanel({
             <p className="text-stone-400">Current game ID</p>
             <p className="font-mono text-sm text-emerald-300">{gameId}</p>
           </div>
+        </div>
+      ) : null}
+
+      {isStarting ? (
+        <div className="mt-4 flex items-center gap-3 rounded-[24px] border border-amber-400/20 bg-amber-500/10 p-4 text-sm text-amber-100">
+          <LoaderCircle className="size-4 animate-spin" />
+          <span>Drawing starting hand</span>
+        </div>
+      ) : null}
+
+      {result ? (
+        <div className="mt-4 rounded-[24px] border border-emerald-400/20 bg-emerald-500/10 p-4">
+          <p className="text-xs font-medium uppercase tracking-[0.18em] text-emerald-200">
+            Simulation result
+          </p>
+          <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-emerald-50">
+            {result}
+          </p>
         </div>
       ) : null}
 
