@@ -56,6 +56,7 @@ export function GoldfishSimulationPanel({
 }: GoldfishSimulationPanelProps) {
   const isNearBottomRef = useRef(false)
   const hasStream = Boolean(rawPromptStream.trim())
+  const promptPreview = hasStream ? getPromptPreview(rawPromptStream) : ""
 
   useEffect(() => {
     function updateIsNearBottom() {
@@ -208,10 +209,25 @@ export function GoldfishSimulationPanel({
                     <ActivityIcon status={activity.status} />
                   </div>
 
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-stone-100">
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <p className="shrink-0 text-sm font-medium text-stone-100">
                       {activity.title}
                     </p>
+                    {activity.status === "active" && promptPreview ? (
+                      <div
+                        className="min-w-0 flex-1 overflow-hidden"
+                        style={{
+                          maskImage:
+                            "linear-gradient(to right, transparent 0%, black 18%, black 82%, transparent 100%)",
+                          WebkitMaskImage:
+                            "linear-gradient(to right, transparent 0%, black 18%, black 82%, transparent 100%)",
+                        }}
+                      >
+                        <p className="overflow-hidden text-xs leading-5 whitespace-nowrap text-stone-500/75">
+                          {promptPreview}
+                        </p>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -256,4 +272,24 @@ function getDocumentHeight() {
 
 function getViewportBottom() {
   return window.scrollY + window.innerHeight
+}
+
+function getPromptPreview(rawPromptStream: string) {
+  const normalizedStream = rawPromptStream.replace(/\s+/g, " ").trim()
+
+  if (!normalizedStream) {
+    return ""
+  }
+
+  const maxCharacters = 180
+  const preview =
+    normalizedStream.length > maxCharacters
+      ? normalizedStream.slice(-maxCharacters)
+      : normalizedStream
+
+  if (preview === normalizedStream) {
+    return preview
+  }
+
+  return `...${preview.replace(/^\S*\s?/, "")}`
 }
