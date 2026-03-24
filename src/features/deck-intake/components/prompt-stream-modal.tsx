@@ -42,12 +42,12 @@ export function PromptStreamModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex overflow-y-auto bg-black/70 px-4 py-6 backdrop-blur-sm sm:items-center sm:justify-center"
       onClick={onClose}
       role="presentation"
     >
       <div
-        className="flex max-h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-[28px] border border-sky-300/15 bg-[linear-gradient(180deg,rgba(15,23,42,0.98)_0%,rgba(12,10,9,0.97)_100%)] shadow-[0_30px_120px_rgba(0,0,0,0.65)]"
+        className="my-auto flex max-h-[calc(100vh-3rem)] w-full max-w-4xl flex-col overflow-hidden rounded-[28px] border border-sky-300/15 bg-[linear-gradient(180deg,rgba(15,23,42,0.98)_0%,rgba(12,10,9,0.97)_100%)] shadow-[0_30px_120px_rgba(0,0,0,0.65)]"
         onClick={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -83,8 +83,8 @@ export function PromptStreamModal({
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 p-6">
-          <div className="h-full overflow-auto rounded-[24px] border border-white/10 bg-black/35 p-4">
+        <div className="min-h-0 flex-1 overflow-hidden p-6">
+          <div className="app-scrollbar max-h-[min(70vh,48rem)] overflow-y-scroll rounded-[24px] border border-white/10 bg-black/35 p-4 pr-3">
             <pre className="font-mono text-xs leading-6 break-words whitespace-pre-wrap text-stone-200">
               {streamText.trim() || "No prompt stream yet."}
             </pre>
