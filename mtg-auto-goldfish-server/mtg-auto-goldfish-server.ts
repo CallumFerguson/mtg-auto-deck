@@ -122,7 +122,7 @@ function createServer() {
         content: [
           {
             type: "text",
-            text: `Drew ${response.cards.length} card(s) from the top: ${response.cards.map((card) => card.name).join(", ")}. ${response.cardsRemaining} cards remain in the library.`,
+            text: `Drew ${response.cards.length} card(s) from the top: ${formatCardList(response.cards)}. ${response.cardsRemaining} cards remain in the library.`,
           },
         ],
         structuredContent: response,
@@ -189,7 +189,7 @@ function createServer() {
         content: [
           {
             type: "text",
-            text: `Drew ${response.cards.length} card(s) from the bottom: ${response.cards.map((card) => card.name).join(", ")}. ${response.cardsRemaining} cards remain in the library.`,
+            text: `Drew ${response.cards.length} card(s) from the bottom: ${formatCardList(response.cards)}. ${response.cardsRemaining} cards remain in the library.`,
           },
         ],
         structuredContent: response,
@@ -255,7 +255,7 @@ function createServer() {
         content: [
           {
             type: "text",
-            text: `Drew starting hand: ${response.cards.map((card) => card.name).join(", ")}. ${response.cardsRemaining} cards remain in the library.`,
+            text: `Drew starting hand: ${formatCardList(response.cards)}. ${response.cardsRemaining} cards remain in the library.`,
           },
         ],
         structuredContent: response,
@@ -331,7 +331,7 @@ function createServer() {
         content: [
           {
             type: "text",
-            text: `Mulliganed into: ${response.cards.map((card) => card.name).join(", ")}. ${response.cardsRemaining} cards remain in the library. ${response.reminder}`,
+            text: `Mulliganed into: ${formatCardList(response.cards)}. ${response.cardsRemaining} cards remain in the library. ${response.reminder}`,
           },
         ],
         structuredContent: response,
@@ -493,7 +493,7 @@ function createServer() {
         content: [
           {
             type: "text",
-            text: `Returned ${response.cards.length} card(s) to the ${side} of the library${randomizeOrder ? " in randomized order" : " in the provided order"}: ${response.cards.map((card) => card.name).join(", ")}. ${response.cardsRemaining} cards are now in the library.`,
+            text: `Returned ${response.cards.length} card(s) to the ${side} of the library${randomizeOrder ? " in randomized order" : " in the provided order"}: ${formatCardList(response.cards)}. ${response.cardsRemaining} cards are now in the library.`,
           },
         ],
         structuredContent: response,
@@ -739,6 +739,10 @@ function formatMulliganReminder(
   }
 
   return `That was your ${toOrdinal(mulliganCount)} mulligan, so if you keep that hand you must put ${cardsToBottomIfKept} ${cardsToBottomIfKept === 1 ? "card" : "cards"} on the bottom of the deck.`
+}
+
+function formatCardList(cards: ReadonlyArray<{ name: string }>) {
+  return cards.map((card) => JSON.stringify(card.name)).join(", ")
 }
 
 function toOrdinal(value: number) {
