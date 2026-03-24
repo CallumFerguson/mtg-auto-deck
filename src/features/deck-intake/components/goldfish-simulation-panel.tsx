@@ -6,6 +6,7 @@ import {
   Sparkles,
   XCircle,
 } from "lucide-react"
+import { useEffect, useRef } from "react"
 
 import { Button } from "@/components/ui/button"
 
@@ -53,7 +54,72 @@ export function GoldfishSimulationPanel({
   onOpenPromptStream,
   onStart,
 }: GoldfishSimulationPanelProps) {
+  const isNearBottomRef = useRef(false)
   const hasStream = Boolean(rawPromptStream.trim())
+
+  useEffect(() => {
+    function updateIsNearBottom() {
+      const distanceToBottom = getDocumentHeight() - getViewportBottom()
+
+      isNearBottomRef.current = distanceToBottom <= 100
+    }
+
+    updateIsNearBottom()
+
+    window.addEventListener("scroll", updateIsNearBottom, { passive: true })
+    window.addEventListener("resize", updateIsNearBottom)
+
+    return () => {
+      window.removeEventListener("scroll", updateIsNearBottom)
+      window.removeEventListener("resize", updateIsNearBottom)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!isStarting) {
+      return
+    }
+
+    window.scrollTo({
+      top: getDocumentHeight(),
+      behavior: "smooth",
+    })
+  }, [isStarting])
+
+  useEffect(() => {
+    const observedRoot = document.body
+
+    if (!observedRoot) {
+      return
+    }
+
+    let previousHeight = getDocumentHeight()
+
+    const observer = new ResizeObserver(() => {
+      const nextHeight = getDocumentHeight()
+
+      if (nextHeight === previousHeight) {
+        return
+      }
+
+      previousHeight = nextHeight
+
+      if (!isNearBottomRef.current) {
+        return
+      }
+
+      window.scrollTo({
+        top: nextHeight,
+        behavior: "smooth",
+      })
+    })
+
+    observer.observe(observedRoot)
+
+    return () => {
+      observer.disconnect()
+    }
+  }, [])
 
   return (
     <section className="rounded-[28px] border border-white/10 bg-white/5 p-5 shadow-lg shadow-black/30 backdrop-blur sm:p-6">
@@ -179,4 +245,15 @@ export function GoldfishSimulationPanel({
       ) : null}
     </section>
   )
+}
+
+function getDocumentHeight() {
+  return Math.max(
+    document.documentElement.scrollHeight,
+    document.body.scrollHeight
+  )
+}
+
+function getViewportBottom() {
+  return window.scrollY + window.innerHeight
 }
