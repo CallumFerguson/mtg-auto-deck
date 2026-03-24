@@ -71,14 +71,16 @@ function createServer() {
         "Draw one or more cards from the stored library for an existing game ID that was created outside MCP.",
       inputSchema: {
         gameId: z
-          .uuid()
+          .string()
+          .trim()
+          .min(1)
           .describe(
             "The game ID returned by the regular HTTP create-game endpoint, not by an MCP tool."
           ),
         count: z.number().int().positive().describe("How many cards to draw."),
       },
       outputSchema: {
-        gameId: z.uuid(),
+        gameId: z.string(),
         cards: z.array(gameCardSchema),
         cardsRemaining: z.number().int().nonnegative(),
       },
@@ -373,3 +375,4 @@ main().catch((error) => {
   console.error("Server error:", error)
   process.exit(1)
 })
+
