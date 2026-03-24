@@ -49,6 +49,29 @@ export type MulliganResult =
       reason: 'game_not_found' | 'starting_hand_not_drawn'
     }
 
+export type ReturnCardToLibraryResult =
+  | {
+      ok: true
+      cardsRemaining: number
+      insertedFromTop: number
+      insertedFromBottom: number
+    }
+  | {
+      ok: false
+      reason: 'game_not_found'
+    }
+
+export type ReturnCardsToLibraryResult =
+  | {
+      ok: true
+      cards: GameCard[]
+      cardsRemaining: number
+    }
+  | {
+      ok: false
+      reason: 'game_not_found'
+    }
+
 export class GameStore {
   private readonly games = new Map<string, GameRecord>()
 
@@ -182,6 +205,67 @@ export class GameStore {
       cardsRemaining: game.library.length,
       mulliganCount: game.mulliganCount,
       cardsToBottomIfKept: Math.max(0, game.mulliganCount - 1),
+    }
+  }
+
+  returnCardToLibrary(
+    gameId: string,
+    card: GameCard,
+    side: 'top' | 'bottom',
+    position: number
+  ): ReturnCardToLibraryResult {
+    this.deleteExpiredGames()
+
+    const game = this.games.get(gameId)
+
+    if (!game) {
+      return { ok: false, reason: 'game_not_found' }
+    }
+
+    const normalizedPosition = Math.max(0, Math.min(position, game.library.length))
+    const insertIndex =
+      side === 'top'
+        ? normalizedPosition
+        : Math.max(0, game.library.length - normalizedPosition)
+
+    game.library.splice(insertIndex, 0, card)
+
+    return {
+      ok: true,
+      cardsRemaining: game.library.length,
+      insertedFromTop: insertIndex,
+      insertedFromBottom: game.library.length - 1 - insertIndex,
+    }
+  }
+
+  returnCardsToLibrary(
+    gameId: string,
+    cards: readonly GameCard[],
+    side: 'top' | 'bottom',
+    randomizeOrder: boolean
+  ): ReturnCardsToLibraryResult {
+    this.deleteExpiredGames()
+
+    const game = this.games.get(gameId)
+
+    if (!game) {
+      return { ok: false, reason: 'game_not_found' }
+    }
+
+    const cardsToInsert = randomizeOrder ? shuffle(cards) : [...cards]
+
+    for (const card of cardsToInsert) {
+      if (side === 'top') {
+        game.library.unshift(card)
+      } else {
+        game.library.push(card)
+      }
+    }
+
+    return {
+      ok: true,
+      cards: cardsToInsert,
+      cardsRemaining: game.library.length,
     }
   }
 

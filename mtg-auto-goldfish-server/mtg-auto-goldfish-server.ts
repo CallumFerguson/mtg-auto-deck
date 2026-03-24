@@ -339,6 +339,168 @@ function createServer() {
     }
   )
 
+  server.registerTool(
+    "return_card_to_library",
+    {
+      title: "Return Card To Library",
+      description:
+        "Return a card to the library for an existing game ID, placing it a specific number of cards from the top or bottom.",
+      inputSchema: {
+        gameId: z
+          .string()
+          .trim()
+          .min(1)
+          .describe(
+            "The game ID returned by the regular HTTP create-game endpoint, not by an MCP tool."
+          ),
+        card: gameCardSchema.describe("The card to put back into the library."),
+        side: z
+          .enum(["top", "bottom"])
+          .describe("Whether the position is measured from the top or the bottom of the library."),
+        position: z
+          .number()
+          .int()
+          .nonnegative()
+          .describe(
+            "How many cards should remain above the card if using top, or below the card if using bottom. Position 0 puts it directly on that end. For example, if you want the card 3rd from the top, use side top, position 2."
+          ),
+      },
+      outputSchema: {
+        gameId: z.string(),
+        card: gameCardSchema,
+        side: z.enum(["top", "bottom"]),
+        position: z.number().int().nonnegative(),
+        insertedFromTop: z.number().int().nonnegative(),
+        insertedFromBottom: z.number().int().nonnegative(),
+        cardsRemaining: z.number().int().nonnegative(),
+      },
+    },
+    async ({ gameId, card, side, position }) => {
+      const returnResult = gameStore.returnCardToLibrary(gameId, card, side, position)
+
+      if (!returnResult.ok) {
+        logWarn("return_to_library", `${shortId(gameId)} ${returnResult.reason}`)
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Game not found. It may be invalid, may not have been created yet, or may have expired after one hour.",
+            },
+          ],
+          isError: true,
+        }
+      }
+
+      const response = {
+        gameId,
+        card,
+        side,
+        position,
+        insertedFromTop: returnResult.insertedFromTop,
+        insertedFromBottom: returnResult.insertedFromBottom,
+        cardsRemaining: returnResult.cardsRemaining,
+      }
+
+      logInfo(
+        "return_to_library",
+        `${shortId(gameId)} ${card.name} side=${side} requested=${position} top=${response.insertedFromTop} bottom=${response.insertedFromBottom} left=${response.cardsRemaining}`
+      )
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Returned ${card.name} to the library ${response.insertedFromTop} card(s) from the top and ${response.insertedFromBottom} card(s) from the bottom. ${response.cardsRemaining} cards are now in the library.`,
+          },
+        ],
+        structuredContent: response,
+      }
+    }
+  )
+
+  server.registerTool(
+    "return_cards_to_library",
+    {
+      title: "Return Cards To Library",
+      description:
+        "Return multiple cards to the top or bottom of the library for an existing game ID, optionally randomizing the order they are returned in.",
+      inputSchema: {
+        gameId: z
+          .string()
+          .trim()
+          .min(1)
+          .describe(
+            "The game ID returned by the regular HTTP create-game endpoint, not by an MCP tool."
+          ),
+        cards: z
+          .array(gameCardSchema)
+          .min(1)
+          .describe(
+            "The cards to put back into the library. If randomizeOrder is false, they are inserted in list order, so the last card becomes the outermost card on the chosen side."
+          ),
+        side: z
+          .enum(["top", "bottom"])
+          .describe("Which end of the library to return the cards to."),
+        randomizeOrder: z
+          .boolean()
+          .describe("Whether to shuffle the returned cards before putting them back."),
+      },
+      outputSchema: {
+        gameId: z.string(),
+        cards: z.array(gameCardSchema),
+        side: z.enum(["top", "bottom"]),
+        randomizeOrder: z.boolean(),
+        cardsRemaining: z.number().int().nonnegative(),
+      },
+    },
+    async ({ gameId, cards, side, randomizeOrder }) => {
+      const returnResult = gameStore.returnCardsToLibrary(
+        gameId,
+        cards,
+        side,
+        randomizeOrder
+      )
+
+      if (!returnResult.ok) {
+        logWarn("return_cards_to_library", `${shortId(gameId)} ${returnResult.reason}`)
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Game not found. It may be invalid, may not have been created yet, or may have expired after one hour.",
+            },
+          ],
+          isError: true,
+        }
+      }
+
+      const response = {
+        gameId,
+        cards: returnResult.cards,
+        side,
+        randomizeOrder,
+        cardsRemaining: returnResult.cardsRemaining,
+      }
+
+      logInfo(
+        "return_cards_to_library",
+        `${shortId(gameId)} n=${response.cards.length} side=${side} randomized=${randomizeOrder} left=${response.cardsRemaining}`
+      )
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Returned ${response.cards.length} card(s) to the ${side} of the library${randomizeOrder ? " in randomized order" : " in the provided order"}: ${response.cards.map((card) => card.name).join(", ")}. ${response.cardsRemaining} cards are now in the library.`,
+          },
+        ],
+        structuredContent: response,
+      }
+    }
+  )
+
   return server
 }
 
