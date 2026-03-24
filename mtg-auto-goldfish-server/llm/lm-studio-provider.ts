@@ -206,7 +206,6 @@ export function createLmStudioPromptProcessor(
         string,
         string | undefined
       > | null = null
-      let pendingMessageWhitespace = ""
       let hasFlushedMessageBlock = false
 
       await consumeSseStream(response, (eventName, payload) => {
@@ -236,7 +235,6 @@ export function createLmStudioPromptProcessor(
 
           case "message.start":
             pendingMessageStartPayload = asStringRecord(payload)
-            pendingMessageWhitespace = ""
             hasFlushedMessageBlock = false
             break
           case "message.end":
@@ -248,7 +246,6 @@ export function createLmStudioPromptProcessor(
               })
             }
             pendingMessageStartPayload = null
-            pendingMessageWhitespace = ""
             hasFlushedMessageBlock = false
             break
           case "model_load.progress":
@@ -280,13 +277,15 @@ export function createLmStudioPromptProcessor(
             break
           }
 
+
           case "message.delta": {
             const content = asContentRecord(payload).content
 
             if (typeof content === "string") {
               if (!hasFlushedMessageBlock) {
-                if (!content.trim()) {
-                  pendingMessageWhitespace += content
+                const trimmedLeadingContent = content.replace(/^\s+/, "")
+
+                if (!trimmedLeadingContent) {
                   break
                 }
 
@@ -298,15 +297,14 @@ export function createLmStudioPromptProcessor(
                     asStringRecord(payload).model_instance_id,
                 })
 
-                if (pendingMessageWhitespace) {
-                  onEvent({
-                    type: "message",
-                    delta: pendingMessageWhitespace,
-                  })
-                  pendingMessageWhitespace = ""
-                }
-
                 hasFlushedMessageBlock = true
+
+                onEvent({
+                  type: "message",
+                  delta: trimmedLeadingContent,
+                })
+
+                break
               }
 
               onEvent({
@@ -316,7 +314,6 @@ export function createLmStudioPromptProcessor(
             }
             break
           }
-
           case "tool_call.start":
             onEvent({
               type: "tool",
