@@ -45,44 +45,44 @@ type GameCardPayload = {
 
 type PromptStreamEvent =
   | {
-      type: "start"
-      model: {
-        displayName: string
-        key: string
-      }
+    type: "start"
+    model: {
+      displayName: string
+      key: string
     }
+  }
   | {
-      type: "status"
-      event: string
-      progress?: number
-      modelInstanceId?: string
-    }
+    type: "status"
+    event: string
+    progress?: number
+    modelInstanceId?: string
+  }
   | {
-      type: "reasoning"
-      delta: string
-    }
+    type: "reasoning"
+    delta: string
+  }
   | {
-      type: "message"
-      delta: string
-    }
+    type: "message"
+    delta: string
+  }
   | {
-      type: "tool"
-      event: string
-      tool?: string
-      provider?: string
-      argumentsText?: string
-      output?: string
-      error?: string
-    }
+    type: "tool"
+    event: string
+    tool?: string
+    provider?: string
+    argumentsText?: string
+    output?: string
+    error?: string
+  }
   | {
-      type: "error"
-      error: string
-    }
+    type: "error"
+    error: string
+  }
   | {
-      type: "done"
-      result: string
-      reasoning: string
-    }
+    type: "done"
+    result: string
+    reasoning: string
+  }
 
 type SimulationActivity = {
   id: string
@@ -737,14 +737,14 @@ export function App() {
         const detailMessage =
           "details" in payload && Array.isArray(payload.details)
             ? payload.details
-                .map((detail) => detail.message)
-                .filter(Boolean)
-                .join(" ")
+              .map((detail) => detail.message)
+              .filter(Boolean)
+              .join(" ")
             : ""
         throw new Error(
           detailMessage ||
-            ("error" in payload && payload.error) ||
-            "Failed to create a game."
+          ("error" in payload && payload.error) ||
+          "Failed to create a game."
         )
       }
 
@@ -764,7 +764,7 @@ export function App() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            prompt: `draw 7 cards with game id ${nextGameId}`,
+            prompt: `draw the starting hand with game id ${nextGameId}, then draw 2 more cards, then draw 1 card 5 separate times`,
           }),
         }
       )
@@ -776,14 +776,14 @@ export function App() {
         const detailMessage =
           "details" in promptPayload && Array.isArray(promptPayload.details)
             ? promptPayload.details
-                .map((detail) => detail.message)
-                .filter(Boolean)
-                .join(" ")
+              .map((detail) => detail.message)
+              .filter(Boolean)
+              .join(" ")
             : ""
         throw new Error(
           detailMessage ||
-            ("error" in promptPayload && promptPayload.error) ||
-            "Failed to process the simulation prompt."
+          ("error" in promptPayload && promptPayload.error) ||
+          "Failed to process the simulation prompt."
         )
       }
 
@@ -1112,3 +1112,4 @@ export function App() {
 }
 
 export default App
+

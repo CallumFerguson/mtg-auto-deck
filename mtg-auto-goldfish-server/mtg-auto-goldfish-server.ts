@@ -64,11 +64,11 @@ function createServer() {
   )
 
   server.registerTool(
-    "draw_card",
+    "draw_card_from_top",
     {
-      title: "Draw Card",
+      title: "Draw Card From Top",
       description:
-        "Draw one or more cards from the stored library for an existing game ID that was created outside MCP.",
+        "Draw one or more cards from the top of the stored library for an existing game ID that was created outside MCP.",
       inputSchema: {
         gameId: z
           .string()
@@ -86,10 +86,10 @@ function createServer() {
       },
     },
     async ({ gameId, count }) => {
-      const drawResult = gameStore.drawCards(gameId, count)
+      const drawResult = gameStore.drawCardsFromTop(gameId, count)
 
       if (!drawResult.ok) {
-        logWarn("draw", `${shortId(gameId)} ${drawResult.reason}`)
+        logWarn("draw_top", `${shortId(gameId)} ${drawResult.reason}`)
 
         const message =
           drawResult.reason === "game_not_found"
@@ -114,7 +114,7 @@ function createServer() {
       }
 
       logInfo(
-        "draw",
+        "draw_top",
         `${shortId(gameId)} n=${response.cards.length} left=${response.cardsRemaining}`
       )
 
@@ -122,7 +122,142 @@ function createServer() {
         content: [
           {
             type: "text",
-            text: `Drew ${response.cards.length} card(s): ${response.cards.map((card) => card.name).join(", ")}. ${response.cardsRemaining} cards remain in the library.`,
+            text: `Drew ${response.cards.length} card(s) from the top: ${response.cards.map((card) => card.name).join(", ")}. ${response.cardsRemaining} cards remain in the library.`,
+          },
+        ],
+        structuredContent: response,
+      }
+    }
+  )
+
+  server.registerTool(
+    "draw_card_from_bottom",
+    {
+      title: "Draw Card From Bottom",
+      description:
+        "Draw one or more cards from the bottom of the stored library for an existing game ID that was created outside MCP.",
+      inputSchema: {
+        gameId: z
+          .string()
+          .trim()
+          .min(1)
+          .describe(
+            "The game ID returned by the regular HTTP create-game endpoint, not by an MCP tool."
+          ),
+        count: z.number().int().positive().describe("How many cards to draw."),
+      },
+      outputSchema: {
+        gameId: z.string(),
+        cards: z.array(gameCardSchema),
+        cardsRemaining: z.number().int().nonnegative(),
+      },
+    },
+    async ({ gameId, count }) => {
+      const drawResult = gameStore.drawCardsFromBottom(gameId, count)
+
+      if (!drawResult.ok) {
+        logWarn("draw_bottom", `${shortId(gameId)} ${drawResult.reason}`)
+
+        const message =
+          drawResult.reason === "game_not_found"
+            ? "Game not found. It may be invalid, may not have been created yet, or may have expired after one hour."
+            : "That game has no cards left in its library."
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: message,
+            },
+          ],
+          isError: true,
+        }
+      }
+
+      const response = {
+        gameId,
+        cards: drawResult.cards,
+        cardsRemaining: drawResult.cardsRemaining,
+      }
+
+      logInfo(
+        "draw_bottom",
+        `${shortId(gameId)} n=${response.cards.length} left=${response.cardsRemaining}`
+      )
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Drew ${response.cards.length} card(s) from the bottom: ${response.cards.map((card) => card.name).join(", ")}. ${response.cardsRemaining} cards remain in the library.`,
+          },
+        ],
+        structuredContent: response,
+      }
+    }
+  )
+
+  server.registerTool(
+    "draw_starting_hand",
+    {
+      title: "Draw Starting Hand",
+      description:
+        "Draw the opening seven-card hand from the stored library for an existing game ID that was created outside MCP. This can only be called once per game.",
+      inputSchema: {
+        gameId: z
+          .string()
+          .trim()
+          .min(1)
+          .describe(
+            "The game ID returned by the regular HTTP create-game endpoint, not by an MCP tool."
+          ),
+      },
+      outputSchema: {
+        gameId: z.string(),
+        cards: z.array(gameCardSchema),
+        cardsRemaining: z.number().int().nonnegative(),
+      },
+    },
+    async ({ gameId }) => {
+      const drawResult = gameStore.drawStartingHand(gameId)
+
+      if (!drawResult.ok) {
+        logWarn("draw_starting_hand", `${shortId(gameId)} ${drawResult.reason}`)
+
+        const message =
+          drawResult.reason === "game_not_found"
+            ? "Game not found. It may be invalid, may not have been created yet, or may have expired after one hour."
+            : drawResult.reason === "starting_hand_already_drawn"
+              ? "The starting hand has already been drawn for that game."
+              : "That game has no cards left in its library."
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: message,
+            },
+          ],
+          isError: true,
+        }
+      }
+
+      const response = {
+        gameId,
+        cards: drawResult.cards,
+        cardsRemaining: drawResult.cardsRemaining,
+      }
+
+      logInfo(
+        "draw_starting_hand",
+        `${shortId(gameId)} n=${response.cards.length} left=${response.cardsRemaining}`
+      )
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Drew starting hand: ${response.cards.map((card) => card.name).join(", ")}. ${response.cardsRemaining} cards remain in the library.`,
           },
         ],
         structuredContent: response,
@@ -375,4 +510,3 @@ main().catch((error) => {
   console.error("Server error:", error)
   process.exit(1)
 })
-

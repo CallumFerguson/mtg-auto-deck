@@ -12,6 +12,7 @@ type GameRecord = {
   createdAt: number
   commanders: GameCard[]
   library: GameCard[]
+  hasDrawnStartingHand: boolean
 }
 
 export type DrawResult =
@@ -23,6 +24,13 @@ export type DrawResult =
   | {
       ok: false
       reason: 'game_not_found' | 'empty_library'
+    }
+
+export type DrawStartingHandResult =
+  | DrawResult
+  | {
+      ok: false
+      reason: 'starting_hand_already_drawn'
     }
 
 export class GameStore {
@@ -45,6 +53,7 @@ export class GameStore {
       createdAt: Date.now(),
       commanders: [...commanders],
       library: shuffle(deck),
+      hasDrawnStartingHand: false,
     }
 
     this.games.set(id, game)
@@ -58,7 +67,7 @@ export class GameStore {
     }
   }
 
-  drawCards(gameId: string, count: number): DrawResult {
+  drawCardsFromTop(gameId: string, count: number): DrawResult {
     this.deleteExpiredGames()
 
     const game = this.games.get(gameId)
@@ -72,6 +81,56 @@ export class GameStore {
     }
 
     const cards = game.library.splice(0, count)
+
+    return {
+      ok: true,
+      cards,
+      cardsRemaining: game.library.length,
+    }
+  }
+
+  drawCardsFromBottom(gameId: string, count: number): DrawResult {
+    this.deleteExpiredGames()
+
+    const game = this.games.get(gameId)
+
+    if (!game) {
+      return { ok: false, reason: 'game_not_found' }
+    }
+
+    if (game.library.length === 0) {
+      return { ok: false, reason: 'empty_library' }
+    }
+
+    const cards = game.library.splice(-count).reverse()
+
+    return {
+      ok: true,
+      cards,
+      cardsRemaining: game.library.length,
+    }
+  }
+
+  drawStartingHand(gameId: string): DrawStartingHandResult {
+    this.deleteExpiredGames()
+
+    const game = this.games.get(gameId)
+
+    if (!game) {
+      return { ok: false, reason: 'game_not_found' }
+    }
+
+    if (game.hasDrawnStartingHand) {
+      return { ok: false, reason: 'starting_hand_already_drawn' }
+    }
+
+    if (game.library.length === 0) {
+      return { ok: false, reason: 'empty_library' }
+    }
+
+    game.hasDrawnStartingHand = true
+
+    const cards = game.library.splice(0, 7)
 
     return {
       ok: true,
