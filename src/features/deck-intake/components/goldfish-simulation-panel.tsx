@@ -21,6 +21,7 @@ type GoldfishSimulationPanelProps = {
   isStarting: boolean
   gameId: string
   result: string
+  finalAnswerStatus: "idle" | "streaming" | "done"
   rawPromptStream: string
   activities: SimulationActivity[]
   errorMessage: string
@@ -45,6 +46,7 @@ export function GoldfishSimulationPanel({
   isStarting,
   gameId,
   result,
+  finalAnswerStatus,
   rawPromptStream,
   activities,
   errorMessage,
@@ -154,9 +156,16 @@ export function GoldfishSimulationPanel({
 
       {result ? (
         <div className="mt-4 rounded-[24px] border border-emerald-400/20 bg-emerald-500/10 p-4">
-          <p className="text-xs font-medium tracking-[0.18em] text-emerald-200 uppercase">
-            Final answer
-          </p>
+          <div className="flex items-center gap-2">
+            {finalAnswerStatus === "done" ? (
+              <CheckCircle2 className="size-4 text-emerald-300" />
+            ) : (
+              <LoaderCircle className="size-4 animate-spin text-emerald-200" />
+            )}
+            <p className="text-xs font-medium tracking-[0.18em] text-emerald-200 uppercase">
+              Final answer
+            </p>
+          </div>
           <p className="mt-2 text-sm leading-6 whitespace-pre-wrap text-emerald-50">
             {result}
           </p>

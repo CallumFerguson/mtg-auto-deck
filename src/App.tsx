@@ -91,6 +91,8 @@ type SimulationActivity = {
   status: "active" | "done" | "error"
 }
 
+type FinalAnswerStatus = "idle" | "streaming" | "done"
+
 function delay(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 }
@@ -161,6 +163,28 @@ function completeActiveActivity(
   return nextActivities
 }
 
+function completeActiveThinkingActivity(
+  currentActivities: SimulationActivity[],
+  status: SimulationActivity["status"] = "done"
+) {
+  const nextActivities = [...currentActivities]
+
+  for (let index = nextActivities.length - 1; index >= 0; index -= 1) {
+    if (
+      nextActivities[index].kind === "thinking" &&
+      nextActivities[index].status === "active"
+    ) {
+      nextActivities[index] = {
+        ...nextActivities[index],
+        status,
+      }
+      break
+    }
+  }
+
+  return nextActivities
+}
+
 function ensureThinkingActivity(currentActivities: SimulationActivity[]) {
   const lastActivity = currentActivities.at(-1)
 
@@ -201,7 +225,8 @@ function handlePromptStreamEvent(
   event: PromptStreamEvent,
   setSimulationActivities: Dispatch<SetStateAction<SimulationActivity[]>>,
   setRawPromptStream: Dispatch<SetStateAction<string>>,
-  setSimulationResult: Dispatch<SetStateAction<string>>
+  setSimulationResult: Dispatch<SetStateAction<string>>,
+  setFinalAnswerStatus: Dispatch<SetStateAction<FinalAnswerStatus>>
 ) {
   switch (event.type) {
     case "start":
@@ -221,12 +246,13 @@ function handlePromptStreamEvent(
         )
       )
 
-      if (
-        event.event === "reasoning.start" ||
-        event.event === "message.start"
-      ) {
+      if (event.event === "reasoning.start") {
         setSimulationActivities((currentActivities) =>
           ensureThinkingActivity(currentActivities)
+        )
+      } else if (event.event === "message.start") {
+        setSimulationActivities((currentActivities) =>
+          completeActiveThinkingActivity(currentActivities)
         )
       }
       return
@@ -239,6 +265,7 @@ function handlePromptStreamEvent(
       setRawPromptStream((currentStream) =>
         appendRawPromptStream(currentStream, event.delta)
       )
+      setFinalAnswerStatus("streaming")
       setSimulationResult((currentResult) => `${currentResult}${event.delta}`)
       return
     case "tool":
@@ -300,6 +327,7 @@ function handlePromptStreamEvent(
       setSimulationActivities((currentActivities) =>
         completeActiveActivity(currentActivities)
       )
+      setFinalAnswerStatus("done")
       setSimulationResult(event.result)
       return
   }
@@ -309,7 +337,8 @@ async function readPromptStream(
   response: Response,
   setSimulationActivities: Dispatch<SetStateAction<SimulationActivity[]>>,
   setRawPromptStream: Dispatch<SetStateAction<string>>,
-  setSimulationResult: Dispatch<SetStateAction<string>>
+  setSimulationResult: Dispatch<SetStateAction<string>>,
+  setFinalAnswerStatus: Dispatch<SetStateAction<FinalAnswerStatus>>
 ) {
   if (!response.body) {
     throw new Error("The server response did not include a stream body.")
@@ -342,7 +371,8 @@ async function readPromptStream(
         event,
         setSimulationActivities,
         setRawPromptStream,
-        setSimulationResult
+        setSimulationResult,
+        setFinalAnswerStatus
       )
     }
   }
@@ -355,7 +385,8 @@ async function readPromptStream(
       event,
       setSimulationActivities,
       setRawPromptStream,
-      setSimulationResult
+      setSimulationResult,
+      setFinalAnswerStatus
     )
   }
 }
@@ -380,6 +411,8 @@ export function App() {
   const [simulationError, setSimulationError] = useState("")
   const [gameId, setGameId] = useState("")
   const [simulationResult, setSimulationResult] = useState("")
+  const [finalAnswerStatus, setFinalAnswerStatus] =
+    useState<FinalAnswerStatus>("idle")
   const [rawPromptStream, setRawPromptStream] = useState("")
   const [simulationActivities, setSimulationActivities] = useState<
     SimulationActivity[]
@@ -678,6 +711,7 @@ export function App() {
     setSimulationError("")
     setGameId("")
     setSimulationResult("")
+    setFinalAnswerStatus("idle")
     setRawPromptStream("")
     setSimulationActivities([])
 
@@ -757,7 +791,8 @@ export function App() {
         promptResponse,
         setSimulationActivities,
         setRawPromptStream,
-        setSimulationResult
+        setSimulationResult,
+        setFinalAnswerStatus
       )
     } catch (error) {
       setSimulationError(
@@ -800,6 +835,7 @@ export function App() {
     setGameId("")
     setSimulationError("")
     setSimulationResult("")
+    setFinalAnswerStatus("idle")
     setRawPromptStream("")
     setSimulationActivities([])
     setIsPromptStreamModalOpen(false)
@@ -826,6 +862,7 @@ export function App() {
     setGameId("")
     setSimulationError("")
     setSimulationResult("")
+    setFinalAnswerStatus("idle")
     setRawPromptStream("")
     setSimulationActivities([])
     setIsPromptStreamModalOpen(false)
@@ -1050,6 +1087,7 @@ export function App() {
           isStarting={isStartingSimulation}
           gameId={gameId}
           result={simulationResult}
+          finalAnswerStatus={finalAnswerStatus}
           rawPromptStream={rawPromptStream}
           activities={simulationActivities}
           errorMessage={simulationError}
