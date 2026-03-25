@@ -93,6 +93,15 @@ type SimulationActivity = {
 
 type FinalAnswerStatus = "idle" | "streaming" | "done"
 
+type SimulationPromptRun = {
+  id: string
+  title: string
+  activities: SimulationActivity[]
+  result: string
+  finalAnswerStatus: FinalAnswerStatus
+  rawPromptStream: string
+}
+
 function delay(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 }
@@ -128,6 +137,17 @@ function createThinkingActivity(): SimulationActivity {
     kind: "thinking",
     title: "Thinking",
     status: "active",
+  }
+}
+
+function createPromptRun(title: string): SimulationPromptRun {
+  return {
+    id: createActivityId(),
+    title,
+    activities: [],
+    result: "",
+    finalAnswerStatus: "idle",
+    rawPromptStream: "",
   }
 }
 
@@ -223,122 +243,166 @@ function getToolActivityTitle(toolName: string | undefined) {
 
 function handlePromptStreamEvent(
   event: PromptStreamEvent,
-  setSimulationActivities: Dispatch<SetStateAction<SimulationActivity[]>>,
-  setRawPromptStream: Dispatch<SetStateAction<string>>,
-  setSimulationResult: Dispatch<SetStateAction<string>>,
-  setFinalAnswerStatus: Dispatch<SetStateAction<FinalAnswerStatus>>
+  setPromptRuns: Dispatch<SetStateAction<SimulationPromptRun[]>>,
+  runId: string
 ) {
   switch (event.type) {
     case "start":
-      setRawPromptStream((currentStream) =>
-        appendRawPromptStream(
-          currentStream,
-          `[model] ${event.model.displayName} (${event.model.key})\n\n`
+      setPromptRuns((currentRuns) =>
+        currentRuns.map((run) =>
+          run.id === runId
+            ? {
+                ...run,
+                rawPromptStream: appendRawPromptStream(
+                  run.rawPromptStream,
+                  `[model] ${event.model.displayName} (${event.model.key})\n\n`
+                ),
+                activities: [createThinkingActivity()],
+              }
+            : run
         )
       )
-      setSimulationActivities([createThinkingActivity()])
       return
     case "status":
-      setRawPromptStream((currentStream) =>
-        appendRawPromptStream(
-          currentStream,
-          `[${event.event}${typeof event.progress === "number" ? ` ${Math.round(event.progress * 100)}%` : ""}]\n`
-        )
-      )
+      setPromptRuns((currentRuns) =>
+        currentRuns.map((run) => {
+          if (run.id !== runId) {
+            return run
+          }
 
-      if (event.event === "reasoning.start") {
-        setSimulationActivities((currentActivities) =>
-          ensureThinkingActivity(currentActivities)
-        )
-      } else if (event.event === "message.start") {
-        setSimulationActivities((currentActivities) =>
-          completeActiveThinkingActivity(currentActivities)
-        )
-      }
+          let nextActivities = run.activities
+
+          if (event.event === "reasoning.start") {
+            nextActivities = ensureThinkingActivity(nextActivities)
+          } else if (event.event === "message.start") {
+            nextActivities = completeActiveThinkingActivity(nextActivities)
+          }
+
+          return {
+            ...run,
+            rawPromptStream: appendRawPromptStream(
+              run.rawPromptStream,
+              `[${event.event}${typeof event.progress === "number" ? ` ${Math.round(event.progress * 100)}%` : ""}]\n`
+            ),
+            activities: nextActivities,
+          }
+        })
+      )
       return
     case "reasoning":
-      setRawPromptStream((currentStream) =>
-        appendRawPromptStream(currentStream, event.delta)
+      setPromptRuns((currentRuns) =>
+        currentRuns.map((run) =>
+          run.id === runId
+            ? {
+                ...run,
+                rawPromptStream: appendRawPromptStream(
+                  run.rawPromptStream,
+                  event.delta
+                ),
+              }
+            : run
+        )
       )
       return
     case "message":
-      setRawPromptStream((currentStream) =>
-        appendRawPromptStream(currentStream, event.delta)
+      setPromptRuns((currentRuns) =>
+        currentRuns.map((run) =>
+          run.id === runId
+            ? {
+                ...run,
+                rawPromptStream: appendRawPromptStream(
+                  run.rawPromptStream,
+                  event.delta
+                ),
+                finalAnswerStatus: "streaming",
+                result: `${run.result}${event.delta}`,
+              }
+            : run
+        )
       )
-      setFinalAnswerStatus("streaming")
-      setSimulationResult((currentResult) => `${currentResult}${event.delta}`)
       return
     case "tool":
-      setRawPromptStream((currentStream) =>
-        appendRawPromptStream(
-          currentStream,
-          `${JSON.stringify(event, null, 2)}\n\n`
-        )
+      setPromptRuns((currentRuns) =>
+        currentRuns.map((run) => {
+          if (run.id !== runId) {
+            return run
+          }
+
+          let nextActivities = run.activities
+
+          if (event.event === "tool_call.start") {
+            nextActivities = [
+              ...completeActiveActivity(nextActivities),
+              createToolActivity(event.tool),
+            ]
+          } else if (event.event === "tool_call.arguments") {
+            nextActivities = updateLatestToolActivity(nextActivities, {
+              title: getToolActivityTitle(event.tool),
+            })
+          } else if (event.event === "tool_call.success") {
+            nextActivities = updateLatestToolActivity(nextActivities, {
+              status: "done",
+              title: getToolActivityTitle(event.tool),
+            })
+          } else if (event.event === "tool_call.failure") {
+            nextActivities = updateLatestToolActivity(nextActivities, {
+              status: "error",
+              title: getToolActivityTitle(event.tool),
+            })
+          }
+
+          return {
+            ...run,
+            rawPromptStream: appendRawPromptStream(
+              run.rawPromptStream,
+              `${JSON.stringify(event, null, 2)}\n\n`
+            ),
+            activities: nextActivities,
+          }
+        })
       )
-
-      if (event.event === "tool_call.start") {
-        setSimulationActivities((currentActivities) => [
-          ...completeActiveActivity(currentActivities),
-          createToolActivity(event.tool),
-        ])
-        return
-      }
-
-      if (event.event === "tool_call.arguments") {
-        setSimulationActivities((currentActivities) =>
-          updateLatestToolActivity(currentActivities, {
-            title: getToolActivityTitle(event.tool),
-          })
-        )
-        return
-      }
-
-      if (event.event === "tool_call.success") {
-        setSimulationActivities((currentActivities) =>
-          updateLatestToolActivity(currentActivities, {
-            status: "done",
-            title: getToolActivityTitle(event.tool),
-          })
-        )
-        return
-      }
-
-      if (event.event === "tool_call.failure") {
-        setSimulationActivities((currentActivities) =>
-          updateLatestToolActivity(currentActivities, {
-            status: "error",
-            title: getToolActivityTitle(event.tool),
-          })
-        )
-      }
       return
     case "error":
-      setRawPromptStream((currentStream) =>
-        appendRawPromptStream(currentStream, `[error] ${event.error}\n`)
-      )
-      setSimulationActivities((currentActivities) =>
-        completeActiveActivity(currentActivities, "error")
+      setPromptRuns((currentRuns) =>
+        currentRuns.map((run) =>
+          run.id === runId
+            ? {
+                ...run,
+                rawPromptStream: appendRawPromptStream(
+                  run.rawPromptStream,
+                  `[error] ${event.error}\n`
+                ),
+                activities: completeActiveActivity(run.activities, "error"),
+              }
+            : run
+        )
       )
       return
     case "done":
-      setRawPromptStream((currentStream) =>
-        appendRawPromptStream(currentStream, "\n[chat.end]\n")
+      setPromptRuns((currentRuns) =>
+        currentRuns.map((run) =>
+          run.id === runId
+            ? {
+                ...run,
+                rawPromptStream: appendRawPromptStream(
+                  run.rawPromptStream,
+                  "\n[chat.end]\n"
+                ),
+                activities: completeActiveActivity(run.activities),
+                finalAnswerStatus: "done",
+                result: event.result,
+              }
+            : run
+        )
       )
-      setSimulationActivities((currentActivities) =>
-        completeActiveActivity(currentActivities)
-      )
-      setFinalAnswerStatus("done")
-      setSimulationResult(event.result)
       return
   }
 }
 
 async function readPromptStream(
   response: Response,
-  setSimulationActivities: Dispatch<SetStateAction<SimulationActivity[]>>,
-  setRawPromptStream: Dispatch<SetStateAction<string>>,
-  setSimulationResult: Dispatch<SetStateAction<string>>,
-  setFinalAnswerStatus: Dispatch<SetStateAction<FinalAnswerStatus>>
+  setPromptRuns: Dispatch<SetStateAction<SimulationPromptRun[]>>,
+  runId: string
 ) {
   if (!response.body) {
     throw new Error("The server response did not include a stream body.")
@@ -347,6 +411,7 @@ async function readPromptStream(
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ""
+  let finalResult = ""
 
   while (true) {
     const { done, value } = await reader.read()
@@ -367,13 +432,15 @@ async function readPromptStream(
       }
 
       const event = JSON.parse(trimmedLine) as PromptStreamEvent
-      handlePromptStreamEvent(
-        event,
-        setSimulationActivities,
-        setRawPromptStream,
-        setSimulationResult,
-        setFinalAnswerStatus
-      )
+      handlePromptStreamEvent(event, setPromptRuns, runId)
+
+      if (event.type === "message") {
+        finalResult += event.delta
+      }
+
+      if (event.type === "done") {
+        finalResult = event.result
+      }
     }
   }
 
@@ -381,14 +448,18 @@ async function readPromptStream(
 
   if (trailing) {
     const event = JSON.parse(trailing) as PromptStreamEvent
-    handlePromptStreamEvent(
-      event,
-      setSimulationActivities,
-      setRawPromptStream,
-      setSimulationResult,
-      setFinalAnswerStatus
-    )
+    handlePromptStreamEvent(event, setPromptRuns, runId)
+
+    if (event.type === "message") {
+      finalResult += event.delta
+    }
+
+    if (event.type === "done") {
+      finalResult = event.result
+    }
   }
+
+  return finalResult
 }
 
 export function App() {
@@ -411,13 +482,7 @@ export function App() {
   const [isCreatingDevGame, setIsCreatingDevGame] = useState(false)
   const [simulationError, setSimulationError] = useState("")
   const [gameId, setGameId] = useState("")
-  const [simulationResult, setSimulationResult] = useState("")
-  const [finalAnswerStatus, setFinalAnswerStatus] =
-    useState<FinalAnswerStatus>("idle")
-  const [rawPromptStream, setRawPromptStream] = useState("")
-  const [simulationActivities, setSimulationActivities] = useState<
-    SimulationActivity[]
-  >([])
+  const [promptRuns, setPromptRuns] = useState<SimulationPromptRun[]>([])
 
   const parsedDeck = useMemo(() => parseDecklist(decklistText), [decklistText])
   const totalCards = parsedDeck.reduce(
@@ -755,17 +820,17 @@ export function App() {
     setIsStartingSimulation(true)
     setSimulationError("")
     setGameId("")
-    setSimulationResult("")
-    setFinalAnswerStatus("idle")
-    setRawPromptStream("")
-    setSimulationActivities([])
+    setPromptRuns([])
 
     try {
       const nextGameId = await createGame()
 
       setGameId(nextGameId)
 
-      const promptResponse = await fetch(
+      const openingHandRun = createPromptRun("Opening hand simulation")
+      setPromptRuns([openingHandRun])
+
+      const openingHandResponse = await fetch(
         `${GOLDFISH_SERVER_URL}/simulate-drawing-starting-hand`,
         {
           method: "POST",
@@ -778,8 +843,8 @@ export function App() {
         }
       )
 
-      if (!promptResponse.ok) {
-        const promptPayload = (await promptResponse.json()) as
+      if (!openingHandResponse.ok) {
+        const promptPayload = (await openingHandResponse.json()) as
           | { result?: string; error?: string }
           | { details?: Array<{ message?: string }> }
         const detailMessage =
@@ -796,13 +861,47 @@ export function App() {
         )
       }
 
-      await readPromptStream(
-        promptResponse,
-        setSimulationActivities,
-        setRawPromptStream,
-        setSimulationResult,
-        setFinalAnswerStatus
+      const openingHandResult = await readPromptStream(
+        openingHandResponse,
+        setPromptRuns,
+        openingHandRun.id
       )
+
+      const nextPlayRun = createPromptRun("First play decision")
+      setPromptRuns((currentRuns) => [...currentRuns, nextPlayRun])
+
+      const followUpResponse = await fetch(
+        `${GOLDFISH_SERVER_URL}/process-prompt`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            prompt: `Given this starting hand:\n\n${openingHandResult}\n\nWhat card do you want to play first given the starting hand?`,
+          }),
+        }
+      )
+
+      if (!followUpResponse.ok) {
+        const promptPayload = (await followUpResponse.json()) as
+          | { result?: string; error?: string }
+          | { details?: Array<{ message?: string }> }
+        const detailMessage =
+          "details" in promptPayload && Array.isArray(promptPayload.details)
+            ? promptPayload.details
+              .map((detail) => detail.message)
+              .filter(Boolean)
+              .join(" ")
+            : ""
+        throw new Error(
+          detailMessage ||
+            ("error" in promptPayload && promptPayload.error) ||
+            "Failed to decide the first card to play."
+        )
+      }
+
+      await readPromptStream(followUpResponse, setPromptRuns, nextPlayRun.id)
     } catch (error) {
       setSimulationError(
         error instanceof Error ? error.message : "Failed to create a game."
@@ -819,10 +918,7 @@ export function App() {
 
     setIsCreatingDevGame(true)
     setSimulationError("")
-    setSimulationResult("")
-    setFinalAnswerStatus("idle")
-    setRawPromptStream("")
-    setSimulationActivities([])
+    setPromptRuns([])
 
     try {
       const nextGameId = await createGame()
@@ -869,10 +965,7 @@ export function App() {
   useEffect(() => {
     setGameId("")
     setSimulationError("")
-    setSimulationResult("")
-    setFinalAnswerStatus("idle")
-    setRawPromptStream("")
-    setSimulationActivities([])
+    setPromptRuns([])
     setIsPromptStreamModalOpen(false)
   }, [commanderOneName, commanderTwoName, decklistText])
 
@@ -896,10 +989,7 @@ export function App() {
     setIsResetModalOpen(false)
     setGameId("")
     setSimulationError("")
-    setSimulationResult("")
-    setFinalAnswerStatus("idle")
-    setRawPromptStream("")
-    setSimulationActivities([])
+    setPromptRuns([])
     setIsPromptStreamModalOpen(false)
   }
 
@@ -1067,6 +1157,17 @@ export function App() {
     )
   }
 
+  const combinedPromptStream = useMemo(
+    () =>
+      promptRuns
+        .map(
+          (run) =>
+            `=== ${run.title} ===\n${run.rawPromptStream.trim() || "No prompt stream yet."}`
+        )
+        .join("\n\n"),
+    [promptRuns]
+  )
+
   return (
     <main className="min-h-svh bg-[radial-gradient(circle_at_top,rgba(245,158,11,0.2),transparent_28%),radial-gradient(circle_at_bottom_right,rgba(120,53,15,0.3),transparent_30%),linear-gradient(180deg,#09090b_0%,#111217_50%,#18181b_100%)] text-stone-100">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-4 py-6 sm:px-6 lg:px-8 lg:py-10">
@@ -1122,10 +1223,7 @@ export function App() {
           isStarting={isStartingSimulation}
           isCreatingDevGame={isCreatingDevGame}
           gameId={gameId}
-          result={simulationResult}
-          finalAnswerStatus={finalAnswerStatus}
-          rawPromptStream={rawPromptStream}
-          activities={simulationActivities}
+          promptRuns={promptRuns}
           errorMessage={simulationError}
           onOpenPromptStream={() => setIsPromptStreamModalOpen(true)}
           onCreateDevGame={createDevGame}
@@ -1141,7 +1239,7 @@ export function App() {
 
       <PromptStreamModal
         isOpen={isPromptStreamModalOpen}
-        streamText={rawPromptStream}
+        streamText={combinedPromptStream}
         onClose={() => setIsPromptStreamModalOpen(false)}
       />
     </main>

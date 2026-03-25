@@ -17,15 +17,21 @@ type SimulationActivity = {
   status: "active" | "done" | "error"
 }
 
+type SimulationPromptRun = {
+  id: string
+  title: string
+  activities: SimulationActivity[]
+  result: string
+  finalAnswerStatus: "idle" | "streaming" | "done"
+  rawPromptStream: string
+}
+
 type GoldfishSimulationPanelProps = {
   canStart: boolean
   isStarting: boolean
   isCreatingDevGame: boolean
   gameId: string
-  result: string
-  finalAnswerStatus: "idle" | "streaming" | "done"
-  rawPromptStream: string
-  activities: SimulationActivity[]
+  promptRuns: SimulationPromptRun[]
   errorMessage: string
   onOpenPromptStream: () => void
   onCreateDevGame: () => void
@@ -47,7 +53,7 @@ function ActivityIcon({ status }: Pick<SimulationActivity, "status">) {
 function FinalAnswerIcon({
   finalAnswerStatus,
 }: {
-  finalAnswerStatus: GoldfishSimulationPanelProps["finalAnswerStatus"]
+  finalAnswerStatus: SimulationPromptRun["finalAnswerStatus"]
 }) {
   if (finalAnswerStatus === "done") {
     return <CheckCircle2 className="size-5 text-emerald-300" />
@@ -61,18 +67,14 @@ export function GoldfishSimulationPanel({
   isStarting,
   isCreatingDevGame,
   gameId,
-  result,
-  finalAnswerStatus,
-  rawPromptStream,
-  activities,
+  promptRuns,
   errorMessage,
   onOpenPromptStream,
   onCreateDevGame,
   onStart,
 }: GoldfishSimulationPanelProps) {
   const isNearBottomRef = useRef(false)
-  const hasStream = Boolean(rawPromptStream.trim())
-  const promptPreview = hasStream ? getPromptPreview(rawPromptStream) : ""
+  const hasStream = promptRuns.some((run) => run.rawPromptStream.trim())
 
   useEffect(() => {
     function updateIsNearBottom() {
@@ -221,72 +223,83 @@ export function GoldfishSimulationPanel({
         </div>
       ) : null}
 
-      {activities.length || result ? (
-        <div className="mt-4 rounded-[24px] border border-white/10 bg-black/20 p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-medium tracking-[0.18em] text-amber-200 uppercase">
-                Prompt activity
-              </p>
-              <p className="mt-1 text-sm text-stone-400">
-                Thinking and tool calls are summarized here as they happen.
-              </p>
-            </div>
-          </div>
+      {promptRuns.length ? (
+        <div className="mt-4 space-y-4">
+          {promptRuns.map((run) => {
+            const promptPreview = run.rawPromptStream.trim()
+              ? getPromptPreview(run.rawPromptStream)
+              : ""
 
-          <div className="mt-4 space-y-3">
-            {activities.map((activity) => (
+            return (
               <div
-                key={activity.id}
-                className="rounded-[20px] border border-white/10 bg-white/[0.03] p-4"
+                key={run.id}
+                className="rounded-[24px] border border-white/10 bg-black/20 p-4"
               >
-                <div className="flex items-start gap-3">
-                  <div className="mt-0.5">
-                    <ActivityIcon status={activity.status} />
-                  </div>
+                <div className="mb-4 border-b border-white/10 pb-3">
+                  <p className="text-base font-semibold tracking-[0.01em] text-stone-50">
+                    {run.title}
+                  </p>
+                </div>
 
-                  <div className="flex min-w-0 flex-1 items-center gap-3">
-                    <p className="shrink-0 text-sm font-medium text-stone-100">
-                      {activity.title}
-                    </p>
-                    {activity.status === "active" && promptPreview ? (
-                      <div
-                        className="min-w-0 flex-1 overflow-hidden"
-                        style={{
-                          maskImage:
-                            "linear-gradient(to right, transparent 0%, black 18%, black 82%, transparent 100%)",
-                          WebkitMaskImage:
-                            "linear-gradient(to right, transparent 0%, black 18%, black 82%, transparent 100%)",
-                        }}
-                      >
-                        <p className="overflow-hidden text-xs leading-5 whitespace-nowrap text-stone-500/75">
-                          {promptPreview}
-                        </p>
+                <div className="space-y-3">
+                  {run.activities.map((activity) => (
+                    <div
+                      key={activity.id}
+                      className="rounded-[20px] border border-white/10 bg-white/[0.03] p-4"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5">
+                          <ActivityIcon status={activity.status} />
+                        </div>
+
+                        <div className="flex min-w-0 flex-1 items-center gap-3">
+                          <p className="shrink-0 text-sm font-medium text-stone-100">
+                            {activity.title}
+                          </p>
+                          {activity.status === "active" && promptPreview ? (
+                            <div
+                              className="min-w-0 flex-1 overflow-hidden"
+                              style={{
+                                maskImage:
+                                  "linear-gradient(to right, transparent 0%, black 18%, black 82%, transparent 100%)",
+                                WebkitMaskImage:
+                                  "linear-gradient(to right, transparent 0%, black 18%, black 82%, transparent 100%)",
+                              }}
+                            >
+                              <p className="overflow-hidden text-xs leading-5 whitespace-nowrap text-stone-500/75">
+                                {promptPreview}
+                              </p>
+                            </div>
+                          ) : null}
+                        </div>
                       </div>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-            ))}
-            {result ? (
-              <div className="rounded-[20px] border border-white/10 bg-white/[0.03] p-4">
-                <div className="flex items-start gap-3">
-                  <div className="mt-0.5">
-                    <FinalAnswerIcon finalAnswerStatus={finalAnswerStatus} />
-                  </div>
+                    </div>
+                  ))}
 
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-stone-100">
-                      Final answer
-                    </p>
-                    <p className="mt-2 text-sm leading-6 whitespace-pre-wrap text-stone-300">
-                      {result}
-                    </p>
-                  </div>
+                  {run.result ? (
+                    <div className="rounded-[20px] border border-white/10 bg-white/[0.03] p-4">
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5">
+                          <FinalAnswerIcon
+                            finalAnswerStatus={run.finalAnswerStatus}
+                          />
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-stone-100">
+                            Final answer
+                          </p>
+                          <p className="mt-2 text-sm leading-6 whitespace-pre-wrap text-stone-300">
+                            {run.result}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
-            ) : null}
-          </div>
+            )
+          })}
         </div>
       ) : null}
 
