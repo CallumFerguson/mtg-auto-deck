@@ -635,8 +635,6 @@ async function main() {
       gamePromptContext.initialLibrary
     )
 
-    console.log(prompt)
-
     try {
       const response = await streamPromptResponse(res, promptProcessor, prompt)
 
