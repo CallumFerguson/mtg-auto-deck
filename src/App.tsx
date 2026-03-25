@@ -574,8 +574,8 @@ export function App() {
           : ""
       throw new Error(
         detailMessage ||
-          ("error" in payload && payload.error) ||
-          "Failed to create a game."
+        ("error" in payload && payload.error) ||
+        "Failed to create a game."
       )
     }
 
@@ -773,7 +773,7 @@ export function App() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            prompt: `draw the starting hand with game id ${nextGameId}, then draw 2 more cards, then draw 1 card 5 separate times`,
+            prompt: `draw the starting hand with game id ${nextGameId}, then draw 1 more card`,
           }),
         }
       )

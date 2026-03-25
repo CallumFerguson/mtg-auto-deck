@@ -13,64 +13,64 @@ type GameRecord = {
   createdAt: number
   commanders: GameCard[]
   initialLibrary: GameCard[]
-  library: GameCard[]
+  library: string[]
   hasDrawnStartingHand: boolean
   mulliganCount: number
 }
 
 export type DrawResult =
   | {
-      ok: true
-      cards: GameCard[]
-      cardsRemaining: number
-    }
+    ok: true
+    cards: string[]
+    cardsRemaining: number
+  }
   | {
-      ok: false
-      reason: 'game_not_found' | 'empty_library'
-    }
+    ok: false
+    reason: 'game_not_found' | 'empty_library'
+  }
 
 export type DrawStartingHandResult =
   | DrawResult
   | {
-      ok: false
-      reason: 'starting_hand_already_drawn'
-    }
+    ok: false
+    reason: 'starting_hand_already_drawn'
+  }
 
 export type MulliganResult =
   | {
-      ok: true
-      cards: GameCard[]
-      cardsRemaining: number
-      mulliganCount: number
-      cardsToBottomIfKept: number
-    }
+    ok: true
+    cards: string[]
+    cardsRemaining: number
+    mulliganCount: number
+    cardsToBottomIfKept: number
+  }
   | {
-      ok: false
-      reason: 'game_not_found' | 'starting_hand_not_drawn'
-    }
+    ok: false
+    reason: 'game_not_found' | 'starting_hand_not_drawn'
+  }
 
 export type ReturnCardToLibraryResult =
   | {
-      ok: true
-      cardsRemaining: number
-      insertedFromTop: number
-      insertedFromBottom: number
-    }
+    ok: true
+    cardsRemaining: number
+    insertedFromTop: number
+    insertedFromBottom: number
+  }
   | {
-      ok: false
-      reason: 'game_not_found'
-    }
+    ok: false
+    reason: 'game_not_found'
+  }
 
 export type ReturnCardsToLibraryResult =
   | {
-      ok: true
-      cards: GameCard[]
-      cardsRemaining: number
-    }
+    ok: true
+    cards: string[]
+    cardsRemaining: number
+  }
   | {
-      ok: false
-      reason: 'game_not_found'
-    }
+    ok: false
+    reason: 'game_not_found'
+  }
 
 export class GameStore {
   private readonly games = new Map<string, GameRecord>()
@@ -87,12 +87,13 @@ export class GameStore {
     this.deleteExpiredGames()
 
     const id = randomUUID()
-    const shuffledLibrary = shuffle(deck)
+    const sortedInitialLibrary = sortCardsAlphabetically(deck)
+    const shuffledLibrary = shuffle(deck.map((card) => card.name))
     const game: GameRecord = {
       id,
       createdAt: Date.now(),
       commanders: [...commanders],
-      initialLibrary: [...shuffledLibrary],
+      initialLibrary: sortedInitialLibrary,
       library: [...shuffledLibrary],
       hasDrawnStartingHand: false,
       mulliganCount: 0,
@@ -194,7 +195,7 @@ export class GameStore {
       return { ok: false, reason: 'starting_hand_not_drawn' }
     }
 
-    game.library = shuffle(game.initialLibrary)
+    game.library = shuffle(game.initialLibrary.map((card) => card.name))
     game.mulliganCount += 1
 
     const cards = game.library.splice(0, STARTING_HAND_SIZE)
@@ -210,7 +211,7 @@ export class GameStore {
 
   returnCardToLibrary(
     gameId: string,
-    card: GameCard,
+    card: string,
     side: 'top' | 'bottom',
     position: number
   ): ReturnCardToLibraryResult {
@@ -240,7 +241,7 @@ export class GameStore {
 
   returnCardsToLibrary(
     gameId: string,
-    cards: readonly GameCard[],
+    cards: readonly string[],
     side: 'top' | 'bottom',
     randomizeOrder: boolean
   ): ReturnCardsToLibraryResult {
@@ -280,7 +281,7 @@ export class GameStore {
   }
 }
 
-function shuffle(cards: readonly GameCard[]) {
+function shuffle<T>(cards: readonly T[]) {
   const shuffledCards = [...cards]
 
   for (let index = shuffledCards.length - 1; index > 0; index -= 1) {
@@ -292,4 +293,10 @@ function shuffle(cards: readonly GameCard[]) {
   }
 
   return shuffledCards
+}
+
+function sortCardsAlphabetically(cards: readonly GameCard[]) {
+  return [...cards].sort((leftCard, rightCard) =>
+    leftCard.name.localeCompare(rightCard.name)
+  )
 }

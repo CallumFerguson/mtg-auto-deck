@@ -81,7 +81,7 @@ function createServer() {
       },
       outputSchema: {
         gameId: z.string(),
-        cards: z.array(gameCardSchema),
+        cards: z.array(z.string()),
         cardsRemaining: z.number().int().nonnegative(),
       },
     },
@@ -148,7 +148,7 @@ function createServer() {
       },
       outputSchema: {
         gameId: z.string(),
-        cards: z.array(gameCardSchema),
+        cards: z.array(z.string()),
         cardsRemaining: z.number().int().nonnegative(),
       },
     },
@@ -214,7 +214,7 @@ function createServer() {
       },
       outputSchema: {
         gameId: z.string(),
-        cards: z.array(gameCardSchema),
+        cards: z.array(z.string()),
         cardsRemaining: z.number().int().nonnegative(),
       },
     },
@@ -280,7 +280,7 @@ function createServer() {
       },
       outputSchema: {
         gameId: z.string(),
-        cards: z.array(gameCardSchema),
+        cards: z.array(z.string()),
         cardsRemaining: z.number().int().nonnegative(),
         mulliganCount: z.number().int().positive(),
         cardsToBottomIfKept: z.number().int().nonnegative(),
@@ -353,7 +353,7 @@ function createServer() {
           .describe(
             "The game ID returned by the regular HTTP create-game endpoint, not by an MCP tool."
           ),
-        card: gameCardSchema.describe("The card to put back into the library."),
+        card: z.string().trim().min(1).describe("The card name to put back into the library."),
         side: z
           .enum(["top", "bottom"])
           .describe("Whether the position is measured from the top or the bottom of the library."),
@@ -367,7 +367,7 @@ function createServer() {
       },
       outputSchema: {
         gameId: z.string(),
-        card: gameCardSchema,
+        card: z.string(),
         side: z.enum(["top", "bottom"]),
         position: z.number().int().nonnegative(),
         insertedFromTop: z.number().int().nonnegative(),
@@ -404,14 +404,14 @@ function createServer() {
 
       logInfo(
         "return_to_library",
-        `${shortId(gameId)} ${card.name} side=${side} requested=${position} top=${response.insertedFromTop} bottom=${response.insertedFromBottom} left=${response.cardsRemaining}`
+        `${shortId(gameId)} ${card} side=${side} requested=${position} top=${response.insertedFromTop} bottom=${response.insertedFromBottom} left=${response.cardsRemaining}`
       )
 
       return {
         content: [
           {
             type: "text",
-            text: `Returned ${card.name} to the library ${response.insertedFromTop} card(s) from the top and ${response.insertedFromBottom} card(s) from the bottom. ${response.cardsRemaining} cards are now in the library.`,
+            text: `Returned ${JSON.stringify(card)} to the library ${response.insertedFromTop} card(s) from the top and ${response.insertedFromBottom} card(s) from the bottom. ${response.cardsRemaining} cards are now in the library.`,
           },
         ],
         structuredContent: response,
@@ -434,7 +434,7 @@ function createServer() {
             "The game ID returned by the regular HTTP create-game endpoint, not by an MCP tool."
           ),
         cards: z
-          .array(gameCardSchema)
+          .array(z.string().trim().min(1))
           .min(1)
           .describe(
             "The cards to put back into the library. If randomizeOrder is false, they are inserted in list order, so the last card becomes the outermost card on the chosen side."
@@ -448,7 +448,7 @@ function createServer() {
       },
       outputSchema: {
         gameId: z.string(),
-        cards: z.array(gameCardSchema),
+        cards: z.array(z.string()),
         side: z.enum(["top", "bottom"]),
         randomizeOrder: z.boolean(),
         cardsRemaining: z.number().int().nonnegative(),
@@ -741,8 +741,8 @@ function formatMulliganReminder(
   return `That was your ${toOrdinal(mulliganCount)} mulligan, so if you keep that hand you must put ${cardsToBottomIfKept} ${cardsToBottomIfKept === 1 ? "card" : "cards"} on the bottom of the deck.`
 }
 
-function formatCardList(cards: ReadonlyArray<{ name: string }>) {
-  return cards.map((card) => JSON.stringify(card.name)).join(", ")
+function formatCardList(cards: readonly string[]) {
+  return cards.map((card) => JSON.stringify(card)).join(", ")
 }
 
 function toOrdinal(value: number) {
