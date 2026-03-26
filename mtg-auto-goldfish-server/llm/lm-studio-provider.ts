@@ -6,6 +6,7 @@ import type {
 } from "./index.js"
 
 export const LM_STUDIO_DEFAULT_BASE_URL = "http://127.0.0.1:1234"
+export const LM_STUDIO_TEMPERATURE = 0.1
 
 export type PromptProcessorOptions = {
   baseUrl?: string
@@ -116,7 +117,7 @@ export function createLmStudioPromptProcessor(
               mcpServerUrl,
             }),
 
-            temperature: 0,
+            temperature: LM_STUDIO_TEMPERATURE,
 
             stream: false,
 
@@ -186,7 +187,7 @@ export function createLmStudioPromptProcessor(
             mcpServerUrl,
           }),
 
-          temperature: 0,
+          temperature: LM_STUDIO_TEMPERATURE,
 
           stream: true,
 
@@ -749,3 +750,5 @@ async function buildErrorMessage(response: Response) {
 
   return `LM Studio request failed with ${response.status}.`
 }
+
+

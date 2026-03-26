@@ -946,45 +946,9 @@ export function App() {
 
       setGameId(nextGameId)
 
-      const openingHandRun = createPromptRun("Opening hand simulation")
-      setPromptRuns([openingHandRun])
-
-      const openingHandResponse = await fetch(
-        `${GOLDFISH_SERVER_URL}/simulate-drawing-starting-hand`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          signal: abortController.signal,
-          body: JSON.stringify({
-            gameId: nextGameId,
-          }),
-        }
-      )
-
-      if (!openingHandResponse.ok) {
-        const promptPayload = (await openingHandResponse.json()) as
-          | { result?: string; error?: string }
-          | { details?: Array<{ message?: string }> }
-        const detailMessage =
-          "details" in promptPayload && Array.isArray(promptPayload.details)
-            ? promptPayload.details
-              .map((detail) => detail.message)
-              .filter(Boolean)
-              .join(" ")
-            : ""
-        throw new Error(
-          detailMessage ||
-          ("error" in promptPayload && promptPayload.error) ||
-          "Failed to simulate drawing the starting hand."
-        )
-      }
-
-      const { keptHandCards } = await readPromptStream(
-        openingHandResponse,
-        setPromptRuns,
-        openingHandRun.id,
+      const { keptHandCards } = await runOpeningHandSimulation(
+        nextGameId,
+        "Opening hand simulation",
         abortController.signal
       )
 
@@ -1035,6 +999,100 @@ export function App() {
         nextPlayRun.id,
         abortController.signal
       )
+    } catch (error) {
+      if (isAbortError(error)) {
+        setPromptRuns((currentRuns) => cancelPromptRuns(currentRuns))
+        setSimulationError(SIMULATION_CANCELED_MESSAGE)
+      } else {
+        setSimulationError(
+          error instanceof Error ? error.message : "Failed to create a game."
+        )
+      }
+    } finally {
+      if (simulationAbortControllerRef.current === abortController) {
+        simulationAbortControllerRef.current = null
+      }
+
+      setIsStartingSimulation(false)
+    }
+  }
+
+  async function runOpeningHandSimulation(
+    currentGameId: string,
+    title: string,
+    signal?: AbortSignal
+  ) {
+    const openingHandRun = createPromptRun(title)
+    setPromptRuns((currentRuns) => [...currentRuns, openingHandRun])
+
+    const openingHandResponse = await fetch(
+      `${GOLDFISH_SERVER_URL}/simulate-drawing-starting-hand`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        signal,
+        body: JSON.stringify({
+          gameId: currentGameId,
+        }),
+      }
+    )
+
+    if (!openingHandResponse.ok) {
+      const promptPayload = (await openingHandResponse.json()) as
+        | { result?: string; error?: string }
+        | { details?: Array<{ message?: string }> }
+      const detailMessage =
+        "details" in promptPayload && Array.isArray(promptPayload.details)
+          ? promptPayload.details
+            .map((detail) => detail.message)
+            .filter(Boolean)
+            .join(" ")
+          : ""
+      throw new Error(
+        detailMessage ||
+        ("error" in promptPayload && promptPayload.error) ||
+        "Failed to simulate drawing the starting hand."
+      )
+    }
+
+    return readPromptStream(
+      openingHandResponse,
+      setPromptRuns,
+      openingHandRun.id,
+      signal
+    )
+  }
+
+  async function startOpeningHandBatchTest() {
+    if (!simulationPayload) {
+      return
+    }
+
+    const abortController = new AbortController()
+    simulationAbortControllerRef.current = abortController
+
+    setIsStartingSimulation(true)
+    setSimulationError("")
+    setGameId("")
+    setPromptRuns([])
+
+    try {
+      for (let runNumber = 1; runNumber <= 10; runNumber += 1) {
+        if (abortController.signal.aborted) {
+          throw createCancellationError()
+        }
+
+        const nextGameId = await createGame(abortController.signal)
+        setGameId(nextGameId)
+
+        await runOpeningHandSimulation(
+          nextGameId,
+          `Opening hand simulation ${runNumber}/10`,
+          abortController.signal
+        )
+      }
     } catch (error) {
       if (isAbortError(error)) {
         setPromptRuns((currentRuns) => cancelPromptRuns(currentRuns))
@@ -1395,6 +1453,7 @@ export function App() {
           onOpenPromptStream={() => setIsPromptStreamModalOpen(true)}
           onCreateDevGame={createDevGame}
           onStart={startSimulation}
+          onStartOpeningHandBatchTest={startOpeningHandBatchTest}
         />
       </div>
 

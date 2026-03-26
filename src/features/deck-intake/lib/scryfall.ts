@@ -3,7 +3,7 @@ import type { DeckEntry, ResolvedCard, ScryfallCard } from "../types"
 const SCRYFALL_COLLECTION_URL = "https://api.scryfall.com/cards/collection"
 const SCRYFALL_NAMED_URL = "https://api.scryfall.com/cards/named"
 const SCRYFALL_CACHE_KEY = "scryfall-card-cache"
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000
+const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
 type CacheEntry = {
   cachedAt: number
