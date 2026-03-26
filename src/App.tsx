@@ -102,6 +102,7 @@ type SimulationPromptRun = {
   result: string
   finalAnswerStatus: FinalAnswerStatus
   rawPromptStream: string
+  keptHandCards: string[]
 }
 
 function delay(milliseconds: number) {
@@ -150,6 +151,7 @@ function createPromptRun(title: string): SimulationPromptRun {
     result: "",
     finalAnswerStatus: "idle",
     rawPromptStream: "",
+    keptHandCards: [],
   }
 }
 
@@ -290,6 +292,45 @@ function getMulliganReason(event: Extract<PromptStreamEvent, { type: "tool" }>) 
   return reason || undefined
 }
 
+function getKeepHandCards(event: Extract<PromptStreamEvent, { type: "tool" }>) {
+  if (event.tool !== "keep_hand") {
+    return undefined
+  }
+
+  const parsedArguments = tryParseJsonObject(event.argumentsText)
+
+  if (
+    parsedArguments === null ||
+    !("cards" in parsedArguments) ||
+    !Array.isArray(parsedArguments.cards)
+  ) {
+    return undefined
+  }
+
+  const cards = parsedArguments.cards
+    .filter((card: unknown): card is string => typeof card === "string")
+    .map((card: string) => card.trim())
+    .filter(Boolean)
+
+  return cards.length ? cards : undefined
+}
+
+function getToolActivityDetail(event: Extract<PromptStreamEvent, { type: "tool" }>) {
+  const mulliganReason = getMulliganReason(event)
+
+  if (mulliganReason) {
+    return mulliganReason
+  }
+
+  const keepHandCards = getKeepHandCards(event)
+
+  if (keepHandCards) {
+    return keepHandCards.join(", ")
+  }
+
+  return undefined
+}
+
 function handlePromptStreamEvent(
   event: PromptStreamEvent,
   setPromptRuns: Dispatch<SetStateAction<SimulationPromptRun[]>>,
@@ -387,19 +428,19 @@ function handlePromptStreamEvent(
           } else if (event.event === "tool_call.arguments") {
             nextActivities = updateLatestToolActivity(nextActivities, {
               title: getToolActivityTitle(event.tool),
-              detail: getMulliganReason(event),
+              detail: getToolActivityDetail(event),
             })
           } else if (event.event === "tool_call.success") {
             nextActivities = updateLatestToolActivity(nextActivities, {
               status: "done",
               title: getToolActivityTitle(event.tool),
-              detail: getMulliganReason(event),
+              detail: getToolActivityDetail(event),
             })
           } else if (event.event === "tool_call.failure") {
             nextActivities = updateLatestToolActivity(nextActivities, {
               status: "error",
               title: getToolActivityTitle(event.tool),
-              detail: getMulliganReason(event),
+              detail: getToolActivityDetail(event),
             })
           }
 
@@ -465,6 +506,7 @@ async function readPromptStream(
   const decoder = new TextDecoder()
   let buffer = ""
   let finalResult = ""
+  let keptHandCards: string[] = []
 
   if (signal?.aborted) {
     throw createCancellationError()
@@ -499,6 +541,10 @@ async function readPromptStream(
         finalResult += event.delta
       }
 
+      if (event.type === "tool") {
+        keptHandCards = getKeepHandCards(event) ?? keptHandCards
+      }
+
       if (event.type === "done") {
         finalResult = event.result
       }
@@ -515,12 +561,19 @@ async function readPromptStream(
       finalResult += event.delta
     }
 
+    if (event.type === "tool") {
+      keptHandCards = getKeepHandCards(event) ?? keptHandCards
+    }
+
     if (event.type === "done") {
       finalResult = event.result
     }
   }
 
-  return finalResult
+  return {
+    finalResult,
+    keptHandCards,
+  }
 }
 
 export function App() {
@@ -928,12 +981,18 @@ export function App() {
         )
       }
 
-      const openingHandResult = await readPromptStream(
+      const { keptHandCards } = await readPromptStream(
         openingHandResponse,
         setPromptRuns,
         openingHandRun.id,
         abortController.signal
       )
+
+      if (!keptHandCards.length) {
+        throw new Error(
+          "The opening-hand simulation did not report a final kept hand through keep_hand."
+        )
+      }
 
       const nextPlayRun = createPromptRun("First play decision")
       setPromptRuns((currentRuns) => [...currentRuns, nextPlayRun])
@@ -947,7 +1006,7 @@ export function App() {
           },
           signal: abortController.signal,
           body: JSON.stringify({
-            prompt: `Given this starting hand:\n\n${openingHandResult}\n\nWhat card do you want to play first given the starting hand?`,
+            prompt: `Given this starting hand:\n\n${keptHandCards.join("\n")}\n\nWhat card do you want to play first given the starting hand?`,
           }),
         }
       )

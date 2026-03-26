@@ -520,6 +520,71 @@ function createServer() {
     }
   )
 
+
+  server.registerTool(
+    "keep_hand",
+    {
+      title: "Keep Hand",
+      description:
+        "Confirm the final opening hand after all mulligans and any bottoming decisions are complete. Call this exactly once, after you have fully decided to keep and after any required bottoming has already happened.",
+      inputSchema: {
+        gameId: z
+          .string()
+          .trim()
+          .min(1)
+          .describe(
+            "The game ID returned by the regular HTTP create-game endpoint, not by an MCP tool."
+          ),
+        cards: z
+          .array(z.string().trim().min(1))
+          .min(1)
+          .describe(
+            "The exact cards in the final kept opening hand after all mulligans and any cards bottomed to the library."
+          ),
+      },
+      outputSchema: {
+        gameId: z.string(),
+        cards: z.array(z.string()),
+        kept: z.literal(true),
+      },
+    },
+    async ({ gameId, cards }) => {
+      const gamePromptContext = gameStore.getGamePromptContext(gameId)
+
+      if (!gamePromptContext.ok) {
+        logWarn("keep_hand", `${shortId(gameId)} ${gamePromptContext.reason}`)
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: GAME_NOT_FOUND_MESSAGE,
+            },
+          ],
+          isError: true,
+        }
+      }
+
+      const response = {
+        gameId,
+        cards,
+        kept: true as const,
+      }
+
+      logInfo("keep_hand", `${shortId(gameId)} n=${cards.length}`)
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Kept opening hand: ${formatCardList(cards)}.`,
+          },
+        ],
+        structuredContent: response,
+      }
+    }
+  )
+
   return server
 }
 
