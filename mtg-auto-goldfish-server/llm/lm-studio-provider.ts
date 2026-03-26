@@ -7,6 +7,7 @@ import type {
 
 export const LM_STUDIO_DEFAULT_BASE_URL = "http://127.0.0.1:1234"
 export const LM_STUDIO_TEMPERATURE = 0.1
+export const LM_STUDIO_PROMPT_TIMEOUT_MS = 10 * 60 * 1000
 
 export type PromptProcessorOptions = {
   baseUrl?: string
@@ -38,20 +39,20 @@ type LmStudioModelsResponse = {
 
 type LmStudioOutputItem =
   | {
-      type: "message"
+    type: "message"
 
-      content: string
-    }
+    content: string
+  }
   | {
-      type: "reasoning"
+    type: "reasoning"
 
-      content: string
-    }
+    content: string
+  }
   | {
-      type: string
+    type: string
 
-      content?: string
-    }
+    content?: string
+  }
 
 type LmStudioChatResponse = {
   output?: LmStudioOutputItem[]
@@ -96,48 +97,61 @@ export function createLmStudioPromptProcessor(
         )
       }
 
-      const chatResponse = await requestJson<LmStudioChatResponse>(
-        fetchImpl,
-
-        `${baseUrl}/api/v1/chat`,
-
-        {
-          method: "POST",
-
-          headers: buildHeaders(apiToken),
-
-          body: JSON.stringify({
-            model: selectedModel.key,
-
-            input: prompt,
-
-            integrations: buildIntegrations({
-              mcpServerLabel,
-
-              mcpServerUrl,
-            }),
-
-            temperature: LM_STUDIO_TEMPERATURE,
-
-            stream: false,
-
-            store: false,
-          }),
-        }
+      const { signal, cleanup } = createTimeoutSignal(
+        undefined,
+        LM_STUDIO_PROMPT_TIMEOUT_MS
       )
 
-      const result = extractMessageText(chatResponse)
+      try {
+        const chatResponse = await requestJson<LmStudioChatResponse>(
+          fetchImpl,
 
-      if (!result) {
-        throw new Error(
-          "LM Studio returned no message content for this prompt."
+          `${baseUrl}/api/v1/chat`,
+
+          {
+            method: "POST",
+
+            headers: buildHeaders(apiToken),
+
+            signal,
+
+            body: JSON.stringify({
+              model: selectedModel.key,
+
+              input: prompt,
+
+              integrations: buildIntegrations({
+                mcpServerLabel,
+
+                mcpServerUrl,
+              }),
+
+              temperature: LM_STUDIO_TEMPERATURE,
+
+              stream: false,
+
+              store: false,
+            }),
+          }
         )
-      }
 
-      return {
-        result,
+        const result = extractMessageText(chatResponse)
 
-        model: selectedModel,
+        if (!result) {
+          throw new Error(
+            "LM Studio returned no message content for this prompt."
+          )
+        }
+
+        return {
+          result,
+
+          model: selectedModel,
+        }
+      } catch (error) {
+        throw normalizePromptAbortError(error)
+      } finally {
+        cleanup()
       }
     },
 
@@ -169,39 +183,10 @@ export function createLmStudioPromptProcessor(
         model: selectedModel,
       })
 
-      const response = await fetchImpl(`${baseUrl}/api/v1/chat`, {
-        method: "POST",
-
-        headers: buildHeaders(apiToken),
-
-        signal,
-
-        body: JSON.stringify({
-          model: selectedModel.key,
-
-          input: prompt,
-
-          integrations: buildIntegrations({
-            mcpServerLabel,
-
-            mcpServerUrl,
-          }),
-
-          temperature: LM_STUDIO_TEMPERATURE,
-
-          stream: true,
-
-          store: false,
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error(await buildErrorMessage(response))
-      }
-
-      if (!response.body) {
-        throw new Error("LM Studio returned no stream body for this prompt.")
-      }
+      const {
+        signal: timeoutSignal,
+        cleanup,
+      } = createTimeoutSignal(signal, LM_STUDIO_PROMPT_TIMEOUT_MS)
 
       let finalResult = ""
 
@@ -212,205 +197,244 @@ export function createLmStudioPromptProcessor(
       > | null = null
       let hasFlushedMessageBlock = false
 
-      await consumeSseStream(response, (eventName, payload) => {
-        switch (eventName) {
-          case "chat.start":
+      try {
+        const response = await fetchImpl(`${baseUrl}/api/v1/chat`, {
+          method: "POST",
 
-          case "model_load.start":
+          headers: buildHeaders(apiToken),
 
-          case "model_load.end":
+          signal: timeoutSignal,
 
-          case "prompt_processing.start":
+          body: JSON.stringify({
+            model: selectedModel.key,
 
-          case "prompt_processing.end":
+            input: prompt,
 
-          case "reasoning.start":
+            integrations: buildIntegrations({
+              mcpServerLabel,
 
-          case "reasoning.end":
-            onEvent({
-              type: "status",
+              mcpServerUrl,
+            }),
 
-              event: eventName,
+            temperature: LM_STUDIO_TEMPERATURE,
 
-              modelInstanceId: asStringRecord(payload).model_instance_id,
-            })
+            stream: true,
 
-            break
+            store: false,
+          }),
+        })
 
-          case "message.start":
-            pendingMessageStartPayload = asStringRecord(payload)
-            hasFlushedMessageBlock = false
-            break
-          case "message.end":
-            if (hasFlushedMessageBlock) {
+        if (!response.ok) {
+          throw new Error(await buildErrorMessage(response))
+        }
+
+        if (!response.body) {
+          throw new Error("LM Studio returned no stream body for this prompt.")
+        }
+
+        await consumeSseStream(response, (eventName, payload) => {
+          switch (eventName) {
+            case "chat.start":
+
+            case "model_load.start":
+
+            case "model_load.end":
+
+            case "prompt_processing.start":
+
+            case "prompt_processing.end":
+
+            case "reasoning.start":
+
+            case "reasoning.end":
               onEvent({
                 type: "status",
+
                 event: eventName,
+
                 modelInstanceId: asStringRecord(payload).model_instance_id,
               })
-            }
-            pendingMessageStartPayload = null
-            hasFlushedMessageBlock = false
-            break
-          case "model_load.progress":
 
-          case "prompt_processing.progress":
-            onEvent({
-              type: "status",
+              break
 
-              event: eventName,
+            case "message.start":
+              pendingMessageStartPayload = asStringRecord(payload)
+              hasFlushedMessageBlock = false
+              break
+            case "message.end":
+              if (hasFlushedMessageBlock) {
+                onEvent({
+                  type: "status",
+                  event: eventName,
+                  modelInstanceId: asStringRecord(payload).model_instance_id,
+                })
+              }
+              pendingMessageStartPayload = null
+              hasFlushedMessageBlock = false
+              break
+            case "model_load.progress":
 
-              progress: asNumberRecord(payload).progress,
-
-              modelInstanceId: asStringRecord(payload).model_instance_id,
-            })
-
-            break
-
-          case "reasoning.delta": {
-            const content = asContentRecord(payload).content
-
-            if (typeof content === "string") {
+            case "prompt_processing.progress":
               onEvent({
-                type: "reasoning",
+                type: "status",
 
-                delta: content,
+                event: eventName,
+
+                progress: asNumberRecord(payload).progress,
+
+                modelInstanceId: asStringRecord(payload).model_instance_id,
               })
+
+              break
+
+            case "reasoning.delta": {
+              const content = asContentRecord(payload).content
+
+              if (typeof content === "string") {
+                onEvent({
+                  type: "reasoning",
+
+                  delta: content,
+                })
+              }
+
+              break
             }
 
-            break
-          }
+            case "message.delta": {
+              const content = asContentRecord(payload).content
 
+              if (typeof content === "string") {
+                if (!hasFlushedMessageBlock) {
+                  const trimmedLeadingContent = content.replace(/^\s+/, "")
 
-          case "message.delta": {
-            const content = asContentRecord(payload).content
+                  if (!trimmedLeadingContent) {
+                    break
+                  }
 
-            if (typeof content === "string") {
-              if (!hasFlushedMessageBlock) {
-                const trimmedLeadingContent = content.replace(/^\s+/, "")
+                  onEvent({
+                    type: "status",
+                    event: "message.start",
+                    modelInstanceId:
+                      pendingMessageStartPayload?.model_instance_id ??
+                      asStringRecord(payload).model_instance_id,
+                  })
 
-                if (!trimmedLeadingContent) {
+                  hasFlushedMessageBlock = true
+
+                  onEvent({
+                    type: "message",
+                    delta: trimmedLeadingContent,
+                  })
+
                   break
                 }
 
                 onEvent({
-                  type: "status",
-                  event: "message.start",
-                  modelInstanceId:
-                    pendingMessageStartPayload?.model_instance_id ??
-                    asStringRecord(payload).model_instance_id,
-                })
-
-                hasFlushedMessageBlock = true
-
-                onEvent({
                   type: "message",
-                  delta: trimmedLeadingContent,
+                  delta: content,
                 })
-
-                break
               }
-
-              onEvent({
-                type: "message",
-                delta: content,
-              })
+              break
             }
-            break
+            case "tool_call.start":
+              onEvent({
+                type: "tool",
+
+                event: eventName,
+
+                tool: extractToolName(payload),
+
+                provider: extractProviderLabel(payload),
+              })
+
+              break
+
+            case "tool_call.arguments":
+              onEvent({
+                type: "tool",
+
+                event: eventName,
+
+                tool: extractToolName(payload),
+
+                provider: extractProviderLabel(payload),
+
+                argumentsText: safeJsonStringify(
+                  asObjectRecord(payload).arguments
+                ),
+              })
+
+              break
+
+            case "tool_call.success":
+              onEvent({
+                type: "tool",
+
+                event: eventName,
+
+                tool: extractToolName(payload),
+
+                provider: extractProviderLabel(payload),
+
+                argumentsText: safeJsonStringify(
+                  asObjectRecord(payload).arguments
+                ),
+
+                output: asStringRecord(payload).output,
+              })
+
+              break
+
+            case "tool_call.failure":
+              onEvent({
+                type: "tool",
+
+                event: eventName,
+
+                error:
+                  asStringRecord(payload).reason ??
+                  asStringRecord(asObjectRecord(payload).error).message,
+              })
+
+              break
+
+            case "error":
+              onEvent({
+                type: "error",
+
+                error:
+                  asStringRecord(asObjectRecord(payload).error).message ??
+                  "LM Studio reported a streaming error.",
+              })
+
+              break
+
+            case "chat.end": {
+              const endPayload = payload as LmStudioChatStreamEndEvent
+
+              finalResult = extractMessageText(endPayload.result ?? {})
+
+              finalReasoning = extractReasoningText(endPayload.result ?? {})
+
+              break
+            }
+
+            default:
+              onEvent({
+                type: "status",
+
+                event: eventName,
+              })
+
+              break
           }
-          case "tool_call.start":
-            onEvent({
-              type: "tool",
-
-              event: eventName,
-
-              tool: extractToolName(payload),
-
-              provider: extractProviderLabel(payload),
-            })
-
-            break
-
-          case "tool_call.arguments":
-            onEvent({
-              type: "tool",
-
-              event: eventName,
-
-              tool: extractToolName(payload),
-
-              provider: extractProviderLabel(payload),
-
-              argumentsText: safeJsonStringify(
-                asObjectRecord(payload).arguments
-              ),
-            })
-
-            break
-
-          case "tool_call.success":
-            onEvent({
-              type: "tool",
-
-              event: eventName,
-
-              tool: extractToolName(payload),
-
-              provider: extractProviderLabel(payload),
-
-              argumentsText: safeJsonStringify(
-                asObjectRecord(payload).arguments
-              ),
-
-              output: asStringRecord(payload).output,
-            })
-
-            break
-
-          case "tool_call.failure":
-            onEvent({
-              type: "tool",
-
-              event: eventName,
-
-              error:
-                asStringRecord(payload).reason ??
-                asStringRecord(asObjectRecord(payload).error).message,
-            })
-
-            break
-
-          case "error":
-            onEvent({
-              type: "error",
-
-              error:
-                asStringRecord(asObjectRecord(payload).error).message ??
-                "LM Studio reported a streaming error.",
-            })
-
-            break
-
-          case "chat.end": {
-            const endPayload = payload as LmStudioChatStreamEndEvent
-
-            finalResult = extractMessageText(endPayload.result ?? {})
-
-            finalReasoning = extractReasoningText(endPayload.result ?? {})
-
-            break
-          }
-
-          default:
-            onEvent({
-              type: "status",
-
-              event: eventName,
-            })
-
-            break
-        }
-      }, signal)
+        }, timeoutSignal)
+      } catch (error) {
+        throw normalizePromptAbortError(error)
+      } finally {
+        cleanup()
+      }
 
       if (!finalResult) {
         throw new Error(
@@ -562,12 +586,12 @@ async function consumeSseStream(
   let buffer = ""
 
   if (signal?.aborted) {
-    throw createAbortError()
+    throw getAbortReason(signal)
   }
 
   for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
     if (signal?.aborted) {
-      throw createAbortError()
+      throw getAbortReason(signal)
     }
     buffer += decoder.decode(chunk, { stream: true })
 
@@ -595,6 +619,71 @@ async function consumeSseStream(
 
 function createAbortError() {
   return new DOMException("The prompt request was cancelled.", "AbortError")
+}
+
+function getAbortReason(signal: AbortSignal) {
+  if (signal.reason instanceof Error) {
+    return signal.reason
+  }
+
+  return createAbortError()
+}
+
+function createTimeoutSignal(
+  parentSignal: AbortSignal | undefined,
+  timeoutMs: number
+) {
+  const timeoutController = new AbortController()
+  const timeoutId = setTimeout(() => {
+    timeoutController.abort(createPromptTimeoutError(timeoutMs))
+  }, timeoutMs)
+
+  const abortFromParent = () => {
+    timeoutController.abort(parentSignal?.reason ?? createAbortError())
+  }
+
+  if (parentSignal?.aborted) {
+    abortFromParent()
+  } else if (parentSignal) {
+    parentSignal.addEventListener("abort", abortFromParent, { once: true })
+  }
+
+  return {
+    signal: timeoutController.signal,
+    cleanup() {
+      clearTimeout(timeoutId)
+
+      if (parentSignal) {
+        parentSignal.removeEventListener("abort", abortFromParent)
+      }
+    },
+  }
+}
+
+function createPromptTimeoutError(timeoutMs: number) {
+  return new Error(
+    `LM Studio prompt request timed out after ${Math.floor(timeoutMs / 60000)} minutes.`
+  )
+}
+
+function normalizePromptAbortError(error: unknown) {
+  if (error instanceof Error) {
+    if (
+      error.name === "AbortError" &&
+      error.message === "The prompt request was cancelled."
+    ) {
+      return error
+    }
+
+    if (
+      error.name === "TimeoutError" ||
+      error.message.includes("timed out after")
+    ) {
+      return createPromptTimeoutError(LM_STUDIO_PROMPT_TIMEOUT_MS)
+    }
+  }
+
+  return error
 }
 
 function emitSseEvent(
@@ -750,5 +839,4 @@ async function buildErrorMessage(response: Response) {
 
   return `LM Studio request failed with ${response.status}.`
 }
-
 
