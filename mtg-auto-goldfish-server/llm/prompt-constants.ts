@@ -68,58 +68,93 @@ Example conversions:
 - Do not confuse a card's color with the colors of mana required to cast it.
 
 WHAT MATTERS IN THIS STEP
-First, look at the commander and decklist and identify what kind of deck this is trying to be. Consider whether it is aggressive, midrange, ramp, synergy-driven, commander-centric, or otherwise focused on a specific game plan.
-Then evaluate whether the hand is functional for the first few turns and likely to develop well for that deck.
+Use a deliberately simple mulligan heuristic.
+
+For this step, the PRIMARY keep / mulligan decision should be based only on the number of mana pieces in the hand, adjusted by which mulligan phase you are in.
+
+Define mana pieces as:
+- lands
+- mana rocks
+- mana dorks
+- ramp spells that are meant to increase your mana development early
+
+Count a nonland card as a mana piece only if it is realistically an early ramp card for this deck.
+Do NOT count:
+- expensive ramp that is not part of early development
+- one-shot rituals that do not provide lasting development
+- generic setup cards that do not actually ramp mana
+
+At this stage, do NOT override the simple heuristic just because:
+- the spells look strong
+- the spells look weak
+- the hand has synergy
+- the hand lacks synergy
+- the commander is powerful
+- the commander is awkward
+- the curve looks pretty
+- the curve looks clunky
+
+Use the mana-piece count as the main decision rule.
+Only use card-specific detail later for:
+- confirming whether something should count as ramp
+- deciding what to bottom after a keep on a non-free mulligan
+- breaking very close ties at the hard cap
 
 Use this exact evaluation procedure for every hand:
-1. Count usable mana sources in hand.
-2. Identify what colors are available by turn 1, turn 2, and turn 3 if you make normal land drops.
-3. List only the cards in hand that are realistically castable by turn 2 or turn 3.
+1. Count mana pieces in hand.
+2. Identify the current mulligan phase:
+   - opening 7
+   - after 1 mulligan
+   - after 2 mulligans
+   - after 3 mulligans
+   - after 4 total mulligans
+3. Apply the phase-specific heuristic below.
 4. Decide KEEP or MULLIGAN.
-5. Give a short reason tied to function, not optimism.
+5. Give a short reason tied to mana-piece count and phase.
 
-Before calling mulligan, explicitly verify all of these:
-- land count or equivalent fast mana count
-- whether the hand can make normal land drops
-- what mana is actually usable by turn 2
-- whether at least one relevant spell, ramp piece, or mana rock is castable by turn 3
+PHASE-SPECIFIC KEEP / MULLIGAN HEURISTIC
+Use these rules in order.
 
-If those checks pass, strongly prefer keeping, especially after you have already mulliganed.
+1. Opening 7
+- KEEP if mana pieces = 3, 4, or 5
+- MULLIGAN if mana pieces = 0, 1, 2, 6, or 7
 
-For each hand, make this decision in order:
-1. Is this hand keepable right now?
-2. If yes, keep it.
-3. If no, ask whether the next mulligan is likely to improve the hand more than the card disadvantage will hurt.
-4. Only mulligan if the hand is genuinely not functional or clearly below the keep threshold for this stage of the mulligan process.
+2. After 1 mulligan
+- KEEP if mana pieces = 3, 4, or 5
+- 2 or 6 mana pieces are borderline; default to KEEP
+- MULLIGAN if mana pieces = 0, 1, or 7
 
-Prioritize:
-- enough lands or fast mana to function
-- access to the colors the hand needs
-- the ability to make early land drops
-- a plausible early or midgame plan
-- good curve and sequencing
-- reliable hands over greedy hands
-- whether the hand supports what this particular commander and deck are trying to do
+3. After 2 mulligans
+- KEEP if mana pieces = 2, 3, 4, 5, or 6
+- MULLIGAN if mana pieces = 0, 1, or 7
 
-Do not spend tokens on details that do not matter for the opening-hand decision, such as:
-- combat patterns
-- stack battles
-- turn-by-turn tactical lines
-- phases and steps
-- attack decisions
-- triggers that only matter once the game is being played
-- repeated self-correction or recounting
-- long card-by-card summaries when only a few cards matter to the keep decision
+4. After 3 mulligans
+- KEEP if mana pieces = 2, 3, 4, 5, 6, or 7
+- MULLIGAN only if mana pieces = 0 or 1 and you are still below the hard cap
+
+5. After 4 total mulligans
+- You have reached the hard cap
+- KEEP the hand no matter what
+- If the hand has 2 or more mana pieces, keep it without hesitation
+- If the hand has 0 or 1 mana piece, keep it anyway because the mulligan limit was reached
+
+PRACTICAL INTERPRETATION
+- 0 to 1 mana pieces: almost always a mulligan until the hard cap forces a keep
+- 3 to 5 mana pieces: ideal range
+- 2 mana pieces: too risky on the first hand, but increasingly acceptable once you have mulliganed
+- 6 mana pieces: too flooded on the first hand, but increasingly acceptable once you have mulliganed
+- 7 mana pieces: usually mulligan unless you are deep enough that preserving hand size matters more
+- Do not chase a perfect hand
+- Do not assume the next hand will be better
+- Once the phase says a hand is a keep, strongly prefer keeping it
 
 MULLIGAN RULES
 Use Commander mulligan rules:
-- Commander is generally slower than 60-card formats, so do not mulligan as aggressively for perfect early pressure.
-- Many Commander decks are happy to keep a stable hand that ramps and develops mana even if the other spells are only medium-quality.
 - Initial hand: draw 7.
 - First mulligan: shuffle and draw a fresh 7. This first mulligan is free.
 - After that, use London mulligan:
   - each additional mulligan draws 7 cards
-  - once you keep, put a number of cards from your hand on the bottom of your library equal to the number of mulligans taken beyond the original hand
+  - once you keep, put a number of cards from your hand on the bottom of your library equal to the number of mulligans taken beyond the free mulligan
 
 Examples:
 - Keep opening 7: keep all 7
@@ -140,77 +175,30 @@ Decision-and-tool examples:
 PRACTICAL MULLIGAN LIMITS FOR THIS SIMULATION
 - Do NOT keep mulliganing indefinitely in search of a perfect hand.
 - Use a hard cap of 4 total mulligans.
-- Usually stop earlier if you find a hand that is functional, even if it is not ideal.
+- Usually stop earlier if the phase-based heuristic says the hand is a keep.
 - Treat mulligan as the fallback for bad hands, not the default action after seeing a merely imperfect hand.
-- After 2 total mulligans, become noticeably more willing to keep a mediocre but functional hand.
-- After 2 total mulligans, a hand with 3 or more lands and a castable ramp piece, mana rock, or coherent path to casting spells is usually a keep even if it is not exciting.
-- After 2 total mulligans, do not reject a hand just because turn 1 is weak.
-- After 3 total mulligans, strongly prefer keeping any hand that can reasonably play Magic and develop at all.
-- After 3 total mulligans, do not reject a hand just because it is slow if it has functional mana, land drops, and a plausible curve into your game plan.
 - Never exceed 4 total mulligans.
 - If you reach the hard cap, you must keep the best available hand, even if it is weak.
 
-KEEP / MULLIGAN HEURISTICS
-Be disciplined but not greedy.
-Usually keep the first decent, functional hand rather than chase a perfect one.
-When uncertain, bias toward keeping the hand if it can make land drops, produce relevant colors, and has a plausible plan.
-
-A hand is generally keepable if it has most of these:
-- about 2-4 usable lands or equivalent fast mana
-- access to at least the most important early colors
-- something meaningful to do in the early turns, or a very reliable setup hand
-- a reasonable path to casting ramp, card draw, setup pieces, or the commander
-- a plan that makes sense for this commander and deck, even if not every card in the hand is exciting
-
-Hands are more likely to be mulligans if they are:
-- mana-light
-- mana-flooded
-- missing critical colors
-- too slow to function
-- full of expensive spells with no early development
-- dependent on drawing perfectly to do anything
-
-Heuristic guidance:
-- 3 lands is usually a strong baseline keep if colors are reasonable.
-- 3 lands plus a castable ramp spell is often a very good Commander keep, even if the rest of the hand is only medium or clunky.
-- 4 lands plus a castable mana rock or setup spell is often a keep, especially after you have already mulliganed.
-- 2 lands can be keepable if the hand has good colors, cheap plays, ramp, or draw.
-- 2 lands plus a mana rock can still be a keep if the sequencing is realistic.
-- 1-land hands are usually mulligans unless the hand has unusually strong cheap fixing, draw, or ramp and a very clear path to function.
-- 5+ land hands are usually mulligans unless the spell quality and curve make the hand clearly functional.
-- Do not over-penalize a hand just because one off-color card is currently uncastable if the rest of the hand has stable mana and a coherent plan.
-- A hand with solid mana, an early mana rock, and one or two castable midgame threats is usually functional enough to keep by the second or third mulligan.
-- In slower Commander decks, stable mana and ramp are often more important than having multiple strong standalone spells in the opener.
-- Do not treat "not ideal" as "must mulligan."
-- Do not assume the next hand will be better.
-- A functional 6-card or 5-card hand is often worse than a merely decent 7-card hand you already have.
-
-Example:
-- A hand with 2 lands, both entering tapped, plus Sol Ring can still be keepable by the 2nd or 3rd mulligan if it has a realistic line to cast Sol Ring on turn 2 and the rest of the hand can function from there.
-
 COMMANDER AWARENESS
-Always consider the commander when judging the hand.
-Before deciding, form a quick read on the deck from the commander and decklist: what is the main plan, what colors matter early, and whether the deck is trying to ramp, curve out, assemble synergy, or play a slower value game.
-Ask:
-- does this hand develop toward casting the commander on a reasonable timeline?
-- if the deck heavily depends on the commander, does the hand support that plan?
-- if the commander is expensive, does the hand still function before casting it?
-- does this hand support the deck's overall game plan, not just the raw power of isolated cards?
+You may briefly identify what kind of deck this appears to be from the commander and decklist, but do not let that override the simple mana-piece heuristic.
+Commander and deck context matter more for later gameplay than for this step.
 
 BOTTOMING RULES AFTER A NON-FREE MULLIGAN
 If you keep after taking extra mulligans and must bottom cards:
 - decide whether you are keeping before you call return_cards_to_library
 - decide the entire set of cards to bottom before making the tool call
 - use one return_cards_to_library call with all cards you are bottoming unless order would meaningfully matter
-- keep the cards that best preserve lands, color access, and early function
+- keep the cards that best preserve lands, early ramp, and basic functionality
 - bottom the weakest, clunkiest, most redundant, or least castable cards
-- prefer keeping a coherent hand over keeping individually powerful but awkward cards
+- prefer keeping a coherent mana base over keeping individually powerful but awkward cards
+- if choosing between similar nonland cards, keep the cheaper and easier-to-cast ones first
 
 DECISION STYLE
 - Maximize consistency, not high-roll potential.
 - Prefer stable, reliable hands.
-- If two decisions are close, choose the simpler and safer keep.
-- Do not chase an ideal hand past the point where the reduced hand size is likely to be worse than a merely mediocre keep.
+- Follow the phase-specific mana-piece heuristic rather than chasing ideal card quality.
+- If two decisions are close, choose the safer keep once you are past the opening hand.
 - Evaluate the hand in front of you, not an imagined better hand.
 - Be concise and decisive. Do not narrate long speculative lines.
 
@@ -225,9 +213,8 @@ Return only:
 7. if you hit the hard cap, explicitly say that you kept because the mulligan limit was reached
 
 While reasoning about each hand before the final answer, keep your internal checklist compact:
-- Mana sources:
-- Colors by turn 3:
-- Castable by turn 3:
+- Mana pieces:
+- Phase:
 - Verdict:
 - Short reason:
 `;
