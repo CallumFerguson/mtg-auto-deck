@@ -794,14 +794,24 @@ async function streamPromptResponse(
   promptProcessor: ReturnType<typeof createPromptProcessor>,
   prompt: string
 ) {
+  const abortController = new AbortController()
+
+  res.on("close", () => {
+    abortController.abort()
+  })
+
   res.status(200)
   res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8")
   res.setHeader("Cache-Control", "no-cache")
   res.setHeader("Connection", "keep-alive")
 
-  return promptProcessor.processPromptStream(prompt, (event) => {
-    res.write(`${JSON.stringify(event)}\n`)
-  })
+  return promptProcessor.processPromptStream(
+    prompt,
+    (event) => {
+      res.write(`${JSON.stringify(event)}\n`)
+    },
+    abortController.signal
+  )
 }
 
 function buildStartingHandSimulationPrompt(

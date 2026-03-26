@@ -1,17 +1,21 @@
 import { useEffect, useLayoutEffect, useRef } from "react"
-import { Eye, X } from "lucide-react"
+import { Eye, LoaderCircle, X, XCircle } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 
 type PromptStreamModalProps = {
   isOpen: boolean
   streamText: string
+  isStarting: boolean
+  onCancel: () => void
   onClose: () => void
 }
 
 export function PromptStreamModal({
   isOpen,
   streamText,
+  isStarting,
+  onCancel,
   onClose,
 }: PromptStreamModalProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
@@ -173,15 +177,29 @@ export function PromptStreamModal({
               </p>
             </div>
 
-            <Button
-              type="button"
-              variant="outline"
-              className="h-10 rounded-full border-white/15 bg-white/5 px-4 text-stone-200 hover:bg-white/10 hover:text-stone-50"
-              onClick={onClose}
-            >
-              <X />
-              Close
-            </Button>
+            <div className="flex items-center gap-3">
+              {isStarting ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 rounded-full border-red-400/30 bg-red-500/10 px-4 text-red-100 hover:bg-red-500/20 hover:text-red-50"
+                  onClick={onCancel}
+                >
+                  <XCircle />
+                  Cancel run
+                </Button>
+              ) : null}
+
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 rounded-full border-white/15 bg-white/5 px-4 text-stone-200 hover:bg-white/10 hover:text-stone-50"
+                onClick={onClose}
+              >
+                <X />
+                Close
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -197,6 +215,13 @@ export function PromptStreamModal({
               {streamText.trim() || "No prompt stream yet."}
             </pre>
           </div>
+
+          {isStarting ? (
+            <div className="mt-4 flex items-center gap-2 text-sm text-stone-400">
+              <LoaderCircle className="size-4 animate-spin text-amber-200" />
+              Prompt stream is still running.
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

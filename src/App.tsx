@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import type { ComponentProps, Dispatch, SetStateAction } from "react"
 
 import { DeckIntakeForm } from "@/features/deck-intake/components/deck-intake-form"
@@ -35,6 +35,7 @@ import type {
 } from "@/features/deck-intake/types"
 
 const MIN_PROCESSING_DURATION_MS = 250
+const SIMULATION_CANCELED_MESSAGE = "Simulation cancelled."
 const GOLDFISH_SERVER_URL =
   import.meta.env.VITE_GOLDFISH_SERVER_URL ?? "http://127.0.0.1:3001"
 
@@ -149,6 +150,24 @@ function createPromptRun(title: string): SimulationPromptRun {
     finalAnswerStatus: "idle",
     rawPromptStream: "",
   }
+}
+
+function createCancellationError() {
+  return new DOMException(SIMULATION_CANCELED_MESSAGE, "AbortError")
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === "AbortError"
+}
+
+function cancelPromptRuns(currentRuns: SimulationPromptRun[]) {
+  return currentRuns.map((run) => ({
+    ...run,
+    rawPromptStream: run.rawPromptStream.includes("[cancelled]")
+      ? run.rawPromptStream
+      : appendRawPromptStream(run.rawPromptStream, "\n[cancelled]\n"),
+    activities: completeActiveActivity(run.activities, "error"),
+  }))
 }
 
 function createToolActivity(toolName: string | undefined): SimulationActivity {
@@ -402,7 +421,8 @@ function handlePromptStreamEvent(
 async function readPromptStream(
   response: Response,
   setPromptRuns: Dispatch<SetStateAction<SimulationPromptRun[]>>,
-  runId: string
+  runId: string,
+  signal?: AbortSignal
 ) {
   if (!response.body) {
     throw new Error("The server response did not include a stream body.")
@@ -413,8 +433,16 @@ async function readPromptStream(
   let buffer = ""
   let finalResult = ""
 
+  if (signal?.aborted) {
+    throw createCancellationError()
+  }
+
   while (true) {
     const { done, value } = await reader.read()
+
+    if (signal?.aborted) {
+      throw createCancellationError()
+    }
 
     if (done) {
       break
@@ -483,6 +511,7 @@ export function App() {
   const [simulationError, setSimulationError] = useState("")
   const [gameId, setGameId] = useState("")
   const [promptRuns, setPromptRuns] = useState<SimulationPromptRun[]>([])
+  const simulationAbortControllerRef = useRef<AbortController | null>(null)
 
   const parsedDeck = useMemo(() => parseDecklist(decklistText), [decklistText])
   const totalCards = parsedDeck.reduce(
@@ -607,7 +636,7 @@ export function App() {
     }
   }, [commanderCards, deckCards, isDeckReady])
 
-  async function createGame() {
+  async function createGame(signal?: AbortSignal) {
     if (!simulationPayload) {
       throw new Error("The deck is not ready for simulation yet.")
     }
@@ -617,6 +646,7 @@ export function App() {
       headers: {
         "Content-Type": "application/json",
       },
+      signal,
       body: JSON.stringify(
         simulationPayload satisfies {
           commanders: GameCardPayload[]
@@ -817,13 +847,16 @@ export function App() {
       return
     }
 
+    const abortController = new AbortController()
+    simulationAbortControllerRef.current = abortController
+
     setIsStartingSimulation(true)
     setSimulationError("")
     setGameId("")
     setPromptRuns([])
 
     try {
-      const nextGameId = await createGame()
+      const nextGameId = await createGame(abortController.signal)
 
       setGameId(nextGameId)
 
@@ -837,6 +870,7 @@ export function App() {
           headers: {
             "Content-Type": "application/json",
           },
+          signal: abortController.signal,
           body: JSON.stringify({
             gameId: nextGameId,
           }),
@@ -864,7 +898,8 @@ export function App() {
       const openingHandResult = await readPromptStream(
         openingHandResponse,
         setPromptRuns,
-        openingHandRun.id
+        openingHandRun.id,
+        abortController.signal
       )
 
       const nextPlayRun = createPromptRun("First play decision")
@@ -877,6 +912,7 @@ export function App() {
           headers: {
             "Content-Type": "application/json",
           },
+          signal: abortController.signal,
           body: JSON.stringify({
             prompt: `Given this starting hand:\n\n${openingHandResult}\n\nWhat card do you want to play first given the starting hand?`,
           }),
@@ -901,14 +937,42 @@ export function App() {
         )
       }
 
-      await readPromptStream(followUpResponse, setPromptRuns, nextPlayRun.id)
-    } catch (error) {
-      setSimulationError(
-        error instanceof Error ? error.message : "Failed to create a game."
+      await readPromptStream(
+        followUpResponse,
+        setPromptRuns,
+        nextPlayRun.id,
+        abortController.signal
       )
+    } catch (error) {
+      if (isAbortError(error)) {
+        setPromptRuns((currentRuns) => cancelPromptRuns(currentRuns))
+        setSimulationError(SIMULATION_CANCELED_MESSAGE)
+      } else {
+        setSimulationError(
+          error instanceof Error ? error.message : "Failed to create a game."
+        )
+      }
     } finally {
+      if (simulationAbortControllerRef.current === abortController) {
+        simulationAbortControllerRef.current = null
+      }
+
       setIsStartingSimulation(false)
     }
+  }
+
+  function cancelSimulation() {
+    const controller = simulationAbortControllerRef.current
+
+    if (!controller) {
+      return
+    }
+
+    controller.abort()
+    simulationAbortControllerRef.current = null
+    setIsStartingSimulation(false)
+    setSimulationError(SIMULATION_CANCELED_MESSAGE)
+    setPromptRuns((currentRuns) => cancelPromptRuns(currentRuns))
   }
 
   async function createDevGame() {
@@ -943,6 +1007,12 @@ export function App() {
   }, [commanderOneName, commanderTwoName, decklistText])
 
   useEffect(() => {
+    return () => {
+      simulationAbortControllerRef.current?.abort()
+    }
+  }, [])
+
+  useEffect(() => {
     if (!canProcess) {
       return
     }
@@ -963,6 +1033,9 @@ export function App() {
   }, [])
 
   useEffect(() => {
+    simulationAbortControllerRef.current?.abort()
+    simulationAbortControllerRef.current = null
+    setIsStartingSimulation(false)
     setGameId("")
     setSimulationError("")
     setPromptRuns([])
@@ -978,6 +1051,8 @@ export function App() {
   }
 
   function resetToSampleDeck() {
+    simulationAbortControllerRef.current?.abort()
+    simulationAbortControllerRef.current = null
     setCommanderOneName(DEFAULT_DECK_INPUT.commanderOneName)
     setCommanderTwoName(DEFAULT_DECK_INPUT.commanderTwoName)
     setDecklistText(DEFAULT_DECK_INPUT.decklistText)
@@ -1240,6 +1315,8 @@ export function App() {
       <PromptStreamModal
         isOpen={isPromptStreamModalOpen}
         streamText={combinedPromptStream}
+        isStarting={isStartingSimulation}
+        onCancel={cancelSimulation}
         onClose={() => setIsPromptStreamModalOpen(false)}
       />
     </main>

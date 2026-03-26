@@ -58,7 +58,8 @@ export interface PromptProcessor {
   processPrompt(prompt: string): Promise<PromptProcessingResult>
   processPromptStream(
     prompt: string,
-    onEvent: (event: PromptStreamEvent) => void
+    onEvent: (event: PromptStreamEvent) => void,
+    signal?: AbortSignal
   ): Promise<PromptProcessingResult>
 }
 

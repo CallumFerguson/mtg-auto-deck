@@ -143,7 +143,8 @@ export function createLmStudioPromptProcessor(
     async processPromptStream(
       prompt: string,
 
-      onEvent: (event: PromptStreamEvent) => void
+      onEvent: (event: PromptStreamEvent) => void,
+      signal?: AbortSignal
     ): Promise<PromptProcessingResult> {
       const loadedModels = await listLoadedTextModels({
         apiToken,
@@ -171,6 +172,8 @@ export function createLmStudioPromptProcessor(
         method: "POST",
 
         headers: buildHeaders(apiToken),
+
+        signal,
 
         body: JSON.stringify({
           model: selectedModel.key,
@@ -406,7 +409,7 @@ export function createLmStudioPromptProcessor(
 
             break
         }
-      })
+      }, signal)
 
       if (!finalResult) {
         throw new Error(
@@ -550,13 +553,21 @@ function isReasoningOutput(
 async function consumeSseStream(
   response: Response,
 
-  onEvent: (eventName: string, payload: unknown) => void
+  onEvent: (eventName: string, payload: unknown) => void,
+  signal?: AbortSignal
 ) {
   const decoder = new TextDecoder()
 
   let buffer = ""
 
+  if (signal?.aborted) {
+    throw createAbortError()
+  }
+
   for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
+    if (signal?.aborted) {
+      throw createAbortError()
+    }
     buffer += decoder.decode(chunk, { stream: true })
 
     buffer = buffer.replace(/\r\n/g, "\n")
@@ -579,6 +590,10 @@ async function consumeSseStream(
   if (buffer.trim()) {
     emitSseEvent(buffer, onEvent)
   }
+}
+
+function createAbortError() {
+  return new DOMException("The prompt request was cancelled.", "AbortError")
 }
 
 function emitSseEvent(
