@@ -812,7 +812,7 @@ function buildStartingHandSimulationPrompt(
   const commanderLabel = commanders.length === 1 ? "Commander" : "Commanders"
   const commanderNames = commanders.map((card) => card.name)
   const cardNames = initialLibrary.map((card) => card.name)
-  const uniqueCards = dedupeCardsByNameAndText(initialLibrary)
+  const uniqueCards = dedupeCardsByNameAndText([...commanders, ...initialLibrary])
 
   return `${DRAW_STARTING_HAND_PROMPT}
 
