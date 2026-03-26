@@ -545,6 +545,10 @@ async function readPromptStream(
         keptHandCards = getKeepHandCards(event) ?? keptHandCards
       }
 
+      if (event.type === "error") {
+        throw new Error(event.error)
+      }
+
       if (event.type === "done") {
         finalResult = event.result
       }
@@ -563,6 +567,10 @@ async function readPromptStream(
 
     if (event.type === "tool") {
       keptHandCards = getKeepHandCards(event) ?? keptHandCards
+    }
+
+    if (event.type === "error") {
+      throw new Error(event.error)
     }
 
     if (event.type === "done") {

@@ -8,6 +8,10 @@ import type {
 export const LM_STUDIO_DEFAULT_BASE_URL = "http://127.0.0.1:1234"
 export const LM_STUDIO_TEMPERATURE = 0.1
 export const LM_STUDIO_PROMPT_TIMEOUT_MS = 10 * 60 * 1000
+const STREAM_LOOP_SEQUENCE_LENGTH = 250
+const STREAM_LOOP_LOOKBACK_LENGTH = 2500
+const STREAM_LOOP_REPEAT_THRESHOLD = 3
+const STREAM_LOOP_ERROR_MESSAGE = "The LLM got stuck in a loop."
 
 export type PromptProcessorOptions = {
   baseUrl?: string
@@ -185,12 +189,13 @@ export function createLmStudioPromptProcessor(
 
       const {
         signal: timeoutSignal,
+        abort: abortPrompt,
         cleanup,
       } = createTimeoutSignal(signal, LM_STUDIO_PROMPT_TIMEOUT_MS)
 
       let finalResult = ""
-
       let finalReasoning = ""
+      let streamedText = ""
       let pendingMessageStartPayload: Record<
         string,
         string | undefined
@@ -291,6 +296,12 @@ export function createLmStudioPromptProcessor(
               const content = asContentRecord(payload).content
 
               if (typeof content === "string") {
+                streamedText = appendStreamTextOrThrow(
+                  streamedText,
+                  content,
+                  abortPrompt
+                )
+
                 onEvent({
                   type: "reasoning",
 
@@ -305,6 +316,8 @@ export function createLmStudioPromptProcessor(
               const content = asContentRecord(payload).content
 
               if (typeof content === "string") {
+                let emittedContent = content
+
                 if (!hasFlushedMessageBlock) {
                   const trimmedLeadingContent = content.replace(/^\s+/, "")
 
@@ -321,23 +334,28 @@ export function createLmStudioPromptProcessor(
                   })
 
                   hasFlushedMessageBlock = true
-
-                  onEvent({
-                    type: "message",
-                    delta: trimmedLeadingContent,
-                  })
-
-                  break
+                  emittedContent = trimmedLeadingContent
                 }
+
+                streamedText = appendStreamTextOrThrow(
+                  streamedText,
+                  emittedContent,
+                  abortPrompt
+                )
 
                 onEvent({
                   type: "message",
-                  delta: content,
+                  delta: emittedContent,
                 })
               }
               break
             }
             case "tool_call.start":
+              streamedText = appendStreamTextOrThrow(
+                streamedText,
+                `${eventName}:${extractToolName(payload) ?? ""}`,
+                abortPrompt
+              )
               onEvent({
                 type: "tool",
 
@@ -351,6 +369,11 @@ export function createLmStudioPromptProcessor(
               break
 
             case "tool_call.arguments":
+              streamedText = appendStreamTextOrThrow(
+                streamedText,
+                safeJsonStringify(asObjectRecord(payload).arguments),
+                abortPrompt
+              )
               onEvent({
                 type: "tool",
 
@@ -368,6 +391,11 @@ export function createLmStudioPromptProcessor(
               break
 
             case "tool_call.success":
+              streamedText = appendStreamTextOrThrow(
+                streamedText,
+                `${safeJsonStringify(asObjectRecord(payload).arguments) ?? ""}${asStringRecord(payload).output ?? ""}`,
+                abortPrompt
+              )
               onEvent({
                 type: "tool",
 
@@ -387,6 +415,12 @@ export function createLmStudioPromptProcessor(
               break
 
             case "tool_call.failure":
+              streamedText = appendStreamTextOrThrow(
+                streamedText,
+                asStringRecord(payload).reason ??
+                asStringRecord(asObjectRecord(payload).error).message,
+                abortPrompt
+              )
               onEvent({
                 type: "tool",
 
@@ -400,6 +434,11 @@ export function createLmStudioPromptProcessor(
               break
 
             case "error":
+              streamedText = appendStreamTextOrThrow(
+                streamedText,
+                asStringRecord(asObjectRecord(payload).error).message,
+                abortPrompt
+              )
               onEvent({
                 type: "error",
 
@@ -650,6 +689,9 @@ function createTimeoutSignal(
 
   return {
     signal: timeoutController.signal,
+    abort(reason?: unknown) {
+      timeoutController.abort(reason ?? createAbortError())
+    },
     cleanup() {
       clearTimeout(timeoutId)
 
@@ -658,6 +700,70 @@ function createTimeoutSignal(
       }
     },
   }
+}
+
+function isRepeatedLoopSequence(streamedText: string) {
+  if (streamedText.length < STREAM_LOOP_SEQUENCE_LENGTH) {
+    return false
+  }
+
+  const sequence = streamedText.slice(-STREAM_LOOP_SEQUENCE_LENGTH)
+  const lookbackStart = Math.max(
+    0,
+    streamedText.length -
+    STREAM_LOOP_SEQUENCE_LENGTH -
+    STREAM_LOOP_LOOKBACK_LENGTH
+  )
+  const priorWindow = streamedText.slice(
+    lookbackStart,
+    streamedText.length - STREAM_LOOP_SEQUENCE_LENGTH
+  )
+
+  return (
+    countSubstringOccurrences(priorWindow, sequence) >=
+    STREAM_LOOP_REPEAT_THRESHOLD
+  )
+}
+
+function countSubstringOccurrences(haystack: string, needle: string) {
+  if (!needle) {
+    return 0
+  }
+
+  let count = 0
+  let searchStart = 0
+
+  while (searchStart <= haystack.length - needle.length) {
+    const matchIndex = haystack.indexOf(needle, searchStart)
+
+    if (matchIndex < 0) {
+      return count
+    }
+
+    count += 1
+    searchStart = matchIndex + 1
+  }
+
+  return count
+}
+
+function appendStreamTextOrThrow(
+  streamedText: string,
+  chunk: string | undefined,
+  abortPrompt: (reason?: unknown) => void
+) {
+  if (!chunk) {
+    return streamedText
+  }
+
+  const nextStreamedText = streamedText + chunk
+
+  if (isRepeatedLoopSequence(nextStreamedText)) {
+    abortPrompt(new Error(STREAM_LOOP_ERROR_MESSAGE))
+    throw new Error(STREAM_LOOP_ERROR_MESSAGE)
+  }
+
+  return nextStreamedText
 }
 
 function createPromptTimeoutError(timeoutMs: number) {
