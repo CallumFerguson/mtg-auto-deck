@@ -4,6 +4,7 @@ import { createPortal } from "react-dom"
 
 import {
   fetchCardByName,
+  fetchCardsByName,
   toManaCost,
   toOracleText,
   toTypeLine,
@@ -47,12 +48,20 @@ export function ToolCardList({
   label,
   className,
 }: ToolCardListProps) {
+  const uniqueCards = useMemo(() => Array.from(new Set(cards)), [cards])
   const [selectedCardName, setSelectedCardName] = useState<string | null>(null)
   const [selectedCard, setSelectedCard] = useState<ScryfallCard | null>(null)
   const [lookupStatus, setLookupStatus] = useState<"idle" | "loading" | "error">(
     "idle"
   )
   const [lookupError, setLookupError] = useState("")
+  const [allCardsStatus, setAllCardsStatus] = useState<
+    "idle" | "loading" | "loaded" | "error"
+  >("idle")
+  const [allCardsError, setAllCardsError] = useState("")
+  const [loadedCardsByName, setLoadedCardsByName] = useState<
+    Record<string, ScryfallCard>
+  >({})
 
   useEffect(() => {
     if (!selectedCardName || lookupStatus !== "loading") {
@@ -114,21 +123,131 @@ export function ToolCardList({
     setLookupError("")
   }
 
+  async function handleLoadAll() {
+    if (!uniqueCards.length || allCardsStatus === "loading") {
+      return
+    }
+
+    setAllCardsStatus("loading")
+    setAllCardsError("")
+
+    try {
+      const { results, fuzzyMatches } = await fetchCardsByName(uniqueCards)
+      const nextLoadedCards: Record<string, ScryfallCard> = {}
+
+      for (const cardName of uniqueCards) {
+        const lookupKey = cardName.toLowerCase()
+        const match = results.get(lookupKey) ?? fuzzyMatches.get(lookupKey)
+
+        if (match) {
+          nextLoadedCards[cardName] = match
+        }
+      }
+
+      setLoadedCardsByName(nextLoadedCards)
+      setAllCardsStatus("loaded")
+    } catch (error: unknown) {
+      setAllCardsStatus("error")
+      setAllCardsError(
+        error instanceof Error
+          ? error.message
+          : "Scryfall bulk lookup failed. Please try again."
+      )
+    }
+  }
+
   return (
     <>
       <div className={cn("space-y-2", className)}>
         {label ? (
           <p className="text-xs leading-5 text-stone-400">{label}</p>
         ) : null}
-        <div className="flex flex-wrap gap-2">
-          {cards.map((card, index) => (
-            <ToolCardChip
-              key={`${card}-${index}`}
-              cardName={card}
-              onClick={() => handleCardClick(card)}
-            />
-          ))}
-        </div>
+        {allCardsStatus !== "loaded" ? (
+          <>
+            <div className="flex flex-wrap gap-2">
+              {cards.map((card, index) => (
+                <ToolCardChip
+                  key={`${card}-${index}`}
+                  cardName={card}
+                  onClick={() => handleCardClick(card)}
+                />
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              <button
+                type="button"
+                className="inline-flex items-center rounded-full border border-sky-300/20 bg-sky-400/10 px-3 py-1 text-xs font-medium text-sky-100 transition hover:border-sky-200/35 hover:bg-sky-400/20 hover:text-sky-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/60 focus-visible:ring-offset-2 focus-visible:ring-offset-stone-950 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/5 disabled:text-stone-500"
+                onClick={handleLoadAll}
+                disabled={allCardsStatus === "loading"}
+              >
+                {allCardsStatus === "loading" ? (
+                  <>
+                    <LoaderCircle className="mr-2 size-3.5 animate-spin" />
+                    Loading all images
+                  </>
+                ) : (
+                  "Load all card images"
+                )}
+              </button>
+            </div>
+          </>
+        ) : null}
+        {allCardsError ? (
+          <div className="rounded-2xl border border-red-400/25 bg-red-500/10 p-3 text-xs leading-5 text-red-100">
+            {allCardsError}
+          </div>
+        ) : null}
+        {allCardsStatus === "loaded" ? (
+          <div className="flex flex-nowrap items-start gap-2 overflow-hidden pt-2">
+            {uniqueCards.map((cardName) => {
+              const card = loadedCardsByName[cardName]
+              const imageUrl = getCardImageUrl(card ?? null)
+
+              if (!card || !imageUrl) {
+                return (
+                  <button
+                    key={cardName}
+                    type="button"
+                    className="min-w-0 flex-1 overflow-hidden rounded-[20px] border border-white/10 bg-white/[0.03] p-2 text-left transition hover:border-amber-200/25 hover:bg-white/[0.05]"
+                    onClick={() => handleCardClick(cardName)}
+                  >
+                    <div className="flex aspect-[5/7] items-center justify-center rounded-[14px] border border-dashed border-white/10 bg-black/25 px-2 text-center text-[11px] leading-4 text-stone-400">
+                      No image available
+                    </div>
+                    <p className="mt-2 line-clamp-2 text-[11px] font-medium leading-4 text-stone-200">
+                      {cardName}
+                    </p>
+                  </button>
+                )
+              }
+
+              return (
+                <button
+                  key={cardName}
+                  type="button"
+                  className="min-w-0 flex-1 overflow-hidden rounded-[20px] border border-white/10 bg-white/[0.03] text-left transition hover:border-amber-200/25 hover:bg-white/[0.05]"
+                  onClick={() => {
+                    setSelectedCardName(cardName)
+                    setSelectedCard(card)
+                    setLookupStatus("idle")
+                    setLookupError("")
+                  }}
+                >
+                  <img
+                    src={imageUrl}
+                    alt={card.name}
+                    className="block aspect-[5/7] w-full object-cover"
+                  />
+                  <div className="p-2">
+                    <p className="line-clamp-2 text-[11px] font-medium leading-4 text-stone-200">
+                      {card.name}
+                    </p>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        ) : null}
       </div>
       <CardLookupModal
         card={selectedCard}
