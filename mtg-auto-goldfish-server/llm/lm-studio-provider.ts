@@ -392,13 +392,6 @@ export function createLmStudioPromptProcessor(
 
             case "tool_call.success": {
               const payloadRecord = asObjectRecord(payload)
-              const metaRecord = asObjectRecord(payloadRecord._meta)
-              const uiMetadata =
-                asOptionalObjectRecord(payloadRecord.uiMetadata) ??
-                asOptionalObjectRecord(metaRecord.uiMetadata)
-              const structuredContent = asOptionalObjectRecord(
-                payloadRecord.structuredContent
-              )
 
               streamedText = appendStreamTextOrThrow(
                 streamedText,
@@ -417,10 +410,6 @@ export function createLmStudioPromptProcessor(
                 argumentsText: safeJsonStringify(payloadRecord.arguments),
 
                 output: asStringRecord(payload).output,
-
-                structuredContent,
-
-                uiMetadata,
               })
 
               break
@@ -852,13 +841,6 @@ function asObjectRecord(value: unknown) {
   return value as Record<string, unknown>
 }
 
-function asOptionalObjectRecord(value: unknown) {
-  if (!value || typeof value !== "object") {
-    return undefined
-  }
-
-  return value as Record<string, unknown>
-}
 
 function asStringRecord(value: unknown) {
   return asObjectRecord(value) as Record<string, string | undefined>
@@ -965,5 +947,6 @@ async function buildErrorMessage(response: Response) {
 
   return `LM Studio request failed with ${response.status}.`
 }
+
 
 

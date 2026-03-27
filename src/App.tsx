@@ -287,8 +287,8 @@ function getToolGameId(event: Extract<PromptStreamEvent, { type: "tool" }>) {
   const parsedArguments = tryParseJsonObject(event.argumentsText)
   const gameId =
     parsedArguments !== null &&
-    "gameId" in parsedArguments &&
-    typeof parsedArguments.gameId === "string"
+      "gameId" in parsedArguments &&
+      typeof parsedArguments.gameId === "string"
       ? parsedArguments.gameId.trim()
       : ""
 
@@ -387,14 +387,6 @@ function getKeepHandCards(event: Extract<PromptStreamEvent, { type: "tool" }>) {
   return cards.length ? cards : undefined
 }
 
-function getToolOutputDetail(
-  event: Extract<PromptStreamEvent, { type: "tool" }>
-) {
-  const output = event.output?.trim()
-
-  return output ? output : undefined
-}
-
 function getDrawStartingHandDetail(
   event: Extract<PromptStreamEvent, { type: "tool" }>
 ) {
@@ -451,7 +443,7 @@ function getToolActivityDetail(
     return drawStartingHandDetail
   }
 
-  return getToolOutputDetail(event)
+  return undefined
 }
 
 function handlePromptStreamEvent(

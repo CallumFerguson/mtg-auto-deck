@@ -41,8 +41,6 @@ export type PromptStreamEvent =
       provider?: string
       argumentsText?: string
       output?: string
-      structuredContent?: Record<string, unknown>
-      uiMetadata?: Record<string, unknown>
       error?: string
     }
   | {
@@ -70,4 +68,5 @@ export function createPromptProcessor(
 ): PromptProcessor {
   return createLmStudioPromptProcessor(options)
 }
+
 

@@ -285,9 +285,6 @@ function createServer() {
           },
         ],
         structuredContent: response,
-        _meta: {
-          uiMetadata,
-        },
       }
     }
   )
@@ -1075,6 +1072,7 @@ function takeToolUiData(toolName: string, gameId: string) {
 function getRandomToolTestNumber() {
   return Math.floor(Math.random() * 9000) + 1000
 }
+
 
 
 
