@@ -2,6 +2,11 @@
 
 A dark-mode React app for turning a Commander decklist into AI-ready gameplay text.
 
+## Screenshots
+
+![Deck input screen](<docs/deck input screenshot.png>)
+![Simulation screen](<docs/simulation screenshot.png>)
+
 The current UI focuses on deck intake:
 
 - Enter `1` or `2` commanders in separate boxes.
