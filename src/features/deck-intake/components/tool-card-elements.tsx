@@ -49,6 +49,19 @@ export function ToolCardList({
   className,
 }: ToolCardListProps) {
   const uniqueCards = useMemo(() => Array.from(new Set(cards)), [cards])
+  const cardEntries = useMemo(() => {
+    const occurrences = new Map<string, number>()
+
+    return cards.map((cardName) => {
+      const nextOccurrence = (occurrences.get(cardName) ?? 0) + 1
+      occurrences.set(cardName, nextOccurrence)
+
+      return {
+        cardName,
+        key: `${cardName}-${nextOccurrence}`,
+      }
+    })
+  }, [cards])
   const [selectedCardName, setSelectedCardName] = useState<string | null>(null)
   const [selectedCard, setSelectedCard] = useState<ScryfallCard | null>(null)
   const [lookupStatus, setLookupStatus] = useState<"idle" | "loading" | "error">(
@@ -165,11 +178,11 @@ export function ToolCardList({
         {allCardsStatus !== "loaded" ? (
           <>
             <div className="flex flex-wrap gap-2">
-              {cards.map((card, index) => (
+              {cardEntries.map(({ cardName, key }) => (
                 <ToolCardChip
-                  key={`${card}-${index}`}
-                  cardName={card}
-                  onClick={() => handleCardClick(card)}
+                  key={key}
+                  cardName={cardName}
+                  onClick={() => handleCardClick(cardName)}
                 />
               ))}
             </div>
@@ -199,14 +212,14 @@ export function ToolCardList({
         ) : null}
         {allCardsStatus === "loaded" ? (
           <div className="flex flex-nowrap items-start gap-2 overflow-hidden pt-2">
-            {uniqueCards.map((cardName) => {
+            {cardEntries.map(({ cardName, key }) => {
               const card = loadedCardsByName[cardName]
               const imageUrl = getCardImageUrl(card ?? null)
 
               if (!card || !imageUrl) {
                 return (
                   <button
-                    key={cardName}
+                    key={key}
                     type="button"
                     className="min-w-0 flex-1 overflow-hidden rounded-[20px] border border-white/10 bg-white/[0.03] p-2 text-left transition hover:border-amber-200/25 hover:bg-white/[0.05]"
                     onClick={() => handleCardClick(cardName)}
@@ -223,7 +236,7 @@ export function ToolCardList({
 
               return (
                 <button
-                  key={cardName}
+                  key={key}
                   type="button"
                   className="min-w-0 flex-1 overflow-hidden rounded-[20px] border border-white/10 bg-white/[0.03] text-left transition hover:border-amber-200/25 hover:bg-white/[0.05]"
                   onClick={() => {
