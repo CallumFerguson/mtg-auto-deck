@@ -430,6 +430,14 @@ function getKeepHandCards(event: Extract<PromptStreamEvent, { type: "tool" }>) {
   return cards.length ? cards : undefined
 }
 
+function getToolCardsRemaining(
+  event: Extract<PromptStreamEvent, { type: "tool" }>
+) {
+  const cardsRemaining = event.structuredContent?.cardsRemaining
+
+  return typeof cardsRemaining === "number" ? cardsRemaining : undefined
+}
+
 function getDrawStartingHandDetail(
   event: Extract<PromptStreamEvent, { type: "tool" }>
 ) {
@@ -713,6 +721,7 @@ async function readPromptStream(
   let buffer = ""
   let finalResult = ""
   let keptHandCards: string[] = []
+  let cardsRemaining: number | null = null
 
   if (signal?.aborted) {
     throw createCancellationError()
@@ -750,6 +759,7 @@ async function readPromptStream(
 
       if (event.type === "tool") {
         keptHandCards = getKeepHandCards(event) ?? keptHandCards
+        cardsRemaining = getToolCardsRemaining(event) ?? cardsRemaining
       }
 
       if (event.type === "error") {
@@ -775,6 +785,7 @@ async function readPromptStream(
 
     if (event.type === "tool") {
       keptHandCards = getKeepHandCards(event) ?? keptHandCards
+      cardsRemaining = getToolCardsRemaining(event) ?? cardsRemaining
     }
 
     if (event.type === "error") {
@@ -789,6 +800,7 @@ async function readPromptStream(
   return {
     finalResult,
     keptHandCards,
+    cardsRemaining,
   }
 }
 
@@ -1204,7 +1216,7 @@ export function App() {
       setGameId(nextGameId)
       setCurrentSimulationSeed(seed)
 
-      const { keptHandCards } = await runOpeningHandSimulation(
+      const { keptHandCards, cardsRemaining } = await runOpeningHandSimulation(
         nextGameId,
         "Opening hand simulation",
         abortController.signal
@@ -1213,6 +1225,21 @@ export function App() {
       if (!keptHandCards.length) {
         throw new Error(
           "The opening-hand simulation did not report a final kept hand through keep_hand."
+        )
+      }
+
+      if (cardsRemaining === null) {
+        throw new Error(
+          "The opening-hand simulation did not report how many cards remain in the library."
+        )
+      }
+
+      const totalGameCards =
+        keptHandCards.length + cardsRemaining + commanderCount
+
+      if (totalGameCards !== 100) {
+        throw new Error(
+          `Opening-hand simulation produced an invalid deck state: kept ${keptHandCards.length} card(s) + library ${cardsRemaining} card(s) + commanders ${commanderCount} = ${totalGameCards}, expected 100.`
         )
       }
 
