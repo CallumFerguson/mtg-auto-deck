@@ -2,10 +2,29 @@ import { randomInt, randomUUID } from 'node:crypto'
 
 const ONE_HOUR_IN_MS = 60 * 60 * 1000
 const STARTING_HAND_SIZE = 7
+const EXPECTED_GAME_CARDS = 100
 
 export type GameCard = {
   name: string
   cardText: string
+}
+
+export type OpeningHandSnapshotValidation = {
+  isValid: boolean
+  message: string
+  totalGameCards: number
+  expectedGameCards: number
+  startingHandSize: number
+  expectedStartingHandSize: number
+  librarySize: number
+  commanderCount: number
+  mulliganCount: number
+}
+
+export type OpeningHandSnapshot = {
+  startingHand: string[]
+  library: string[]
+  validation: OpeningHandSnapshotValidation
 }
 
 type GameRecord = {
@@ -15,6 +34,7 @@ type GameRecord = {
   commanders: GameCard[]
   initialLibrary: GameCard[]
   library: string[]
+  openingHandSnapshot?: OpeningHandSnapshot
   hasDrawnStartingHand: boolean
   mulliganCount: number
   random: () => number
@@ -81,11 +101,32 @@ export type GetGamePromptContextResult =
     commanders: GameCard[]
     initialLibrary: GameCard[]
     currentLibrary: string[]
+    openingHandSnapshot?: OpeningHandSnapshot
   }
   | {
     ok: false
     reason: 'game_not_found'
   }
+
+export type SaveOpeningHandSnapshotResult =
+  | ({
+      ok: true
+    } & OpeningHandSnapshot)
+  | {
+      ok: false
+      reason: 'game_not_found'
+    }
+
+export type GetOpeningHandSnapshotStatusResult =
+  | {
+      ok: true
+      hasSnapshot: boolean
+      snapshot?: OpeningHandSnapshot
+    }
+  | {
+      ok: false
+      reason: 'game_not_found'
+    }
 
 export type GameStoreOptions = {
   onDeleteGame?: (gameId: string) => void
@@ -132,6 +173,7 @@ export class GameStore {
       commanders: [...commanders],
       initialLibrary: sortedInitialLibrary,
       library: [...shuffledLibrary],
+      openingHandSnapshot: undefined,
       hasDrawnStartingHand: false,
       mulliganCount: 0,
       random,
@@ -318,6 +360,55 @@ export class GameStore {
     }
   }
 
+  saveOpeningHandSnapshot(
+    gameId: string,
+    startingHand: readonly string[]
+  ): SaveOpeningHandSnapshotResult {
+    this.deleteExpiredGames()
+
+    const game = this.games.get(gameId)
+
+    if (!game) {
+      return { ok: false, reason: 'game_not_found' }
+    }
+
+    game.openingHandSnapshot = createOpeningHandSnapshot(
+      startingHand,
+      game.library,
+      game.commanders.length,
+      game.mulliganCount
+    )
+
+    return {
+      ok: true,
+      startingHand: [...game.openingHandSnapshot.startingHand],
+      library: [...game.openingHandSnapshot.library],
+      validation: { ...game.openingHandSnapshot.validation },
+    }
+  }
+
+  getOpeningHandSnapshotStatus(gameId: string): GetOpeningHandSnapshotStatusResult {
+    this.deleteExpiredGames()
+
+    const game = this.games.get(gameId)
+
+    if (!game) {
+      return { ok: false, reason: 'game_not_found' }
+    }
+
+    return {
+      ok: true,
+      hasSnapshot: Boolean(game.openingHandSnapshot),
+      snapshot: game.openingHandSnapshot
+        ? {
+            startingHand: [...game.openingHandSnapshot.startingHand],
+            library: [...game.openingHandSnapshot.library],
+            validation: { ...game.openingHandSnapshot.validation },
+          }
+        : undefined,
+    }
+  }
+
   getGamePromptContext(gameId: string): GetGamePromptContextResult {
     this.deleteExpiredGames()
 
@@ -333,6 +424,13 @@ export class GameStore {
       commanders: game.commanders.map((card) => ({ ...card })),
       initialLibrary: game.initialLibrary.map((card) => ({ ...card })),
       currentLibrary: [...game.library].sort((leftCard, rightCard) => leftCard.localeCompare(rightCard)),
+      openingHandSnapshot: game.openingHandSnapshot
+        ? {
+            startingHand: [...game.openingHandSnapshot.startingHand],
+            library: [...game.openingHandSnapshot.library],
+            validation: { ...game.openingHandSnapshot.validation },
+          }
+        : undefined,
     }
   }
 
@@ -347,7 +445,6 @@ export class GameStore {
     }
   }
 }
-
 
 function shuffle<T>(cards: readonly T[], random: () => number) {
   const shuffledCards = [...cards]
@@ -389,5 +486,53 @@ function sortCardsAlphabetically(cards: readonly GameCard[]) {
   )
 }
 
+function createOpeningHandSnapshot(
+  startingHand: readonly string[],
+  library: readonly string[],
+  commanderCount: number,
+  mulliganCount: number
+): OpeningHandSnapshot {
+  return {
+    startingHand: [...startingHand],
+    library: [...library],
+    validation: createOpeningHandSnapshotValidation(
+      startingHand.length,
+      library.length,
+      commanderCount,
+      mulliganCount
+    ),
+  }
+}
 
+function createOpeningHandSnapshotValidation(
+  startingHandSize: number,
+  librarySize: number,
+  commanderCount: number,
+  mulliganCount: number
+): OpeningHandSnapshotValidation {
+  const expectedStartingHandSize = getExpectedStartingHandSize(mulliganCount)
+  const totalGameCards = startingHandSize + librarySize + commanderCount
+  const hasValidStartingHandSize = startingHandSize === expectedStartingHandSize
+  const hasValidTotalGameCards = totalGameCards === EXPECTED_GAME_CARDS
+  const isValid = hasValidStartingHandSize && hasValidTotalGameCards
+  const message = isValid
+    ? `Opening-hand snapshot is valid: mulligans ${mulliganCount}, kept ${startingHandSize}/${expectedStartingHandSize} card(s), library ${librarySize}, commanders ${commanderCount}, total ${totalGameCards}.`
+    : `Opening-hand snapshot is invalid: mulligans ${mulliganCount}, kept ${startingHandSize}/${expectedStartingHandSize} card(s), library ${librarySize}, commanders ${commanderCount}, total ${totalGameCards}/${EXPECTED_GAME_CARDS}.`
+
+  return {
+    isValid,
+    message,
+    totalGameCards,
+    expectedGameCards: EXPECTED_GAME_CARDS,
+    startingHandSize,
+    expectedStartingHandSize,
+    librarySize,
+    commanderCount,
+    mulliganCount,
+  }
+}
+
+function getExpectedStartingHandSize(mulliganCount: number) {
+  return STARTING_HAND_SIZE - Math.max(0, mulliganCount - 1)
+}
 

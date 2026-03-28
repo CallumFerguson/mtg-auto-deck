@@ -5,7 +5,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { z } from "zod/v4"
 
 import { GameStore, type GameCard } from "./game-store.js"
-import { createPromptProcessor } from "./llm/index.js"
+import { createPromptProcessor, type PromptStreamEvent } from "./llm/index.js"
 import {
   DRAW_STARTING_HAND_PROMPT,
   SIMULATE_TURN_PROMPT,
@@ -46,13 +46,12 @@ const simulateDrawingStartingHandSchema = z.object({
 })
 const simulateTurnSchema = z.object({
   gameId: z.string().trim().min(1).describe("The game ID to simulate."),
-  startingHand: z
-    .array(z.string().trim().min(1))
-    .min(1)
-    .describe("The kept starting hand to simulate a turn from."),
 })
 const toolUiDataLookupSchema = z.object({
   toolName: z.string().trim().min(1).describe("The tool name."),
+  gameId: z.string().trim().min(1).describe("The game ID."),
+})
+const openingHandSnapshotStatusSchema = z.object({
   gameId: z.string().trim().min(1).describe("The game ID."),
 })
 const createGameSchema = z
@@ -739,6 +738,31 @@ async function main() {
     res.status(200).json(toolUiData)
   })
 
+  app.post("/opening-hand-snapshot-status", (req: Request, res: Response) => {
+    const parsedRequest = openingHandSnapshotStatusSchema.safeParse(req.body)
+
+    if (!parsedRequest.success) {
+      res.status(400).json({
+        error: "Invalid request body.",
+        details: parsedRequest.error.issues,
+      })
+      return
+    }
+
+    const snapshotStatus = gameStore.getOpeningHandSnapshotStatus(
+      parsedRequest.data.gameId
+    )
+
+    if (!snapshotStatus.ok) {
+      res.status(404).json({
+        error: GAME_NOT_FOUND_MESSAGE,
+      })
+      return
+    }
+
+    res.status(200).json(snapshotStatus)
+  })
+
   app.post("/process-prompt", async (req: Request, res: Response) => {
     const parsedRequest = processPromptSchema.safeParse(req.body)
 
@@ -812,11 +836,31 @@ async function main() {
     )
 
     try {
-      const response = await streamPromptResponse(res, promptProcessor, prompt)
+      let keptHandCards: string[] | undefined
+      const response = await streamPromptResponse(
+        res,
+        promptProcessor,
+        prompt,
+        (event) => {
+          keptHandCards = getKeepHandCardsFromPromptEvent(event) ?? keptHandCards
+        }
+      )
+
+      if (!keptHandCards?.length) {
+        throw new Error(
+          "The opening-hand simulation did not report a final kept hand through keep_hand."
+        )
+      }
+
+      const snapshotResult = gameStore.saveOpeningHandSnapshot(gameId, keptHandCards)
+
+      if (!snapshotResult.ok) {
+        throw new Error(GAME_NOT_FOUND_MESSAGE)
+      }
 
       logInfo(
         "simulate_starting_hand",
-        `${shortId(gameId)} len=${prompt.length} model=${response.model.key} size=${response.model.sizeBytes}`
+        `${shortId(gameId)} hand=${snapshotResult.startingHand.length} library=${snapshotResult.library.length} valid=${snapshotResult.validation.isValid} len=${prompt.length} model=${response.model.key} size=${response.model.sizeBytes}`
       )
 
       res.end()
@@ -855,7 +899,7 @@ async function main() {
       return
     }
 
-    const { gameId, startingHand } = parsedRequest.data
+    const { gameId } = parsedRequest.data
     const gamePromptContext = gameStore.getGamePromptContext(gameId)
 
     if (!gamePromptContext.ok) {
@@ -865,9 +909,30 @@ async function main() {
       return
     }
 
+    const resolvedStartingHand = gamePromptContext.openingHandSnapshot?.startingHand
+
+    if (!resolvedStartingHand?.length) {
+      res.status(400).json({
+        error:
+          "No saved opening-hand snapshot was found for that game. Run the opening-hand simulation first.",
+      })
+      return
+    }
+
+    const snapshotValidation = gamePromptContext.openingHandSnapshot?.validation
+
+    if (!snapshotValidation?.isValid) {
+      res.status(400).json({
+        error:
+          snapshotValidation?.message ??
+          "The saved opening-hand snapshot is invalid.",
+      })
+      return
+    }
+
     const prompt = buildTurnSimulationPrompt(
       gamePromptContext.gameId,
-      startingHand,
+      resolvedStartingHand,
       gamePromptContext.commanders,
       gamePromptContext.currentLibrary,
       gamePromptContext.initialLibrary
@@ -878,7 +943,7 @@ async function main() {
 
       logInfo(
         "simulate_turn",
-        `${shortId(gameId)} hand=${startingHand.length} len=${prompt.length} model=${response.model.key} size=${response.model.sizeBytes}`
+        `${shortId(gameId)} hand=${resolvedStartingHand.length} len=${prompt.length} model=${response.model.key} size=${response.model.sizeBytes}`
       )
 
       res.end()
@@ -1026,7 +1091,8 @@ function applyCors(
 async function streamPromptResponse(
   res: Response,
   promptProcessor: ReturnType<typeof createPromptProcessor>,
-  prompt: string
+  prompt: string,
+  onEvent?: (event: PromptStreamEvent) => void
 ) {
   const abortController = new AbortController()
 
@@ -1042,10 +1108,47 @@ async function streamPromptResponse(
   return promptProcessor.processPromptStream(
     prompt,
     (event) => {
+      onEvent?.(event)
       res.write(`${JSON.stringify(event)}\n`)
     },
     abortController.signal
   )
+}
+
+function tryParseJsonObject(value: string | undefined) {
+  if (!value) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(value)
+    return parsed !== null && typeof parsed === "object" ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function getKeepHandCardsFromPromptEvent(event: PromptStreamEvent) {
+  if (event.type !== "tool" || event.tool !== "keep_hand") {
+    return undefined
+  }
+
+  const parsedArguments = tryParseJsonObject(event.argumentsText)
+
+  if (
+    parsedArguments === null ||
+    !("cards" in parsedArguments) ||
+    !Array.isArray(parsedArguments.cards)
+  ) {
+    return undefined
+  }
+
+  const cards = parsedArguments.cards
+    .filter((card: unknown): card is string => typeof card === "string")
+    .map((card: string) => card.trim())
+    .filter(Boolean)
+
+  return cards.length ? cards : undefined
 }
 
 function buildStartingHandSimulationPrompt(
@@ -1217,13 +1320,6 @@ function takeToolUiData(toolName: string, gameId: string) {
 
   return toolUiData
 }
-
-
-
-
-
-
-
 
 
 

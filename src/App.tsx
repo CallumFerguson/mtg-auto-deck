@@ -55,6 +55,22 @@ type ToolUiDataResponse = {
   uiMetadata?: Record<string, unknown>
 }
 
+type OpeningHandSnapshotStatusResponse =
+  | {
+    ok: true
+    hasSnapshot: boolean
+    snapshot?: {
+      validation: {
+        isValid: boolean
+        message: string
+      }
+    }
+  }
+  | {
+    ok: false
+    error?: string
+  }
+
 type PromptStreamEvent =
   | {
     type: "start"
@@ -1216,36 +1232,16 @@ export function App() {
       setGameId(nextGameId)
       setCurrentSimulationSeed(seed)
 
-      const { keptHandCards, cardsRemaining } = await runOpeningHandSimulation(
+      await runOpeningHandSimulation(
         nextGameId,
         "Opening hand simulation",
         abortController.signal
       )
 
-      if (!keptHandCards.length) {
-        throw new Error(
-          "The opening-hand simulation did not report a final kept hand through keep_hand."
-        )
-      }
-
-      if (cardsRemaining === null) {
-        throw new Error(
-          "The opening-hand simulation did not report how many cards remain in the library."
-        )
-      }
-
-      const totalGameCards =
-        keptHandCards.length + cardsRemaining + commanderCount
-
-      if (totalGameCards !== 100) {
-        throw new Error(
-          `Opening-hand simulation produced an invalid deck state: kept ${keptHandCards.length} card(s) + library ${cardsRemaining} card(s) + commanders ${commanderCount} = ${totalGameCards}, expected 100.`
-        )
-      }
+      await assertStartingHandSnapshotReady(nextGameId, abortController.signal)
 
       await runTurnSimulation(
         nextGameId,
-        keptHandCards,
         "First play decision",
         abortController.signal
       )
@@ -1267,9 +1263,46 @@ export function App() {
     }
   }
 
+  async function assertStartingHandSnapshotReady(
+    currentGameId: string,
+    signal?: AbortSignal
+  ) {
+    const response = await fetch(
+      `${GOLDFISH_SERVER_URL}/opening-hand-snapshot-status`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        signal,
+        body: JSON.stringify({
+          gameId: currentGameId,
+        }),
+      }
+    )
+
+    const payload = (await response.json()) as OpeningHandSnapshotStatusResponse
+
+    if (!response.ok || !payload.ok) {
+      throw new Error(
+        ("error" in payload && payload.error) ||
+          "Failed to load opening-hand snapshot status."
+      )
+    }
+
+    if (!payload.hasSnapshot || !payload.snapshot) {
+      throw new Error(
+        "The opening-hand simulation did not save a starting-hand snapshot."
+      )
+    }
+
+    if (!payload.snapshot.validation.isValid) {
+      throw new Error(payload.snapshot.validation.message)
+    }
+  }
+
   async function runTurnSimulation(
     currentGameId: string,
-    startingHand: readonly string[],
     title: string,
     signal?: AbortSignal
   ) {
@@ -1284,7 +1317,6 @@ export function App() {
       signal,
       body: JSON.stringify({
         gameId: currentGameId,
-        startingHand,
       }),
     })
 
@@ -1779,12 +1811,6 @@ export function App() {
 }
 
 export default App
-
-
-
-
-
-
 
 
 
