@@ -211,7 +211,7 @@ export function ToolCardList({
           </div>
         ) : null}
         {allCardsStatus === "loaded" ? (
-          <div className="flex flex-nowrap items-start gap-2 overflow-hidden pt-2">
+          <div className="flex flex-nowrap items-start gap-2 overflow-x-auto pt-2 pb-2">
             {cardEntries.map(({ cardName, key }) => {
               const card = loadedCardsByName[cardName]
               const imageUrl = getCardImageUrl(card ?? null)
@@ -221,7 +221,7 @@ export function ToolCardList({
                   <button
                     key={key}
                     type="button"
-                    className="min-w-0 flex-1 overflow-hidden rounded-[20px] border border-white/10 bg-white/[0.03] p-2 text-left transition hover:border-amber-200/25 hover:bg-white/[0.05]"
+                    className="w-full max-w-[calc((100%-3rem)/7)] flex-none overflow-hidden rounded-[20px] border border-white/10 bg-white/[0.03] p-2 text-left transition hover:border-amber-200/25 hover:bg-white/[0.05]"
                     onClick={() => handleCardClick(cardName)}
                   >
                     <div className="flex aspect-[5/7] items-center justify-center rounded-[14px] border border-dashed border-white/10 bg-black/25 px-2 text-center text-[11px] leading-4 text-stone-400">
@@ -238,7 +238,7 @@ export function ToolCardList({
                 <button
                   key={key}
                   type="button"
-                  className="min-w-0 flex-1 overflow-hidden rounded-[20px] border border-white/10 bg-white/[0.03] text-left transition hover:border-amber-200/25 hover:bg-white/[0.05]"
+                  className="w-full max-w-[calc((100%-3rem)/7)] flex-none overflow-hidden rounded-[20px] border border-white/10 bg-white/[0.03] text-left transition hover:border-amber-200/25 hover:bg-white/[0.05]"
                   onClick={() => {
                     setSelectedCardName(cardName)
                     setSelectedCard(card)
