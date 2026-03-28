@@ -34,8 +34,11 @@ type GoldfishSimulationPanelProps = {
   isStarting: boolean
   isCreatingDevGame: boolean
   gameId: string
+  simulationSeedInput: string
+  currentSimulationSeed: number | null
   promptRuns: SimulationPromptRun[]
   errorMessage: string
+  onSimulationSeedInputChange: (value: string) => void
   onOpenPromptStream: () => void
   onCreateDevGame: () => void
   onStart: () => void
@@ -71,8 +74,11 @@ export function GoldfishSimulationPanel({
   isStarting,
   isCreatingDevGame,
   gameId,
+  simulationSeedInput,
+  currentSimulationSeed,
   promptRuns,
   errorMessage,
+  onSimulationSeedInputChange,
   onOpenPromptStream,
   onCreateDevGame,
   onStart,
@@ -162,6 +168,29 @@ export function GoldfishSimulationPanel({
               game on the local goldfish server, then let the local model work
               through the prompt while you follow a higher-level activity trace.
             </p>
+            <div className="pt-2">
+              <label className="block space-y-2">
+                <span className="text-xs font-medium tracking-[0.16em] text-stone-400 uppercase">
+                  Simulation seed
+                </span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min="0"
+                  step="1"
+                  value={simulationSeedInput}
+                  onChange={(event) =>
+                    onSimulationSeedInputChange(event.target.value)
+                  }
+                  placeholder="Blank = random"
+                  className="h-11 w-full max-w-xs appearance-none rounded-2xl border border-white/10 bg-black/30 px-4 text-sm text-stone-100 outline-none transition [appearance:textfield] placeholder:text-stone-500 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none focus:border-amber-300/40 focus:bg-black/40"
+                />
+              </label>
+              <p className="mt-2 text-xs leading-5 text-stone-500">
+                Leave blank to generate a random seed and display it here for
+                reruns.
+              </p>
+            </div>
           </div>
         </div>
 
@@ -242,9 +271,19 @@ export function GoldfishSimulationPanel({
 
       {gameId ? (
         <div className="mt-5 rounded-[24px] border border-white/10 bg-black/25 p-4 text-sm leading-6 text-stone-300">
-          <div className="space-y-1">
-            <p className="text-stone-400">Current game ID</p>
-            <p className="font-mono text-sm text-emerald-300">{gameId}</p>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <p className="text-stone-400">Current game ID</p>
+              <p className="font-mono text-sm text-emerald-300">{gameId}</p>
+            </div>
+            {currentSimulationSeed !== null ? (
+              <div className="space-y-1">
+                <p className="text-stone-400">Seed used</p>
+                <p className="font-mono text-sm text-amber-200">
+                  {currentSimulationSeed}
+                </p>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -369,3 +408,8 @@ function getPromptPreview(rawPromptStream: string) {
 
   return `...${preview.replace(/^\S*\s?/, "")}`
 }
+
+
+
+
+

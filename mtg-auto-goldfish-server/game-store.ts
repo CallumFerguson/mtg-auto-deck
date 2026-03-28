@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { randomInt, randomUUID } from 'node:crypto'
 
 const ONE_HOUR_IN_MS = 60 * 60 * 1000
 const STARTING_HAND_SIZE = 7
@@ -11,11 +11,13 @@ export type GameCard = {
 type GameRecord = {
   id: string
   createdAt: number
+  seed: number
   commanders: GameCard[]
   initialLibrary: GameCard[]
   library: string[]
   hasDrawnStartingHand: boolean
   mulliganCount: number
+  random: () => number
 }
 
 export type DrawResult =
@@ -88,6 +90,15 @@ export type GameStoreOptions = {
   onDeleteGame?: (gameId: string) => void
 }
 
+type CreateGameResult = {
+  gameId: string
+  seed: number
+  createdAt: string
+  commanderCount: number
+  cardsRemaining: number
+  totalGames: number
+}
+
 export class GameStore {
   private readonly games = new Map<string, GameRecord>()
   private readonly onDeleteGame?: (gameId: string) => void
@@ -101,26 +112,35 @@ export class GameStore {
     cleanupTimer.unref()
   }
 
-  createGame(commanders: readonly GameCard[], deck: readonly GameCard[]) {
+  createGame(
+    commanders: readonly GameCard[],
+    deck: readonly GameCard[],
+    seed?: number
+  ): CreateGameResult {
     this.deleteExpiredGames()
 
     const id = randomUUID()
+    const resolvedSeed = normalizeSeed(seed)
+    const random = createSeededRandom(resolvedSeed)
     const sortedInitialLibrary = sortCardsAlphabetically(deck)
-    const shuffledLibrary = shuffle(deck.map((card) => card.name))
+    const shuffledLibrary = shuffle(deck.map((card) => card.name), random)
     const game: GameRecord = {
       id,
       createdAt: Date.now(),
+      seed: resolvedSeed,
       commanders: [...commanders],
       initialLibrary: sortedInitialLibrary,
       library: [...shuffledLibrary],
       hasDrawnStartingHand: false,
       mulliganCount: 0,
+      random,
     }
 
     this.games.set(id, game)
 
     return {
       gameId: game.id,
+      seed: game.seed,
       createdAt: new Date(game.createdAt).toISOString(),
       commanderCount: game.commanders.length,
       cardsRemaining: game.library.length,
@@ -219,7 +239,10 @@ export class GameStore {
       return { ok: false, reason: 'starting_hand_not_drawn' }
     }
 
-    game.library = shuffle(game.initialLibrary.map((card) => card.name))
+    game.library = shuffle(
+      game.initialLibrary.map((card) => card.name),
+      game.random
+    )
     game.mulliganCount += 1
 
     const cards = game.library.splice(0, STARTING_HAND_SIZE)
@@ -277,7 +300,7 @@ export class GameStore {
       return { ok: false, reason: 'game_not_found' }
     }
 
-    const cardsToInsert = randomizeOrder ? shuffle(cards) : [...cards]
+    const cardsToInsert = randomizeOrder ? shuffle(cards, game.random) : [...cards]
 
     for (const card of cardsToInsert) {
       if (side === 'top') {
@@ -323,11 +346,11 @@ export class GameStore {
   }
 }
 
-function shuffle<T>(cards: readonly T[]) {
+function shuffle<T>(cards: readonly T[], random: () => number) {
   const shuffledCards = [...cards]
 
   for (let index = shuffledCards.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(Math.random() * (index + 1))
+    const swapIndex = Math.floor(random() * (index + 1))
     const currentCard = shuffledCards[index]
 
     shuffledCards[index] = shuffledCards[swapIndex]
@@ -337,10 +360,31 @@ function shuffle<T>(cards: readonly T[]) {
   return shuffledCards
 }
 
+function normalizeSeed(seed: number | undefined) {
+  if (typeof seed === 'number' && Number.isInteger(seed)) {
+    return seed >>> 0
+  }
+
+  return randomInt(0, 2 ** 32)
+}
+
+function createSeededRandom(seed: number) {
+  let state = seed >>> 0
+
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0
+    let next = Math.imul(state ^ (state >>> 15), state | 1)
+    next ^= next + Math.imul(next ^ (next >>> 7), next | 61)
+
+    return ((next ^ (next >>> 14)) >>> 0) / 4294967296
+  }
+}
+
 function sortCardsAlphabetically(cards: readonly GameCard[]) {
   return [...cards].sort((leftCard, rightCard) =>
     leftCard.name.localeCompare(rightCard.name)
   )
 }
+
 
 

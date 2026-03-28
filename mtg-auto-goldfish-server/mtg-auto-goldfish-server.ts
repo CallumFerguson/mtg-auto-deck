@@ -55,6 +55,12 @@ const createGameSchema = z
     deck: z
       .array(gameCardSchema)
       .describe("The main-deck cards for this game."),
+    seed: z
+      .number()
+      .int()
+      .nonnegative()
+      .optional()
+      .describe("Optional deterministic seed for library shuffling."),
   })
   .superRefine((value, context) => {
     const expectedDeckSize = value.commanders.length === 1 ? 99 : 98
@@ -677,12 +683,13 @@ async function main() {
 
     const game = gameStore.createGame(
       parsedRequest.data.commanders,
-      parsedRequest.data.deck
+      parsedRequest.data.deck,
+      parsedRequest.data.seed
     )
 
     logInfo(
       "new",
-      `${shortId(game.gameId)} commanders=${game.commanderCount} cards=${game.cardsRemaining} games=${game.totalGames}`
+      `${shortId(game.gameId)} seed=${game.seed} commanders=${game.commanderCount} cards=${game.cardsRemaining} games=${game.totalGames}`
     )
 
     res.status(201).json(game)
@@ -1094,6 +1101,11 @@ function takeToolUiData(toolName: string, gameId: string) {
 
   return toolUiData
 }
+
+
+
+
+
 
 
 

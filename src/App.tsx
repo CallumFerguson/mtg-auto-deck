@@ -45,6 +45,11 @@ type GameCardPayload = {
   cardText: string
 }
 
+type CreateGameResponse = {
+  gameId: string
+  seed: number
+}
+
 type ToolUiDataResponse = {
   structuredContent?: Record<string, unknown>
   uiMetadata?: Record<string, unknown>
@@ -437,6 +442,65 @@ function getDrawStartingHandDetail(
   return cards?.length ? <ToolCardList cards={cards} /> : undefined
 }
 
+function getDrawToolDetail(event: Extract<PromptStreamEvent, { type: "tool" }>) {
+  if (
+    event.tool !== "draw_card_from_top" &&
+    event.tool !== "draw_card_from_bottom"
+  ) {
+    return undefined
+  }
+
+  const cards = getStructuredToolCards(event)
+
+  if (!cards?.length) {
+    return undefined
+  }
+
+  const label =
+    event.tool === "draw_card_from_top"
+      ? "Drawn from top:"
+      : "Drawn from bottom:"
+
+  return <ToolCardList cards={cards} label={label} />
+}
+
+function getReturnToolCards(event: Extract<PromptStreamEvent, { type: "tool" }>) {
+  if (event.tool === "return_card_to_library") {
+    const card = event.structuredContent?.card
+
+    if (typeof card !== "string") {
+      return undefined
+    }
+
+    const trimmedCard = card.trim()
+    return trimmedCard ? [trimmedCard] : undefined
+  }
+
+  if (event.tool === "return_cards_to_library") {
+    return getStructuredToolCards(event)
+  }
+
+  return undefined
+}
+
+function getReturnToolDetail(
+  event: Extract<PromptStreamEvent, { type: "tool" }>
+) {
+  const cards = getReturnToolCards(event)
+
+  if (!cards?.length) {
+    return undefined
+  }
+
+  const side =
+    typeof event.structuredContent?.side === "string"
+      ? event.structuredContent.side
+      : undefined
+  const label = side ? `Returned to ${side}:` : "Returned cards:"
+
+  return <ToolCardList cards={cards} label={label} />
+}
+
 function getToolActivityDetail(
   event: Extract<PromptStreamEvent, { type: "tool" }>
 ) {
@@ -456,6 +520,18 @@ function getToolActivityDetail(
 
   if (drawStartingHandDetail) {
     return drawStartingHandDetail
+  }
+
+  const drawToolDetail = getDrawToolDetail(event)
+
+  if (drawToolDetail) {
+    return drawToolDetail
+  }
+
+  const returnToolDetail = getReturnToolDetail(event)
+
+  if (returnToolDetail) {
+    return returnToolDetail
   }
 
   return undefined
@@ -736,6 +812,10 @@ export function App() {
   const [isCreatingDevGame, setIsCreatingDevGame] = useState(false)
   const [simulationError, setSimulationError] = useState("")
   const [gameId, setGameId] = useState("")
+  const [simulationSeedInput, setSimulationSeedInput] = useState("")
+  const [currentSimulationSeed, setCurrentSimulationSeed] = useState<number | null>(
+    null
+  )
   const [promptRuns, setPromptRuns] = useState<SimulationPromptRun[]>([])
   const simulationAbortControllerRef = useRef<AbortController | null>(null)
 
@@ -862,10 +942,32 @@ export function App() {
     }
   }, [commanderCards, deckCards, isDeckReady])
 
+  function getRequestedSimulationSeed() {
+    const trimmedValue = simulationSeedInput.trim()
+
+    if (!trimmedValue) {
+      return undefined
+    }
+
+    if (!/^\d+$/.test(trimmedValue)) {
+      throw new Error("Simulation seed must be a whole number.")
+    }
+
+    const seed = Number(trimmedValue)
+
+    if (!Number.isSafeInteger(seed) || seed < 0) {
+      throw new Error("Simulation seed must be a non-negative whole number.")
+    }
+
+    return seed
+  }
+
   async function createGame(signal?: AbortSignal) {
     if (!simulationPayload) {
       throw new Error("The deck is not ready for simulation yet.")
     }
+
+    const requestedSeed = getRequestedSimulationSeed()
 
     const response = await fetch(`${GOLDFISH_SERVER_URL}/games`, {
       method: "POST",
@@ -874,15 +976,19 @@ export function App() {
       },
       signal,
       body: JSON.stringify(
-        simulationPayload satisfies {
+        {
+          ...simulationPayload,
+          ...(requestedSeed !== undefined ? { seed: requestedSeed } : {}),
+        } satisfies {
           commanders: GameCardPayload[]
           deck: GameCardPayload[]
+          seed?: number
         }
       ),
     })
 
     const payload = (await response.json()) as
-      | { gameId?: string; error?: string }
+      | Partial<CreateGameResponse & { error?: string }>
       | { details?: Array<{ message?: string }> }
 
     if (!response.ok) {
@@ -900,11 +1006,19 @@ export function App() {
       )
     }
 
-    if (!("gameId" in payload) || !payload.gameId) {
-      throw new Error("The server response did not include a game ID.")
+    if (
+      !("gameId" in payload) ||
+      !payload.gameId ||
+      !("seed" in payload) ||
+      typeof payload.seed !== "number"
+    ) {
+      throw new Error("The server response did not include the game ID and seed.")
     }
 
-    return payload.gameId
+    return {
+      gameId: payload.gameId,
+      seed: payload.seed,
+    }
   }
 
   const handleSubmit: NonNullable<ComponentProps<"form">["onSubmit"]> = async (
@@ -1079,12 +1193,16 @@ export function App() {
     setIsStartingSimulation(true)
     setSimulationError("")
     setGameId("")
+    setCurrentSimulationSeed(null)
     setPromptRuns([])
 
     try {
-      const nextGameId = await createGame(abortController.signal)
+      const { gameId: nextGameId, seed } = await createGame(
+        abortController.signal
+      )
 
       setGameId(nextGameId)
+      setCurrentSimulationSeed(seed)
 
       const { keptHandCards } = await runOpeningHandSimulation(
         nextGameId,
@@ -1216,6 +1334,7 @@ export function App() {
     setIsStartingSimulation(true)
     setSimulationError("")
     setGameId("")
+    setCurrentSimulationSeed(null)
     setPromptRuns([])
 
     try {
@@ -1224,8 +1343,11 @@ export function App() {
           throw createCancellationError()
         }
 
-        const nextGameId = await createGame(abortController.signal)
+        const { gameId: nextGameId, seed } = await createGame(
+          abortController.signal
+        )
         setGameId(nextGameId)
+        setCurrentSimulationSeed(seed)
 
         await runOpeningHandSimulation(
           nextGameId,
@@ -1262,6 +1384,7 @@ export function App() {
     simulationAbortControllerRef.current = null
     setIsStartingSimulation(false)
     setSimulationError(SIMULATION_CANCELED_MESSAGE)
+    setCurrentSimulationSeed(null)
     setPromptRuns((currentRuns) => cancelPromptRuns(currentRuns))
   }
 
@@ -1272,12 +1395,14 @@ export function App() {
 
     setIsCreatingDevGame(true)
     setSimulationError("")
+    setCurrentSimulationSeed(null)
     setPromptRuns([])
 
     try {
-      const nextGameId = await createGame()
+      const { gameId: nextGameId, seed } = await createGame()
 
       setGameId(nextGameId)
+      setCurrentSimulationSeed(seed)
       await navigator.clipboard.writeText(nextGameId)
     } catch (error) {
       setSimulationError(
@@ -1327,6 +1452,7 @@ export function App() {
     simulationAbortControllerRef.current = null
     setIsStartingSimulation(false)
     setGameId("")
+    setCurrentSimulationSeed(null)
     setSimulationError("")
     setPromptRuns([])
     setIsPromptStreamModalOpen(false)
@@ -1353,6 +1479,7 @@ export function App() {
     setIsProcessing(false)
     setIsResetModalOpen(false)
     setGameId("")
+    setCurrentSimulationSeed(null)
     setSimulationError("")
     setPromptRuns([])
     setIsPromptStreamModalOpen(false)
@@ -1588,8 +1715,11 @@ export function App() {
           isStarting={isStartingSimulation}
           isCreatingDevGame={isCreatingDevGame}
           gameId={gameId}
+          simulationSeedInput={simulationSeedInput}
+          currentSimulationSeed={currentSimulationSeed}
           promptRuns={promptRuns}
           errorMessage={simulationError}
+          onSimulationSeedInputChange={setSimulationSeedInput}
           onOpenPromptStream={() => setIsPromptStreamModalOpen(true)}
           onCreateDevGame={createDevGame}
           onStart={startSimulation}
@@ -1615,6 +1745,10 @@ export function App() {
 }
 
 export default App
+
+
+
+
 
 
 
