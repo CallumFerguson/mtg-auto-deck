@@ -1243,45 +1243,10 @@ export function App() {
         )
       }
 
-      const nextPlayRun = createPromptRun("First play decision")
-      setPromptRuns((currentRuns) => [...currentRuns, nextPlayRun])
-
-      const followUpResponse = await fetch(
-        `${GOLDFISH_SERVER_URL}/process-prompt`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          signal: abortController.signal,
-          body: JSON.stringify({
-            prompt: `Given this starting hand:\n\n${keptHandCards.join("\n")}\n\nWhat card do you want to play first given the starting hand?`,
-          }),
-        }
-      )
-
-      if (!followUpResponse.ok) {
-        const promptPayload = (await followUpResponse.json()) as
-          | { result?: string; error?: string }
-          | { details?: Array<{ message?: string }> }
-        const detailMessage =
-          "details" in promptPayload && Array.isArray(promptPayload.details)
-            ? promptPayload.details
-              .map((detail) => detail.message)
-              .filter(Boolean)
-              .join(" ")
-            : ""
-        throw new Error(
-          detailMessage ||
-          ("error" in promptPayload && promptPayload.error) ||
-          "Failed to decide the first card to play."
-        )
-      }
-
-      await readPromptStream(
-        followUpResponse,
-        setPromptRuns,
-        nextPlayRun.id,
+      await runTurnSimulation(
+        nextGameId,
+        keptHandCards,
+        "First play decision",
         abortController.signal
       )
     } catch (error) {
@@ -1300,6 +1265,48 @@ export function App() {
 
       setIsStartingSimulation(false)
     }
+  }
+
+  async function runTurnSimulation(
+    currentGameId: string,
+    startingHand: readonly string[],
+    title: string,
+    signal?: AbortSignal
+  ) {
+    const turnRun = createPromptRun(title)
+    setPromptRuns((currentRuns) => [...currentRuns, turnRun])
+
+    const turnResponse = await fetch(`${GOLDFISH_SERVER_URL}/simulate-turn`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      signal,
+      body: JSON.stringify({
+        gameId: currentGameId,
+        startingHand,
+      }),
+    })
+
+    if (!turnResponse.ok) {
+      const promptPayload = (await turnResponse.json()) as
+        | { result?: string; error?: string }
+        | { details?: Array<{ message?: string }> }
+      const detailMessage =
+        "details" in promptPayload && Array.isArray(promptPayload.details)
+          ? promptPayload.details
+            .map((detail) => detail.message)
+            .filter(Boolean)
+            .join(" ")
+          : ""
+      throw new Error(
+        detailMessage ||
+          ("error" in promptPayload && promptPayload.error) ||
+          "Failed to simulate the turn."
+      )
+    }
+
+    return readPromptStream(turnResponse, setPromptRuns, turnRun.id, signal)
   }
 
   async function runOpeningHandSimulation(

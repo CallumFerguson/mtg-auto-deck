@@ -6,7 +6,10 @@ import { z } from "zod/v4"
 
 import { GameStore, type GameCard } from "./game-store.js"
 import { createPromptProcessor } from "./llm/index.js"
-import { DRAW_STARTING_HAND_PROMPT } from "./llm/prompt-constants.js"
+import {
+  DRAW_STARTING_HAND_PROMPT,
+  SIMULATE_TURN_PROMPT,
+} from "./llm/prompt-constants.js"
 
 const DEFAULT_HOST = "127.0.0.1"
 const DEFAULT_PORT = 3001
@@ -40,6 +43,13 @@ const processPromptSchema = z.object({
 })
 const simulateDrawingStartingHandSchema = z.object({
   gameId: z.string().trim().min(1).describe("The game ID to simulate."),
+})
+const simulateTurnSchema = z.object({
+  gameId: z.string().trim().min(1).describe("The game ID to simulate."),
+  startingHand: z
+    .array(z.string().trim().min(1))
+    .min(1)
+    .describe("The kept starting hand to simulate a turn from."),
 })
 const toolUiDataLookupSchema = z.object({
   toolName: z.string().trim().min(1).describe("The tool name."),
@@ -833,6 +843,69 @@ async function main() {
     }
   })
 
+
+  app.post("/simulate-turn", async (req: Request, res: Response) => {
+    const parsedRequest = simulateTurnSchema.safeParse(req.body)
+
+    if (!parsedRequest.success) {
+      res.status(400).json({
+        error: "Invalid request body.",
+        details: parsedRequest.error.issues,
+      })
+      return
+    }
+
+    const { gameId, startingHand } = parsedRequest.data
+    const gamePromptContext = gameStore.getGamePromptContext(gameId)
+
+    if (!gamePromptContext.ok) {
+      res.status(404).json({
+        error: GAME_NOT_FOUND_MESSAGE,
+      })
+      return
+    }
+
+    const prompt = buildTurnSimulationPrompt(
+      gamePromptContext.gameId,
+      startingHand,
+      gamePromptContext.commanders,
+      gamePromptContext.currentLibrary,
+      gamePromptContext.initialLibrary
+    )
+
+    try {
+      const response = await streamPromptResponse(res, promptProcessor, prompt)
+
+      logInfo(
+        "simulate_turn",
+        `${shortId(gameId)} hand=${startingHand.length} len=${prompt.length} model=${response.model.key} size=${response.model.sizeBytes}`
+      )
+
+      res.end()
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to process prompt."
+
+      logWarn("simulate_turn", `${shortId(gameId)} ${message}`)
+
+      if (res.headersSent) {
+        res.write(
+          `${JSON.stringify({
+            type: "error",
+            error: message,
+          })}
+`
+        )
+        res.end()
+        return
+      }
+
+      res.status(502).json({
+        error: message,
+      })
+    }
+  })
+
   app.post("/mcp", async (req: Request, res: Response) => {
     const server = createServer()
 
@@ -998,6 +1071,49 @@ ${cardNames.join("\n")}
 Card reference:
 ${uniqueCards.map(card => `${card.name}\n${card.cardText}\n`).join("\n")}
 `.trim();
+}
+
+
+function buildTurnSimulationPrompt(
+  gameId: string,
+  startingHand: readonly string[],
+  commanders: readonly GameCard[],
+  currentLibrary: readonly string[],
+  initialLibrary: readonly GameCard[]
+) {
+  const commanderNames = commanders.map((card) => card.name)
+  const cardNames = currentLibrary
+  const uniqueCards = dedupeCardsByNameAndText([...commanders, ...initialLibrary])
+
+  return `${SIMULATE_TURN_PROMPT}
+
+Game ID: ${gameId}
+
+===start game state===
+
+Hand:
+${startingHand.join("\n")}
+
+Command Zone:
+${commanderNames.join("\n")}
+
+Graveyard:
+// empty
+
+Exile:
+// empty
+
+Battlefield:
+// empty
+
+===end game state===
+
+Cards in library. Not actual order of library. Use tools to interact with library:
+${cardNames.join("\n")}
+
+Card reference:
+${uniqueCards.map((card) => `${card.name}\n${card.cardText}\n`).join("\n")}
+`.trim()
 }
 
 function dedupeCardsByNameAndText(cards: readonly GameCard[]) {

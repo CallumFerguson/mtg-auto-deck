@@ -80,6 +80,7 @@ export type GetGamePromptContextResult =
     gameId: string
     commanders: GameCard[]
     initialLibrary: GameCard[]
+    currentLibrary: string[]
   }
   | {
     ok: false
@@ -331,6 +332,7 @@ export class GameStore {
       gameId: game.id,
       commanders: game.commanders.map((card) => ({ ...card })),
       initialLibrary: game.initialLibrary.map((card) => ({ ...card })),
+      currentLibrary: [...game.library].sort((leftCard, rightCard) => leftCard.localeCompare(rightCard)),
     }
   }
 
@@ -345,6 +347,7 @@ export class GameStore {
     }
   }
 }
+
 
 function shuffle<T>(cards: readonly T[], random: () => number) {
   const shuffledCards = [...cards]
