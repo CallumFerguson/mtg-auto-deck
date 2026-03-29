@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
+    "ngrok": "ngrok http 3001 --host-header=rewrite",
     "server:build": "tsc -p tsconfig.server.json",
     "server:dev": "tsx mtg-auto-goldfish-server/mtg-auto-goldfish-server.ts",
     "server:start": "node dist-server/mtg-auto-goldfish-server.js",
