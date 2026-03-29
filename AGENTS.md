@@ -10,3 +10,9 @@
 ## Product Context
 
 - This project is an MTG deck goldfishing tool where an AI will automatically play your deck.
+
+
+## Security
+
+- Never read or change the .env file
+- If there is a change you would like to make to it, notify the user and tell them what to change
