@@ -1,4 +1,4 @@
-import type { Request, Response } from "express"
+﻿import type { Request, Response } from "express"
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js"
@@ -14,6 +14,10 @@ import {
 const DEFAULT_HOST = "127.0.0.1"
 const DEFAULT_PORT = 3001
 const SERVER_NAME = "mtg-auto-goldfish-server"
+const OPENING_HAND_SERVER_NAME = "opening-hand-server"
+const TURN_SIMULATION_SERVER_NAME = "turn-simulation-server"
+const OPENING_HAND_MCP_PATH = "/mcp/opening-hand"
+const TURN_SIMULATION_MCP_PATH = "/mcp/turn-simulation"
 const DEFAULT_ALLOWED_ORIGINS = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
@@ -83,10 +87,13 @@ const createGameSchema = z
     }
   })
 
-function createServer() {
+function createServer(
+  name: string,
+  registerTools: (server: McpServer) => void
+) {
   const server = new McpServer(
     {
-      name: SERVER_NAME,
+      name,
       version: "0.0.1",
     },
     {
@@ -96,6 +103,30 @@ function createServer() {
     }
   )
 
+  registerTools(server)
+
+  return server
+}
+
+function createOpeningHandServer() {
+  return createServer(OPENING_HAND_SERVER_NAME, (server) => {
+    registerDrawStartingHandTool(server)
+    registerMulliganTool(server)
+    registerKeepHandTool(server)
+    registerReturnCardsToLibraryTool(server)
+  })
+}
+
+function createTurnSimulationServer() {
+  return createServer(TURN_SIMULATION_SERVER_NAME, (server) => {
+    registerDrawCardFromTopTool(server)
+    registerDrawCardFromBottomTool(server)
+    registerReturnCardToLibraryTool(server)
+    registerReturnCardsToLibraryTool(server)
+  })
+}
+
+function registerDrawCardFromTopTool(server: McpServer) {
   server.registerTool(
     "draw_card_from_top",
     {
@@ -167,7 +198,9 @@ function createServer() {
       }
     }
   )
+}
 
+function registerDrawCardFromBottomTool(server: McpServer) {
   server.registerTool(
     "draw_card_from_bottom",
     {
@@ -239,7 +272,9 @@ function createServer() {
       }
     }
   )
+}
 
+function registerDrawStartingHandTool(server: McpServer) {
   server.registerTool(
     "draw_starting_hand",
     {
@@ -309,7 +344,9 @@ function createServer() {
       }
     }
   )
+}
 
+function registerMulliganTool(server: McpServer) {
   server.registerTool(
     "mulligan",
     {
@@ -403,7 +440,9 @@ function createServer() {
       }
     }
   )
+}
 
+function registerReturnCardToLibraryTool(server: McpServer) {
   server.registerTool(
     "return_card_to_library",
     {
@@ -488,7 +527,9 @@ function createServer() {
       }
     }
   )
+}
 
+function registerReturnCardsToLibraryTool(server: McpServer) {
   server.registerTool(
     "return_cards_to_library",
     {
@@ -575,8 +616,9 @@ function createServer() {
       }
     }
   )
+}
 
-
+function registerKeepHandTool(server: McpServer) {
   server.registerTool(
     "keep_hand",
     {
@@ -645,20 +687,31 @@ function createServer() {
       }
     }
   )
-
-  return server
 }
-
 async function main() {
   const host = process.env.HOST ?? DEFAULT_HOST
   const port = getPort(process.env.PORT)
   const app = createMcpExpressApp({ host })
   const allowedOrigins = getAllowedOrigins(process.env.ALLOWED_ORIGINS)
-  const promptProcessor = createPromptProcessor({
+  const processPromptProcessor = createPromptProcessor({
+    baseUrl: process.env.LM_STUDIO_BASE_URL,
+    apiToken: process.env.LM_STUDIO_API_TOKEN,
+  })
+  const openingHandPromptProcessor = createPromptProcessor({
     baseUrl: process.env.LM_STUDIO_BASE_URL,
     apiToken: process.env.LM_STUDIO_API_TOKEN,
     mcpServerUrl:
-      process.env.GOLDFISH_MCP_SERVER_URL ?? getLocalMcpServerUrl(host, port),
+      process.env.GOLDFISH_OPENING_HAND_MCP_SERVER_URL ??
+      getLocalMcpServerUrl(host, port, OPENING_HAND_MCP_PATH),
+    mcpServerLabel: OPENING_HAND_SERVER_NAME,
+  })
+  const turnSimulationPromptProcessor = createPromptProcessor({
+    baseUrl: process.env.LM_STUDIO_BASE_URL,
+    apiToken: process.env.LM_STUDIO_API_TOKEN,
+    mcpServerUrl:
+      process.env.GOLDFISH_TURN_SIMULATION_MCP_SERVER_URL ??
+      getLocalMcpServerUrl(host, port, TURN_SIMULATION_MCP_PATH),
+    mcpServerLabel: TURN_SIMULATION_SERVER_NAME,
   })
 
   app.use((req: Request, res: Response, next) => {
@@ -777,7 +830,11 @@ async function main() {
     const { prompt } = parsedRequest.data
 
     try {
-      const response = await streamPromptResponse(res, promptProcessor, prompt)
+      const response = await streamPromptResponse(
+        res,
+        processPromptProcessor,
+        prompt
+      )
 
       logInfo(
         "prompt",
@@ -839,7 +896,7 @@ async function main() {
       let keptHandCards: string[] | undefined
       const response = await streamPromptResponse(
         res,
-        promptProcessor,
+        openingHandPromptProcessor,
         prompt,
         (event) => {
           keptHandCards = getKeepHandCardsFromPromptEvent(event) ?? keptHandCards
@@ -939,7 +996,11 @@ async function main() {
     )
 
     try {
-      const response = await streamPromptResponse(res, promptProcessor, prompt)
+      const response = await streamPromptResponse(
+        res,
+        turnSimulationPromptProcessor,
+        prompt
+      )
 
       logInfo(
         "simulate_turn",
@@ -971,59 +1032,8 @@ async function main() {
     }
   })
 
-  app.post("/mcp", async (req: Request, res: Response) => {
-    const server = createServer()
-
-    try {
-      const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: undefined,
-      })
-
-      await server.connect(transport)
-      await transport.handleRequest(req, res, req.body)
-
-      res.on("close", () => {
-        void transport.close()
-        void server.close()
-      })
-    } catch (error) {
-      console.error("Error handling MCP request:", error)
-
-      if (!res.headersSent) {
-        res.status(500).json({
-          jsonrpc: "2.0",
-          error: {
-            code: -32603,
-            message: "Internal server error",
-          },
-          id: null,
-        })
-      }
-    }
-  })
-
-  app.get("/mcp", (_req: Request, res: Response) => {
-    res.status(405).json({
-      jsonrpc: "2.0",
-      error: {
-        code: -32000,
-        message: "Method not allowed.",
-      },
-      id: null,
-    })
-  })
-
-  app.delete("/mcp", (_req: Request, res: Response) => {
-    res.status(405).json({
-      jsonrpc: "2.0",
-      error: {
-        code: -32000,
-        message: "Method not allowed.",
-      },
-      id: null,
-    })
-  })
-
+  registerMcpEndpoint(app, OPENING_HAND_MCP_PATH, createOpeningHandServer)
+  registerMcpEndpoint(app, TURN_SIMULATION_MCP_PATH, createTurnSimulationServer)
   app.listen(port, host, (error?: Error) => {
     if (error) {
       console.error("Failed to start server:", error)
@@ -1031,7 +1041,12 @@ async function main() {
     }
 
     console.error(`${SERVER_NAME} listening at http://${host}:${port}`)
-    console.error(`MCP endpoint available at http://${host}:${port}/mcp`)
+    console.error(
+      `Opening-hand MCP endpoint available at http://${host}:${port}${OPENING_HAND_MCP_PATH}`
+    )
+    console.error(
+      `Turn-simulation MCP endpoint available at http://${host}:${port}${TURN_SIMULATION_MCP_PATH}`
+    )
   })
 }
 
@@ -1060,8 +1075,8 @@ function getAllowedOrigins(rawOrigins: string | undefined) {
     .filter(Boolean)
 }
 
-function getLocalMcpServerUrl(host: string, port: number) {
-  return `http://${normalizeLocalHost(host)}:${port}/mcp`
+function getLocalMcpServerUrl(host: string, port: number, path: string) {
+  return `http://${normalizeLocalHost(host)}:${port}${path}`
 }
 
 function normalizeLocalHost(host: string) {
@@ -1086,6 +1101,70 @@ function applyCors(
 
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")
   res.setHeader("Access-Control-Allow-Headers", "Content-Type")
+}
+
+function registerMcpEndpoint(
+  app: ReturnType<typeof createMcpExpressApp>,
+  path: string,
+  createScopedServer: () => McpServer
+) {
+  app.post(path, async (req: Request, res: Response) => {
+    await handleMcpRequest(req, res, createScopedServer)
+  })
+
+  app.get(path, (_req: Request, res: Response) => {
+    respondWithMethodNotAllowed(res)
+  })
+
+  app.delete(path, (_req: Request, res: Response) => {
+    respondWithMethodNotAllowed(res)
+  })
+}
+
+async function handleMcpRequest(
+  req: Request,
+  res: Response,
+  createScopedServer: () => McpServer
+) {
+  const server = createScopedServer()
+
+  try {
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+    })
+
+    await server.connect(transport)
+    await transport.handleRequest(req, res, req.body)
+
+    res.on("close", () => {
+      void transport.close()
+      void server.close()
+    })
+  } catch (error) {
+    console.error("Error handling MCP request:", error)
+
+    if (!res.headersSent) {
+      res.status(500).json({
+        jsonrpc: "2.0",
+        error: {
+          code: -32603,
+          message: "Internal server error",
+        },
+        id: null,
+      })
+    }
+  }
+}
+
+function respondWithMethodNotAllowed(res: Response) {
+  res.status(405).json({
+    jsonrpc: "2.0",
+    error: {
+      code: -32000,
+      message: "Method not allowed.",
+    },
+    id: null,
+  })
 }
 
 async function streamPromptResponse(
@@ -1320,6 +1399,8 @@ function takeToolUiData(toolName: string, gameId: string) {
 
   return toolUiData
 }
+
+
 
 
 
