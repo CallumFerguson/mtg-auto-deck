@@ -196,7 +196,7 @@ export function ToolCardList({
                     Loading images
                   </>
                 ) : (
-                  "Load images"
+                  "Show images"
                 )}
               </button>
               {cardEntries.map(({ cardName, key }) => (
@@ -221,7 +221,7 @@ export function ToolCardList({
               className="inline-flex items-center rounded-xl border border-white/12 bg-black/30 px-3 py-0.5 text-[10px] font-semibold leading-5 tracking-[0.12em] text-stone-400 uppercase transition hover:border-white/20 hover:bg-black/40 hover:text-stone-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20 focus-visible:ring-offset-2 focus-visible:ring-offset-stone-950"
               onClick={handleUnloadAll}
             >
-              Unload images
+              Hide images
             </button>
             <div className="flex flex-nowrap items-start gap-2 overflow-x-auto pb-2">
               {cardEntries.map(({ cardName, key }) => {
