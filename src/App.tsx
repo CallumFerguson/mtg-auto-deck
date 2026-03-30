@@ -71,6 +71,11 @@ type OpeningHandSnapshotStatusResponse =
     error?: string
   }
 
+type StartingHandValidation = {
+  isValid: boolean
+  message: string
+}
+
 type PromptStreamEvent =
   | {
     type: "start"
@@ -192,6 +197,39 @@ function createPromptRun(title: string): SimulationPromptRun {
     finalAnswerStatus: "idle",
     rawPromptStream: "",
     keptHandCards: [],
+  }
+}
+
+function createStartingHandValidationRun(
+  validation: StartingHandValidation,
+  keptHandCards: string[]
+): SimulationPromptRun {
+  return {
+    id: createActivityId(),
+    title: "Starting hand validation",
+    activities: [
+      {
+        id: createActivityId(),
+        kind: "tool",
+        title: validation.isValid ? "Starting hand is valid" : "Starting hand is invalid",
+        detail: (
+          <div className="space-y-2">
+            <p className="text-xs leading-5 text-stone-400">{validation.message}</p>
+            {keptHandCards.length ? (
+              <ToolCardList
+                cards={keptHandCards}
+                label={validation.isValid ? "Kept hand:" : "Rejected hand:"}
+              />
+            ) : null}
+          </div>
+        ),
+        status: validation.isValid ? "done" : "error",
+      },
+    ],
+    result: "",
+    finalAnswerStatus: "idle",
+    rawPromptStream: `[starting-hand-validation] ${validation.message}\n`,
+    keptHandCards,
   }
 }
 
@@ -1295,13 +1333,28 @@ export function App() {
       setGameId(nextGameId)
       setCurrentSimulationSeed(seed)
 
-      await runOpeningHandSimulation(
+      const openingHandRun = await runOpeningHandSimulation(
         nextGameId,
         "Opening hand simulation",
         abortController.signal
       )
 
-      await assertStartingHandSnapshotReady(nextGameId, abortController.signal)
+      const startingHandValidation = await getStartingHandSnapshotValidation(
+        nextGameId,
+        abortController.signal
+      )
+
+      setPromptRuns((currentRuns) => [
+        ...currentRuns,
+        createStartingHandValidationRun(
+          startingHandValidation,
+          openingHandRun.keptHandCards
+        ),
+      ])
+
+      if (!startingHandValidation.isValid) {
+        throw new Error(startingHandValidation.message)
+      }
 
       await runTurnSimulation(
         nextGameId,
@@ -1326,10 +1379,10 @@ export function App() {
     }
   }
 
-  async function assertStartingHandSnapshotReady(
+  async function getStartingHandSnapshotValidation(
     currentGameId: string,
     signal?: AbortSignal
-  ) {
+  ): Promise<StartingHandValidation> {
     const response = await fetch(
       `${GOLDFISH_SERVER_URL}/opening-hand-snapshot-status`,
       {
@@ -1359,9 +1412,7 @@ export function App() {
       )
     }
 
-    if (!payload.snapshot.validation.isValid) {
-      throw new Error(payload.snapshot.validation.message)
-    }
+    return payload.snapshot.validation
   }
 
   async function runTurnSimulation(
