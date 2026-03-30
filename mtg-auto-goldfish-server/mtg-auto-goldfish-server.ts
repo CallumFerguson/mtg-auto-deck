@@ -68,6 +68,12 @@ const toolUiDataLookupSchema = z.object({
 const openingHandSnapshotStatusSchema = z.object({
   gameId: z.string().trim().min(1).describe("The game ID."),
 })
+const resetGameStateSchema = z.object({
+  gameId: z.string().trim().min(1).describe("The game ID."),
+  target: z
+    .enum(["initial", "opening_hand_snapshot"])
+    .describe("Which saved point-in-time state to restore."),
+})
 const createGameSchema = z
   .object({
     commanders: z
@@ -983,6 +989,43 @@ async function main() {
     res.status(200).json(snapshotStatus)
   })
 
+  app.post("/reset-game-state", (req: Request, res: Response) => {
+    const parsedRequest = resetGameStateSchema.safeParse(req.body)
+
+    if (!parsedRequest.success) {
+      res.status(400).json({
+        error: "Invalid request body.",
+        details: parsedRequest.error.issues,
+      })
+      return
+    }
+
+    const { gameId, target } = parsedRequest.data
+    const resetResult =
+      target === "initial"
+        ? gameStore.resetGameToInitialState(gameId)
+        : gameStore.restoreOpeningHandSnapshot(gameId)
+
+    if (!resetResult.ok) {
+      res.status(404).json({
+        error:
+          resetResult.reason === "opening_hand_snapshot_not_found"
+            ? "No saved opening-hand snapshot was found for that game."
+            : GAME_NOT_FOUND_MESSAGE,
+      })
+      return
+    }
+
+    logInfo(
+      "reset_game_state",
+      `${shortId(gameId)} target=${target} cards=${resetResult.cardsRemaining}`
+    )
+
+    res.status(200).json({
+      target,
+      ...resetResult,
+    })
+  })
   app.post("/process-prompt", async (req: Request, res: Response) => {
     const parsedRequest = processPromptSchema.safeParse(req.body)
 

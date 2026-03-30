@@ -154,6 +154,26 @@ export type GetOpeningHandSnapshotStatusResult =
       reason: 'game_not_found'
     }
 
+export type ResetGameToInitialStateResult =
+  | {
+      ok: true
+      cardsRemaining: number
+    }
+  | {
+      ok: false
+      reason: 'game_not_found'
+    }
+export type RestoreOpeningHandSnapshotResult =
+  | {
+      ok: true
+      cardsRemaining: number
+      startingHand: string[]
+      mulliganCount: number
+    }
+  | {
+      ok: false
+      reason: 'game_not_found' | 'opening_hand_snapshot_not_found'
+    }
 export type GameStoreOptions = {
   onDeleteGame?: (gameId: string) => void
 }
@@ -489,6 +509,41 @@ export class GameStore {
     }
   }
 
+  resetGameToInitialState(gameId: string): ResetGameToInitialStateResult {
+    this.deleteExpiredGames()
+    const game = this.games.get(gameId)
+    if (!game) {
+      return { ok: false, reason: 'game_not_found' }
+    }
+    game.random = createSeededRandom(game.seed)
+    game.library = shuffle(game.initialLibrary.map((card) => card.name), game.random)
+    game.openingHandSnapshot = undefined
+    game.hasDrawnStartingHand = false
+    game.mulliganCount = 0
+    return {
+      ok: true,
+      cardsRemaining: game.library.length,
+    }
+  }
+  restoreOpeningHandSnapshot(gameId: string): RestoreOpeningHandSnapshotResult {
+    this.deleteExpiredGames()
+    const game = this.games.get(gameId)
+    if (!game) {
+      return { ok: false, reason: 'game_not_found' }
+    }
+    if (!game.openingHandSnapshot) {
+      return { ok: false, reason: 'opening_hand_snapshot_not_found' }
+    }
+    game.library = [...game.openingHandSnapshot.library]
+    game.hasDrawnStartingHand = true
+    game.mulliganCount = game.openingHandSnapshot.validation.mulliganCount
+    return {
+      ok: true,
+      cardsRemaining: game.library.length,
+      startingHand: [...game.openingHandSnapshot.startingHand],
+      mulliganCount: game.mulliganCount,
+    }
+  }
   getGamePromptContext(gameId: string): GetGamePromptContextResult {
     this.deleteExpiredGames()
 

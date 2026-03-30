@@ -4,6 +4,7 @@ import {
   Eye,
   LoaderCircle,
   Play,
+  RotateCcw,
   Sparkles,
   Square,
   XCircle,
@@ -25,6 +26,8 @@ type SimulationActivity = {
 type SimulationPromptRun = {
   id: string
   title: string
+  kind: "opening_hand" | "starting_hand_validation" | "turn"
+  rerunnable: boolean
   activities: SimulationActivity[]
   result: string
   finalAnswerStatus: "idle" | "streaming" | "done"
@@ -43,6 +46,7 @@ type GoldfishSimulationPanelProps = {
   errorMessage: string
   onSimulationSeedInputChange: (value: string) => void
   onCancelPromptRun: (runId: string) => void
+  onRerunPromptRun: (runId: string) => void
   onOpenPromptStream: () => void
   onCreateDevGame: () => void
   onStart: () => void
@@ -84,6 +88,7 @@ export function GoldfishSimulationPanel({
   errorMessage,
   onSimulationSeedInputChange,
   onCancelPromptRun,
+  onRerunPromptRun,
   onOpenPromptStream,
   onCreateDevGame,
   onStart,
@@ -309,6 +314,25 @@ export function GoldfishSimulationPanel({
                     {run.title}
                   </p>
                   <div className="flex items-center gap-2">
+                    {run.rerunnable &&
+                    (run.status === "done" ||
+                      run.status === "cancelled" ||
+                      run.status === "error") ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 rounded-full border-white/15 bg-white/5 px-3 text-xs text-stone-200 hover:bg-white/10 hover:text-stone-50"
+                        onClick={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          onRerunPromptRun(run.id)
+                        }}
+                      >
+                        <RotateCcw className="size-3.5" />
+                        Rerun
+                      </Button>
+                    ) : null}
                     {run.status === "running" ? (
                       <Button
                         type="button"

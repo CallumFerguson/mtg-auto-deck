@@ -50,6 +50,17 @@ type CreateGameResponse = {
   seed: number
 }
 
+type ResetGameStateResponse =
+  | {
+      ok: true
+      target: "initial" | "opening_hand_snapshot"
+      cardsRemaining: number
+    }
+  | {
+      ok: false
+      error?: string
+    }
+
 type ToolUiDataResponse = {
   structuredContent?: Record<string, unknown>
   uiMetadata?: Record<string, unknown>
@@ -130,10 +141,18 @@ type SimulationActivity = {
 
 type FinalAnswerStatus = "idle" | "streaming" | "done"
 type SimulationPromptRunStatus = "running" | "done" | "error" | "cancelled"
+type SimulationPromptRunKind = "opening_hand" | "starting_hand_validation" | "turn"
+type SimulationPromptRunFlow = "main" | "opening_hand_batch"
 
 type SimulationPromptRun = {
   id: string
   title: string
+  kind: SimulationPromptRunKind
+  flow: SimulationPromptRunFlow
+  gameId: string
+  seed: number | null
+  batchRunNumber?: number
+  rerunnable: boolean
   activities: SimulationActivity[]
   result: string
   finalAnswerStatus: FinalAnswerStatus
@@ -190,10 +209,26 @@ function createProcessingActivity(): SimulationActivity {
   }
 }
 
-function createPromptRun(title: string): SimulationPromptRun {
+function createPromptRun(
+  title: string,
+  options: {
+    kind: SimulationPromptRunKind
+    flow: SimulationPromptRunFlow
+    gameId: string
+    seed: number | null
+    batchRunNumber?: number
+    rerunnable?: boolean
+  }
+): SimulationPromptRun {
   return {
     id: createActivityId(),
     title,
+    kind: options.kind,
+    flow: options.flow,
+    gameId: options.gameId,
+    seed: options.seed,
+    batchRunNumber: options.batchRunNumber,
+    rerunnable: options.rerunnable ?? true,
     activities: [],
     result: "",
     finalAnswerStatus: "idle",
@@ -205,11 +240,21 @@ function createPromptRun(title: string): SimulationPromptRun {
 
 function createStartingHandValidationRun(
   validation: StartingHandValidation,
-  keptHandCards: string[]
+  keptHandCards: string[],
+  options: {
+    flow: SimulationPromptRunFlow
+    gameId: string
+    seed: number | null
+  }
 ): SimulationPromptRun {
   return {
     id: createActivityId(),
     title: "Starting hand validation",
+    kind: "starting_hand_validation",
+    flow: options.flow,
+    gameId: options.gameId,
+    seed: options.seed,
+    rerunnable: false,
     activities: [
       {
         id: createActivityId(),
@@ -1036,6 +1081,7 @@ export function App() {
   )
   const [promptRuns, setPromptRuns] = useState<SimulationPromptRun[]>([])
   const simulationAbortControllerRef = useRef<AbortController | null>(null)
+  const pendingRerunRunIdRef = useRef<string | null>(null)
 
   const parsedDeck = useMemo(() => parseDecklist(decklistText), [decklistText])
   const totalCards = parsedDeck.reduce(
@@ -1180,12 +1226,12 @@ export function App() {
     return seed
   }
 
-  async function createGame(signal?: AbortSignal) {
+  async function createGame(signal?: AbortSignal, seedOverride?: number) {
     if (!simulationPayload) {
       throw new Error("The deck is not ready for simulation yet.")
     }
 
-    const requestedSeed = getRequestedSimulationSeed()
+    const requestedSeed = seedOverride ?? getRequestedSimulationSeed()
 
     const response = await fetch(`${GOLDFISH_SERVER_URL}/games`, {
       method: "POST",
@@ -1425,7 +1471,11 @@ export function App() {
       const openingHandRun = await runOpeningHandSimulation(
         nextGameId,
         "Opening hand simulation",
-        abortController.signal
+        abortController.signal,
+        {
+          flow: "main",
+          seed,
+        }
       )
 
       const startingHandValidation = await getStartingHandSnapshotValidation(
@@ -1437,7 +1487,12 @@ export function App() {
         ...currentRuns,
         createStartingHandValidationRun(
           startingHandValidation,
-          openingHandRun.keptHandCards
+          openingHandRun.keptHandCards,
+          {
+            flow: "main",
+            gameId: nextGameId,
+            seed,
+          }
         ),
       ])
 
@@ -1448,12 +1503,18 @@ export function App() {
       await runTurnSimulation(
         nextGameId,
         "First play decision",
-        abortController.signal
+        abortController.signal,
+        {
+          flow: "main",
+          seed,
+        }
       )
     } catch (error) {
       if (isAbortError(error)) {
-        setPromptRuns((currentRuns) => cancelPromptRuns(currentRuns))
-        setSimulationError(SIMULATION_CANCELED_MESSAGE)
+        if (!pendingRerunRunIdRef.current) {
+          setPromptRuns((currentRuns) => cancelPromptRuns(currentRuns))
+          setSimulationError(SIMULATION_CANCELED_MESSAGE)
+        }
       } else {
         setSimulationError(
           error instanceof Error ? error.message : "Failed to create a game."
@@ -1504,12 +1565,50 @@ export function App() {
     return payload.snapshot.validation
   }
 
+  async function resetGameState(
+    currentGameId: string,
+    target: "initial" | "opening_hand_snapshot",
+    signal?: AbortSignal
+  ) {
+    const response = await fetch(`${GOLDFISH_SERVER_URL}/reset-game-state`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      signal,
+      body: JSON.stringify({
+        gameId: currentGameId,
+        target,
+      }),
+    })
+
+    const payload = (await response.json()) as ResetGameStateResponse
+
+    if (!response.ok || !payload.ok) {
+      throw new Error(
+        ("error" in payload && payload.error) ||
+          "Failed to reset the game state."
+      )
+    }
+  }
+
   async function runTurnSimulation(
     currentGameId: string,
     title: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    options?: {
+      flow?: SimulationPromptRunFlow
+      seed?: number | null
+      batchRunNumber?: number
+    }
   ) {
-    const turnRun = createPromptRun(title)
+    const turnRun = createPromptRun(title, {
+      kind: "turn",
+      flow: options?.flow ?? "main",
+      gameId: currentGameId,
+      seed: options?.seed ?? null,
+      batchRunNumber: options?.batchRunNumber,
+    })
     setPromptRuns((currentRuns) => [...currentRuns, turnRun])
 
     try {
@@ -1559,9 +1658,20 @@ export function App() {
   async function runOpeningHandSimulation(
     currentGameId: string,
     title: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    options?: {
+      flow?: SimulationPromptRunFlow
+      seed?: number | null
+      batchRunNumber?: number
+    }
   ) {
-    const openingHandRun = createPromptRun(title)
+    const openingHandRun = createPromptRun(title, {
+      kind: "opening_hand",
+      flow: options?.flow ?? "main",
+      gameId: currentGameId,
+      seed: options?.seed ?? null,
+      batchRunNumber: options?.batchRunNumber,
+    })
     setPromptRuns((currentRuns) => [...currentRuns, openingHandRun])
 
     try {
@@ -1647,13 +1757,20 @@ export function App() {
         await runOpeningHandSimulation(
           nextGameId,
           `Opening hand simulation ${runNumber}/10`,
-          abortController.signal
+          abortController.signal,
+          {
+            flow: "opening_hand_batch",
+            seed,
+            batchRunNumber: runNumber,
+          }
         )
       }
     } catch (error) {
       if (isAbortError(error)) {
-        setPromptRuns((currentRuns) => cancelPromptRuns(currentRuns))
-        setSimulationError(SIMULATION_CANCELED_MESSAGE)
+        if (!pendingRerunRunIdRef.current) {
+          setPromptRuns((currentRuns) => cancelPromptRuns(currentRuns))
+          setSimulationError(SIMULATION_CANCELED_MESSAGE)
+        }
       } else {
         setSimulationError(
           error instanceof Error ? error.message : "Failed to create a game."
@@ -1688,6 +1805,167 @@ export function App() {
     setIsStartingSimulation(false)
     setSimulationError(SIMULATION_CANCELED_MESSAGE)
     setPromptRuns((currentRuns) => cancelPromptRuns(currentRuns))
+  }
+
+  async function rerunPromptRun(runId: string) {
+    const runIndex = promptRuns.findIndex((run) => run.id === runId)
+
+    if (runIndex === -1) {
+      return
+    }
+
+    const run = promptRuns[runIndex]
+
+    if (
+      !run.rerunnable ||
+      (run.status !== "done" &&
+        run.status !== "cancelled" &&
+        run.status !== "error")
+    ) {
+      return
+    }
+
+    if (isStartingSimulation) {
+      pendingRerunRunIdRef.current = runId
+      simulationAbortControllerRef.current?.abort()
+      return
+    }
+
+    const abortController = new AbortController()
+    simulationAbortControllerRef.current = abortController
+
+    setIsStartingSimulation(true)
+    setSimulationError("")
+
+    try {
+      if (run.flow === "opening_hand_batch") {
+        await rerunOpeningHandBatchFrom(runIndex, abortController.signal)
+      } else if (run.kind === "opening_hand") {
+        await rerunMainSimulationFromOpeningHand(
+          runIndex,
+          run,
+          abortController.signal
+        )
+      } else if (run.kind === "turn") {
+        await rerunMainTurnSimulation(runIndex, run, abortController.signal)
+      }
+    } catch (error) {
+      if (isAbortError(error)) {
+        if (!pendingRerunRunIdRef.current) {
+          setPromptRuns((currentRuns) => cancelPromptRuns(currentRuns))
+          setSimulationError(SIMULATION_CANCELED_MESSAGE)
+        }
+      } else {
+        setSimulationError(
+          error instanceof Error ? error.message : "Failed to rerun the simulation."
+        )
+      }
+    } finally {
+      if (simulationAbortControllerRef.current === abortController) {
+        simulationAbortControllerRef.current = null
+      }
+
+      setIsStartingSimulation(false)
+    }
+  }
+
+  async function rerunMainSimulationFromOpeningHand(
+    runIndex: number,
+    run: SimulationPromptRun,
+    signal?: AbortSignal
+  ) {
+    const replaySeed = run.seed ?? currentSimulationSeed ?? undefined
+
+    setPromptRuns((currentRuns) => currentRuns.slice(0, runIndex))
+
+    const { gameId: nextGameId, seed } = await createGame(signal, replaySeed)
+    setGameId(nextGameId)
+    setCurrentSimulationSeed(seed)
+
+    const openingHandRun = await runOpeningHandSimulation(
+      nextGameId,
+      "Opening hand simulation",
+      signal,
+      {
+        flow: "main",
+        seed,
+      }
+    )
+
+    const startingHandValidation = await getStartingHandSnapshotValidation(
+      nextGameId,
+      signal
+    )
+
+    setPromptRuns((currentRuns) => [
+      ...currentRuns,
+      createStartingHandValidationRun(startingHandValidation, openingHandRun.keptHandCards, {
+        flow: "main",
+        gameId: nextGameId,
+        seed,
+      }),
+    ])
+
+    if (!startingHandValidation.isValid) {
+      throw new Error(startingHandValidation.message)
+    }
+
+    await runTurnSimulation(nextGameId, "First play decision", signal, {
+      flow: "main",
+      seed,
+    })
+  }
+
+  async function rerunMainTurnSimulation(
+    runIndex: number,
+    run: SimulationPromptRun,
+    signal?: AbortSignal
+  ) {
+    setPromptRuns((currentRuns) => currentRuns.slice(0, runIndex))
+    await resetGameState(run.gameId, "opening_hand_snapshot", signal)
+    setGameId(run.gameId)
+    setCurrentSimulationSeed(run.seed)
+
+    await runTurnSimulation(run.gameId, "First play decision", signal, {
+      flow: "main",
+      seed: run.seed,
+    })
+  }
+
+  async function rerunOpeningHandBatchFrom(
+    runIndex: number,
+    signal?: AbortSignal
+  ) {
+    const runsToReplay = promptRuns
+      .slice(runIndex)
+      .filter(
+        (run): run is SimulationPromptRun & { batchRunNumber: number } =>
+          run.flow === "opening_hand_batch" &&
+          run.kind === "opening_hand" &&
+          typeof run.batchRunNumber === "number"
+      )
+
+    setPromptRuns((currentRuns) => currentRuns.slice(0, runIndex))
+
+    for (const run of runsToReplay) {
+      if (signal?.aborted) {
+        throw createCancellationError()
+      }
+
+      const { gameId: nextGameId, seed } = await createGame(
+        signal,
+        run.seed ?? undefined
+      )
+
+      setGameId(nextGameId)
+      setCurrentSimulationSeed(seed)
+
+      await runOpeningHandSimulation(nextGameId, run.title, signal, {
+        flow: "opening_hand_batch",
+        seed,
+        batchRunNumber: run.batchRunNumber,
+      })
+    }
   }
 
   async function createDevGame() {
@@ -1751,8 +2029,25 @@ export function App() {
   }, [])
 
   useEffect(() => {
+    if (isStartingSimulation) {
+      return
+    }
+
+    const pendingRunId = pendingRerunRunIdRef.current
+
+    if (!pendingRunId) {
+      return
+    }
+
+    pendingRerunRunIdRef.current = null
+    setSimulationError("")
+    void rerunPromptRun(pendingRunId)
+  }, [isStartingSimulation, promptRuns])
+
+  useEffect(() => {
     simulationAbortControllerRef.current?.abort()
     simulationAbortControllerRef.current = null
+    pendingRerunRunIdRef.current = null
     setIsStartingSimulation(false)
     setGameId("")
     setCurrentSimulationSeed(null)
@@ -2025,6 +2320,7 @@ export function App() {
           errorMessage={simulationError}
           onSimulationSeedInputChange={setSimulationSeedInput}
           onCancelPromptRun={cancelSimulation}
+          onRerunPromptRun={rerunPromptRun}
           onOpenPromptStream={() => setIsPromptStreamModalOpen(true)}
           onCreateDevGame={createDevGame}
           onStart={startSimulation}

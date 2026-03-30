@@ -740,12 +740,6 @@ function createTimeoutSignal(
   }
 }
 
-function isRepeatedLoopSequence(streamedText: string) {
-  return (
-    longestSubstringLengthRepeatingAtLeast3Times(streamedText) >
-    STREAM_LOOP_SEQUENCE_LENGTH
-  )
-}
 
 function longestSubstringLengthRepeatingAtLeast3Times(s: string): number {
   const n = s.length
