@@ -320,11 +320,11 @@ export function GoldfishSimulationPanel({
                             {activity.title}
                           </p>
                           {activity.detail ? (
-                            <div className="mt-1">{activity.detail}</div>
+                            <div className="mt-4">{activity.detail}</div>
                           ) : null}
                           {activity.status === "active" && promptPreview ? (
                             <div
-                              className="min-w-0 overflow-hidden"
+                              className={`min-w-0 overflow-hidden ${activity.detail ? "mt-4" : "mt-2"}`}
                               style={{
                                 maskImage:
                                   "linear-gradient(to right, transparent 0%, black 18%, black 82%, transparent 100%)",
