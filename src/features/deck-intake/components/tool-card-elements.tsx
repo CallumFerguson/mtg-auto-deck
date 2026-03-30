@@ -136,6 +136,12 @@ export function ToolCardList({
     setLookupError("")
   }
 
+  function handleUnloadAll() {
+    setLoadedCardsByName({})
+    setAllCardsStatus("idle")
+    setAllCardsError("")
+  }
+
   async function handleLoadAll() {
     if (!uniqueCards.length || allCardsStatus === "loading") {
       return
@@ -180,17 +186,17 @@ export function ToolCardList({
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                className="inline-flex items-center rounded-md border border-sky-300/20 bg-sky-400/10 px-2.5 py-0.5 text-[11px] font-medium leading-5 text-sky-100 transition hover:border-sky-200/35 hover:bg-sky-400/20 hover:text-sky-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/60 focus-visible:ring-offset-2 focus-visible:ring-offset-stone-950 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/5 disabled:text-stone-500"
+                className="inline-flex items-center rounded-xl border border-white/12 bg-black/30 px-3 py-0.5 text-[10px] font-semibold leading-5 tracking-[0.12em] text-stone-400 uppercase transition hover:border-white/20 hover:bg-black/40 hover:text-stone-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20 focus-visible:ring-offset-2 focus-visible:ring-offset-stone-950 disabled:cursor-not-allowed disabled:border-white/8 disabled:bg-black/20 disabled:text-stone-500"
                 onClick={handleLoadAll}
                 disabled={allCardsStatus === "loading"}
               >
                 {allCardsStatus === "loading" ? (
                   <>
                     <LoaderCircle className="mr-1.5 size-3 animate-spin" />
-                    Loading all images
+                    Loading images
                   </>
                 ) : (
-                  "Load all card images"
+                  "Load images"
                 )}
               </button>
               {cardEntries.map(({ cardName, key }) => (
@@ -209,54 +215,63 @@ export function ToolCardList({
           </div>
         ) : null}
         {allCardsStatus === "loaded" ? (
-          <div className="flex flex-nowrap items-start gap-2 overflow-x-auto pt-2 pb-2">
-            {cardEntries.map(({ cardName, key }) => {
-              const card = loadedCardsByName[cardName]
-              const imageUrl = getCardImageUrl(card ?? null)
+          <div className="space-y-2 pt-2">
+            <button
+              type="button"
+              className="inline-flex items-center rounded-xl border border-white/12 bg-black/30 px-3 py-0.5 text-[10px] font-semibold leading-5 tracking-[0.12em] text-stone-400 uppercase transition hover:border-white/20 hover:bg-black/40 hover:text-stone-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20 focus-visible:ring-offset-2 focus-visible:ring-offset-stone-950"
+              onClick={handleUnloadAll}
+            >
+              Unload images
+            </button>
+            <div className="flex flex-nowrap items-start gap-2 overflow-x-auto pb-2">
+              {cardEntries.map(({ cardName, key }) => {
+                const card = loadedCardsByName[cardName]
+                const imageUrl = getCardImageUrl(card ?? null)
 
-              if (!card || !imageUrl) {
+                if (!card || !imageUrl) {
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      className="w-full max-w-[calc((100%-3rem)/7)] flex-none overflow-hidden rounded-[20px] border border-white/10 bg-white/[0.03] p-2 text-left transition hover:border-amber-200/25 hover:bg-white/[0.05]"
+                      onClick={() => handleCardClick(cardName)}
+                    >
+                      <div className="flex aspect-[5/7] items-center justify-center rounded-[14px] border border-dashed border-white/10 bg-black/25 px-2 text-center text-[11px] leading-4 text-stone-400">
+                        No image available
+                      </div>
+                      <p className="mt-2 line-clamp-2 text-[11px] font-medium leading-4 text-stone-200">
+                        {cardName}
+                      </p>
+                    </button>
+                  )
+                }
+
                 return (
                   <button
                     key={key}
                     type="button"
-                    className="w-full max-w-[calc((100%-3rem)/7)] flex-none overflow-hidden rounded-[20px] border border-white/10 bg-white/[0.03] p-2 text-left transition hover:border-amber-200/25 hover:bg-white/[0.05]"
-                    onClick={() => handleCardClick(cardName)}
+                    className="w-full max-w-[calc((100%-3rem)/7)] flex-none overflow-hidden rounded-[20px] border border-white/10 bg-white/[0.03] text-left transition hover:border-amber-200/25 hover:bg-white/[0.05]"
+                    onClick={() => {
+                      setSelectedCardName(cardName)
+                      setSelectedCard(card)
+                      setLookupStatus("idle")
+                      setLookupError("")
+                    }}
                   >
-                    <div className="flex aspect-[5/7] items-center justify-center rounded-[14px] border border-dashed border-white/10 bg-black/25 px-2 text-center text-[11px] leading-4 text-stone-400">
-                      No image available
+                    <img
+                      src={imageUrl}
+                      alt={card.name}
+                      className="block aspect-[5/7] w-full object-cover"
+                    />
+                    <div className="p-2">
+                      <p className="line-clamp-2 text-[11px] font-medium leading-4 text-stone-200">
+                        {card.name}
+                      </p>
                     </div>
-                    <p className="mt-2 line-clamp-2 text-[11px] font-medium leading-4 text-stone-200">
-                      {cardName}
-                    </p>
                   </button>
                 )
-              }
-
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  className="w-full max-w-[calc((100%-3rem)/7)] flex-none overflow-hidden rounded-[20px] border border-white/10 bg-white/[0.03] text-left transition hover:border-amber-200/25 hover:bg-white/[0.05]"
-                  onClick={() => {
-                    setSelectedCardName(cardName)
-                    setSelectedCard(card)
-                    setLookupStatus("idle")
-                    setLookupError("")
-                  }}
-                >
-                  <img
-                    src={imageUrl}
-                    alt={card.name}
-                    className="block aspect-[5/7] w-full object-cover"
-                  />
-                  <div className="p-2">
-                    <p className="line-clamp-2 text-[11px] font-medium leading-4 text-stone-200">
-                      {card.name}
-                    </p>
-                  </div>
-                </button>
-              )
-            })}
+              })}
+            </div>
           </div>
         ) : null}
       </div>
