@@ -616,6 +616,61 @@ function getReturnToolDetail(
   return <ToolCardList cards={cards} label={label} />
 }
 
+function getTakeCardsFromLibraryDetail(
+  event: Extract<PromptStreamEvent, { type: "tool" }>
+) {
+  if (event.tool !== "take_cards_from_library") {
+    return undefined
+  }
+
+  const matches = Array.isArray(event.structuredContent?.matches)
+    ? event.structuredContent.matches.filter(
+      (
+        match
+      ): match is {
+        requestedCard: string
+        foundCard: string | null
+      } =>
+        match !== null &&
+        typeof match === "object" &&
+        "requestedCard" in match &&
+        typeof match.requestedCard === "string" &&
+        "foundCard" in match &&
+        (typeof match.foundCard === "string" || match.foundCard === null)
+    )
+    : []
+  const foundCards = Array.isArray(event.structuredContent?.foundCards)
+    ? event.structuredContent.foundCards
+      .filter((card): card is string => typeof card === "string")
+      .map((card) => card.trim())
+      .filter(Boolean)
+    : []
+
+  if (!matches.length && !foundCards.length) {
+    return undefined
+  }
+
+  const missedCards = matches
+    .filter((match) => match.foundCard === null)
+    .map((match) => match.requestedCard.trim())
+    .filter(Boolean)
+  const requestedCount = matches.length || foundCards.length
+  const cardLabel = requestedCount === 1 ? "card" : "cards"
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs leading-5 text-stone-400">
+        {`Found ${foundCards.length}/${requestedCount} ${cardLabel}.`}
+        {missedCards.length
+          ? ` No close match for: ${missedCards.join(", ")}.`
+          : ""}
+      </p>
+      {foundCards.length ? (
+        <ToolCardList cards={foundCards} label={"Taken from library:"} />
+      ) : null}
+    </div>
+  )
+}
 function getToolActivityDetail(
   event: Extract<PromptStreamEvent, { type: "tool" }>
 ) {
@@ -641,12 +696,16 @@ function getToolActivityDetail(
 
   if (drawToolDetail) {
     return drawToolDetail
-  }
-
-  const returnToolDetail = getReturnToolDetail(event)
+  }  const returnToolDetail = getReturnToolDetail(event)
 
   if (returnToolDetail) {
     return returnToolDetail
+  }
+
+  const takeCardsFromLibraryDetail = getTakeCardsFromLibraryDetail(event)
+
+  if (takeCardsFromLibraryDetail) {
+    return takeCardsFromLibraryDetail
   }
 
   return undefined
@@ -1926,6 +1985,7 @@ export function App() {
 }
 
 export default App
+
 
 
 

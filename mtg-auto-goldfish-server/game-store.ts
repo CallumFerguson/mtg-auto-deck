@@ -94,6 +94,22 @@ export type ReturnCardsToLibraryResult =
     reason: 'game_not_found'
   }
 
+export type TakeCardsFromLibraryMatch = {
+  requestedCard: string
+  foundCard: string | null
+}
+
+export type TakeCardsFromLibraryResult =
+  | {
+    ok: true
+    matches: TakeCardsFromLibraryMatch[]
+    cardsRemaining: number
+  }
+  | {
+    ok: false
+    reason: 'game_not_found'
+  }
+
 export type ShuffleLibraryResult =
   | {
     ok: true
@@ -370,6 +386,43 @@ export class GameStore {
     }
   }
 
+  takeCardsFromLibrary(
+    gameId: string,
+    requestedCards: readonly string[]
+  ): TakeCardsFromLibraryResult {
+    this.deleteExpiredGames()
+
+    const game = this.games.get(gameId)
+
+    if (!game) {
+      return { ok: false, reason: 'game_not_found' }
+    }
+
+    const matches = requestedCards.map((requestedCard) => {
+      const matchedIndex = findBestLibraryMatchIndex(game.library, requestedCard)
+
+      if (matchedIndex === -1) {
+        return {
+          requestedCard,
+          foundCard: null,
+        }
+      }
+
+      const [foundCard] = game.library.splice(matchedIndex, 1)
+
+      return {
+        requestedCard,
+        foundCard,
+      }
+    })
+
+    return {
+      ok: true,
+      matches,
+      cardsRemaining: game.library.length,
+    }
+  }
+
   shuffleLibrary(gameId: string): ShuffleLibraryResult {
     this.deleteExpiredGames()
 
@@ -561,5 +614,124 @@ function createOpeningHandSnapshotValidation(
 
 function getExpectedStartingHandSize(mulliganCount: number) {
   return STARTING_HAND_SIZE - Math.max(0, mulliganCount - 1)
+}
+
+function findBestLibraryMatchIndex(library: readonly string[], requestedCard: string) {
+  const normalizedRequestedCard = normalizeCardNameForFuzzyMatch(requestedCard)
+
+  if (!normalizedRequestedCard) {
+    return -1
+  }
+
+  let bestMatchIndex = -1
+  let bestMatchScore = Number.NEGATIVE_INFINITY
+  let bestMatchDistance = Number.POSITIVE_INFINITY
+
+  for (const [index, card] of library.entries()) {
+    const normalizedCard = normalizeCardNameForFuzzyMatch(card)
+
+    if (!normalizedCard) {
+      continue
+    }
+
+    const distance = levenshteinDistance(normalizedRequestedCard, normalizedCard)
+    const maxLength = Math.max(normalizedRequestedCard.length, normalizedCard.length)
+    const score = maxLength === 0 ? 1 : 1 - distance / maxLength
+
+    if (
+      score > bestMatchScore ||
+      (score === bestMatchScore && distance < bestMatchDistance) ||
+      (
+        score === bestMatchScore &&
+        distance === bestMatchDistance &&
+        card.localeCompare(library[bestMatchIndex] ?? '') < 0
+      )
+    ) {
+      bestMatchIndex = index
+      bestMatchScore = score
+      bestMatchDistance = distance
+    }
+  }
+
+  if (bestMatchIndex === -1) {
+    return -1
+  }
+
+  const matchedCard = library[bestMatchIndex]
+  const normalizedMatchedCard = normalizeCardNameForFuzzyMatch(matchedCard)
+
+  if (
+    !isReasonablyCloseFuzzyMatch(
+      normalizedRequestedCard,
+      normalizedMatchedCard,
+      bestMatchDistance,
+      bestMatchScore
+    )
+  ) {
+    return -1
+  }
+
+  return bestMatchIndex
+}
+
+function normalizeCardNameForFuzzyMatch(cardName: string) {
+  return cardName.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+}
+
+function isReasonablyCloseFuzzyMatch(
+  requestedCard: string,
+  candidateCard: string,
+  distance: number,
+  score: number
+) {
+  if (requestedCard === candidateCard) {
+    return true
+  }
+
+  const maxLength = Math.max(requestedCard.length, candidateCard.length)
+  const lengthDifference = Math.abs(requestedCard.length - candidateCard.length)
+  const allowedDistance = Math.max(1, Math.floor(maxLength * 0.25))
+
+  if (lengthDifference > Math.max(2, Math.floor(maxLength * 0.3))) {
+    return false
+  }
+
+  return distance <= allowedDistance && score >= 0.72
+}
+
+function levenshteinDistance(left: string, right: string) {
+  if (left === right) {
+    return 0
+  }
+
+  if (left.length === 0) {
+    return right.length
+  }
+
+  if (right.length === 0) {
+    return left.length
+  }
+
+  const previousRow = Array.from({ length: right.length + 1 }, (_value, index) => index)
+
+  for (let leftIndex = 0; leftIndex < left.length; leftIndex += 1) {
+    let previousDiagonal = previousRow[0]
+    previousRow[0] = leftIndex + 1
+
+    for (let rightIndex = 0; rightIndex < right.length; rightIndex += 1) {
+      const currentValue = previousRow[rightIndex + 1]
+      const substitutionCost = left[leftIndex] === right[rightIndex] ? 0 : 1
+
+      previousRow[rightIndex + 1] = Math.min(
+        previousRow[rightIndex + 1] + 1,
+        previousRow[rightIndex] + 1,
+        previousDiagonal + substitutionCost
+      )
+
+      previousDiagonal = currentValue
+    }
+  }
+
+  return previousRow[right.length]
 }
 

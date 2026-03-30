@@ -131,6 +131,7 @@ function createTurnSimulationServer() {
   return createServer(TURN_SIMULATION_SERVER_NAME, (server) => {
     registerDrawCardFromTopTool(server)
     registerDrawCardFromBottomTool(server)
+    registerTakeCardsFromLibraryTool(server)
     registerReturnCardToLibraryTool(server)
     registerReturnCardsToLibraryTool(server)
     registerShuffleLibraryTool(server)
@@ -621,6 +622,95 @@ function registerReturnCardsToLibraryTool(server: McpServer) {
           {
             type: "text",
             text: `Returned ${response.cards.length} card(s) to the ${side} of the library${randomizeOrder ? " in randomized order" : " in the provided order"}: ${formatCardList(response.cards)}. ${response.cardsRemaining} cards are now in the library.`,
+          },
+        ],
+        structuredContent: response,
+      }
+    }
+  )
+}
+
+function registerTakeCardsFromLibraryTool(server: McpServer) {
+  server.registerTool(
+    "take_cards_from_library",
+    {
+      title: "Take Cards From Library",
+      description:
+        "Take one or more specific cards out of the stored library for tutor and search effects. Each requested name uses the best reasonably close fuzzy match, ignoring case and punctuation. If no close enough match exists, that request returns no card.",
+      inputSchema: {
+        gameId: z
+          .string()
+          .trim()
+          .min(1)
+          .describe(
+            "The game ID returned by the regular HTTP create-game endpoint, not by an MCP tool."
+          ),
+        cards: z
+          .array(z.string().trim().min(1))
+          .min(1)
+          .describe(
+            "The card names to remove from the library. Each request is matched independently against the current remaining library."
+          ),
+      },
+      outputSchema: {
+        gameId: z.string(),
+        matches: z.array(
+          z.object({
+            requestedCard: z.string(),
+            foundCard: z.string().nullable(),
+          })
+        ),
+        foundCards: z.array(z.string()),
+        cardsRemaining: z.number().int().nonnegative(),
+      },
+    },
+    async ({ gameId, cards }) => {
+      const takeResult = gameStore.takeCardsFromLibrary(gameId, cards)
+
+      if (!takeResult.ok) {
+        logWarn("take_cards_from_library", `${shortId(gameId)} ${takeResult.reason}`)
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: GAME_NOT_FOUND_MESSAGE,
+            },
+          ],
+          isError: true,
+        }
+      }
+
+      const foundCards = takeResult.matches
+        .flatMap((match) => (match.foundCard ? [match.foundCard] : []))
+      const missedCards = takeResult.matches
+        .filter((match) => match.foundCard === null)
+        .map((match) => match.requestedCard)
+      const response = {
+        gameId,
+        matches: takeResult.matches,
+        foundCards,
+        cardsRemaining: takeResult.cardsRemaining,
+      }
+
+      storeToolUiData("take_cards_from_library", gameId, {
+        structuredContent: response,
+        uiMetadata: {},
+      })
+
+      logInfo(
+        "take_cards_from_library",
+        `${shortId(gameId)} requested=${cards.length} found=${foundCards.length} missed=${missedCards.length} left=${response.cardsRemaining}`
+      )
+
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              foundCards.length > 0 || missedCards.length > 0
+                ? `Took ${foundCards.length} requested card(s) from the library: ${foundCards.length > 0 ? formatCardList(foundCards) : 'none'}. ${missedCards.length > 0 ? `No reasonably close library match was found for: ${formatCardList(missedCards)}. ` : ''}${response.cardsRemaining} cards remain in the library.`
+                : `No cards were taken from the library. ${response.cardsRemaining} cards remain in the library.`,
           },
         ],
         structuredContent: response,

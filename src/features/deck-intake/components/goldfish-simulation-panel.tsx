@@ -308,47 +308,75 @@ export function GoldfishSimulationPanel({
                 </summary>
 
                 <div className="space-y-3">
-                  {run.activities.map((activity) => (
-                    <details
-                      key={activity.id}
-                      open
-                      className="group/activity rounded-[20px] border border-white/10 bg-white/[0.03] p-4"
-                    >
-                      <summary className="flex cursor-pointer list-none items-start gap-3 [&::-webkit-details-marker]:hidden">
-                        <div className="mt-0.5 shrink-0">
-                          <ActivityIcon status={activity.status} />
-                        </div>
+                  {run.activities.map((activity) => {
+                    const hasPromptPreview =
+                      activity.status === "active" && Boolean(promptPreview)
+                    const hasExpandableContent =
+                      Boolean(activity.detail) || hasPromptPreview
 
-                        <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium text-stone-100">
-                              {activity.title}
-                            </p>
-                          </div>
-                          <ChevronDown className="mt-0.5 size-4 shrink-0 -rotate-90 text-stone-500 transition-transform group-open/activity:rotate-0" />
-                        </div>
-                      </summary>
+                    if (!hasExpandableContent) {
+                      return (
+                        <div
+                          key={activity.id}
+                          className="rounded-[20px] border border-white/10 bg-white/[0.03] p-4"
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="mt-0.5 shrink-0">
+                              <ActivityIcon status={activity.status} />
+                            </div>
 
-                      <div className="mt-4">
-                        {activity.detail ? <div>{activity.detail}</div> : null}
-                        {activity.status === "active" && promptPreview ? (
-                          <div
-                            className={`min-w-0 overflow-hidden ${activity.detail ? "mt-4" : ""}`}
-                            style={{
-                              maskImage:
-                                "linear-gradient(to right, transparent 0%, black 18%, black 82%, transparent 100%)",
-                              WebkitMaskImage:
-                                "linear-gradient(to right, transparent 0%, black 18%, black 82%, transparent 100%)",
-                            }}
-                          >
-                            <p className="overflow-hidden text-xs leading-5 whitespace-nowrap text-stone-500/75">
-                              {promptPreview}
-                            </p>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium text-stone-100">
+                                {activity.title}
+                              </p>
+                            </div>
                           </div>
-                        ) : null}
-                      </div>
-                    </details>
-                  ))}
+                        </div>
+                      )
+                    }
+
+                    return (
+                      <details
+                        key={activity.id}
+                        open
+                        className="group/activity rounded-[20px] border border-white/10 bg-white/[0.03] p-4"
+                      >
+                        <summary className="flex cursor-pointer list-none items-start gap-3 [&::-webkit-details-marker]:hidden">
+                          <div className="mt-0.5 shrink-0">
+                            <ActivityIcon status={activity.status} />
+                          </div>
+
+                          <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium text-stone-100">
+                                {activity.title}
+                              </p>
+                            </div>
+                            <ChevronDown className="mt-0.5 size-4 shrink-0 -rotate-90 text-stone-500 transition-transform group-open/activity:rotate-0" />
+                          </div>
+                        </summary>
+
+                        <div className="mt-4">
+                          {activity.detail ? <div>{activity.detail}</div> : null}
+                          {hasPromptPreview ? (
+                            <div
+                              className={`min-w-0 overflow-hidden ${activity.detail ? "mt-4" : ""}`}
+                              style={{
+                                maskImage:
+                                  "linear-gradient(to right, transparent 0%, black 18%, black 82%, transparent 100%)",
+                                WebkitMaskImage:
+                                  "linear-gradient(to right, transparent 0%, black 18%, black 82%, transparent 100%)",
+                              }}
+                            >
+                              <p className="overflow-hidden text-xs leading-5 whitespace-nowrap text-stone-500/75">
+                                {promptPreview}
+                              </p>
+                            </div>
+                          ) : null}
+                        </div>
+                      </details>
+                    )
+                  })}
 
                   {run.result ? (
                     <details
@@ -423,6 +451,7 @@ function getPromptPreview(rawPromptStream: string) {
 
   return `...${preview.replace(/^\S*\s?/, "")}`
 }
+
 
 
 

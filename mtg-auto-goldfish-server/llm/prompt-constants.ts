@@ -416,9 +416,11 @@ LIBRARY / MCP TOOL RULES
   - reveal-from-top effects
   - cascade / discover style effects
   - searching the library
+  - taking a specific named card from the library for tutor or search effects
   - shuffling / randomizing
   - putting cards on top or bottom
   - any effect that depends on unknown library order
+- Use take_cards_from_library when an effect searches for a specific card by name. It may return no card if nothing if the card cannot be found.
 - Resolve multi-card library effects one card at a time in the correct order unless the effect clearly moves a known set together.
 - If a card becomes known and that knowledge still matters, track it in comments.
 - If that knowledge stops being valid because of a shuffle, draw, or other change, update or remove the stale comment.
