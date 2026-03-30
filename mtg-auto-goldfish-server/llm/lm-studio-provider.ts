@@ -9,8 +9,8 @@ import type {
 export const LM_STUDIO_DEFAULT_BASE_URL = "http://127.0.0.1:1234"
 export const LM_STUDIO_PROMPT_TIMEOUT_MS = 10 * 60 * 1000
 const STREAM_LOOP_SEQUENCE_LENGTH = 250
-const STREAM_LOOP_LOOKBACK_LENGTH = 2500
-const STREAM_LOOP_REPEAT_THRESHOLD = 3
+const STREAM_LOOP_ANALYSIS_LENGTH = 5000
+const STREAM_LOOP_CHECK_INTERVAL_CHARS = 1000
 const STREAM_LOOP_ERROR_MESSAGE = "The LLM got stuck in a loop."
 
 type LmStudioModelsResponse = {
@@ -184,6 +184,7 @@ export function createLmStudioPromptProcessor(
       let finalResult = ""
       let finalReasoning = ""
       let streamedText = ""
+      let nextLoopCheckLength = STREAM_LOOP_CHECK_INTERVAL_CHARS
       let pendingMessageStartPayload: Record<
         string,
         string | undefined
@@ -283,11 +284,15 @@ export function createLmStudioPromptProcessor(
               const content = asContentRecord(payload).content
 
               if (typeof content === "string") {
-                streamedText = appendStreamTextOrThrow(
+                ({
+                  streamedText,
+                  nextLoopCheckLength,
+                } = appendStreamTextOrThrow(
                   streamedText,
                   content,
+                  nextLoopCheckLength,
                   abortPrompt
-                )
+                ))
 
                 onEvent({
                   type: "reasoning",
@@ -324,11 +329,15 @@ export function createLmStudioPromptProcessor(
                   emittedContent = trimmedLeadingContent
                 }
 
-                streamedText = appendStreamTextOrThrow(
+                ({
+                  streamedText,
+                  nextLoopCheckLength,
+                } = appendStreamTextOrThrow(
                   streamedText,
                   emittedContent,
+                  nextLoopCheckLength,
                   abortPrompt
-                )
+                ))
 
                 onEvent({
                   type: "message",
@@ -338,11 +347,15 @@ export function createLmStudioPromptProcessor(
               break
             }
             case "tool_call.start":
-              streamedText = appendStreamTextOrThrow(
+              ({
+                streamedText,
+                nextLoopCheckLength,
+              } = appendStreamTextOrThrow(
                 streamedText,
                 `${eventName}:${extractToolName(payload) ?? ""}`,
+                nextLoopCheckLength,
                 abortPrompt
-              )
+              ))
               onEvent({
                 type: "tool",
 
@@ -356,11 +369,15 @@ export function createLmStudioPromptProcessor(
               break
 
             case "tool_call.arguments":
-              streamedText = appendStreamTextOrThrow(
+              ({
+                streamedText,
+                nextLoopCheckLength,
+              } = appendStreamTextOrThrow(
                 streamedText,
                 safeJsonStringify(asObjectRecord(payload).arguments),
+                nextLoopCheckLength,
                 abortPrompt
-              )
+              ))
               onEvent({
                 type: "tool",
 
@@ -377,14 +394,16 @@ export function createLmStudioPromptProcessor(
 
               break
 
-            case "tool_call.success": {
-              const payloadRecord = asObjectRecord(payload)
-
-              streamedText = appendStreamTextOrThrow(
+            case "tool_call.success":
+              ({
                 streamedText,
-                `${safeJsonStringify(payloadRecord.arguments) ?? ""}${asStringRecord(payload).output ?? ""}`,
+                nextLoopCheckLength,
+              } = appendStreamTextOrThrow(
+                streamedText,
+                `${safeJsonStringify(asObjectRecord(payload).arguments) ?? ""}${asStringRecord(payload).output ?? ""}`,
+                nextLoopCheckLength,
                 abortPrompt
-              )
+              ))
               onEvent({
                 type: "tool",
 
@@ -394,21 +413,26 @@ export function createLmStudioPromptProcessor(
 
                 provider: extractProviderLabel(payload),
 
-                argumentsText: safeJsonStringify(payloadRecord.arguments),
+                argumentsText: safeJsonStringify(
+                  asObjectRecord(payload).arguments
+                ),
 
                 output: asStringRecord(payload).output,
               })
 
               break
-            }
 
             case "tool_call.failure":
-              streamedText = appendStreamTextOrThrow(
+              ({
+                streamedText,
+                nextLoopCheckLength,
+              } = appendStreamTextOrThrow(
                 streamedText,
                 asStringRecord(payload).reason ??
                 asStringRecord(asObjectRecord(payload).error).message,
+                nextLoopCheckLength,
                 abortPrompt
-              )
+              ))
               onEvent({
                 type: "tool",
 
@@ -422,11 +446,15 @@ export function createLmStudioPromptProcessor(
               break
 
             case "error":
-              streamedText = appendStreamTextOrThrow(
+              ({
+                streamedText,
+                nextLoopCheckLength,
+              } = appendStreamTextOrThrow(
                 streamedText,
                 asStringRecord(asObjectRecord(payload).error).message,
+                nextLoopCheckLength,
                 abortPrompt
-              )
+              ))
               onEvent({
                 type: "error",
 
@@ -713,67 +741,153 @@ function createTimeoutSignal(
 }
 
 function isRepeatedLoopSequence(streamedText: string) {
-  if (streamedText.length < STREAM_LOOP_SEQUENCE_LENGTH) {
-    return false
-  }
-
-  const sequence = streamedText.slice(-STREAM_LOOP_SEQUENCE_LENGTH)
-  const lookbackStart = Math.max(
-    0,
-    streamedText.length -
-    STREAM_LOOP_SEQUENCE_LENGTH -
-    STREAM_LOOP_LOOKBACK_LENGTH
-  )
-  const priorWindow = streamedText.slice(
-    lookbackStart,
-    streamedText.length - STREAM_LOOP_SEQUENCE_LENGTH
-  )
-
   return (
-    countSubstringOccurrences(priorWindow, sequence) >=
-    STREAM_LOOP_REPEAT_THRESHOLD
+    longestSubstringLengthRepeatingAtLeast3Times(streamedText) >
+    STREAM_LOOP_SEQUENCE_LENGTH
   )
 }
 
-function countSubstringOccurrences(haystack: string, needle: string) {
-  if (!needle) {
+function longestSubstringLengthRepeatingAtLeast3Times(s: string): number {
+  const n = s.length
+
+  if (n < 3) {
     return 0
   }
 
-  let count = 0
-  let searchStart = 0
+  const sa = buildSuffixArray(s)
+  const lcp = buildLcpArray(s, sa)
 
-  while (searchStart <= haystack.length - needle.length) {
-    const matchIndex = haystack.indexOf(needle, searchStart)
+  let bestLen = 0
 
-    if (matchIndex < 0) {
-      return count
+  for (let i = 1; i + 1 < n; i++) {
+    const sharedLen = Math.min(lcp[i], lcp[i + 1])
+
+    if (sharedLen > bestLen) {
+      bestLen = sharedLen
     }
-
-    count += 1
-    searchStart = matchIndex + 1
   }
 
-  return count
+  return bestLen
+}
+
+function buildSuffixArray(s: string): number[] {
+  const n = s.length
+  const sa = Array.from({ length: n }, (_, i) => i)
+  let rank = Array.from({ length: n }, (_, i) => s.charCodeAt(i))
+  const tmp = new Array<number>(n)
+
+  for (let k = 1; k < n; k <<= 1) {
+    sa.sort((a, b) => {
+      if (rank[a] !== rank[b]) {
+        return rank[a] - rank[b]
+      }
+
+      const ra = a + k < n ? rank[a + k] : -1
+      const rb = b + k < n ? rank[b + k] : -1
+
+      return ra - rb
+    })
+
+    tmp[sa[0]] = 0
+
+    for (let i = 1; i < n; i++) {
+      const a = sa[i - 1]
+      const b = sa[i]
+
+      const different =
+        rank[a] !== rank[b] ||
+        (a + k < n ? rank[a + k] : -1) !== (b + k < n ? rank[b + k] : -1)
+
+      tmp[b] = tmp[a] + (different ? 1 : 0)
+    }
+
+    rank = tmp.slice()
+
+    if (rank[sa[n - 1]] === n - 1) {
+      break
+    }
+  }
+
+  return sa
+}
+
+function buildLcpArray(s: string, sa: number[]): number[] {
+  const n = s.length
+  const rank = new Array<number>(n)
+
+  for (let i = 0; i < n; i++) {
+    rank[sa[i]] = i
+  }
+
+  const lcp = new Array<number>(n).fill(0)
+  let h = 0
+
+  for (let i = 0; i < n; i++) {
+    const r = rank[i]
+
+    if (r === 0) {
+      continue
+    }
+
+    const j = sa[r - 1]
+
+    while (
+      i + h < n &&
+      j + h < n &&
+      s.charCodeAt(i + h) === s.charCodeAt(j + h)
+    ) {
+      h++
+    }
+
+    lcp[r] = h
+
+    if (h > 0) {
+      h--
+    }
+  }
+
+  return lcp
 }
 
 function appendStreamTextOrThrow(
   streamedText: string,
   chunk: string | undefined,
+  nextLoopCheckLength: number,
   abortPrompt: (reason?: unknown) => void
-) {
+): { streamedText: string; nextLoopCheckLength: number } {
   if (!chunk) {
-    return streamedText
+    return {
+      streamedText,
+      nextLoopCheckLength,
+    }
   }
 
   const nextStreamedText = streamedText + chunk
 
-  if (isRepeatedLoopSequence(nextStreamedText)) {
+  if (nextStreamedText.length < nextLoopCheckLength) {
+    return {
+      streamedText: nextStreamedText,
+      nextLoopCheckLength,
+    }
+  }
+
+  const analyzedText = nextStreamedText.slice(-STREAM_LOOP_ANALYSIS_LENGTH)
+  const longestRepeatedSubstringLength =
+    longestSubstringLengthRepeatingAtLeast3Times(analyzedText)
+  const isLooping =
+    longestRepeatedSubstringLength > STREAM_LOOP_SEQUENCE_LENGTH
+  if (isLooping) {
     abortPrompt(new Error(STREAM_LOOP_ERROR_MESSAGE))
     throw new Error(STREAM_LOOP_ERROR_MESSAGE)
   }
 
-  return nextStreamedText
+  return {
+    streamedText: nextStreamedText,
+    nextLoopCheckLength:
+      Math.floor(nextStreamedText.length / STREAM_LOOP_CHECK_INTERVAL_CHARS) *
+        STREAM_LOOP_CHECK_INTERVAL_CHARS +
+      STREAM_LOOP_CHECK_INTERVAL_CHARS,
+  }
 }
 
 function createPromptTimeoutError(timeoutMs: number) {
@@ -956,6 +1070,16 @@ async function buildErrorMessage(response: Response) {
 
   return `LM Studio request failed with ${response.status}.`
 }
+
+
+
+
+
+
+
+
+
+
 
 
 
