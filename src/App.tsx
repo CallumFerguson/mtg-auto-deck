@@ -120,6 +120,7 @@ type SimulationActivity = {
   title: string
   detail?: ReactNode
   status: "active" | "done" | "error"
+  transient?: boolean
 }
 
 type FinalAnswerStatus = "idle" | "streaming" | "done"
@@ -169,6 +170,16 @@ function createThinkingActivity(): SimulationActivity {
     kind: "thinking",
     title: "Thinking",
     status: "active",
+  }
+}
+
+function createProcessingActivity(): SimulationActivity {
+  return {
+    id: createActivityId(),
+    kind: "thinking",
+    title: "Thinking",
+    status: "active",
+    transient: true,
   }
 }
 
@@ -234,10 +245,7 @@ function completeActiveActivity(
   return nextActivities
 }
 
-function completeActiveThinkingActivity(
-  currentActivities: SimulationActivity[],
-  status: SimulationActivity["status"] = "done"
-) {
+function removeActiveThinkingActivity(currentActivities: SimulationActivity[]) {
   const nextActivities = [...currentActivities]
 
   for (let index = nextActivities.length - 1; index >= 0; index -= 1) {
@@ -245,10 +253,7 @@ function completeActiveThinkingActivity(
       nextActivities[index].kind === "thinking" &&
       nextActivities[index].status === "active"
     ) {
-      nextActivities[index] = {
-        ...nextActivities[index],
-        status,
-      }
+      nextActivities.splice(index, 1)
       break
     }
   }
@@ -260,6 +265,17 @@ function ensureThinkingActivity(currentActivities: SimulationActivity[]) {
   const lastActivity = currentActivities.at(-1)
 
   if (lastActivity?.kind === "thinking" && lastActivity.status === "active") {
+    if (lastActivity.transient || lastActivity.title !== "Thinking") {
+      return [
+        ...currentActivities.slice(0, -1),
+        {
+          ...lastActivity,
+          title: "Thinking",
+          transient: false,
+        },
+      ]
+    }
+
     return currentActivities
   }
 
@@ -267,6 +283,43 @@ function ensureThinkingActivity(currentActivities: SimulationActivity[]) {
     ...completeActiveActivity(currentActivities),
     createThinkingActivity(),
   ]
+}
+
+function ensureProcessingActivity(currentActivities: SimulationActivity[]) {
+  const lastActivity = currentActivities.at(-1)
+
+  if (lastActivity?.status === "active") {
+    return currentActivities
+  }
+
+  return [...currentActivities, createProcessingActivity()]
+}
+
+function replaceTransientActivity(
+  currentActivities: SimulationActivity[],
+  activity: SimulationActivity
+) {
+  const lastActivity = currentActivities.at(-1)
+
+  if (lastActivity?.status === "active" && lastActivity.transient) {
+    return [...currentActivities.slice(0, -1), activity]
+  }
+
+  if (lastActivity?.kind === "thinking" && lastActivity.status === "active") {
+    return [...currentActivities.slice(0, -1), activity]
+  }
+
+  return [...completeActiveActivity(currentActivities), activity]
+}
+
+function resolveActiveThinkingActivity(currentActivities: SimulationActivity[]) {
+  const lastActivity = currentActivities.at(-1)
+
+  if (lastActivity?.kind !== "thinking" || lastActivity.status !== "active") {
+    return currentActivities
+  }
+
+  return removeActiveThinkingActivity(currentActivities)
 }
 
 function updateLatestToolActivity(
@@ -594,8 +647,6 @@ function handlePromptStreamEvent(
 
           if (event.event === "reasoning.start") {
             nextActivities = ensureThinkingActivity(nextActivities)
-          } else if (event.event === "message.start") {
-            nextActivities = completeActiveThinkingActivity(nextActivities)
           }
 
           return {
@@ -630,6 +681,7 @@ function handlePromptStreamEvent(
           run.id === runId
             ? {
               ...run,
+              activities: resolveActiveThinkingActivity(run.activities),
               rawPromptStream: appendRawPromptStream(
                 run.rawPromptStream,
                 event.delta
@@ -651,10 +703,10 @@ function handlePromptStreamEvent(
           let nextActivities = run.activities
 
           if (event.event === "tool_call.start") {
-            nextActivities = [
-              ...completeActiveActivity(nextActivities),
-              createToolActivity(event.tool),
-            ]
+            nextActivities = replaceTransientActivity(
+              nextActivities,
+              createToolActivity(event.tool)
+            )
           } else if (event.event === "tool_call.arguments") {
             nextActivities = updateLatestToolActivity(nextActivities, {
               title: getToolActivityTitle(event.tool),
@@ -672,6 +724,13 @@ function handlePromptStreamEvent(
               title: getToolActivityTitle(event.tool),
               detail: getToolActivityDetail(event),
             })
+          }
+
+          if (
+            event.event === "tool_call.success" ||
+            event.event === "tool_call.failure"
+          ) {
+            nextActivities = ensureProcessingActivity(nextActivities)
           }
 
           return {
@@ -711,7 +770,9 @@ function handlePromptStreamEvent(
                 run.rawPromptStream,
                 "\n[chat.end]\n"
               ),
-              activities: completeActiveActivity(run.activities),
+              activities: completeActiveActivity(
+                removeActiveThinkingActivity(run.activities)
+              ),
               finalAnswerStatus: "done",
               result: event.result,
             }
