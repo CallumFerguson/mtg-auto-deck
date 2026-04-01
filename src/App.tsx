@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import type { ComponentProps, Dispatch, ReactNode, SetStateAction } from "react"
+import type { ComponentProps, Dispatch, SetStateAction } from "react"
 
 import { DeckIntakeForm } from "@/features/deck-intake/components/deck-intake-form"
 import { GoldfishSimulationPanel } from "@/features/deck-intake/components/goldfish-simulation-panel"
-import { ToolCardList } from "@/features/deck-intake/components/tool-card-elements"
 import { HeroSection } from "@/features/deck-intake/components/hero-section"
 import { ProcessedCardsPanel } from "@/features/deck-intake/components/processed-cards-panel"
 import { PromptStreamModal } from "@/features/deck-intake/components/prompt-stream-modal"
@@ -25,6 +24,26 @@ import {
   saveStoredDeckInput,
 } from "@/features/deck-intake/lib/deck-storage"
 import {
+  clearStoredSimulationSession,
+  loadStoredSimulationSession,
+  saveStoredSimulationSession,
+} from "@/features/deck-intake/lib/simulation-session-storage"
+import {
+  cancelPromptRun,
+  createPromptRun,
+  createStartingHandValidationRun,
+  getKeepHandCardsFromEvent,
+  getToolGameId,
+  markPromptRunError,
+  recordPromptStreamEvent,
+  restorePromptRuns,
+  type GameCardPayload,
+  type PromptStreamEvent,
+  type SimulationPayload,
+  type SimulationPromptRun,
+  type StartingHandValidation,
+} from "@/features/deck-intake/lib/simulation-session"
+import {
   areCardsAvailableInCache,
   fetchCardsByName,
   toResolvedCard,
@@ -39,11 +58,6 @@ const MIN_PROCESSING_DURATION_MS = 250
 const SIMULATION_CANCELED_MESSAGE = "Simulation cancelled."
 const GOLDFISH_SERVER_URL =
   import.meta.env.VITE_GOLDFISH_SERVER_URL ?? "http://127.0.0.1:3001"
-
-type GameCardPayload = {
-  name: string
-  cardText: string
-}
 
 type CreateGameResponse = {
   gameId: string
@@ -68,97 +82,28 @@ type ToolUiDataResponse = {
 
 type OpeningHandSnapshotStatusResponse =
   | {
-    ok: true
-    hasSnapshot: boolean
-    snapshot?: {
-      validation: {
-        isValid: boolean
-        message: string
+      ok: true
+      hasSnapshot: boolean
+      snapshot?: {
+        validation: {
+          isValid: boolean
+          message: string
+        }
       }
     }
-  }
   | {
-    ok: false
-    error?: string
-  }
-
-type StartingHandValidation = {
-  isValid: boolean
-  message: string
-}
-
-type PromptStreamEvent =
-  | {
-    type: "start"
-    model: {
-      displayName: string
-      key: string
+      ok: false
+      error?: string
     }
-  }
-  | {
-    type: "status"
-    event: string
-    progress?: number
-    modelInstanceId?: string
-  }
-  | {
-    type: "reasoning"
-    delta: string
-  }
-  | {
-    type: "message"
-    delta: string
-  }
-  | {
-    type: "tool"
-    event: string
-    tool?: string
-    provider?: string
-    argumentsText?: string
-    output?: string
-    structuredContent?: Record<string, unknown>
-    uiMetadata?: Record<string, unknown>
-    error?: string
-  }
-  | {
-    type: "error"
-    error: string
-  }
-  | {
-    type: "done"
-    result: string
-    reasoning: string
-  }
 
-type SimulationActivity = {
-  id: string
-  kind: "thinking" | "tool"
-  title: string
-  detail?: ReactNode
-  status: "active" | "done" | "error"
-  transient?: boolean
-}
-
-type FinalAnswerStatus = "idle" | "streaming" | "done"
-type SimulationPromptRunStatus = "running" | "done" | "error" | "cancelled"
-type SimulationPromptRunKind = "opening_hand" | "starting_hand_validation" | "turn"
 type SimulationPromptRunFlow = "main" | "opening_hand_batch"
 
-type SimulationPromptRun = {
-  id: string
-  title: string
-  kind: SimulationPromptRunKind
-  flow: SimulationPromptRunFlow
+type StoredSimulationSessionState = {
+  simulationPayload: SimulationPayload | null
   gameId: string
-  seed: number | null
-  batchRunNumber?: number
-  rerunnable: boolean
-  activities: SimulationActivity[]
-  result: string
-  finalAnswerStatus: FinalAnswerStatus
-  status: SimulationPromptRunStatus
-  rawPromptStream: string
-  keptHandCards: string[]
+  currentSimulationSeed: number | null
+  simulationError: string
+  promptRuns: SimulationPromptRun[]
 }
 
 function delay(milliseconds: number) {
@@ -186,102 +131,6 @@ function expandResolvedCard(card: ResolvedCard) {
   }))
 }
 
-function createActivityId() {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-}
-
-function createThinkingActivity(): SimulationActivity {
-  return {
-    id: createActivityId(),
-    kind: "thinking",
-    title: "Thinking",
-    status: "active",
-  }
-}
-
-function createProcessingActivity(): SimulationActivity {
-  return {
-    id: createActivityId(),
-    kind: "thinking",
-    title: "Thinking",
-    status: "active",
-    transient: true,
-  }
-}
-
-function createPromptRun(
-  title: string,
-  options: {
-    kind: SimulationPromptRunKind
-    flow: SimulationPromptRunFlow
-    gameId: string
-    seed: number | null
-    batchRunNumber?: number
-    rerunnable?: boolean
-  }
-): SimulationPromptRun {
-  return {
-    id: createActivityId(),
-    title,
-    kind: options.kind,
-    flow: options.flow,
-    gameId: options.gameId,
-    seed: options.seed,
-    batchRunNumber: options.batchRunNumber,
-    rerunnable: options.rerunnable ?? true,
-    activities: [],
-    result: "",
-    finalAnswerStatus: "idle",
-    status: "running",
-    rawPromptStream: "",
-    keptHandCards: [],
-  }
-}
-
-function createStartingHandValidationRun(
-  validation: StartingHandValidation,
-  keptHandCards: string[],
-  options: {
-    flow: SimulationPromptRunFlow
-    gameId: string
-    seed: number | null
-  }
-): SimulationPromptRun {
-  return {
-    id: createActivityId(),
-    title: "Starting hand validation",
-    kind: "starting_hand_validation",
-    flow: options.flow,
-    gameId: options.gameId,
-    seed: options.seed,
-    rerunnable: false,
-    activities: [
-      {
-        id: createActivityId(),
-        kind: "tool",
-        title: validation.isValid ? "Starting hand is valid" : "Starting hand is invalid",
-        detail: (
-          <div className="space-y-2">
-            <p className="text-xs leading-5 text-stone-400">{validation.message}</p>
-            {keptHandCards.length ? (
-              <ToolCardList
-                cards={keptHandCards}
-                label={validation.isValid ? "Kept hand:" : "Rejected hand:"}
-              />
-            ) : null}
-          </div>
-        ),
-        status: validation.isValid ? "done" : "error",
-      },
-    ],
-    result: "",
-    finalAnswerStatus: "idle",
-    status: validation.isValid ? "done" : "error",
-    rawPromptStream: `[starting-hand-validation] ${validation.message}\n`,
-    keptHandCards,
-  }
-}
-
 function createCancellationError() {
   return new DOMException(SIMULATION_CANCELED_MESSAGE, "AbortError")
 }
@@ -293,14 +142,7 @@ function isAbortError(error: unknown) {
 function cancelPromptRuns(
   currentRuns: SimulationPromptRun[]
 ): SimulationPromptRun[] {
-  return currentRuns.map((run) => ({
-    ...run,
-    status: run.status === "done" || run.status === "error" ? run.status : "cancelled",
-    rawPromptStream: run.rawPromptStream.includes("[cancelled]")
-      ? run.rawPromptStream
-      : appendRawPromptStream(run.rawPromptStream, "\n[cancelled]\n"),
-    activities: completeActiveActivity(run.activities, "error"),
-  }))
+  return currentRuns.map((run) => cancelPromptRun(run))
 }
 
 function markPromptRunFailed(
@@ -308,177 +150,9 @@ function markPromptRunFailed(
   runId: string,
   message: string
 ): SimulationPromptRun[] {
-  return currentRuns.map((run) => {
-    if (run.id !== runId) {
-      return run
-    }
-
-    return {
-      ...run,
-      status: "error",
-      rawPromptStream: run.rawPromptStream.includes(`[error] ${message}`)
-        ? run.rawPromptStream
-        : appendRawPromptStream(run.rawPromptStream, `[error] ${message}\n`),
-      activities: completeActiveActivity(run.activities, "error"),
-    }
-  })
-}
-
-function createToolActivity(toolName: string | undefined): SimulationActivity {
-  return {
-    id: createActivityId(),
-    kind: "tool",
-    title: toolName ? `Calling ${toolName}` : "Calling tool",
-    status: "active",
-  }
-}
-
-function appendRawPromptStream(currentStream: string, chunk: string) {
-  return `${currentStream}${chunk}`
-}
-
-function completeActiveActivity(
-  currentActivities: SimulationActivity[],
-  status: SimulationActivity["status"] = "done"
-) {
-  const nextActivities = [...currentActivities]
-
-  for (let index = nextActivities.length - 1; index >= 0; index -= 1) {
-    if (nextActivities[index].status === "active") {
-      nextActivities[index] = {
-        ...nextActivities[index],
-        status,
-      }
-      break
-    }
-  }
-
-  return nextActivities
-}
-
-function removeActiveThinkingActivity(currentActivities: SimulationActivity[]) {
-  const nextActivities = [...currentActivities]
-
-  for (let index = nextActivities.length - 1; index >= 0; index -= 1) {
-    if (
-      nextActivities[index].kind === "thinking" &&
-      nextActivities[index].status === "active"
-    ) {
-      nextActivities.splice(index, 1)
-      break
-    }
-  }
-
-  return nextActivities
-}
-
-function ensureThinkingActivity(currentActivities: SimulationActivity[]) {
-  const lastActivity = currentActivities.at(-1)
-
-  if (lastActivity?.kind === "thinking" && lastActivity.status === "active") {
-    if (lastActivity.transient || lastActivity.title !== "Thinking") {
-      return [
-        ...currentActivities.slice(0, -1),
-        {
-          ...lastActivity,
-          title: "Thinking",
-          transient: false,
-        },
-      ]
-    }
-
-    return currentActivities
-  }
-
-  return [
-    ...completeActiveActivity(currentActivities),
-    createThinkingActivity(),
-  ]
-}
-
-function ensureProcessingActivity(currentActivities: SimulationActivity[]) {
-  const lastActivity = currentActivities.at(-1)
-
-  if (lastActivity?.status === "active") {
-    return currentActivities
-  }
-
-  return [...currentActivities, createProcessingActivity()]
-}
-
-function replaceTransientActivity(
-  currentActivities: SimulationActivity[],
-  activity: SimulationActivity
-) {
-  const lastActivity = currentActivities.at(-1)
-
-  if (lastActivity?.status === "active" && lastActivity.transient) {
-    return [...currentActivities.slice(0, -1), activity]
-  }
-
-  if (lastActivity?.kind === "thinking" && lastActivity.status === "active") {
-    return [...currentActivities.slice(0, -1), activity]
-  }
-
-  return [...completeActiveActivity(currentActivities), activity]
-}
-
-function resolveActiveThinkingActivity(currentActivities: SimulationActivity[]) {
-  const lastActivity = currentActivities.at(-1)
-
-  if (lastActivity?.kind !== "thinking" || lastActivity.status !== "active") {
-    return currentActivities
-  }
-
-  return removeActiveThinkingActivity(currentActivities)
-}
-
-function updateLatestToolActivity(
-  currentActivities: SimulationActivity[],
-  changes: Partial<SimulationActivity>
-) {
-  const nextActivities = [...currentActivities]
-
-  for (let index = nextActivities.length - 1; index >= 0; index -= 1) {
-    if (nextActivities[index].kind === "tool") {
-      nextActivities[index] = {
-        ...nextActivities[index],
-        ...changes,
-      }
-      break
-    }
-  }
-
-  return nextActivities
-}
-
-function getToolActivityTitle(toolName: string | undefined) {
-  return toolName ? `Calling ${toolName}` : "Calling tool"
-}
-
-function tryParseJsonObject(value: string | undefined) {
-  if (!value) {
-    return null
-  }
-
-  try {
-    const parsed = JSON.parse(value)
-    return parsed !== null && typeof parsed === "object" ? parsed : null
-  } catch {
-    return null
-  }
-}
-
-function getToolGameId(event: Extract<PromptStreamEvent, { type: "tool" }>) {
-  const parsedArguments = tryParseJsonObject(event.argumentsText)
-  const gameId =
-    parsedArguments !== null &&
-      "gameId" in parsedArguments &&
-      typeof parsedArguments.gameId === "string"
-      ? parsedArguments.gameId.trim()
-      : ""
-
-  return gameId || undefined
+  return currentRuns.map((run) =>
+    run.id === runId ? markPromptRunError(run, message) : run
+  )
 }
 
 async function hydrateToolEvent(
@@ -534,82 +208,6 @@ async function hydrateToolEvent(
   }
 }
 
-function getStructuredToolCards(
-  event: Extract<PromptStreamEvent, { type: "tool" }>
-) {
-  if (!Array.isArray(event.structuredContent?.cards)) {
-    return undefined
-  }
-
-  const cards = event.structuredContent.cards
-    .filter((card): card is string => typeof card === "string")
-    .map((card) => card.trim())
-    .filter(Boolean)
-
-  return cards.length ? cards : undefined
-}
-
-function getMulliganReason(event: Extract<PromptStreamEvent, { type: "tool" }>) {
-  if (event.tool !== "mulligan") {
-    return undefined
-  }
-
-  const parsedArguments = tryParseJsonObject(event.argumentsText)
-  const reason =
-    parsedArguments !== null &&
-      "reason" in parsedArguments &&
-      typeof parsedArguments.reason === "string"
-      ? parsedArguments.reason.trim()
-      : ""
-
-  return reason || undefined
-}
-
-function getMulliganDetail(event: Extract<PromptStreamEvent, { type: "tool" }>) {
-  if (event.tool !== "mulligan") {
-    return undefined
-  }
-
-  const reason = getMulliganReason(event)
-  const cards = getStructuredToolCards(event)
-
-  if (!reason && !cards?.length) {
-    return undefined
-  }
-
-  return (
-    <div className="space-y-2">
-      {reason ? (
-        <p className="text-xs leading-5 text-stone-400">Reason: {reason}</p>
-      ) : null}
-      {cards?.length ? <ToolCardList cards={cards} label={"New Hand:"} /> : null}
-    </div>
-  )
-}
-
-function getKeepHandCards(event: Extract<PromptStreamEvent, { type: "tool" }>) {
-  if (event.tool !== "keep_hand") {
-    return undefined
-  }
-
-  const parsedArguments = tryParseJsonObject(event.argumentsText)
-
-  if (
-    parsedArguments === null ||
-    !("cards" in parsedArguments) ||
-    !Array.isArray(parsedArguments.cards)
-  ) {
-    return undefined
-  }
-
-  const cards = parsedArguments.cards
-    .filter((card: unknown): card is string => typeof card === "string")
-    .map((card: string) => card.trim())
-    .filter(Boolean)
-
-  return cards.length ? cards : undefined
-}
-
 function getToolCardsRemaining(
   event: Extract<PromptStreamEvent, { type: "tool" }>
 ) {
@@ -618,341 +216,16 @@ function getToolCardsRemaining(
   return typeof cardsRemaining === "number" ? cardsRemaining : undefined
 }
 
-function getDrawStartingHandDetail(
-  event: Extract<PromptStreamEvent, { type: "tool" }>
-) {
-  if (event.tool !== "draw_starting_hand") {
-    return undefined
-  }
-
-  const cards = getStructuredToolCards(event)
-
-  return cards?.length ? <ToolCardList cards={cards} /> : undefined
-}
-
-function getDrawToolDetail(event: Extract<PromptStreamEvent, { type: "tool" }>) {
-  if (
-    event.tool !== "draw_card_from_top" &&
-    event.tool !== "draw_card_from_bottom"
-  ) {
-    return undefined
-  }
-
-  const cards = getStructuredToolCards(event)
-
-  if (!cards?.length) {
-    return undefined
-  }
-
-  const label =
-    event.tool === "draw_card_from_top"
-      ? "Drawn from top:"
-      : "Drawn from bottom:"
-
-  return <ToolCardList cards={cards} label={label} />
-}
-
-function getReturnToolCards(event: Extract<PromptStreamEvent, { type: "tool" }>) {
-  if (event.tool === "return_card_to_library") {
-    const card = event.structuredContent?.card
-
-    if (typeof card !== "string") {
-      return undefined
-    }
-
-    const trimmedCard = card.trim()
-    return trimmedCard ? [trimmedCard] : undefined
-  }
-
-  if (event.tool === "return_cards_to_library") {
-    return getStructuredToolCards(event)
-  }
-
-  return undefined
-}
-
-function getReturnToolDetail(
-  event: Extract<PromptStreamEvent, { type: "tool" }>
-) {
-  const cards = getReturnToolCards(event)
-
-  if (!cards?.length) {
-    return undefined
-  }
-
-  const side =
-    typeof event.structuredContent?.side === "string"
-      ? event.structuredContent.side
-      : undefined
-  const label = side ? `Returned to ${side}:` : "Returned cards:"
-
-  return <ToolCardList cards={cards} label={label} />
-}
-
-function getTakeCardsFromLibraryDetail(
-  event: Extract<PromptStreamEvent, { type: "tool" }>
-) {
-  if (event.tool !== "take_cards_from_library") {
-    return undefined
-  }
-
-  const matches = Array.isArray(event.structuredContent?.matches)
-    ? event.structuredContent.matches.filter(
-      (
-        match
-      ): match is {
-        requestedCard: string
-        foundCard: string | null
-      } =>
-        match !== null &&
-        typeof match === "object" &&
-        "requestedCard" in match &&
-        typeof match.requestedCard === "string" &&
-        "foundCard" in match &&
-        (typeof match.foundCard === "string" || match.foundCard === null)
-    )
-    : []
-  const foundCards = Array.isArray(event.structuredContent?.foundCards)
-    ? event.structuredContent.foundCards
-      .filter((card): card is string => typeof card === "string")
-      .map((card) => card.trim())
-      .filter(Boolean)
-    : []
-
-  if (!matches.length && !foundCards.length) {
-    return undefined
-  }
-
-  const missedCards = matches
-    .filter((match) => match.foundCard === null)
-    .map((match) => match.requestedCard.trim())
-    .filter(Boolean)
-  const requestedCount = matches.length || foundCards.length
-  const cardLabel = requestedCount === 1 ? "card" : "cards"
-
-  return (
-    <div className="space-y-2">
-      <p className="text-xs leading-5 text-stone-400">
-        {`Found ${foundCards.length}/${requestedCount} ${cardLabel}.`}
-        {missedCards.length
-          ? ` No close match for: ${missedCards.join(", ")}.`
-          : ""}
-      </p>
-      {foundCards.length ? (
-        <ToolCardList cards={foundCards} label={"Taken from library:"} />
-      ) : null}
-    </div>
-  )
-}
-function getToolActivityDetail(
-  event: Extract<PromptStreamEvent, { type: "tool" }>
-) {
-  const mulliganDetail = getMulliganDetail(event)
-
-  if (mulliganDetail) {
-    return mulliganDetail
-  }
-
-  const keepHandCards = getKeepHandCards(event)
-
-  if (keepHandCards) {
-    return <ToolCardList cards={keepHandCards} />
-  }
-
-  const drawStartingHandDetail = getDrawStartingHandDetail(event)
-
-  if (drawStartingHandDetail) {
-    return drawStartingHandDetail
-  }
-
-  const drawToolDetail = getDrawToolDetail(event)
-
-  if (drawToolDetail) {
-    return drawToolDetail
-  }  const returnToolDetail = getReturnToolDetail(event)
-
-  if (returnToolDetail) {
-    return returnToolDetail
-  }
-
-  const takeCardsFromLibraryDetail = getTakeCardsFromLibraryDetail(event)
-
-  if (takeCardsFromLibraryDetail) {
-    return takeCardsFromLibraryDetail
-  }
-
-  return undefined
-}
-
 function handlePromptStreamEvent(
   event: PromptStreamEvent,
   setPromptRuns: Dispatch<SetStateAction<SimulationPromptRun[]>>,
   runId: string
 ) {
-  switch (event.type) {
-    case "start":
-      setPromptRuns((currentRuns) =>
-        currentRuns.map((run) =>
-          run.id === runId
-            ? {
-              ...run,
-              rawPromptStream: appendRawPromptStream(
-                run.rawPromptStream,
-                `[model] ${event.model.displayName} (${event.model.key})\n\n`
-              ),
-              activities: [createThinkingActivity()],
-            }
-            : run
-        )
-      )
-      return
-    case "status":
-      setPromptRuns((currentRuns) =>
-        currentRuns.map((run) => {
-          if (run.id !== runId) {
-            return run
-          }
-
-          let nextActivities = run.activities
-
-          if (event.event === "reasoning.start") {
-            nextActivities = ensureThinkingActivity(nextActivities)
-          }
-
-          return {
-            ...run,
-            rawPromptStream: appendRawPromptStream(
-              run.rawPromptStream,
-              `[${event.event}${typeof event.progress === "number" ? ` ${Math.round(event.progress * 100)}%` : ""}]\n`
-            ),
-            activities: nextActivities,
-          }
-        })
-      )
-      return
-    case "reasoning":
-      setPromptRuns((currentRuns) =>
-        currentRuns.map((run) =>
-          run.id === runId
-            ? {
-              ...run,
-              rawPromptStream: appendRawPromptStream(
-                run.rawPromptStream,
-                event.delta
-              ),
-            }
-            : run
-        )
-      )
-      return
-    case "message":
-      setPromptRuns((currentRuns) =>
-        currentRuns.map((run) =>
-          run.id === runId
-            ? {
-              ...run,
-              activities: resolveActiveThinkingActivity(run.activities),
-              rawPromptStream: appendRawPromptStream(
-                run.rawPromptStream,
-                event.delta
-              ),
-              finalAnswerStatus: "streaming",
-              result: `${run.result}${event.delta}`,
-            }
-            : run
-        )
-      )
-      return
-    case "tool":
-      setPromptRuns((currentRuns) =>
-        currentRuns.map((run) => {
-          if (run.id !== runId) {
-            return run
-          }
-
-          let nextActivities = run.activities
-
-          if (event.event === "tool_call.start") {
-            nextActivities = replaceTransientActivity(
-              nextActivities,
-              createToolActivity(event.tool)
-            )
-          } else if (event.event === "tool_call.arguments") {
-            nextActivities = updateLatestToolActivity(nextActivities, {
-              title: getToolActivityTitle(event.tool),
-              detail: getToolActivityDetail(event),
-            })
-          } else if (event.event === "tool_call.success") {
-            nextActivities = updateLatestToolActivity(nextActivities, {
-              status: "done",
-              title: getToolActivityTitle(event.tool),
-              detail: getToolActivityDetail(event),
-            })
-          } else if (event.event === "tool_call.failure") {
-            nextActivities = updateLatestToolActivity(nextActivities, {
-              status: "error",
-              title: getToolActivityTitle(event.tool),
-              detail: getToolActivityDetail(event),
-            })
-          }
-
-          if (
-            event.event === "tool_call.success" ||
-            event.event === "tool_call.failure"
-          ) {
-            nextActivities = ensureProcessingActivity(nextActivities)
-          }
-
-          return {
-            ...run,
-            rawPromptStream: appendRawPromptStream(
-              run.rawPromptStream,
-              `${JSON.stringify(event, null, 2)}\n\n`
-            ),
-            activities: nextActivities,
-          }
-        })
-      )
-      return
-    case "error":
-      setPromptRuns((currentRuns) =>
-        currentRuns.map((run) =>
-          run.id === runId
-            ? {
-              ...run,
-              status: "error",
-              rawPromptStream: appendRawPromptStream(
-                run.rawPromptStream,
-                `[error] ${event.error}\n`
-              ),
-              activities: completeActiveActivity(run.activities, "error"),
-            }
-            : run
-        )
-      )
-      return
-    case "done":
-      setPromptRuns((currentRuns) =>
-        currentRuns.map((run) =>
-          run.id === runId
-            ? {
-              ...run,
-              status: "done",
-              rawPromptStream: appendRawPromptStream(
-                run.rawPromptStream,
-                "\n[chat.end]\n"
-              ),
-              activities: completeActiveActivity(
-                removeActiveThinkingActivity(run.activities)
-              ),
-              finalAnswerStatus: "done",
-              result: event.result,
-            }
-            : run
-        )
-      )
-      return
-  }
+  setPromptRuns((currentRuns) =>
+    currentRuns.map((run) =>
+      run.id === runId ? recordPromptStreamEvent(run, event) : run
+    )
+  )
 }
 
 async function readPromptStream(
@@ -1007,7 +280,7 @@ async function readPromptStream(
       }
 
       if (event.type === "tool") {
-        keptHandCards = getKeepHandCards(event) ?? keptHandCards
+        keptHandCards = getKeepHandCardsFromEvent(event) ?? keptHandCards
         cardsRemaining = getToolCardsRemaining(event) ?? cardsRemaining
       }
 
@@ -1033,7 +306,7 @@ async function readPromptStream(
     }
 
     if (event.type === "tool") {
-      keptHandCards = getKeepHandCards(event) ?? keptHandCards
+      keptHandCards = getKeepHandCardsFromEvent(event) ?? keptHandCards
       cardsRemaining = getToolCardsRemaining(event) ?? cardsRemaining
     }
 
@@ -1055,6 +328,17 @@ async function readPromptStream(
 
 export function App() {
   const [storedDeckInput] = useState(() => loadStoredDeckInput())
+  const [storedSimulationSession] = useState<StoredSimulationSessionState>(() => {
+    const session = loadStoredSimulationSession()
+
+    return {
+      simulationPayload: session.simulationPayload,
+      gameId: session.gameId,
+      currentSimulationSeed: session.currentSimulationSeed,
+      simulationError: session.simulationError,
+      promptRuns: restorePromptRuns(session.promptRuns),
+    }
+  })
   const [commanderOneName, setCommanderOneName] = useState(
     storedDeckInput.commanderOneName
   )
@@ -1071,17 +355,28 @@ export function App() {
   const [isPromptStreamModalOpen, setIsPromptStreamModalOpen] = useState(false)
   const [isStartingSimulation, setIsStartingSimulation] = useState(false)
   const [isCreatingDevGame, setIsCreatingDevGame] = useState(false)
-  const [simulationError, setSimulationError] = useState("")
-  const [gameId, setGameId] = useState("")
+  const [simulationError, setSimulationError] = useState(
+    storedSimulationSession.simulationError
+  )
+  const [gameId, setGameId] = useState(storedSimulationSession.gameId)
   const [simulationSeedInput, setSimulationSeedInput] = useState(
     storedDeckInput.simulationSeedInput
   )
   const [currentSimulationSeed, setCurrentSimulationSeed] = useState<number | null>(
-    null
+    storedSimulationSession.currentSimulationSeed
   )
-  const [promptRuns, setPromptRuns] = useState<SimulationPromptRun[]>([])
+  const [promptRuns, setPromptRuns] = useState<SimulationPromptRun[]>(
+    storedSimulationSession.promptRuns
+  )
+  const [savedSimulationPayload, setSavedSimulationPayload] =
+    useState<SimulationPayload | null>(storedSimulationSession.simulationPayload)
   const simulationAbortControllerRef = useRef<AbortController | null>(null)
   const pendingRerunRunIdRef = useRef<string | null>(null)
+  const previousDeckInputRef = useRef({
+    commanderOneName: storedDeckInput.commanderOneName,
+    commanderTwoName: storedDeckInput.commanderTwoName,
+    decklistText: storedDeckInput.decklistText,
+  })
 
   const parsedDeck = useMemo(() => parseDecklist(decklistText), [decklistText])
   const totalCards = parsedDeck.reduce(
@@ -1226,8 +521,14 @@ export function App() {
     return seed
   }
 
-  async function createGame(signal?: AbortSignal, seedOverride?: number) {
-    if (!simulationPayload) {
+  async function createGame(
+    signal?: AbortSignal,
+    seedOverride?: number,
+    payloadOverride?: SimulationPayload | null
+  ) {
+    const resolvedSimulationPayload = payloadOverride ?? simulationPayload
+
+    if (!resolvedSimulationPayload) {
       throw new Error("The deck is not ready for simulation yet.")
     }
 
@@ -1241,7 +542,7 @@ export function App() {
       signal,
       body: JSON.stringify(
         {
-          ...simulationPayload,
+          ...resolvedSimulationPayload,
           ...(requestedSeed !== undefined ? { seed: requestedSeed } : {}),
         } satisfies {
           commanders: GameCardPayload[]
@@ -1451,6 +752,7 @@ export function App() {
       return
     }
 
+    setSavedSimulationPayload(simulationPayload)
     const abortController = new AbortController()
     simulationAbortControllerRef.current = abortController
 
@@ -1462,7 +764,9 @@ export function App() {
 
     try {
       const { gameId: nextGameId, seed } = await createGame(
-        abortController.signal
+        abortController.signal,
+        undefined,
+        simulationPayload
       )
 
       setGameId(nextGameId)
@@ -1733,6 +1037,7 @@ export function App() {
       return
     }
 
+    setSavedSimulationPayload(simulationPayload)
     const abortController = new AbortController()
     simulationAbortControllerRef.current = abortController
 
@@ -1749,7 +1054,9 @@ export function App() {
         }
 
         const { gameId: nextGameId, seed } = await createGame(
-          abortController.signal
+          abortController.signal,
+          undefined,
+          simulationPayload
         )
         setGameId(nextGameId)
         setCurrentSimulationSeed(seed)
@@ -1875,10 +1182,15 @@ export function App() {
     signal?: AbortSignal
   ) {
     const replaySeed = run.seed ?? currentSimulationSeed ?? undefined
+    const replayPayload = savedSimulationPayload ?? simulationPayload
 
     setPromptRuns((currentRuns) => currentRuns.slice(0, runIndex))
 
-    const { gameId: nextGameId, seed } = await createGame(signal, replaySeed)
+    const { gameId: nextGameId, seed } = await createGame(
+      signal,
+      replaySeed,
+      replayPayload
+    )
     setGameId(nextGameId)
     setCurrentSimulationSeed(seed)
 
@@ -1936,6 +1248,7 @@ export function App() {
     runIndex: number,
     signal?: AbortSignal
   ) {
+    const replayPayload = savedSimulationPayload ?? simulationPayload
     const runsToReplay = promptRuns
       .slice(runIndex)
       .filter(
@@ -1954,7 +1267,8 @@ export function App() {
 
       const { gameId: nextGameId, seed } = await createGame(
         signal,
-        run.seed ?? undefined
+        run.seed ?? undefined,
+        replayPayload
       )
 
       setGameId(nextGameId)
@@ -1973,13 +1287,18 @@ export function App() {
       return
     }
 
+    setSavedSimulationPayload(simulationPayload)
     setIsCreatingDevGame(true)
     setSimulationError("")
     setCurrentSimulationSeed(null)
     setPromptRuns([])
 
     try {
-      const { gameId: nextGameId, seed } = await createGame()
+      const { gameId: nextGameId, seed } = await createGame(
+        undefined,
+        undefined,
+        simulationPayload
+      )
 
       setGameId(nextGameId)
       setCurrentSimulationSeed(seed)
@@ -2001,6 +1320,34 @@ export function App() {
       simulationSeedInput,
     })
   }, [commanderOneName, commanderTwoName, decklistText, simulationSeedInput])
+
+  useEffect(() => {
+    if (
+      !savedSimulationPayload &&
+      !gameId &&
+      currentSimulationSeed === null &&
+      !simulationError &&
+      !promptRuns.length
+    ) {
+      clearStoredSimulationSession()
+      return
+    }
+
+    saveStoredSimulationSession({
+      version: 1,
+      simulationPayload: savedSimulationPayload,
+      gameId,
+      currentSimulationSeed,
+      simulationError,
+      promptRuns,
+    })
+  }, [
+    currentSimulationSeed,
+    gameId,
+    promptRuns,
+    savedSimulationPayload,
+    simulationError,
+  ])
 
   useEffect(() => {
     return () => {
@@ -2045,15 +1392,33 @@ export function App() {
   }, [isStartingSimulation, promptRuns])
 
   useEffect(() => {
+    const previousDeckInput = previousDeckInputRef.current
+    const hasDeckInputChanged =
+      previousDeckInput.commanderOneName !== commanderOneName ||
+      previousDeckInput.commanderTwoName !== commanderTwoName ||
+      previousDeckInput.decklistText !== decklistText
+
+    if (!hasDeckInputChanged) {
+      return
+    }
+
+    previousDeckInputRef.current = {
+      commanderOneName,
+      commanderTwoName,
+      decklistText,
+    }
+
     simulationAbortControllerRef.current?.abort()
     simulationAbortControllerRef.current = null
     pendingRerunRunIdRef.current = null
     setIsStartingSimulation(false)
+    setSavedSimulationPayload(null)
     setGameId("")
     setCurrentSimulationSeed(null)
     setSimulationError("")
     setPromptRuns([])
     setIsPromptStreamModalOpen(false)
+    clearStoredSimulationSession()
   }, [commanderOneName, commanderTwoName, decklistText])
 
   function requestResetToSampleDeck() {
@@ -2076,12 +1441,14 @@ export function App() {
     setLookupError("")
     setIsProcessing(false)
     setIsResetModalOpen(false)
+    setSavedSimulationPayload(null)
     setGameId("")
     setSimulationSeedInput(DEFAULT_DECK_INPUT.simulationSeedInput)
     setCurrentSimulationSeed(null)
     setSimulationError("")
     setPromptRuns([])
     setIsPromptStreamModalOpen(false)
+    clearStoredSimulationSession()
   }
 
   function updateManualText(name: string, manualText: string) {

@@ -10,30 +10,14 @@ import {
   XCircle,
 } from "lucide-react"
 import { useEffect, useRef } from "react"
-import type { ReactNode } from "react"
 
 import { Button } from "@/components/ui/button"
 import { GoldfishAnswerMarkdown } from "@/features/deck-intake/components/goldfish-answer-markdown"
-
-type SimulationActivity = {
-  id: string
-  kind: "thinking" | "tool"
-  title: string
-  detail?: ReactNode
-  status: "active" | "done" | "error"
-}
-
-type SimulationPromptRun = {
-  id: string
-  title: string
-  kind: "opening_hand" | "starting_hand_validation" | "turn"
-  rerunnable: boolean
-  activities: SimulationActivity[]
-  result: string
-  finalAnswerStatus: "idle" | "streaming" | "done"
-  status: "running" | "done" | "error" | "cancelled"
-  rawPromptStream: string
-}
+import {
+  renderSimulationActivityDetail,
+  type SimulationActivity,
+  type SimulationPromptRun,
+} from "@/features/deck-intake/lib/simulation-session"
 
 type GoldfishSimulationPanelProps = {
   canStart: boolean
@@ -403,7 +387,11 @@ export function GoldfishSimulationPanel({
                         </summary>
 
                         <div className="mt-4">
-                          {activity.detail ? <div>{activity.detail}</div> : null}
+                          {activity.detail ? (
+                            <div>
+                              {renderSimulationActivityDetail(activity.detail)}
+                            </div>
+                          ) : null}
                           {hasPromptPreview ? (
                             <div
                               className={`min-w-0 overflow-hidden ${activity.detail ? "mt-4" : ""}`}
