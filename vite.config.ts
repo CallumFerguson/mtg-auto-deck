@@ -8,7 +8,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     watch: {
-      ignored: ["**/mtg-auto-goldfish-server/data/**"],
+      ignored: ["**/mtg-auto-goldfish-server/**"],
     },
   },
   resolve: {
