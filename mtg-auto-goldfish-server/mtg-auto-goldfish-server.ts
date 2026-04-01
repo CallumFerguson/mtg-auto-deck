@@ -1,6 +1,7 @@
 import "dotenv/config"
 
 import type { Request, Response } from "express"
+import { mkdir, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js"
@@ -40,6 +41,13 @@ const DEFAULT_GAME_STORE_PERSISTENCE_PATH = resolve(
   "data",
   "game-store.json"
 )
+const DEFAULT_PROMPT_LOG_DIRECTORY = resolve(
+  process.cwd(),
+  "mtg-auto-goldfish-server",
+  "prompt-logs"
+)
+const SHOULD_LOG_PROMPTS_TO_FILE =
+  process.env.LOG_PROMPTS_TO_FILE?.trim().toLowerCase() === "true"
 
 type ToolUiDataRecord = {
   structuredContent?: Record<string, unknown>
@@ -1112,6 +1120,8 @@ async function main() {
     )
 
     try {
+      await writePromptLog(gameId, "opening-hand", prompt)
+
       let keptHandCards: string[] | undefined
       const response = await streamPromptResponse(
         res,
@@ -1215,6 +1225,8 @@ async function main() {
     )
 
     try {
+      await writePromptLog(gameId, "first-turn", prompt)
+
       const response = await streamPromptResponse(
         res,
         turnSimulationPromptProcessor,
@@ -1727,6 +1739,33 @@ function toOrdinal(value: number) {
 
 function shortId(gameId: string) {
   return gameId.slice(0, 8)
+}
+
+async function writePromptLog(
+  gameId: string,
+  promptType: "opening-hand" | "first-turn",
+  prompt: string
+) {
+  if (!SHOULD_LOG_PROMPTS_TO_FILE) {
+    return
+  }
+
+  try {
+    await mkdir(DEFAULT_PROMPT_LOG_DIRECTORY, { recursive: true })
+
+    const sanitizedGameId = gameId.replace(/[^a-zA-Z0-9-_]/g, "_")
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-")
+    const filePath = resolve(
+      DEFAULT_PROMPT_LOG_DIRECTORY,
+      `${sanitizedGameId}-${promptType}-${timestamp}.log`
+    )
+
+    await writeFile(filePath, prompt, "utf8")
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to write prompt log."
+    logWarn("prompt_log", `${shortId(gameId)} ${message}`)
+  }
 }
 
 function logInfo(event: string, message: string) {

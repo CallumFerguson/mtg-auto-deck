@@ -105,6 +105,8 @@ Example `.env` file:
 # Valid values: lm-studio, openai, claude
 LLM_PROVIDER=lm-studio
 
+LOG_PROMPTS_TO_FILE=false
+
 # Used by OpenAI and Claude requests. Ignored by LM Studio.
 LLM_MAX_OUTPUT_TOKENS=50000
 
