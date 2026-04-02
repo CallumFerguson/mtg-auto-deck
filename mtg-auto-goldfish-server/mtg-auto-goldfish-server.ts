@@ -19,6 +19,7 @@ import {
 import {
   DRAW_STARTING_HAND_PROMPT,
   SIMULATE_TURN_PROMPT,
+  GENERIC_GAME_RULES_REFERENCE,
 } from "./llm/prompt-constants.js"
 
 const DEFAULT_HOST = "127.0.0.1"
@@ -1769,6 +1770,9 @@ ${cardNames.join("\n")}
 
 Card reference:
 ${uniqueCards.map((card) => `${card.name}\n${card.cardText}\n`).join("\n")}
+
+GENERIC MTG AND COMMANDER RULES REFERENCE:
+${GENERIC_GAME_RULES_REFERENCE}
 `.trim()
 }
 function dedupeCardsByNameAndText(cards: readonly GameCard[]) {

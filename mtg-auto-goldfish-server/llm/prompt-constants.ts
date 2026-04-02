@@ -644,3 +644,209 @@ ABSOLUTE PRIORITIES
 4. Choose a strong line.
 5. Finalize the turn with update_game_state exactly once.
 `;
+
+export const GENERIC_GAME_RULES_REFERENCE = `
+Use normal Magic: The Gathering and Commander rules unless the provided game state or card reference explicitly says otherwise.
+
+FORMAT AND TURN BASICS
+- This is Commander.
+- Commander decks contain 100 cards including the commander.
+- Other than basic lands, cards are singleton.
+- Your commander starts in the command zone.
+- You may cast your commander from the command zone when legal.
+- Each time you cast your commander from the command zone, it costs {2} more for each previous time you cast that commander from the command zone this game. This is commander tax.
+- In multiplayer Commander, each player starts at 40 life.
+- In multiplayer Commander, you draw a card on your first turn.
+- Opponents do not take actions in this goldfish simulation, but the game should still be treated as a multiplayer Commander game for rules and card behavior.
+- A turn normally proceeds:
+  1. untap
+  2. upkeep
+  3. draw
+  4. precombat main phase
+  5. beginning of combat
+  6. declare attackers
+  7. declare blockers
+  8. combat damage
+  9. end of combat
+  10. postcombat main phase
+  11. end step
+  12. cleanup
+
+ZONES
+- Common zones include:
+  - library
+  - hand
+  - battlefield
+  - graveyard
+  - exile
+  - stack
+  - command zone
+- Spells are usually cast from hand unless a rule or effect allows another zone.
+- Permanents normally exist on the battlefield.
+- Instants and sorceries normally go to the graveyard after resolving unless a rule or effect says otherwise.
+- A commander that would go to hand, graveyard, exile, or library may be moved to the command zone instead, if its owner chooses.
+
+CASTING, RESOLVING, AND THE STACK
+- Most spells and abilities use the stack.
+- A spell is not resolved when it is cast. It goes on the stack first.
+- Players normally get priority to act before an object on the stack resolves.
+- Since this is a goldfish simulation, assume opponents do not respond, but still follow normal timing and stack rules.
+- When a spell or ability resolves, do exactly what its text says in order.
+- If a spell or ability has targets, those targets must be legal when chosen.
+- If all targets become illegal before resolution, the spell or ability does not resolve.
+- If only some targets become illegal, it resolves as much as possible using the remaining legal targets.
+- Do not skip required triggers.
+- If multiple triggers you control would go on the stack at the same time, you choose their order.
+
+LANDS AND MANA
+- You normally may play one land during each of your turns, during a main phase, when the stack is empty.
+- Playing a land is not casting a spell.
+- Lands are not cast and do not use the stack.
+- A land may only be played if you still have a land play available.
+- Mana abilities usually do not use the stack.
+- Tap only the permanents actually used to generate mana.
+- A permanent produces only the mana its text allows.
+- Check both total mana and color requirements before casting or activating anything.
+- Generic mana is not colored mana.
+- Colorless mana is not the same thing as generic mana.
+- Costs must be paid in full to cast a spell or activate an ability unless an effect says otherwise.
+- Additional costs must be paid.
+- Optional additional costs may be chosen only if legal.
+- Cost reductions reduce only what the rules allow them to reduce.
+
+SUMMONING SICKNESS AND COMBAT
+- A creature cannot attack unless you have controlled it continuously since the start of your most recent turn, unless it has haste.
+- A creature also cannot use an activated ability with the tap symbol or untap symbol in its cost unless you have controlled it continuously since the start of your most recent turn, unless it has haste.
+- Creatures without haste that entered this turn usually cannot attack this turn.
+- A creature with vigilance does not tap to attack.
+- A creature with defender cannot attack.
+- A tapped creature normally cannot be declared as an attacker.
+- Combat damage is assigned during the combat damage step.
+- Damage marked on creatures remains until cleanup, then is removed.
+- Damage to players causes loss of that much life unless prevented or modified.
+- In Commander, a player that has been dealt 21 or more combat damage by the same commander over the course of the game loses the game.
+- Commander damage is tracked separately for each commander.
+
+STATE-BASED ACTIONS
+- Creatures with damage marked greater than or equal to their toughness are destroyed, unless something prevents that.
+- A creature with toughness 0 or less is put into its owner’s graveyard.
+- A player with 0 or less life loses the game.
+- If a legendary player-controlled permanent is on the battlefield under your control and you control another legendary permanent with the same name, you choose one and put the rest into the graveyard. This is the legend rule.
+- State-based actions are checked whenever a player would receive priority.
+
+COUNTERS, ATTACHMENTS, AND COPIES
+- +1/+1 and -1/-1 counters both affect power and toughness.
+- If a permanent has both +1/+1 and -1/-1 counters, they cancel each other out one-for-one as a state-based action.
+- Equipment and Auras stay attached only if they are legally attached.
+- If an Aura or Equipment becomes illegally attached, it becomes unattached or goes to the graveyard as appropriate.
+- A copied permanent, spell, or ability copies only what the copy effect says it copies.
+- Copying a permanent does not copy counters or attachments unless stated otherwise.
+- A token that leaves the battlefield normally ceases to exist shortly after.
+
+TRIGGERS AND ENTERS / LEAVES THE BATTLEFIELD
+- “When,” “whenever,” and “at” usually indicate triggered abilities.
+- “Enters the battlefield” abilities trigger when the permanent enters the battlefield.
+- “Dies” means “is put into a graveyard from the battlefield.”
+- “Leaves the battlefield” refers to moving from battlefield to another zone.
+- Triggered abilities still happen even if the source later leaves the battlefield, unless the rules say otherwise.
+- Last known information may matter for objects that left the battlefield.
+
+TURN-BASED INFORMATION
+- Track things that matter during the turn, such as:
+  - lands played this turn
+  - mana floating
+  - creatures that attacked
+  - creatures with damage marked
+  - once-per-turn abilities already used
+- Remove information that expires at end of turn when saving final game state.
+- Keep information that persists, such as:
+  - counters
+  - tapped state
+  - commander tax
+  - exiled cards linked to permanents
+  - named choices
+  - chosen card types or colors
+  - known information about hidden zones that is still legally known
+
+COMMANDER-SPECIFIC GUIDELINES
+- Your commander is always available from the command zone unless something changes that.
+- Each cast from the command zone increases future commander tax by {2}.
+- If the commander changes zones, preserve zone changes correctly.
+- If the commander deals combat damage to players, track commander damage separately.
+- Use normal color identity deckbuilding assumptions from Commander if relevant, but do not invent restrictions during play beyond the actual rules and provided decklist.
+
+COMMON MTG KEYWORDS AND ABILITY WORDS
+
+These are short reminders, not full rules text. If a card’s actual text is provided, follow the card text.
+
+EVERGREEN KEYWORDS
+- Deathtouch: Any nonzero damage dealt by this source to a creature is lethal damage.
+- Defender: This creature cannot attack.
+- Double strike: Deals combat damage in both first-strike and regular combat damage steps.
+- Enchant: Aura can legally enchant only what its enchant ability allows.
+- Equip: Attach Equipment to a creature you control by paying its equip cost as a sorcery unless stated otherwise.
+- First strike: Deals combat damage in the first-strike combat damage step.
+- Flash: May be cast any time you could cast an instant.
+- Flying: Can be blocked only by creatures with flying or reach.
+- Haste: Can attack and use tap/untap abilities immediately.
+- Hexproof: Cannot be targeted by spells or abilities your opponents control.
+- Indestructible: Cannot be destroyed by damage or “destroy” effects, but can still be exiled, sacrificed, bounced, etc.
+- Lifelink: Damage dealt by this source causes its controller to gain that much life.
+- Menace: Can’t be blocked except by two or more creatures.
+- Reach: Can block creatures with flying.
+- Trample: Excess combat damage beyond lethal may be assigned to the defending player, planeswalker, or battle as appropriate.
+- Vigilance: Attacking does not cause this creature to tap.
+- Ward: When this permanent becomes the target of an opponent’s spell or ability, counter that spell or ability unless that player pays the ward cost.
+
+COMMON NON-EVERGREEN OR FREQUENT KEYWORDS
+- Changeling: This card is every creature type.
+- Flashback: May be cast from graveyard for its flashback cost, then exiled instead of going elsewhere when it leaves the stack.
+- Foretell: During your turn, you may pay {2} and exile the card from your hand face down. On a later turn, you may cast it for its foretell cost.
+- Morph: May be cast face down as a 2/2 creature for {3}; may later be turned face up for its morph cost.
+- Megamorph: Like morph, but gets a +1/+1 counter when turned face up.
+- Unearth: Return the card from graveyard to battlefield, usually with haste, and exile it if it would leave the battlefield or at the next end step.
+- Cycling: Pay the cycling cost and discard the card to draw a card.
+- Kicker: Optional additional cost paid as the spell is cast.
+- Multikicker: May pay the kicker cost multiple times.
+- Buyback: Optional additional cost; if paid, the card returns to hand instead of going to graveyard on resolution.
+- Cascade: Exile cards from the top of your library until you exile a nonland card with lesser mana value; you may cast it without paying its mana cost.
+- Discover N: Exile cards from the top of your library until you exile a nonland card with mana value N or less; you may cast it without paying its mana cost or put it into hand.
+- Convoke: Your creatures may help pay for the spell; each tapped creature pays for {1} or one mana of that creature’s color.
+- Delve: You may exile cards from your graveyard to help pay the generic portion of the cost.
+- Exploit: When the creature enters, you may sacrifice a creature for an additional effect.
+- Escape: May be cast from the graveyard by paying its escape cost and exiling required cards.
+- Blitz: Alternative cost that usually grants haste and a draw trigger when it dies, and it is sacrificed at the next end step.
+- Mutate: Cast onto a non-Human creature you own; the merged permanent has the top object’s characteristics plus abilities from all parts.
+- Prototype: You may cast the card for an alternative smaller cost and stats if allowed by its prototype ability.
+- Adventure: A card may be cast for its Adventure spell first, then later cast as the permanent from exile.
+- Aftermath: May be cast from graveyard only as the aftermath half.
+- Split second: While this spell is on the stack, players cannot cast spells or activate non-mana abilities.
+- Suspend: Exile with time counters, remove one each upkeep, then cast when the last is removed if able.
+
+COMMON ACTION WORDS
+- Scry N: Look at the top N cards of your library, then put any number on the bottom and the rest back on top in any order.
+- Surveil N: Look at the top N cards of your library, then put any number into your graveyard and the rest back on top in any order.
+- Mill N: Put the top N cards of your library into your graveyard.
+- Draw N: Put N cards from the top of your library into your hand.
+- Discard: Move a card from hand to graveyard.
+- Sacrifice: Move your own permanent from battlefield to graveyard; this is not destruction.
+- Exile: Move a card to exile.
+- Destroy: Put a permanent into graveyard; does not work on indestructible unless lethal damage/state-based actions matter separately.
+- Return: Move a card to the specified zone, often hand or battlefield.
+- Search: Find a card in the specified zone that matches the condition; reveal it if required; shuffle if instructed.
+- Reveal: Show the specified card to all players for the instructed reason.
+- Counter a spell: Remove it from the stack; it does not resolve.
+- Activate: Use an activated ability written as “cost: effect.”
+- Trigger: A triggered ability automatically goes on the stack when its condition happens.
+- Cast: Move a spell to the stack and pay costs.
+- Play: Either play a land or cast a spell, depending on context.
+- Fight: Two creatures deal damage equal to their power to each other.
+- Populate: Create a token that is a copy of a creature token you control.
+- Proliferate: Choose any number of permanents and/or players with counters and give each another counter of a kind already there.
+
+INTERPRETATION RULES
+- Card text beats general rules when there is a conflict.
+- If a card says it can do something that normally is not allowed, follow the card.
+- If a rule detail is not written in this section, use normal MTG rules.
+- If the provided card reference gives the exact text of a card, follow that exact text over these summaries.
+`;
