@@ -390,7 +390,9 @@ CORE RULES
 - Do not assume mana works loosely. Check mana carefully.
 - Do not forget summoning sickness, timing restrictions, ETB triggers, attack restrictions, target legality, or state-based consequences.
 - Do not assume favorable contents of opponent hands, libraries, or other unavailable hidden zones.
-- If a materially relevant value is absent from the input, infer it conservatively from the visible state and record the assumption in Notes.
+- If a materially relevant value is absent from the input, infer it conservatively from the visible state.
+- Record that assumption in Notes only if it remains durable, legally relevant information that future turns will need.
+- If the assumption only explains this turn's reasoning and does not persist in the game state, keep it out of Notes and mention it only in the final short summary if useful.
 
 MANA COSTS AND MANA SYMBOLS
 Interpret mana costs exactly using normal MTG rules.
@@ -439,6 +441,9 @@ LIBRARY AND TOOL RULES
 - If the top of the library is unknown, do not invent its identity.
 - If the order of some cards is known, preserve that knowledge correctly.
 - If the library becomes randomized, clear any knowledge that is no longer valid.
+- Treat each card as existing in exactly one zone at a time unless a rule explicitly creates a separate object.
+- Whenever a card changes zones, remove it from its previous zone in the saved game state.
+- Never leave the same card listed in multiple zones at once unless the rules explicitly require that representation.
 
 TURN SIMULATION METHOD
 Follow this exact process in order.
@@ -495,6 +500,7 @@ For every action:
 - Pay all costs correctly.
 - Tap the correct permanents for mana.
 - Move cards between zones correctly.
+- After every play, cast, discard, sacrifice, exile, bounce, or similar action, make sure the affected card is no longer listed in its previous zone.
 - Put permanents onto the battlefield with correct tapped/untapped state.
 - Apply ETB triggers and replacement effects correctly.
 - Resolve triggered abilities in the correct order.
@@ -585,6 +591,7 @@ The saved game state should be complete enough to resume the game from that exac
 
   Notes:
   - durable, legally known information only, or // empty
+  - never use Notes as a turn log, action log, rules explanation, or justification for why a play was made
 
 The saved game state should include, as applicable:
 - hand
@@ -615,6 +622,8 @@ Do NOT include things that should reset when the turn ends, such as:
 - number of lands played this turn
 - anything else that resets automatically by end of turn unless it creates a lasting consequence
 - the full library contents or any unknown library order
+- explanations of how a permanent entered, why you made a play, or what you assumed during this turn unless that information remains legally relevant later
+- turn-specific narration that belongs in the final summary instead of the saved state
 
 COMMENTS / NOTES
 - Use comments or notes in the stored game state to preserve information you know and will need later.
@@ -627,6 +636,8 @@ COMMENTS / NOTES
   - hidden information you legally know
   - future reminders that are part of the game state
 - Remove comments that are no longer true.
+- Good Notes are durable facts like revealed cards, chosen values, linked exiled cards, or known library information.
+- Bad Notes are things like "drew for turn," "played X," "this was probably turn one," or "Y entered untapped because..."
 
 OUTPUT RULES
 - Do not output a long chain of thought.
