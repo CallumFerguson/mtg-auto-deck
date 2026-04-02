@@ -33,7 +33,7 @@ const DEFAULT_ALLOWED_ORIGINS = [
   "http://127.0.0.1:5173",
 ]
 const GAME_NOT_FOUND_MESSAGE =
-  "Game not found. It may be invalid, may not have been created yet, or may have expired after one hour."
+  "Game not found. It may be invalid, may not have been created yet, or may have expired after 24 hours."
 const DEFAULT_LLM_MAX_OUTPUT_TOKENS = 8192
 const DEFAULT_GAME_STORE_PERSISTENCE_PATH = resolve(
   process.cwd(),
@@ -1899,6 +1899,7 @@ function takeToolUiData(toolName: string, gameId: string) {
 
   return toolUiData
 }
+
 
 
 

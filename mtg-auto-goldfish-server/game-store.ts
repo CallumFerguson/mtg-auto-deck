@@ -9,6 +9,7 @@ import {
 import { dirname } from 'node:path'
 
 const ONE_HOUR_IN_MS = 60 * 60 * 1000
+const GAME_RETENTION_IN_MS = 24 * ONE_HOUR_IN_MS
 const STARTING_HAND_SIZE = 7
 const EXPECTED_GAME_CARDS = 100
 const GAME_STORE_FILE_VERSION = 1
@@ -655,7 +656,7 @@ export class GameStore {
   }
 
   private deleteExpiredGames() {
-    const expirationCutoff = Date.now() - ONE_HOUR_IN_MS
+    const expirationCutoff = Date.now() - GAME_RETENTION_IN_MS
     let deletedAnyGames = false
 
     for (const [gameId, game] of this.games.entries()) {
@@ -1045,6 +1046,8 @@ function levenshteinDistance(left: string, right: string) {
 
   return previousRow[right.length]
 }
+
+
 
 
 
