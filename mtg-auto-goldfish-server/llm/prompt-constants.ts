@@ -446,7 +446,6 @@ Follow this exact process in order.
 1. READ THE INPUTS
 - Read the starting game state carefully.
 - Identify all relevant permanents, counters, tapped status, summoning sickness, attack restrictions, floating mana, delayed triggers, static effects, known hidden information, commander tax, and any other game-relevant notes.
-- Identify which values are explicit, which are inferred, and which must be preserved in the saved state.
 
 2. DETERMINE WHAT TURN STATE NEEDS TO BE PROCESSED
 - Identify whether this is your first turn or a later turn if that can be determined from the game state.
