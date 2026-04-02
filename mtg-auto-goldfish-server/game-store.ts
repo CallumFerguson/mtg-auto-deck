@@ -43,6 +43,7 @@ type GameRecord = {
   commanders: GameCard[]
   initialLibrary: GameCard[]
   library: string[]
+  currentGameState?: string
   openingHandSnapshot?: OpeningHandSnapshot
   hasDrawnStartingHand: boolean
   mulliganCount: number
@@ -141,6 +142,7 @@ export type GetGamePromptContextResult =
       commanders: GameCard[]
       initialLibrary: GameCard[]
       currentLibrary: string[]
+      currentGameState?: string
       openingHandSnapshot?: OpeningHandSnapshot
     }
   | {
@@ -188,6 +190,16 @@ export type RestoreOpeningHandSnapshotResult =
   | {
       ok: false
       reason: 'game_not_found' | 'opening_hand_snapshot_not_found'
+    }
+
+export type UpdateGameStateResult =
+  | {
+      ok: true
+      gameState: string
+    }
+  | {
+      ok: false
+      reason: 'game_not_found'
     }
 
 export type GameStoreOptions = {
@@ -238,6 +250,7 @@ export class GameStore {
       commanders: [...commanders],
       initialLibrary: sortedInitialLibrary,
       library: [],
+      currentGameState: undefined,
       openingHandSnapshot: undefined,
       hasDrawnStartingHand: false,
       mulliganCount: 0,
@@ -556,6 +569,7 @@ export class GameStore {
     game.library = shuffle(game.initialLibrary.map((card) => card.name), () =>
       nextRandom(game)
     )
+    game.currentGameState = undefined
     game.openingHandSnapshot = undefined
     game.hasDrawnStartingHand = false
     game.mulliganCount = 0
@@ -581,6 +595,7 @@ export class GameStore {
     }
 
     game.library = [...game.openingHandSnapshot.library]
+    game.currentGameState = undefined
     game.hasDrawnStartingHand = true
     game.mulliganCount = game.openingHandSnapshot.validation.mulliganCount
     this.persistGames()
@@ -590,6 +605,24 @@ export class GameStore {
       cardsRemaining: game.library.length,
       startingHand: [...game.openingHandSnapshot.startingHand],
       mulliganCount: game.mulliganCount,
+    }
+  }
+
+  updateGameState(gameId: string, gameState: string): UpdateGameStateResult {
+    this.deleteExpiredGames()
+
+    const game = this.games.get(gameId)
+
+    if (!game) {
+      return { ok: false, reason: 'game_not_found' }
+    }
+
+    game.currentGameState = gameState
+    this.persistGames()
+
+    return {
+      ok: true,
+      gameState,
     }
   }
 
@@ -610,6 +643,7 @@ export class GameStore {
       currentLibrary: [...game.library].sort((leftCard, rightCard) =>
         leftCard.localeCompare(rightCard)
       ),
+      currentGameState: game.currentGameState,
       openingHandSnapshot: game.openingHandSnapshot
         ? {
             startingHand: [...game.openingHandSnapshot.startingHand],
@@ -668,6 +702,7 @@ export class GameStore {
           commanders: game.commanders.map((card) => ({ ...card })),
           initialLibrary: game.initialLibrary.map((card) => ({ ...card })),
           library: [...game.library],
+          currentGameState: game.currentGameState,
           openingHandSnapshot: game.openingHandSnapshot
             ? {
                 startingHand: [...game.openingHandSnapshot.startingHand],
@@ -701,6 +736,7 @@ export class GameStore {
         commanders: game.commanders.map((card) => ({ ...card })),
         initialLibrary: game.initialLibrary.map((card) => ({ ...card })),
         library: [...game.library],
+        currentGameState: game.currentGameState,
         openingHandSnapshot: game.openingHandSnapshot
           ? {
               startingHand: [...game.openingHandSnapshot.startingHand],
@@ -825,6 +861,8 @@ function isValidPersistedGameRecord(value: unknown): value is GameRecord {
     record.initialLibrary.every(isGameCard) &&
     Array.isArray(record.library) &&
     record.library.every((card) => typeof card === 'string') &&
+    (record.currentGameState === undefined ||
+      typeof record.currentGameState === 'string') &&
     typeof record.hasDrawnStartingHand === 'boolean' &&
     typeof record.mulliganCount === 'number' &&
     typeof record.randomState === 'number' &&
@@ -1007,3 +1045,6 @@ function levenshteinDistance(left: string, right: string) {
 
   return previousRow[right.length]
 }
+
+
+

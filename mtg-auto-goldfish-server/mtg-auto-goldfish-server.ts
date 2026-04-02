@@ -158,6 +158,7 @@ function createTurnSimulationServer() {
     registerReturnCardToLibraryTool(server)
     registerReturnCardsToLibraryTool(server)
     registerShuffleLibraryTool(server)
+    registerUpdateGameStateTool(server)
   })
 }
 
@@ -805,6 +806,78 @@ function registerShuffleLibraryTool(server: McpServer) {
   )
 }
 
+function registerUpdateGameStateTool(server: McpServer) {
+  server.registerTool(
+    "update_game_state",
+    {
+      title: "Update Game State",
+      description:
+        "Save the current game state text for this game after finishing a turn simulation. The string can use any format the model chooses.",
+      inputSchema: {
+        gameId: z
+          .string()
+          .trim()
+          .min(1)
+          .describe(
+            "The game ID returned by the regular HTTP create-game endpoint, not by an MCP tool."
+          ),
+        gameState: z
+          .string()
+          .describe(
+            "The full end-of-turn game state string in any format the model chooses."
+          ),
+      },
+      outputSchema: {
+        gameId: z.string(),
+        gameState: z.string(),
+        updated: z.literal(true),
+      },
+    },
+    async ({ gameId, gameState }) => {
+      const updateResult = gameStore.updateGameState(gameId, gameState)
+
+      if (!updateResult.ok) {
+        logWarn("update_game_state", `${shortId(gameId)} ${updateResult.reason}`)
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: GAME_NOT_FOUND_MESSAGE,
+            },
+          ],
+          isError: true,
+        }
+      }
+
+      const response = {
+        gameId,
+        gameState: updateResult.gameState,
+        updated: true as const,
+      }
+
+      storeToolUiData("update_game_state", gameId, {
+        structuredContent: response,
+        uiMetadata: {},
+      })
+
+      logInfo(
+        "update_game_state",
+        `${shortId(gameId)} len=${response.gameState.length}`
+      )
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Saved updated game state (${response.gameState.length} characters).`,
+          },
+        ],
+        structuredContent: response,
+      }
+    }
+  )
+}
 function registerKeepHandTool(server: McpServer) {
   server.registerTool(
     "keep_hand",
@@ -1221,7 +1294,8 @@ async function main() {
       resolvedStartingHand,
       gamePromptContext.commanders,
       gamePromptContext.currentLibrary,
-      gamePromptContext.initialLibrary
+      gamePromptContext.initialLibrary,
+      gamePromptContext.currentGameState
     )
 
     try {
@@ -1651,18 +1725,15 @@ function buildTurnSimulationPrompt(
   startingHand: readonly string[],
   commanders: readonly GameCard[],
   currentLibrary: readonly string[],
-  initialLibrary: readonly GameCard[]
+  initialLibrary: readonly GameCard[],
+  currentGameState?: string
 ) {
   const commanderNames = commanders.map((card) => card.name)
   const cardNames = currentLibrary
   const uniqueCards = dedupeCardsByNameAndText([...commanders, ...initialLibrary])
-
-  return `${SIMULATE_TURN_PROMPT}
-
-Game ID: ${gameId}
-
-===Start Game State===
-
+  const resolvedGameState = currentGameState?.trim()
+    ? currentGameState.trim()
+    : `
 Hand:
 ${startingHand.join("\n")}
 
@@ -1678,6 +1749,19 @@ Exile:
 Battlefield:
 // empty
 
+Opponent A Life: 40
+Opponent B Life: 40
+Opponent C Life: 40
+`
+
+  return `${SIMULATE_TURN_PROMPT}
+
+Game ID: ${gameId}
+
+===Start Game State===
+
+${resolvedGameState}
+
 ===End Game State===
 
 Cards in library. Not actual order of library. Use tools to interact with library:
@@ -1687,7 +1771,6 @@ Card reference:
 ${uniqueCards.map((card) => `${card.name}\n${card.cardText}\n`).join("\n")}
 `.trim()
 }
-
 function dedupeCardsByNameAndText(cards: readonly GameCard[]) {
   const seenCards = new Set<string>()
 
@@ -1816,6 +1899,12 @@ function takeToolUiData(toolName: string, gameId: string) {
 
   return toolUiData
 }
+
+
+
+
+
+
 
 
 
