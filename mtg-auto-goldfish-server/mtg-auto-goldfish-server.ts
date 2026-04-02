@@ -1661,7 +1661,7 @@ function buildTurnSimulationPrompt(
 
 Game ID: ${gameId}
 
-===Game State===
+===Start Game State===
 
 Hand:
 ${startingHand.join("\n")}
