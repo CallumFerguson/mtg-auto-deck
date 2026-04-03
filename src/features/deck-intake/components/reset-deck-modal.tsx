@@ -2,6 +2,7 @@ import { useEffect } from "react"
 import { AlertTriangle, RotateCcw } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { useModalBackdropDismiss } from "@/lib/use-modal-backdrop-dismiss"
 
 type ResetDeckModalProps = {
   isOpen: boolean
@@ -14,6 +15,12 @@ export function ResetDeckModal({
   onCancel,
   onConfirm,
 }: ResetDeckModalProps) {
+  const {
+    handleBackdropPointerCancel,
+    handleBackdropPointerDown,
+    handleBackdropPointerUp,
+  } = useModalBackdropDismiss({ onDismiss: onCancel })
+
   useEffect(() => {
     if (!isOpen) {
       return
@@ -43,7 +50,9 @@ export function ResetDeckModal({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm"
-      onClick={onCancel}
+      onPointerCancel={handleBackdropPointerCancel}
+      onPointerDown={handleBackdropPointerDown}
+      onPointerUp={handleBackdropPointerUp}
       role="presentation"
     >
       <div

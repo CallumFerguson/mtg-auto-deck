@@ -3,6 +3,7 @@ import { Check, Copy, LoaderCircle, Sparkles, Square, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import type { PromptStreamEvent } from "@/features/deck-intake/lib/simulation-session"
+import { useModalBackdropDismiss } from "@/lib/use-modal-backdrop-dismiss"
 
 type CustomPromptTestModalProps = {
   isOpen: boolean
@@ -38,6 +39,16 @@ export function CustomPromptTestModal({
   const [copyState, setCopyState] = useState<
     "idle" | "result-copied" | "raw-copied" | "copy-error"
   >("idle")
+  const {
+    handleBackdropPointerCancel,
+    handleBackdropPointerDown,
+    handleBackdropPointerUp,
+  } = useModalBackdropDismiss({
+    onDismiss: () => {
+      abortControllerRef.current?.abort()
+      onClose()
+    },
+  })
 
   useEffect(() => {
     if (!isOpen) {
@@ -259,10 +270,9 @@ export function CustomPromptTestModal({
   return (
     <div
       className="fixed inset-0 z-50 flex overflow-y-auto bg-black/75 px-4 py-6 backdrop-blur-sm sm:items-center sm:justify-center"
-      onClick={() => {
-        abortControllerRef.current?.abort()
-        onClose()
-      }}
+      onPointerCancel={handleBackdropPointerCancel}
+      onPointerDown={handleBackdropPointerDown}
+      onPointerUp={handleBackdropPointerUp}
       role="presentation"
     >
       <div

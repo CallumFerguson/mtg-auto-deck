@@ -3,6 +3,7 @@ import { Check, Copy, Eye, LoaderCircle, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import type { SimulationPromptRun } from "@/features/deck-intake/lib/simulation-session"
+import { useModalBackdropDismiss } from "@/lib/use-modal-backdrop-dismiss"
 
 type PromptStreamModalProps = {
   isOpen: boolean
@@ -24,6 +25,11 @@ export function PromptStreamModal({
   const [copyState, setCopyState] = useState<
     "idle" | "stream-copied" | "all-copied" | "stream-error" | "all-error"
   >("idle")
+  const {
+    handleBackdropPointerCancel,
+    handleBackdropPointerDown,
+    handleBackdropPointerUp,
+  } = useModalBackdropDismiss({ onDismiss: onClose })
 
   const selectedRun = useMemo(() => {
     if (!promptRuns.length) {
@@ -223,7 +229,9 @@ export function PromptStreamModal({
   return (
     <div
       className="fixed inset-0 z-50 flex overflow-y-auto bg-black/70 px-4 py-6 backdrop-blur-sm sm:items-center sm:justify-center"
-      onClick={onClose}
+      onPointerCancel={handleBackdropPointerCancel}
+      onPointerDown={handleBackdropPointerDown}
+      onPointerUp={handleBackdropPointerUp}
       role="presentation"
     >
       <div

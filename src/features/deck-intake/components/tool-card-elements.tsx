@@ -10,6 +10,7 @@ import {
   toTypeLine,
 } from "@/features/deck-intake/lib/scryfall"
 import type { ScryfallCard } from "@/features/deck-intake/types"
+import { useModalBackdropDismiss } from "@/lib/use-modal-backdrop-dismiss"
 import { cn } from "@/lib/utils"
 
 type ToolCardChipProps = {
@@ -304,10 +305,17 @@ function CardLookupModal({
   const typeLine = card ? toTypeLine(card) : ""
   const oracleText = card ? toOracleText(card) : ""
   const displayCardName = card?.name ?? cardName ?? "Card"
+  const {
+    handleBackdropPointerCancel,
+    handleBackdropPointerDown,
+    handleBackdropPointerUp,
+  } = useModalBackdropDismiss({ onDismiss: onClose })
   const modalContent = (
     <div
       className="fixed inset-0 z-[100] flex overflow-y-auto bg-black/75 px-4 py-6 backdrop-blur-sm sm:items-center sm:justify-center"
-      onClick={onClose}
+      onPointerCancel={handleBackdropPointerCancel}
+      onPointerDown={handleBackdropPointerDown}
+      onPointerUp={handleBackdropPointerUp}
       role="presentation"
     >
       <div
