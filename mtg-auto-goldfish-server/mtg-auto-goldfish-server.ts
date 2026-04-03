@@ -1414,6 +1414,8 @@ function getProviderReasoningEffort(
   _model: string | undefined
 ) {
   switch (provider) {
+    case "llama.cpp":
+      return undefined
     case "openai":
       return process.env.OPENAI_REASONING_EFFORT?.trim() || "medium"
     case "claude":
@@ -1428,6 +1430,8 @@ function getProviderReasoningEffort(
 
 function getProviderReasoningSummary(provider: PromptProcessorProvider) {
   switch (provider) {
+    case "llama.cpp":
+      return undefined
     case "openai": {
       const configuredSummary = process.env.OPENAI_REASONING_SUMMARY?.trim()
 
@@ -1450,6 +1454,8 @@ function getProviderReasoningSummary(provider: PromptProcessorProvider) {
 }
 function getProviderBaseUrl(provider: PromptProcessorProvider) {
   switch (provider) {
+    case "llama.cpp":
+      return process.env.LLAMA_CPP_BASE_URL?.trim() || undefined
     case "openai":
       return undefined
     case "claude":
@@ -1472,6 +1478,8 @@ function getProviderApiToken(provider: PromptProcessorProvider) {
 
 function getProviderApiKey(provider: PromptProcessorProvider) {
   switch (provider) {
+    case "llama.cpp":
+      return process.env.LLAMA_CPP_API_KEY?.trim() || undefined
     case "openai":
       return requireNonEmptyEnvValue("OPENAI_API_KEY")
     case "claude":
@@ -1486,6 +1494,8 @@ function getProviderApiKey(provider: PromptProcessorProvider) {
 
 function getProviderModel(provider: PromptProcessorProvider) {
   switch (provider) {
+    case "llama.cpp":
+      return undefined
     case "openai":
       return requireNonEmptyEnvValue("OPENAI_MODEL")
     case "claude":
@@ -1497,14 +1507,13 @@ function getProviderModel(provider: PromptProcessorProvider) {
       return process.env.LM_STUDIO_MODEL?.trim() || undefined
   }
 }
-
 function resolveMcpServerUrl(
   provider: PromptProcessorProvider,
   configuredUrl: string | undefined,
   localUrl: string,
   envName: string
 ) {
-  if (provider === "lm-studio") {
+  if (provider === "lm-studio" || provider === "llama.cpp") {
     return localUrl
   }
 
@@ -1917,7 +1926,7 @@ function formatPromptMetrics(response: PromptProcessingResult) {
 }
 
 function estimatePromptCostUsd(response: PromptProcessingResult) {
-  if (response.provider === "lm-studio") {
+  if (response.provider === "lm-studio" || response.provider === "llama.cpp") {
     return 0
   }
 
@@ -1963,6 +1972,8 @@ function getTokenPricing(
   const normalizedModelKey = modelKey.trim().toLowerCase()
 
   switch (provider) {
+    case "llama.cpp":
+      return undefined
     case "openai":
       return getOpenAiTokenPricing(normalizedModelKey, inputTokens)
     case "claude":
@@ -2164,6 +2175,12 @@ function takeToolUiData(toolName: string, gameId: string) {
 
   return toolUiData
 }
+
+
+
+
+
+
 
 
 

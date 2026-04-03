@@ -102,18 +102,24 @@ Example `.env` file:
 
 ```dotenv
 # Global LLM selection
-# Valid values: lm-studio, openai, claude, gemini
+# Valid values: lm-studio, llama.cpp, openai, claude, gemini
 LLM_PROVIDER=lm-studio
 
 LOG_PROMPTS_TO_FILE=false
 
-# Used by OpenAI, Claude, and Gemini requests. Ignored by LM Studio.
+# Used by OpenAI, Claude, and Gemini requests. Ignored by local providers.
 LLM_MAX_OUTPUT_TOKENS=50000
 
 # LM Studio
 # Optional. If blank, the server picks the largest currently loaded LM Studio model.
 LM_STUDIO_MODEL=
 
+# llama.cpp / llama-server
+# Optional. Defaults to http://127.0.0.1:8080/v1 if blank.
+LLAMA_CPP_BASE_URL=
+# Optional unless your llama-server instance requires auth.
+LLAMA_CPP_API_KEY=
+# The app auto-detects the currently loaded model from llama-server.
 # OpenAI
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-5.4-mini
@@ -136,7 +142,7 @@ GEMINI_THINKING_LEVEL=medium
 
 # Public MCP URLs for cloud providers only.
 # Required when LLM_PROVIDER=openai, LLM_PROVIDER=claude, or LLM_PROVIDER=gemini.
-# Ignored when LLM_PROVIDER=lm-studio, because LM Studio always uses local http MCP URLs.
+# Ignored when LLM_PROVIDER=lm-studio or LLM_PROVIDER=llama.cpp, because local providers use local http MCP URLs.
 GOLDFISH_OPENING_HAND_MCP_SERVER_URL=https://example.com//mcp/opening-hand
 GOLDFISH_TURN_SIMULATION_MCP_SERVER_URL=https://example.com/mcp/turn-simulation
 ```
@@ -151,6 +157,16 @@ Configure LM Studio to connect to the running HTTP MCP endpoint instead of spawn
     "url": "http://127.0.0.1:3001/mcp"
   }
 }
+```
+
+### llama.cpp configuration
+
+`llama-server` is wired through its OpenAI-compatible `/v1/chat/completions` API. The app bridges MCP tools into regular tool calls for the model, and it auto-detects the currently loaded model from the server, so no `LLAMA_CPP_MODEL` env var is needed.
+
+Example launch:
+
+```bash
+llama-server -m path/to/model.gguf --port 8080
 ```
 
 ### App flow
@@ -185,6 +201,12 @@ npm run dev
 - Tailwind CSS v4
 - shadcn/ui
 - Scryfall API
+
+
+
+
+
+
 
 
 
