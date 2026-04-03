@@ -59,6 +59,7 @@ type LlamaCppChatCompletionChunk = {
   choices?: Array<{
     delta?: {
       content?: string
+      reasoning_content?: string
       tool_calls?: Array<{
         index?: number
         id?: string
@@ -96,6 +97,7 @@ type LlamaCppRoundResult = {
     args: Record<string, unknown>
     argumentsText: string
   }>
+  reasoningText: string
   usage?: PromptTokenUsage
 }
 
@@ -151,8 +153,11 @@ export function createLlamaCppPromptProcessor(
       ]
 
       let finalText = ""
+      let finalReasoning = ""
       let usage: PromptTokenUsage | undefined
       let completed = false
+      let reasoningStarted = false
+      let messageStarted = false
 
       for (let roundIndex = 0; roundIndex < LLAMA_CPP_MAX_TOOL_ROUNDS; roundIndex += 1) {
         const roundResult = await streamLlamaCppRound({
@@ -164,7 +169,30 @@ export function createLlamaCppPromptProcessor(
           tools,
           maxOutputTokens,
           signal: timeoutSignal,
+          onReasoningDelta(delta) {
+            if (!reasoningStarted) {
+              reasoningStarted = true
+              onEvent?.({
+                type: "status",
+                event: "reasoning.start",
+              })
+            }
+
+            finalReasoning += delta
+            onEvent?.({
+              type: "reasoning",
+              delta,
+            })
+          },
           onTextDelta(delta) {
+            if (!messageStarted) {
+              messageStarted = true
+              onEvent?.({
+                type: "status",
+                event: "message.start",
+              })
+            }
+
             finalText += delta
             onEvent?.({
               type: "message",
@@ -175,6 +203,7 @@ export function createLlamaCppPromptProcessor(
 
         usage = roundResult.usage ?? usage
         messages.push(roundResult.assistantMessage)
+        finalReasoning = finalReasoning || roundResult.reasoningText
 
         if (roundResult.toolCalls.length === 0) {
           completed = true
@@ -261,10 +290,24 @@ export function createLlamaCppPromptProcessor(
         throw new Error("llama.cpp returned no message content for this prompt.")
       }
 
+      if (reasoningStarted) {
+        onEvent?.({
+          type: "status",
+          event: "reasoning.end",
+        })
+      }
+
+      if (messageStarted) {
+        onEvent?.({
+          type: "status",
+          event: "message.end",
+        })
+      }
+
       onEvent?.({
         type: "done",
         result: trimmedResult,
-        reasoning: "",
+        reasoning: finalReasoning.trim(),
         model: selectedModel,
       })
 
@@ -386,6 +429,7 @@ async function streamLlamaCppRound(options: {
   tools?: LlamaCppToolDefinition[]
   maxOutputTokens?: number
   signal?: AbortSignal
+  onReasoningDelta?: (delta: string) => void
   onTextDelta?: (delta: string) => void
 }): Promise<LlamaCppRoundResult> {
   const response = await options.fetchImpl(`${options.baseUrl}/chat/completions`, {
@@ -412,6 +456,7 @@ async function streamLlamaCppRound(options: {
 
   const toolCallsByIndex = new Map<number, LlamaCppToolCall>()
   let messageText = ""
+  let reasoningText = ""
   let usage: PromptTokenUsage | undefined
 
   await consumeSseStream(
@@ -424,6 +469,11 @@ async function streamLlamaCppRound(options: {
 
         if (!delta) {
           continue
+        }
+
+        if (typeof delta.reasoning_content === "string" && delta.reasoning_content.length > 0) {
+          reasoningText += delta.reasoning_content
+          options.onReasoningDelta?.(delta.reasoning_content)
         }
 
         if (typeof delta.content === "string" && delta.content.length > 0) {
@@ -480,6 +530,7 @@ async function streamLlamaCppRound(options: {
       })),
     },
     toolCalls,
+    reasoningText,
     usage,
   }
 }
