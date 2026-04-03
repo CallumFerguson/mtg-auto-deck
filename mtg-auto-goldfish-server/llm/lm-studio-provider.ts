@@ -90,6 +90,8 @@ export function createLmStudioPromptProcessor(
         )
       }
 
+      const startedAt = Date.now()
+
       const { signal, cleanup } = createTimeoutSignal(
         undefined,
         LM_STUDIO_PROMPT_TIMEOUT_MS
@@ -138,7 +140,9 @@ export function createLmStudioPromptProcessor(
         return {
           result,
 
+          provider: "lm-studio" as const,
           model: selectedModel,
+          durationMs: Date.now() - startedAt,
         }
       } catch (error) {
         throw normalizePromptAbortError(error)
@@ -174,6 +178,8 @@ export function createLmStudioPromptProcessor(
 
         model: selectedModel,
       })
+
+      const startedAt = Date.now()
 
       const {
         signal: timeoutSignal,
@@ -500,7 +506,9 @@ export function createLmStudioPromptProcessor(
       const result = {
         result: finalResult,
 
+        provider: "lm-studio" as const,
         model: selectedModel,
+        durationMs: Date.now() - startedAt,
       }
 
       onEvent({

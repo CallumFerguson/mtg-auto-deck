@@ -3,6 +3,7 @@ import type {
   PromptProcessingResult,
   PromptProcessor,
   PromptProcessorOptions,
+  PromptTokenUsage,
 } from "./index.js"
 
 export const OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
@@ -23,6 +24,11 @@ type OpenAiReasoningConfig = {
 type OpenAiResponse = {
   output?: OpenAiOutputItem[]
   output_text?: string
+  usage?: {
+    input_tokens?: number
+    output_tokens?: number
+    total_tokens?: number
+  }
 }
 
 type OpenAiOutputItem = {
@@ -85,6 +91,8 @@ export function createOpenAiPromptProcessor(
       OPENAI_PROMPT_TIMEOUT_MS
     )
 
+    const startedAt = Date.now()
+
     try {
       const response = await requestJson<OpenAiResponse>(
         fetchImpl,
@@ -118,7 +126,10 @@ export function createOpenAiPromptProcessor(
 
       return {
         result: extractedMessage,
+        provider: "openai",
         model: selectedModel,
+        usage: extractOpenAiUsage(response.usage),
+        durationMs: Date.now() - startedAt,
       }
     } catch (error) {
       throw normalizePromptAbortError(error)
@@ -151,6 +162,7 @@ export function createOpenAiPromptProcessor(
         OPENAI_PROMPT_TIMEOUT_MS
       )
 
+      const startedAt = Date.now()
       let finalResponse: OpenAiResponse | undefined
       let streamedMessage = ""
       let hasStartedMessage = false
@@ -437,7 +449,10 @@ export function createOpenAiPromptProcessor(
 
       return {
         result: extractedMessage,
+        provider: "openai",
         model: selectedModel,
+        usage: extractOpenAiUsage(finalResponse?.usage),
+        durationMs: Date.now() - startedAt,
       }
     },
   }
@@ -538,6 +553,22 @@ function extractReasoningFromItem(item: OpenAiOutputItem) {
 
 function extractToolName(item: OpenAiOutputItem) {
   return asString(item.name) ?? asString(item.tool_name)
+}
+
+function extractOpenAiUsage(usage: OpenAiResponse["usage"]): PromptTokenUsage | undefined {
+  if (!usage) {
+    return undefined
+  }
+
+  const normalizedUsage = {
+    inputTokens: usage.input_tokens,
+    outputTokens: usage.output_tokens,
+    totalTokens: usage.total_tokens,
+  }
+
+  return Object.values(normalizedUsage).some((value) => typeof value === "number")
+    ? normalizedUsage
+    : undefined
 }
 
 function normalizeArgumentsText(value: unknown) {

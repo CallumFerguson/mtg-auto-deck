@@ -25,9 +25,18 @@ export type LoadedTextModel = {
   instanceIds: string[]
 }
 
+export type PromptTokenUsage = {
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens?: number
+}
+
 export type PromptProcessingResult = {
   result: string
+  provider: PromptProcessorProvider
   model: LoadedTextModel
+  usage?: PromptTokenUsage
+  durationMs: number
 }
 
 export type PromptStreamEvent =

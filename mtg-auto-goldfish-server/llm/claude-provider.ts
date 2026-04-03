@@ -4,6 +4,7 @@ import type {
   PromptProcessor,
   PromptProcessorOptions,
   PromptStreamEvent,
+  PromptTokenUsage,
 } from "./index.js"
 
 export const CLAUDE_DEFAULT_BASE_URL = "https://api.anthropic.com/v1"
@@ -28,6 +29,10 @@ type ClaudeAdaptiveThinkingConfig = {
 
 type ClaudeMessageResponse = {
   content?: ClaudeContentBlock[]
+  usage?: {
+    input_tokens?: number
+    output_tokens?: number
+  }
 }
 
 type ClaudeContentBlock = {
@@ -78,6 +83,8 @@ export function createClaudePromptProcessor(
       model: selectedModel,
     })
 
+    const startedAt = Date.now()
+
     const { signal: timeoutSignal, cleanup } = createTimeoutSignal(
       signal,
       CLAUDE_PROMPT_TIMEOUT_MS
@@ -126,7 +133,10 @@ export function createClaudePromptProcessor(
 
       return {
         result: messageText,
+        provider: "claude",
         model: selectedModel,
+        usage: extractClaudeUsage(response.usage),
+        durationMs: Date.now() - startedAt,
       }
     } catch (error) {
       throw normalizePromptAbortError(error)
@@ -170,6 +180,33 @@ function buildAdaptiveThinkingConfig(
 
 function isClaudeReasoningEffort(value: string): value is ClaudeReasoningEffort {
   return (CLAUDE_ADAPTIVE_EFFORT_VALUES as readonly string[]).includes(value)
+}
+
+function extractClaudeUsage(usage: ClaudeMessageResponse["usage"]): PromptTokenUsage | undefined {
+  if (!usage) {
+    return undefined
+  }
+
+  const inputTokens = usage.input_tokens
+  const outputTokens = usage.output_tokens
+  const totalTokens =
+    typeof inputTokens === "number" && typeof outputTokens === "number"
+      ? inputTokens + outputTokens
+      : undefined
+
+  if (
+    typeof inputTokens !== "number" &&
+    typeof outputTokens !== "number" &&
+    typeof totalTokens !== "number"
+  ) {
+    return undefined
+  }
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+  }
 }
 
 function buildMcpServers(options: {

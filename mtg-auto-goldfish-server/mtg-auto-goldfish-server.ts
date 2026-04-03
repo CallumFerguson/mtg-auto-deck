@@ -12,6 +12,7 @@ import { GameStore, type GameCard } from "./game-store.js"
 import {
   createPromptProcessor,
   normalizePromptProcessorProvider,
+  type PromptProcessingResult,
   type PromptProcessorOptions,
   type PromptProcessorProvider,
   type PromptStreamEvent,
@@ -1139,7 +1140,7 @@ async function main() {
 
       logInfo(
         "prompt",
-        `len=${prompt.length} model=${response.model.key} size=${response.model.sizeBytes}`
+        `len=${prompt.length} model=${response.model.key} size=${response.model.sizeBytes} ${formatPromptMetrics(response)}`
       )
 
       res.end()
@@ -1220,7 +1221,7 @@ async function main() {
 
       logInfo(
         "simulate_starting_hand",
-        `${shortId(gameId)} hand=${snapshotResult.startingHand.length} library=${snapshotResult.library.length} valid=${snapshotResult.validation.isValid} len=${prompt.length} model=${response.model.key} size=${response.model.sizeBytes}`
+        `${shortId(gameId)} hand=${snapshotResult.startingHand.length} library=${snapshotResult.library.length} valid=${snapshotResult.validation.isValid} len=${prompt.length} model=${response.model.key} size=${response.model.sizeBytes} ${formatPromptMetrics(response)}`
       )
 
       res.end()
@@ -1310,7 +1311,7 @@ async function main() {
 
       logInfo(
         "simulate_turn",
-        `${shortId(gameId)} hand=${resolvedStartingHand.length} len=${prompt.length} model=${response.model.key} size=${response.model.sizeBytes}`
+        `${shortId(gameId)} hand=${resolvedStartingHand.length} len=${prompt.length} model=${response.model.key} size=${response.model.sizeBytes} ${formatPromptMetrics(response)}`
       )
 
       res.end()
@@ -1826,6 +1827,97 @@ function toOrdinal(value: number) {
 
 function shortId(gameId: string) {
   return gameId.slice(0, 8)
+}
+
+type TokenPricing = {
+  inputUsdPerMillionTokens: number
+  outputUsdPerMillionTokens: number
+}
+
+function formatPromptMetrics(response: PromptProcessingResult) {
+  const inputTokens = response.usage?.inputTokens ?? "unknown"
+  const outputTokens = response.usage?.outputTokens ?? "unknown"
+  const estimatedCostUsd = estimatePromptCostUsd(response)
+  const formattedCost =
+    estimatedCostUsd === undefined ? "unknown" : formatCostInCents(estimatedCostUsd)
+
+  return `input_tokens=${inputTokens} output_tokens=${outputTokens} duration_seconds=${formatDurationSeconds(response.durationMs)} estimated_cost_cents=${formattedCost}`
+}
+
+function estimatePromptCostUsd(response: PromptProcessingResult) {
+  if (response.provider === "lm-studio") {
+    return 0
+  }
+
+  const inputTokens = response.usage?.inputTokens
+  const outputTokens = response.usage?.outputTokens
+
+  if (typeof inputTokens !== "number" || typeof outputTokens !== "number") {
+    return undefined
+  }
+
+  const pricing = getTokenPricing(response.provider, response.model.key)
+
+  if (!pricing) {
+    return undefined
+  }
+
+  return (
+    (inputTokens / 1_000_000) * pricing.inputUsdPerMillionTokens +
+    (outputTokens / 1_000_000) * pricing.outputUsdPerMillionTokens
+  )
+}
+
+function getTokenPricing(
+  provider: PromptProcessorProvider,
+  modelKey: string
+): TokenPricing | undefined {
+  const normalizedModelKey = modelKey.trim().toLowerCase()
+
+  switch (provider) {
+    case "openai":
+      return getOpenAiTokenPricing(normalizedModelKey)
+    case "claude":
+      return getClaudeTokenPricing(normalizedModelKey)
+    case "lm-studio":
+    default:
+      return undefined
+  }
+}
+
+function getOpenAiTokenPricing(modelKey: string): TokenPricing | undefined {
+  const pricingTable: Array<[string, TokenPricing]> = [
+    ["gpt-5.4-mini", { inputUsdPerMillionTokens: 0.75, outputUsdPerMillionTokens: 4.5 }],
+    ["gpt-5.4-nano", { inputUsdPerMillionTokens: 0.2, outputUsdPerMillionTokens: 1.25 }],
+    ["gpt-5.4", { inputUsdPerMillionTokens: 2.5, outputUsdPerMillionTokens: 15 }],
+  ]
+
+  return pricingTable.find(([prefix]) => modelKey.startsWith(prefix))?.[1]
+}
+
+function getClaudeTokenPricing(modelKey: string): TokenPricing | undefined {
+  const pricingTable: Array<[string, TokenPricing]> = [
+    ["claude-opus-4-6", { inputUsdPerMillionTokens: 5, outputUsdPerMillionTokens: 25 }],
+    ["claude-opus-4.6", { inputUsdPerMillionTokens: 5, outputUsdPerMillionTokens: 25 }],
+    ["claude-sonnet-4-6", { inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 15 }],
+    ["claude-sonnet-4.6", { inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 15 }],
+  ]
+
+  return pricingTable.find(([prefix]) => modelKey.startsWith(prefix))?.[1]
+}
+
+function formatCostInCents(valueUsd: number) {
+  const valueCents = valueUsd * 100
+
+  if (valueCents < 0.1) {
+    return "<0.1"
+  }
+
+  return valueCents.toFixed(1)
+}
+
+function formatDurationSeconds(durationMs: number) {
+  return Math.round(durationMs / 1000)
 }
 
 async function writePromptLog(
