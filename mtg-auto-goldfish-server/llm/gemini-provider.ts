@@ -14,6 +14,18 @@ export const GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.co
 const GEMINI_PROMPT_TIMEOUT_MS = 10 * 60 * 1000
 const GEMINI_MAX_TOOL_ROUNDS = 12
 const GEMINI_THINKING_LEVELS = ["minimal", "low", "medium", "high"] as const
+const UNSUPPORTED_GEMINI_SCHEMA_KEYS = new Set([
+  "$schema",
+  "$defs",
+  "definitions",
+  "additionalProperties",
+  "patternProperties",
+  "unevaluatedProperties",
+  "propertyNames",
+  "exclusiveMinimum",
+  "exclusiveMaximum",
+  "multipleOf",
+])
 
 type GeminiThinkingLevel = (typeof GEMINI_THINKING_LEVELS)[number]
 
@@ -431,15 +443,45 @@ async function loadToolDeclarations(client: Client) {
     (tool): GeminiFunctionDeclaration => ({
       name: tool.name,
       description: tool.description,
-      parameters: {
+      parameters: sanitizeGeminiSchema({
         type: "object",
         properties: tool.inputSchema.properties,
         required: tool.inputSchema.required,
-      },
+      }),
     })
   )
 }
 
+function sanitizeGeminiSchema(value: unknown): GeminiFunctionDeclaration["parameters"] {
+  const sanitizedValue = sanitizeGeminiSchemaValue(value)
+  const schema = asObjectRecord(sanitizedValue)
+
+  return {
+    type: "object",
+    properties: isPlainObject(schema.properties)
+      ? (schema.properties as Record<string, object>)
+      : undefined,
+    required: Array.isArray(schema.required)
+      ? schema.required.filter((item): item is string => typeof item === "string")
+      : undefined,
+  }
+}
+
+function sanitizeGeminiSchemaValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeGeminiSchemaValue(item))
+  }
+
+  if (!isPlainObject(value)) {
+    return value
+  }
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !UNSUPPORTED_GEMINI_SCHEMA_KEYS.has(key))
+      .map(([key, nestedValue]) => [key, sanitizeGeminiSchemaValue(nestedValue)])
+  )
+}
 function normalizeThinkingLevel(value: string | undefined): GeminiThinkingLevel | undefined {
   if (!value?.trim()) {
     return undefined
@@ -801,6 +843,10 @@ function normalizeJsonValue(value: unknown): unknown {
   return safeJsonStringify(value)
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value)
+}
+
 function asObjectRecord(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {}
@@ -820,3 +866,7 @@ function safeJsonStringify(value: unknown) {
     return undefined
   }
 }
+
+
+
+
