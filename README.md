@@ -102,12 +102,12 @@ Example `.env` file:
 
 ```dotenv
 # Global LLM selection
-# Valid values: lm-studio, openai, claude
+# Valid values: lm-studio, openai, claude, gemini
 LLM_PROVIDER=lm-studio
 
 LOG_PROMPTS_TO_FILE=false
 
-# Used by OpenAI and Claude requests. Ignored by LM Studio.
+# Used by OpenAI, Claude, and Gemini requests. Ignored by LM Studio.
 LLM_MAX_OUTPUT_TOKENS=50000
 
 # LM Studio
@@ -128,8 +128,14 @@ CLAUDE_API_KEY=
 CLAUDE_MODEL=claude-sonnet-4-6
 CLAUDE_REASONING_EFFORT=medium
 
+# Gemini
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-3.1-flash-lite-preview
+# Optional. Valid values for Gemini 3 models: minimal, low, medium, high
+GEMINI_THINKING_LEVEL=medium
+
 # Public MCP URLs for cloud providers only.
-# Required when LLM_PROVIDER=openai or LLM_PROVIDER=claude.
+# Required when LLM_PROVIDER=openai, LLM_PROVIDER=claude, or LLM_PROVIDER=gemini.
 # Ignored when LLM_PROVIDER=lm-studio, because LM Studio always uses local http MCP URLs.
 GOLDFISH_OPENING_HAND_MCP_SERVER_URL=https://example.com//mcp/opening-hand
 GOLDFISH_TURN_SIMULATION_MCP_SERVER_URL=https://example.com/mcp/turn-simulation
@@ -179,6 +185,8 @@ npm run dev
 - Tailwind CSS v4
 - shadcn/ui
 - Scryfall API
+
+
 
 
 

@@ -1410,6 +1410,8 @@ function getProviderReasoningEffort(
       return process.env.OPENAI_REASONING_EFFORT?.trim() || "medium"
     case "claude":
       return process.env.CLAUDE_REASONING_EFFORT?.trim() || "medium"
+    case "gemini":
+      return process.env.GEMINI_THINKING_LEVEL?.trim() || undefined
     case "lm-studio":
     default:
       return undefined
@@ -1432,6 +1434,7 @@ function getProviderReasoningSummary(provider: PromptProcessorProvider) {
       return configuredSummary
     }
     case "claude":
+    case "gemini":
     case "lm-studio":
     default:
       return undefined
@@ -1443,6 +1446,8 @@ function getProviderBaseUrl(provider: PromptProcessorProvider) {
       return undefined
     case "claude":
       return undefined
+    case "gemini":
+      return process.env.GEMINI_BASE_URL?.trim() || undefined
     case "lm-studio":
     default:
       return process.env.LM_STUDIO_BASE_URL?.trim() || undefined
@@ -1463,6 +1468,8 @@ function getProviderApiKey(provider: PromptProcessorProvider) {
       return requireNonEmptyEnvValue("OPENAI_API_KEY")
     case "claude":
       return requireNonEmptyEnvValue("CLAUDE_API_KEY")
+    case "gemini":
+      return requireNonEmptyEnvValue("GEMINI_API_KEY")
     case "lm-studio":
     default:
       return process.env.LM_STUDIO_API_TOKEN?.trim() || undefined
@@ -1475,6 +1482,8 @@ function getProviderModel(provider: PromptProcessorProvider) {
       return requireNonEmptyEnvValue("OPENAI_MODEL")
     case "claude":
       return requireNonEmptyEnvValue("CLAUDE_MODEL")
+    case "gemini":
+      return requireNonEmptyEnvValue("GEMINI_MODEL")
     case "lm-studio":
     default:
       return process.env.LM_STUDIO_MODEL?.trim() || undefined
@@ -1879,6 +1888,8 @@ function getTokenPricing(
       return getOpenAiTokenPricing(normalizedModelKey)
     case "claude":
       return getClaudeTokenPricing(normalizedModelKey)
+    case "gemini":
+      return getGeminiTokenPricing(normalizedModelKey)
     case "lm-studio":
     default:
       return undefined
@@ -1901,6 +1912,15 @@ function getClaudeTokenPricing(modelKey: string): TokenPricing | undefined {
     ["claude-opus-4.6", { inputUsdPerMillionTokens: 5, outputUsdPerMillionTokens: 25 }],
     ["claude-sonnet-4-6", { inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 15 }],
     ["claude-sonnet-4.6", { inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 15 }],
+  ]
+
+  return pricingTable.find(([prefix]) => modelKey.startsWith(prefix))?.[1]
+}
+
+function getGeminiTokenPricing(modelKey: string): TokenPricing | undefined {
+  const pricingTable: Array<[string, TokenPricing]> = [
+    ["gemini-3.1-pro-preview", { inputUsdPerMillionTokens: 2, outputUsdPerMillionTokens: 12 }],
+    ["gemini-3.1-flash-lite-preview", { inputUsdPerMillionTokens: 0.25, outputUsdPerMillionTokens: 1.5 }],
   ]
 
   return pricingTable.find(([prefix]) => modelKey.startsWith(prefix))?.[1]
@@ -1995,6 +2015,12 @@ function takeToolUiData(toolName: string, gameId: string) {
 
   return toolUiData
 }
+
+
+
+
+
+
 
 
 

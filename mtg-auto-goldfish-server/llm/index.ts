@@ -1,8 +1,9 @@
 import { createClaudePromptProcessor } from "./claude-provider.js"
+import { createGeminiPromptProcessor } from "./gemini-provider.js"
 import { createLmStudioPromptProcessor } from "./lm-studio-provider.js"
 import { createOpenAiPromptProcessor } from "./openai-provider.js"
 
-export type PromptProcessorProvider = "lm-studio" | "openai" | "claude"
+export type PromptProcessorProvider = "lm-studio" | "openai" | "claude" | "gemini"
 
 export type PromptProcessorOptions = {
   provider?: PromptProcessorProvider | string
@@ -95,6 +96,8 @@ export function createPromptProcessor(
       return createOpenAiPromptProcessor(options)
     case "claude":
       return createClaudePromptProcessor(options)
+    case "gemini":
+      return createGeminiPromptProcessor(options)
     case "lm-studio":
     default:
       return createLmStudioPromptProcessor(options)
@@ -112,6 +115,10 @@ export function normalizePromptProcessorProvider(
     case "anthropic":
     case "claude":
       return "claude"
+    case "google":
+    case "google-gemini":
+    case "gemini":
+      return "gemini"
     case "lmstudio":
     case "lm-studio":
     case "local":
@@ -120,7 +127,7 @@ export function normalizePromptProcessorProvider(
       return "lm-studio"
     default:
       throw new Error(
-        `Unsupported LLM_PROVIDER value: ${rawProvider}. Expected lm-studio, openai, or claude.`
+        `Unsupported LLM_PROVIDER value: ${rawProvider}. Expected lm-studio, openai, claude, or gemini.`
       )
   }
 }
