@@ -34,6 +34,14 @@ const DEFAULT_ALLOWED_ORIGINS = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
 ]
+const DEFAULT_ALLOWED_HEADERS = [
+  "Content-Type",
+  "Accept",
+  "Authorization",
+  "Last-Event-ID",
+  "Mcp-Session-Id",
+  "Mcp-Protocol-Version",
+]
 const GAME_NOT_FOUND_MESSAGE =
   "Game not found. It may be invalid, may not have been created yet, or may have expired after 24 hours."
 const DEFAULT_LLM_MAX_OUTPUT_TOKENS = 8192
@@ -1569,13 +1577,62 @@ function applyCors(
 ) {
   const requestOrigin = req.headers.origin
 
-  if (requestOrigin && allowedOrigins.includes(requestOrigin)) {
+  if (requestOrigin && isAllowedOrigin(requestOrigin, allowedOrigins)) {
     res.setHeader("Access-Control-Allow-Origin", requestOrigin)
     res.setHeader("Vary", "Origin")
   }
 
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type")
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    getAllowedRequestHeaders(req.headers["access-control-request-headers"])
+  )
+  res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id")
+}
+
+function isAllowedOrigin(
+  origin: string,
+  allowedOrigins: readonly string[]
+) {
+  return allowedOrigins.includes(origin) || isLoopbackOrigin(origin)
+}
+
+function isLoopbackOrigin(origin: string) {
+  try {
+    const parsedOrigin = new URL(origin)
+
+    return (
+      parsedOrigin.protocol === "http:" &&
+      (parsedOrigin.hostname === "localhost" ||
+        parsedOrigin.hostname === "127.0.0.1")
+    )
+  } catch {
+    return false
+  }
+}
+
+function getAllowedRequestHeaders(
+  requestedHeaders: string | string[] | undefined
+) {
+  const headerNames = new Set(
+    DEFAULT_ALLOWED_HEADERS.map((header) => header.toLowerCase())
+  )
+
+  const requestedHeaderList = Array.isArray(requestedHeaders)
+    ? requestedHeaders.join(",")
+    : requestedHeaders
+
+  if (requestedHeaderList) {
+    for (const header of requestedHeaderList.split(",")) {
+      const normalizedHeader = header.trim().toLowerCase()
+
+      if (normalizedHeader) {
+        headerNames.add(normalizedHeader)
+      }
+    }
+  }
+
+  return Array.from(headerNames).join(", ")
 }
 
 function registerMcpEndpoint(
