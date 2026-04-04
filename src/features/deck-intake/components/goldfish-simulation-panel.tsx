@@ -158,7 +158,10 @@ export function GoldfishSimulationPanel({
               Start a simulation
             </h2>
             <p className="max-w-3xl text-sm leading-6 text-stone-400">
-              Once the full commander and deck package is resolved, create a game on the goldfish server, then let the configured model work through the prompt while you follow a higher-level activity trace.
+              Once the full commander and deck package is resolved, create a
+              game on the goldfish server, then let the configured model play
+              through turns 1, 2, and 3 one turn at a time while you follow a
+              higher-level activity trace.
             </p>
             <div className="pt-2">
               <label className="block space-y-2">
@@ -175,7 +178,7 @@ export function GoldfishSimulationPanel({
                     onSimulationSeedInputChange(event.target.value)
                   }
                   placeholder="Blank = random"
-                  className="h-11 w-full max-w-xs appearance-none rounded-2xl border border-white/10 bg-black/30 px-4 text-sm text-stone-100 outline-none transition [appearance:textfield] placeholder:text-stone-500 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none focus:border-amber-300/40 focus:bg-black/40"
+                  className="h-11 w-full max-w-xs [appearance:textfield] appearance-none rounded-2xl border border-white/10 bg-black/30 px-4 text-sm text-stone-100 transition outline-none placeholder:text-stone-500 focus:border-amber-300/40 focus:bg-black/40 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                 />
               </label>
               <p className="mt-2 text-xs leading-5 text-stone-500">
@@ -475,11 +478,3 @@ function getPromptPreview(rawPromptStream: string) {
 
   return `...${preview.replace(/^\S*\s?/, "")}`
 }
-
-
-
-
-
-
-
-

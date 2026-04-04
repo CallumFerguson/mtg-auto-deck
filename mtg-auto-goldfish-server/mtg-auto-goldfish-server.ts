@@ -95,12 +95,28 @@ const toolUiDataLookupSchema = z.object({
 const openingHandSnapshotStatusSchema = z.object({
   gameId: z.string().trim().min(1).describe("The game ID."),
 })
-const resetGameStateSchema = z.object({
-  gameId: z.string().trim().min(1).describe("The game ID."),
-  target: z
-    .enum(["initial", "opening_hand_snapshot"])
-    .describe("Which saved point-in-time state to restore."),
-})
+const resetGameStateSchema = z
+  .object({
+    gameId: z.string().trim().min(1).describe("The game ID."),
+    target: z
+      .enum(["initial", "opening_hand_snapshot", "turn_snapshot"])
+      .describe("Which saved point-in-time state to restore."),
+    turnNumber: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("The turn snapshot to restore when target is turn_snapshot."),
+  })
+  .superRefine((value, context) => {
+    if (value.target === "turn_snapshot" && value.turnNumber === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["turnNumber"],
+        message: "turnNumber is required when target is turn_snapshot.",
+      })
+    }
+  })
 const createGameSchema = z
   .object({
     commanders: z
@@ -503,10 +519,16 @@ function registerReturnCardToLibraryTool(server: McpServer) {
           .describe(
             "The game ID returned by the regular HTTP create-game endpoint, not by an MCP tool."
           ),
-        card: z.string().trim().min(1).describe("The card name to put back into the library."),
+        card: z
+          .string()
+          .trim()
+          .min(1)
+          .describe("The card name to put back into the library."),
         side: z
           .enum(["top", "bottom"])
-          .describe("Whether the position is measured from the top or the bottom of the library."),
+          .describe(
+            "Whether the position is measured from the top or the bottom of the library."
+          ),
         position: z
           .number()
           .int()
@@ -526,10 +548,18 @@ function registerReturnCardToLibraryTool(server: McpServer) {
       },
     },
     async ({ gameId, card, side, position }) => {
-      const returnResult = gameStore.returnCardToLibrary(gameId, card, side, position)
+      const returnResult = gameStore.returnCardToLibrary(
+        gameId,
+        card,
+        side,
+        position
+      )
 
       if (!returnResult.ok) {
-        logWarn("return_to_library", `${shortId(gameId)} ${returnResult.reason}`)
+        logWarn(
+          "return_to_library",
+          `${shortId(gameId)} ${returnResult.reason}`
+        )
 
         return {
           content: [
@@ -601,7 +631,9 @@ function registerReturnCardsToLibraryTool(server: McpServer) {
           .describe("Which end of the library to return the cards to."),
         randomizeOrder: z
           .boolean()
-          .describe("Whether to shuffle the returned cards before putting them back."),
+          .describe(
+            "Whether to shuffle the returned cards before putting them back."
+          ),
       },
       outputSchema: {
         gameId: z.string(),
@@ -620,7 +652,10 @@ function registerReturnCardsToLibraryTool(server: McpServer) {
       )
 
       if (!returnResult.ok) {
-        logWarn("return_cards_to_library", `${shortId(gameId)} ${returnResult.reason}`)
+        logWarn(
+          "return_cards_to_library",
+          `${shortId(gameId)} ${returnResult.reason}`
+        )
 
         return {
           content: [
@@ -702,7 +737,10 @@ function registerTakeCardsFromLibraryTool(server: McpServer) {
       const takeResult = gameStore.takeCardsFromLibrary(gameId, cards)
 
       if (!takeResult.ok) {
-        logWarn("take_cards_from_library", `${shortId(gameId)} ${takeResult.reason}`)
+        logWarn(
+          "take_cards_from_library",
+          `${shortId(gameId)} ${takeResult.reason}`
+        )
 
         return {
           content: [
@@ -715,8 +753,9 @@ function registerTakeCardsFromLibraryTool(server: McpServer) {
         }
       }
 
-      const foundCards = takeResult.matches
-        .flatMap((match) => (match.foundCard ? [match.foundCard] : []))
+      const foundCards = takeResult.matches.flatMap((match) =>
+        match.foundCard ? [match.foundCard] : []
+      )
       const missedCards = takeResult.matches
         .filter((match) => match.foundCard === null)
         .map((match) => match.requestedCard)
@@ -743,7 +782,7 @@ function registerTakeCardsFromLibraryTool(server: McpServer) {
             type: "text",
             text:
               foundCards.length > 0 || missedCards.length > 0
-                ? `Took ${foundCards.length} requested card(s) from the library: ${foundCards.length > 0 ? formatCardList(foundCards) : 'none'}. ${missedCards.length > 0 ? `No reasonably close library match was found for: ${formatCardList(missedCards)}. ` : ''}${response.cardsRemaining} cards remain in the library.`
+                ? `Took ${foundCards.length} requested card(s) from the library: ${foundCards.length > 0 ? formatCardList(foundCards) : "none"}. ${missedCards.length > 0 ? `No reasonably close library match was found for: ${formatCardList(missedCards)}. ` : ""}${response.cardsRemaining} cards remain in the library.`
                 : `No cards were taken from the library. ${response.cardsRemaining} cards remain in the library.`,
           },
         ],
@@ -801,7 +840,10 @@ function registerShuffleLibraryTool(server: McpServer) {
         uiMetadata: {},
       })
 
-      logInfo("shuffle_library", `${shortId(gameId)} left=${response.cardsRemaining}`)
+      logInfo(
+        "shuffle_library",
+        `${shortId(gameId)} left=${response.cardsRemaining}`
+      )
 
       return {
         content: [
@@ -822,7 +864,7 @@ function registerUpdateGameStateTool(server: McpServer) {
     {
       title: "Update Game State",
       description:
-        "Save the current game state text for this game after finishing a turn simulation. The string can use any format the model chooses.",
+        "Save the current game state text for the active turn simulation. This can only be called once per turn, and it must be the final tool call for that turn.",
       inputSchema: {
         gameId: z
           .string()
@@ -839,6 +881,8 @@ function registerUpdateGameStateTool(server: McpServer) {
       },
       outputSchema: {
         gameId: z.string(),
+        turnNumber: z.number().int().positive(),
+        nextTurnNumber: z.number().int().positive(),
         gameState: z.string(),
         updated: z.literal(true),
       },
@@ -847,13 +891,23 @@ function registerUpdateGameStateTool(server: McpServer) {
       const updateResult = gameStore.updateGameState(gameId, gameState)
 
       if (!updateResult.ok) {
-        logWarn("update_game_state", `${shortId(gameId)} ${updateResult.reason}`)
+        logWarn(
+          "update_game_state",
+          `${shortId(gameId)} ${updateResult.reason}`
+        )
+
+        const message =
+          updateResult.reason === "turn_already_updated"
+            ? "update_game_state has already been called for this turn. Do not call it more than once."
+            : updateResult.reason === "no_active_turn_simulation"
+              ? "There is no active turn simulation for that game. Only call update_game_state while resolving the current turn."
+              : GAME_NOT_FOUND_MESSAGE
 
         return {
           content: [
             {
               type: "text",
-              text: GAME_NOT_FOUND_MESSAGE,
+              text: message,
             },
           ],
           isError: true,
@@ -862,6 +916,8 @@ function registerUpdateGameStateTool(server: McpServer) {
 
       const response = {
         gameId,
+        turnNumber: updateResult.turnNumber,
+        nextTurnNumber: updateResult.nextTurnNumber,
         gameState: updateResult.gameState,
         updated: true as const,
       }
@@ -873,14 +929,14 @@ function registerUpdateGameStateTool(server: McpServer) {
 
       logInfo(
         "update_game_state",
-        `${shortId(gameId)} len=${response.gameState.length}`
+        `${shortId(gameId)} turn=${response.turnNumber} next=${response.nextTurnNumber} len=${response.gameState.length}`
       )
 
       return {
         content: [
           {
             type: "text",
-            text: `Saved updated game state (${response.gameState.length} characters).`,
+            text: `Saved updated game state for turn ${response.turnNumber}. The next turn is ${response.nextTurnNumber}.`,
           },
         ],
         structuredContent: response,
@@ -965,7 +1021,9 @@ async function main() {
   const allowedOrigins = getAllowedOrigins(process.env.ALLOWED_ORIGINS)
   const llmProvider = normalizePromptProcessorProvider(process.env.LLM_PROVIDER)
   const sharedPromptProcessorOptions = getPromptProcessorOptions(llmProvider)
-  const processPromptProcessor = createPromptProcessor(sharedPromptProcessorOptions)
+  const processPromptProcessor = createPromptProcessor(
+    sharedPromptProcessorOptions
+  )
   const openingHandPromptProcessor = createPromptProcessor({
     ...sharedPromptProcessorOptions,
     mcpServerUrl: resolveMcpServerUrl(
@@ -1100,32 +1158,38 @@ async function main() {
       return
     }
 
-    const { gameId, target } = parsedRequest.data
+    const { gameId, target, turnNumber } = parsedRequest.data
     const resetResult =
       target === "initial"
         ? gameStore.resetGameToInitialState(gameId)
-        : gameStore.restoreOpeningHandSnapshot(gameId)
+        : target === "opening_hand_snapshot"
+          ? gameStore.restoreOpeningHandSnapshot(gameId)
+          : gameStore.restoreTurnSnapshot(gameId, turnNumber!)
 
     if (!resetResult.ok) {
-      res.status(404).json({
-        error:
-          resetResult.reason === "opening_hand_snapshot_not_found"
-            ? "No saved opening-hand snapshot was found for that game."
-            : GAME_NOT_FOUND_MESSAGE,
-      })
+      const error =
+        resetResult.reason === "opening_hand_snapshot_not_found"
+          ? "No saved opening-hand snapshot was found for that game."
+          : resetResult.reason === "turn_snapshot_not_found"
+            ? `No saved turn snapshot was found for turn ${turnNumber}.`
+            : GAME_NOT_FOUND_MESSAGE
+
+      res.status(404).json({ error })
       return
     }
 
     logInfo(
       "reset_game_state",
-      `${shortId(gameId)} target=${target} cards=${resetResult.cardsRemaining}`
+      `${shortId(gameId)} target=${target}${typeof turnNumber === "number" ? ` turn=${turnNumber}` : ""} cards=${resetResult.cardsRemaining}`
     )
 
     res.status(200).json({
       target,
+      ...(typeof turnNumber === "number" ? { turnNumber } : {}),
       ...resetResult,
     })
   })
+
   app.post("/process-prompt", async (req: Request, res: Response) => {
     const parsedRequest = processPromptSchema.safeParse(req.body)
 
@@ -1175,87 +1239,95 @@ async function main() {
     }
   })
 
-  app.post("/simulate-drawing-starting-hand", async (req: Request, res: Response) => {
-    const parsedRequest = simulateDrawingStartingHandSchema.safeParse(req.body)
-
-    if (!parsedRequest.success) {
-      res.status(400).json({
-        error: "Invalid request body.",
-        details: parsedRequest.error.issues,
-      })
-      return
-    }
-
-    const { gameId } = parsedRequest.data
-    const gamePromptContext = gameStore.getGamePromptContext(gameId)
-
-    if (!gamePromptContext.ok) {
-      res.status(404).json({
-        error: GAME_NOT_FOUND_MESSAGE,
-      })
-      return
-    }
-
-    const prompt = buildStartingHandSimulationPrompt(
-      gamePromptContext.gameId,
-      gamePromptContext.commanders,
-      gamePromptContext.initialLibrary
-    )
-
-    try {
-      await writePromptLog(gameId, "opening-hand", prompt)
-
-      let keptHandCards: string[] | undefined
-      const response = await streamPromptResponse(
-        res,
-        openingHandPromptProcessor,
-        prompt,
-        (event) => {
-          keptHandCards = getKeepHandCardsFromPromptEvent(event) ?? keptHandCards
-        }
+  app.post(
+    "/simulate-drawing-starting-hand",
+    async (req: Request, res: Response) => {
+      const parsedRequest = simulateDrawingStartingHandSchema.safeParse(
+        req.body
       )
 
-      if (!keptHandCards?.length) {
-        throw new Error(
-          "The opening-hand simulation did not report a final kept hand through keep_hand."
-        )
-      }
-
-      const snapshotResult = gameStore.saveOpeningHandSnapshot(gameId, keptHandCards)
-
-      if (!snapshotResult.ok) {
-        throw new Error(GAME_NOT_FOUND_MESSAGE)
-      }
-
-      logInfo(
-        "simulate_starting_hand",
-        `${shortId(gameId)} hand=${snapshotResult.startingHand.length} library=${snapshotResult.library.length} valid=${snapshotResult.validation.isValid} len=${prompt.length} model=${response.model.key} size=${response.model.sizeBytes} ${formatPromptMetrics(response)}`
-      )
-
-      res.end()
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Failed to process prompt."
-
-      logWarn("simulate_starting_hand", `${shortId(gameId)} ${message}`)
-
-      if (res.headersSent) {
-        res.write(
-          `${JSON.stringify({
-            type: "error",
-            error: message,
-          })}\n`
-        )
-        res.end()
+      if (!parsedRequest.success) {
+        res.status(400).json({
+          error: "Invalid request body.",
+          details: parsedRequest.error.issues,
+        })
         return
       }
 
-      res.status(502).json({
-        error: message,
-      })
-    }
-  })
+      const { gameId } = parsedRequest.data
+      const gamePromptContext = gameStore.getGamePromptContext(gameId)
 
+      if (!gamePromptContext.ok) {
+        res.status(404).json({
+          error: GAME_NOT_FOUND_MESSAGE,
+        })
+        return
+      }
+
+      const prompt = buildStartingHandSimulationPrompt(
+        gamePromptContext.gameId,
+        gamePromptContext.commanders,
+        gamePromptContext.initialLibrary
+      )
+
+      try {
+        await writePromptLog(gameId, "opening-hand", prompt)
+
+        let keptHandCards: string[] | undefined
+        const response = await streamPromptResponse(
+          res,
+          openingHandPromptProcessor,
+          prompt,
+          (event) => {
+            keptHandCards =
+              getKeepHandCardsFromPromptEvent(event) ?? keptHandCards
+          }
+        )
+
+        if (!keptHandCards?.length) {
+          throw new Error(
+            "The opening-hand simulation did not report a final kept hand through keep_hand."
+          )
+        }
+
+        const snapshotResult = gameStore.saveOpeningHandSnapshot(
+          gameId,
+          keptHandCards
+        )
+
+        if (!snapshotResult.ok) {
+          throw new Error(GAME_NOT_FOUND_MESSAGE)
+        }
+
+        logInfo(
+          "simulate_starting_hand",
+          `${shortId(gameId)} hand=${snapshotResult.startingHand.length} library=${snapshotResult.library.length} valid=${snapshotResult.validation.isValid} len=${prompt.length} model=${response.model.key} size=${response.model.sizeBytes} ${formatPromptMetrics(response)}`
+        )
+
+        res.end()
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Failed to process prompt."
+
+        logWarn("simulate_starting_hand", `${shortId(gameId)} ${message}`)
+
+        if (res.headersSent) {
+          res.write(
+            `${JSON.stringify({
+              type: "error",
+              error: message,
+            })}\n`
+          )
+          res.end()
+          return
+        }
+
+        res.status(502).json({
+          error: message,
+        })
+      }
+    }
+  )
 
   app.post("/simulate-turn", async (req: Request, res: Response) => {
     const parsedRequest = simulateTurnSchema.safeParse(req.body)
@@ -1278,7 +1350,8 @@ async function main() {
       return
     }
 
-    const resolvedStartingHand = gamePromptContext.openingHandSnapshot?.startingHand
+    const resolvedStartingHand =
+      gamePromptContext.openingHandSnapshot?.startingHand
 
     if (!resolvedStartingHand?.length) {
       res.status(400).json({
@@ -1299,8 +1372,27 @@ async function main() {
       return
     }
 
+    const startTurnResult = gameStore.startTurnSimulation(gameId)
+
+    if (!startTurnResult.ok) {
+      res
+        .status(
+          startTurnResult.reason === "turn_simulation_already_active"
+            ? 409
+            : 404
+        )
+        .json({
+          error:
+            startTurnResult.reason === "turn_simulation_already_active"
+              ? "A turn simulation is already active for that game."
+              : GAME_NOT_FOUND_MESSAGE,
+        })
+      return
+    }
+
     const prompt = buildTurnSimulationPrompt(
       gamePromptContext.gameId,
+      startTurnResult.turnNumber,
       resolvedStartingHand,
       gamePromptContext.commanders,
       gamePromptContext.currentLibrary,
@@ -1309,7 +1401,7 @@ async function main() {
     )
 
     try {
-      await writePromptLog(gameId, "first-turn", prompt)
+      await writePromptLog(gameId, `turn-${startTurnResult.turnNumber}`, prompt)
 
       const response = await streamPromptResponse(
         res,
@@ -1319,7 +1411,7 @@ async function main() {
 
       logInfo(
         "simulate_turn",
-        `${shortId(gameId)} hand=${resolvedStartingHand.length} len=${prompt.length} model=${response.model.key} size=${response.model.sizeBytes} ${formatPromptMetrics(response)}`
+        `${shortId(gameId)} turn=${startTurnResult.turnNumber} hand=${resolvedStartingHand.length} len=${prompt.length} model=${response.model.key} size=${response.model.sizeBytes} ${formatPromptMetrics(response)}`
       )
 
       res.end()
@@ -1334,8 +1426,7 @@ async function main() {
           `${JSON.stringify({
             type: "error",
             error: message,
-          })}
-`
+          })}\n`
         )
         res.end()
         return
@@ -1344,9 +1435,19 @@ async function main() {
       res.status(502).json({
         error: message,
       })
+    } finally {
+      const endTurnResult = gameStore.endTurnSimulation(gameId)
+
+      if (!endTurnResult.ok) {
+        logWarn("simulate_turn", `${shortId(gameId)} ${endTurnResult.reason}`)
+      } else if (!endTurnResult.turnWasUpdated) {
+        logWarn(
+          "simulate_turn",
+          `${shortId(gameId)} turn=${endTurnResult.turnNumber ?? startTurnResult.turnNumber} ended_without_update_game_state`
+        )
+      }
     }
   })
-
   registerMcpEndpoint(app, OPENING_HAND_MCP_PATH, createOpeningHandServer)
   registerMcpEndpoint(app, TURN_SIMULATION_MCP_PATH, createTurnSimulationServer)
   app.listen(port, host, (error?: Error) => {
@@ -1599,10 +1700,7 @@ function applyCors(
   res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id")
 }
 
-function isAllowedOrigin(
-  origin: string,
-  allowedOrigins: readonly string[]
-) {
+function isAllowedOrigin(origin: string, allowedOrigins: readonly string[]) {
   return allowedOrigins.includes(origin) || isLoopbackOrigin(origin)
 }
 
@@ -1779,7 +1877,10 @@ function buildStartingHandSimulationPrompt(
   const commanderLabel = commanders.length === 1 ? "Commander" : "Commanders"
   const commanderNames = commanders.map((card) => card.name)
   const cardNames = initialLibrary.map((card) => card.name)
-  const uniqueCards = dedupeCardsByNameAndText([...commanders, ...initialLibrary])
+  const uniqueCards = dedupeCardsByNameAndText([
+    ...commanders,
+    ...initialLibrary,
+  ])
 
   return `${DRAW_STARTING_HAND_PROMPT}
 
@@ -1792,13 +1893,13 @@ Decklist:
 ${cardNames.join("\n")}
 
 Card reference:
-${uniqueCards.map(card => `${card.name}\n${card.cardText}\n`).join("\n")}
-`.trim();
+${uniqueCards.map((card) => `${card.name}\n${card.cardText}\n`).join("\n")}
+`.trim()
 }
-
 
 function buildTurnSimulationPrompt(
   gameId: string,
+  currentTurn: number,
   startingHand: readonly string[],
   commanders: readonly GameCard[],
   currentLibrary: readonly string[],
@@ -1807,7 +1908,10 @@ function buildTurnSimulationPrompt(
 ) {
   const commanderNames = commanders.map((card) => card.name)
   const cardNames = currentLibrary
-  const uniqueCards = dedupeCardsByNameAndText([...commanders, ...initialLibrary])
+  const uniqueCards = dedupeCardsByNameAndText([
+    ...commanders,
+    ...initialLibrary,
+  ])
   const resolvedGameState = currentGameState?.trim()
     ? currentGameState.trim()
     : `
@@ -1834,6 +1938,7 @@ Opponent C Life: 40
   return `${SIMULATE_TURN_PROMPT}
 
 Game ID: ${gameId}
+Turn Number To Simulate: ${currentTurn}
 
 ===Start Game State===
 
@@ -1915,7 +2020,9 @@ function formatPromptMetrics(response: PromptProcessingResult) {
   const reasoningTokens = response.usage?.reasoningTokens
   const estimatedCostUsd = estimatePromptCostUsd(response)
   const formattedCost =
-    estimatedCostUsd === undefined ? "unknown" : formatCostInCents(estimatedCostUsd)
+    estimatedCostUsd === undefined
+      ? "unknown"
+      : formatCostInCents(estimatedCostUsd)
 
   const reasoningMetrics =
     typeof reasoningTokens === "number"
@@ -1933,11 +2040,18 @@ function estimatePromptCostUsd(response: PromptProcessingResult) {
   const inputTokens = response.usage?.inputTokens
   const billedOutputTokens = getBilledOutputTokens(response)
 
-  if (typeof inputTokens !== "number" || typeof billedOutputTokens !== "number") {
+  if (
+    typeof inputTokens !== "number" ||
+    typeof billedOutputTokens !== "number"
+  ) {
     return undefined
   }
 
-  const pricing = getTokenPricing(response.provider, response.model.key, inputTokens)
+  const pricing = getTokenPricing(
+    response.provider,
+    response.model.key,
+    inputTokens
+  )
 
   if (!pricing) {
     return undefined
@@ -1958,7 +2072,9 @@ function getBilledOutputTokens(response: PromptProcessingResult) {
   }
 
   if (response.provider === "gemini") {
-    return outputTokens + (typeof reasoningTokens === "number" ? reasoningTokens : 0)
+    return (
+      outputTokens + (typeof reasoningTokens === "number" ? reasoningTokens : 0)
+    )
   }
 
   return outputTokens
@@ -1991,27 +2107,83 @@ function getOpenAiTokenPricing(
   inputTokens?: number
 ): TokenPricing | undefined {
   const pricingTable: Array<[string, TokenPricing]> = [
-    ["gpt-5.4-pro", { inputUsdPerMillionTokens: 30, outputUsdPerMillionTokens: 180 }],
-    ["gpt-5.4-mini", { inputUsdPerMillionTokens: 0.75, outputUsdPerMillionTokens: 4.5 }],
-    ["gpt-5.4-nano", { inputUsdPerMillionTokens: 0.2, outputUsdPerMillionTokens: 1.25 }],
-    ["gpt-5.4", { inputUsdPerMillionTokens: 2.5, outputUsdPerMillionTokens: 15 }],
-    ["gpt-5-pro", { inputUsdPerMillionTokens: 15, outputUsdPerMillionTokens: 120 }],
-    ["gpt-5.2-pro", { inputUsdPerMillionTokens: 21, outputUsdPerMillionTokens: 168 }],
-    ["gpt-5.2-codex", { inputUsdPerMillionTokens: 1.75, outputUsdPerMillionTokens: 14 }],
-    ["gpt-5.2-chat-latest", { inputUsdPerMillionTokens: 1.75, outputUsdPerMillionTokens: 14 }],
-    ["gpt-5.2", { inputUsdPerMillionTokens: 1.75, outputUsdPerMillionTokens: 14 }],
-    ["gpt-5.1-codex-max", { inputUsdPerMillionTokens: 1.25, outputUsdPerMillionTokens: 10 }],
-    ["gpt-5.1-codex-mini", { inputUsdPerMillionTokens: 0.25, outputUsdPerMillionTokens: 2 }],
-    ["gpt-5.1-codex", { inputUsdPerMillionTokens: 1.25, outputUsdPerMillionTokens: 10 }],
-    ["gpt-5.1-chat-latest", { inputUsdPerMillionTokens: 1.25, outputUsdPerMillionTokens: 10 }],
-    ["gpt-5.1", { inputUsdPerMillionTokens: 1.25, outputUsdPerMillionTokens: 10 }],
-    ["gpt-5-codex", { inputUsdPerMillionTokens: 1.25, outputUsdPerMillionTokens: 10 }],
-    ["gpt-5-mini", { inputUsdPerMillionTokens: 0.25, outputUsdPerMillionTokens: 2 }],
-    ["gpt-5-nano", { inputUsdPerMillionTokens: 0.05, outputUsdPerMillionTokens: 0.4 }],
-    ["gpt-5", { inputUsdPerMillionTokens: 1.25, outputUsdPerMillionTokens: 10 }],
+    [
+      "gpt-5.4-pro",
+      { inputUsdPerMillionTokens: 30, outputUsdPerMillionTokens: 180 },
+    ],
+    [
+      "gpt-5.4-mini",
+      { inputUsdPerMillionTokens: 0.75, outputUsdPerMillionTokens: 4.5 },
+    ],
+    [
+      "gpt-5.4-nano",
+      { inputUsdPerMillionTokens: 0.2, outputUsdPerMillionTokens: 1.25 },
+    ],
+    [
+      "gpt-5.4",
+      { inputUsdPerMillionTokens: 2.5, outputUsdPerMillionTokens: 15 },
+    ],
+    [
+      "gpt-5-pro",
+      { inputUsdPerMillionTokens: 15, outputUsdPerMillionTokens: 120 },
+    ],
+    [
+      "gpt-5.2-pro",
+      { inputUsdPerMillionTokens: 21, outputUsdPerMillionTokens: 168 },
+    ],
+    [
+      "gpt-5.2-codex",
+      { inputUsdPerMillionTokens: 1.75, outputUsdPerMillionTokens: 14 },
+    ],
+    [
+      "gpt-5.2-chat-latest",
+      { inputUsdPerMillionTokens: 1.75, outputUsdPerMillionTokens: 14 },
+    ],
+    [
+      "gpt-5.2",
+      { inputUsdPerMillionTokens: 1.75, outputUsdPerMillionTokens: 14 },
+    ],
+    [
+      "gpt-5.1-codex-max",
+      { inputUsdPerMillionTokens: 1.25, outputUsdPerMillionTokens: 10 },
+    ],
+    [
+      "gpt-5.1-codex-mini",
+      { inputUsdPerMillionTokens: 0.25, outputUsdPerMillionTokens: 2 },
+    ],
+    [
+      "gpt-5.1-codex",
+      { inputUsdPerMillionTokens: 1.25, outputUsdPerMillionTokens: 10 },
+    ],
+    [
+      "gpt-5.1-chat-latest",
+      { inputUsdPerMillionTokens: 1.25, outputUsdPerMillionTokens: 10 },
+    ],
+    [
+      "gpt-5.1",
+      { inputUsdPerMillionTokens: 1.25, outputUsdPerMillionTokens: 10 },
+    ],
+    [
+      "gpt-5-codex",
+      { inputUsdPerMillionTokens: 1.25, outputUsdPerMillionTokens: 10 },
+    ],
+    [
+      "gpt-5-mini",
+      { inputUsdPerMillionTokens: 0.25, outputUsdPerMillionTokens: 2 },
+    ],
+    [
+      "gpt-5-nano",
+      { inputUsdPerMillionTokens: 0.05, outputUsdPerMillionTokens: 0.4 },
+    ],
+    [
+      "gpt-5",
+      { inputUsdPerMillionTokens: 1.25, outputUsdPerMillionTokens: 10 },
+    ],
   ]
 
-  const basePricing = pricingTable.find(([prefix]) => modelKey.startsWith(prefix))?.[1]
+  const basePricing = pricingTable.find(([prefix]) =>
+    modelKey.startsWith(prefix)
+  )?.[1]
 
   if (!basePricing) {
     return undefined
@@ -2036,24 +2208,71 @@ function getClaudeTokenPricing(
   inputTokens?: number
 ): TokenPricing | undefined {
   const pricingTable: Array<[string, TokenPricing]> = [
-    ["claude-opus-4-6", { inputUsdPerMillionTokens: 5, outputUsdPerMillionTokens: 25 }],
-    ["claude-opus-4.6", { inputUsdPerMillionTokens: 5, outputUsdPerMillionTokens: 25 }],
-    ["claude-opus-4-5", { inputUsdPerMillionTokens: 5, outputUsdPerMillionTokens: 25 }],
-    ["claude-opus-4.5", { inputUsdPerMillionTokens: 5, outputUsdPerMillionTokens: 25 }],
-    ["claude-opus-4-1", { inputUsdPerMillionTokens: 15, outputUsdPerMillionTokens: 75 }],
-    ["claude-opus-4.1", { inputUsdPerMillionTokens: 15, outputUsdPerMillionTokens: 75 }],
-    ["claude-opus-4", { inputUsdPerMillionTokens: 15, outputUsdPerMillionTokens: 75 }],
-    ["claude-sonnet-4-6", { inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 15 }],
-    ["claude-sonnet-4.6", { inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 15 }],
-    ["claude-sonnet-4-5", { inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 15 }],
-    ["claude-sonnet-4.5", { inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 15 }],
-    ["claude-sonnet-4", { inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 15 }],
-    ["claude-3-7-sonnet", { inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 15 }],
-    ["claude-3-5-haiku", { inputUsdPerMillionTokens: 0.8, outputUsdPerMillionTokens: 4 }],
-    ["claude-3-haiku", { inputUsdPerMillionTokens: 0.25, outputUsdPerMillionTokens: 1.25 }],
+    [
+      "claude-opus-4-6",
+      { inputUsdPerMillionTokens: 5, outputUsdPerMillionTokens: 25 },
+    ],
+    [
+      "claude-opus-4.6",
+      { inputUsdPerMillionTokens: 5, outputUsdPerMillionTokens: 25 },
+    ],
+    [
+      "claude-opus-4-5",
+      { inputUsdPerMillionTokens: 5, outputUsdPerMillionTokens: 25 },
+    ],
+    [
+      "claude-opus-4.5",
+      { inputUsdPerMillionTokens: 5, outputUsdPerMillionTokens: 25 },
+    ],
+    [
+      "claude-opus-4-1",
+      { inputUsdPerMillionTokens: 15, outputUsdPerMillionTokens: 75 },
+    ],
+    [
+      "claude-opus-4.1",
+      { inputUsdPerMillionTokens: 15, outputUsdPerMillionTokens: 75 },
+    ],
+    [
+      "claude-opus-4",
+      { inputUsdPerMillionTokens: 15, outputUsdPerMillionTokens: 75 },
+    ],
+    [
+      "claude-sonnet-4-6",
+      { inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 15 },
+    ],
+    [
+      "claude-sonnet-4.6",
+      { inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 15 },
+    ],
+    [
+      "claude-sonnet-4-5",
+      { inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 15 },
+    ],
+    [
+      "claude-sonnet-4.5",
+      { inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 15 },
+    ],
+    [
+      "claude-sonnet-4",
+      { inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 15 },
+    ],
+    [
+      "claude-3-7-sonnet",
+      { inputUsdPerMillionTokens: 3, outputUsdPerMillionTokens: 15 },
+    ],
+    [
+      "claude-3-5-haiku",
+      { inputUsdPerMillionTokens: 0.8, outputUsdPerMillionTokens: 4 },
+    ],
+    [
+      "claude-3-haiku",
+      { inputUsdPerMillionTokens: 0.25, outputUsdPerMillionTokens: 1.25 },
+    ],
   ]
 
-  const basePricing = pricingTable.find(([prefix]) => modelKey.startsWith(prefix))?.[1]
+  const basePricing = pricingTable.find(([prefix]) =>
+    modelKey.startsWith(prefix)
+  )?.[1]
 
   if (!basePricing) {
     return undefined
@@ -2079,8 +2298,14 @@ function getClaudeTokenPricing(
 
 function getGeminiTokenPricing(modelKey: string): TokenPricing | undefined {
   const pricingTable: Array<[string, TokenPricing]> = [
-    ["gemini-3.1-pro-preview", { inputUsdPerMillionTokens: 2, outputUsdPerMillionTokens: 12 }],
-    ["gemini-3.1-flash-lite-preview", { inputUsdPerMillionTokens: 0.25, outputUsdPerMillionTokens: 1.5 }],
+    [
+      "gemini-3.1-pro-preview",
+      { inputUsdPerMillionTokens: 2, outputUsdPerMillionTokens: 12 },
+    ],
+    [
+      "gemini-3.1-flash-lite-preview",
+      { inputUsdPerMillionTokens: 0.25, outputUsdPerMillionTokens: 1.5 },
+    ],
   ]
 
   return pricingTable.find(([prefix]) => modelKey.startsWith(prefix))?.[1]
@@ -2102,7 +2327,7 @@ function formatDurationSeconds(durationMs: number) {
 
 async function writePromptLog(
   gameId: string,
-  promptType: "opening-hand" | "first-turn",
+  promptType: string,
   prompt: string
 ) {
   if (!SHOULD_LOG_PROMPTS_TO_FILE) {
@@ -2140,7 +2365,6 @@ main().catch((error) => {
   process.exit(1)
 })
 
-
 function createToolUiDataKey(toolName: string, gameId: string) {
   return `${toolName}:${gameId}`
 }
@@ -2175,55 +2399,3 @@ function takeToolUiData(toolName: string, gameId: string) {
 
   return toolUiData
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

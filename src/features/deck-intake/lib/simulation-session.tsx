@@ -87,7 +87,11 @@ export type SimulationActivity = {
 }
 
 export type FinalAnswerStatus = "idle" | "streaming" | "done"
-export type SimulationPromptRunStatus = "running" | "done" | "error" | "cancelled"
+export type SimulationPromptRunStatus =
+  | "running"
+  | "done"
+  | "error"
+  | "cancelled"
 export type SimulationPromptRunKind =
   | "opening_hand"
   | "starting_hand_validation"
@@ -120,6 +124,7 @@ export type SimulationPromptRun = {
   gameId: string
   seed: number | null
   rerunnable: boolean
+  turnNumber: number | null
   eventLog: PromptRunEventRecord[]
   activities: SimulationActivity[]
   result: string
@@ -141,6 +146,7 @@ export function createPromptRun(
     gameId: string
     seed: number | null
     rerunnable?: boolean
+    turnNumber?: number | null
   }
 ): SimulationPromptRun {
   return {
@@ -151,6 +157,7 @@ export function createPromptRun(
     gameId: options.gameId,
     seed: options.seed,
     rerunnable: options.rerunnable ?? true,
+    turnNumber: options.turnNumber ?? null,
     eventLog: [],
     activities: [],
     result: "",
@@ -178,6 +185,7 @@ export function createStartingHandValidationRun(
     gameId: options.gameId,
     seed: options.seed,
     rerunnable: false,
+    turnNumber: null,
     eventLog: [
       {
         type: "starting_hand_validation",
@@ -318,7 +326,11 @@ function recomputePromptRun(run: SimulationPromptRun): SimulationPromptRun {
 
     switch (eventRecord.type) {
       case "prompt_stream_event":
-        nextRun = applyPromptStreamEvent(nextRun, eventRecord.event, activityIdBase)
+        nextRun = applyPromptStreamEvent(
+          nextRun,
+          eventRecord.event,
+          activityIdBase
+        )
         break
       case "starting_hand_validation":
         nextRun = applyStartingHandValidation(
@@ -377,13 +389,19 @@ function applyPromptStreamEvent(
     case "reasoning":
       return {
         ...run,
-        rawPromptStream: appendRawPromptStream(run.rawPromptStream, event.delta),
+        rawPromptStream: appendRawPromptStream(
+          run.rawPromptStream,
+          event.delta
+        ),
       }
     case "message":
       return {
         ...run,
         activities: resolveActiveThinkingActivity(run.activities),
-        rawPromptStream: appendRawPromptStream(run.rawPromptStream, event.delta),
+        rawPromptStream: appendRawPromptStream(
+          run.rawPromptStream,
+          event.delta
+        ),
         finalAnswerStatus: "streaming",
         result: `${run.result}${event.delta}`,
       }
@@ -432,8 +450,9 @@ function applyPromptStreamEvent(
         ),
         activities: nextActivities,
         keptHandCards:
-          getKeepHandCardsFromEvent(event as Extract<PromptStreamEvent, { type: "tool" }>) ??
-          run.keptHandCards,
+          getKeepHandCardsFromEvent(
+            event as Extract<PromptStreamEvent, { type: "tool" }>
+          ) ?? run.keptHandCards,
       }
     }
     case "error":
@@ -450,7 +469,10 @@ function applyPromptStreamEvent(
       return {
         ...run,
         status: "done",
-        rawPromptStream: appendRawPromptStream(run.rawPromptStream, "\n[chat.end]\n"),
+        rawPromptStream: appendRawPromptStream(
+          run.rawPromptStream,
+          "\n[chat.end]\n"
+        ),
         activities: completeActiveActivity(
           removeActiveThinkingActivity(run.activities)
         ),
@@ -501,11 +523,17 @@ function applyStartingHandValidation(
   }
 }
 
-function applyLocalError(run: SimulationPromptRun, message: string): SimulationPromptRun {
+function applyLocalError(
+  run: SimulationPromptRun,
+  message: string
+): SimulationPromptRun {
   return {
     ...run,
     status: "error",
-    rawPromptStream: appendRawPromptStream(run.rawPromptStream, `[error] ${message}\n`),
+    rawPromptStream: appendRawPromptStream(
+      run.rawPromptStream,
+      `[error] ${message}\n`
+    ),
     activities: completeActiveActivity(run.activities, "error"),
   }
 }
@@ -518,7 +546,10 @@ function applyCancelled(run: SimulationPromptRun): SimulationPromptRun {
   return {
     ...run,
     status: "cancelled",
-    rawPromptStream: appendRawPromptStream(run.rawPromptStream, "\n[cancelled]\n"),
+    rawPromptStream: appendRawPromptStream(
+      run.rawPromptStream,
+      "\n[cancelled]\n"
+    ),
     activities: completeActiveActivity(run.activities, "error"),
   }
 }
@@ -650,7 +681,9 @@ function replaceTransientActivity(
   return [...completeActiveActivity(currentActivities), activity]
 }
 
-function resolveActiveThinkingActivity(currentActivities: SimulationActivity[]) {
+function resolveActiveThinkingActivity(
+  currentActivities: SimulationActivity[]
+) {
   const lastActivity = currentActivities.at(-1)
 
   if (lastActivity?.kind !== "thinking" || lastActivity.status !== "active") {
@@ -698,7 +731,9 @@ function getStructuredToolCards(
   return cards.length ? cards : undefined
 }
 
-function getMulliganReason(event: Extract<PromptStreamEvent, { type: "tool" }>) {
+function getMulliganReason(
+  event: Extract<PromptStreamEvent, { type: "tool" }>
+) {
   if (event.tool !== "mulligan") {
     return undefined
   }
@@ -714,7 +749,9 @@ function getMulliganReason(event: Extract<PromptStreamEvent, { type: "tool" }>) 
   return reason || undefined
 }
 
-function getMulliganDetail(event: Extract<PromptStreamEvent, { type: "tool" }>) {
+function getMulliganDetail(
+  event: Extract<PromptStreamEvent, { type: "tool" }>
+) {
   if (event.tool !== "mulligan") {
     return undefined
   }
@@ -749,7 +786,9 @@ function getDrawStartingHandDetail(
   return cards?.length ? { kind: "card_list" as const, cards } : undefined
 }
 
-function getDrawToolDetail(event: Extract<PromptStreamEvent, { type: "tool" }>) {
+function getDrawToolDetail(
+  event: Extract<PromptStreamEvent, { type: "tool" }>
+) {
   if (
     event.tool !== "draw_card_from_top" &&
     event.tool !== "draw_card_from_bottom"
@@ -766,11 +805,16 @@ function getDrawToolDetail(event: Extract<PromptStreamEvent, { type: "tool" }>) 
   return {
     kind: "card_list" as const,
     cards,
-    label: event.tool === "draw_card_from_top" ? "Drawn from top:" : "Drawn from bottom:",
+    label:
+      event.tool === "draw_card_from_top"
+        ? "Drawn from top:"
+        : "Drawn from bottom:",
   }
 }
 
-function getReturnToolCards(event: Extract<PromptStreamEvent, { type: "tool" }>) {
+function getReturnToolCards(
+  event: Extract<PromptStreamEvent, { type: "tool" }>
+) {
   if (event.tool === "return_card_to_library") {
     const card = event.structuredContent?.card
 

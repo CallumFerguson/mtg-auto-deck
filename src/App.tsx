@@ -57,6 +57,7 @@ import type {
 
 const MIN_PROCESSING_DURATION_MS = 250
 const SIMULATION_CANCELED_MESSAGE = "Simulation cancelled."
+const MAX_SIMULATED_TURNS = 3
 const GOLDFISH_SERVER_URL =
   import.meta.env.VITE_GOLDFISH_SERVER_URL ?? "http://127.0.0.1:3001"
 
@@ -68,7 +69,7 @@ type CreateGameResponse = {
 type ResetGameStateResponse =
   | {
       ok: true
-      target: "initial" | "opening_hand_snapshot"
+      target: "initial" | "opening_hand_snapshot" | "turn_snapshot"
       cardsRemaining: number
     }
   | {
@@ -156,6 +157,28 @@ function markPromptRunFailed(
   )
 }
 
+function getTurnRunTitle(turnNumber: number) {
+  return `Turn ${turnNumber}`
+}
+
+function getPromptRunTurnNumber(run: SimulationPromptRun) {
+  if (typeof run.turnNumber === "number") {
+    return run.turnNumber
+  }
+
+  if (run.title === "First play decision") {
+    return 1
+  }
+
+  const match = run.title.match(/^Turn (\d+)$/)
+
+  if (!match) {
+    return null
+  }
+
+  const parsedTurnNumber = Number(match[1])
+  return Number.isSafeInteger(parsedTurnNumber) ? parsedTurnNumber : null
+}
 async function hydrateToolEvent(
   event: PromptStreamEvent,
   signal?: AbortSignal
@@ -197,7 +220,8 @@ async function hydrateToolEvent(
 
     return {
       ...event,
-      structuredContent: toolUiData.structuredContent ?? event.structuredContent,
+      structuredContent:
+        toolUiData.structuredContent ?? event.structuredContent,
       uiMetadata: toolUiData.uiMetadata ?? event.uiMetadata,
     }
   } catch (error) {
@@ -329,17 +353,19 @@ async function readPromptStream(
 
 export function App() {
   const [storedDeckInput] = useState(() => loadStoredDeckInput())
-  const [storedSimulationSession] = useState<StoredSimulationSessionState>(() => {
-    const session = loadStoredSimulationSession()
+  const [storedSimulationSession] = useState<StoredSimulationSessionState>(
+    () => {
+      const session = loadStoredSimulationSession()
 
-    return {
-      simulationPayload: session.simulationPayload,
-      gameId: session.gameId,
-      currentSimulationSeed: session.currentSimulationSeed,
-      simulationError: session.simulationError,
-      promptRuns: restorePromptRuns(session.promptRuns),
+      return {
+        simulationPayload: session.simulationPayload,
+        gameId: session.gameId,
+        currentSimulationSeed: session.currentSimulationSeed,
+        simulationError: session.simulationError,
+        promptRuns: restorePromptRuns(session.promptRuns),
+      }
     }
-  })
+  )
   const [commanderOneName, setCommanderOneName] = useState(
     storedDeckInput.commanderOneName
   )
@@ -365,14 +391,16 @@ export function App() {
   const [simulationSeedInput, setSimulationSeedInput] = useState(
     storedDeckInput.simulationSeedInput
   )
-  const [currentSimulationSeed, setCurrentSimulationSeed] = useState<number | null>(
-    storedSimulationSession.currentSimulationSeed
-  )
+  const [currentSimulationSeed, setCurrentSimulationSeed] = useState<
+    number | null
+  >(storedSimulationSession.currentSimulationSeed)
   const [promptRuns, setPromptRuns] = useState<SimulationPromptRun[]>(
     storedSimulationSession.promptRuns
   )
   const [savedSimulationPayload, setSavedSimulationPayload] =
-    useState<SimulationPayload | null>(storedSimulationSession.simulationPayload)
+    useState<SimulationPayload | null>(
+      storedSimulationSession.simulationPayload
+    )
   const simulationAbortControllerRef = useRef<AbortController | null>(null)
   const pendingRerunRunIdRef = useRef<string | null>(null)
   const previousDeckInputRef = useRef({
@@ -543,16 +571,14 @@ export function App() {
         "Content-Type": "application/json",
       },
       signal,
-      body: JSON.stringify(
-        {
-          ...resolvedSimulationPayload,
-          ...(requestedSeed !== undefined ? { seed: requestedSeed } : {}),
-        } satisfies {
-          commanders: GameCardPayload[]
-          deck: GameCardPayload[]
-          seed?: number
-        }
-      ),
+      body: JSON.stringify({
+        ...resolvedSimulationPayload,
+        ...(requestedSeed !== undefined ? { seed: requestedSeed } : {}),
+      } satisfies {
+        commanders: GameCardPayload[]
+        deck: GameCardPayload[]
+        seed?: number
+      }),
     })
 
     const payload = (await response.json()) as
@@ -563,14 +589,14 @@ export function App() {
       const detailMessage =
         "details" in payload && Array.isArray(payload.details)
           ? payload.details
-            .map((detail) => detail.message)
-            .filter(Boolean)
-            .join(" ")
+              .map((detail) => detail.message)
+              .filter(Boolean)
+              .join(" ")
           : ""
       throw new Error(
         detailMessage ||
-        ("error" in payload && payload.error) ||
-        "Failed to create a game."
+          ("error" in payload && payload.error) ||
+          "Failed to create a game."
       )
     }
 
@@ -580,7 +606,9 @@ export function App() {
       !("seed" in payload) ||
       typeof payload.seed !== "number"
     ) {
-      throw new Error("The server response did not include the game ID and seed.")
+      throw new Error(
+        "The server response did not include the game ID and seed."
+      )
     }
 
     return {
@@ -807,15 +835,10 @@ export function App() {
         throw new Error(startingHandValidation.message)
       }
 
-      await runTurnSimulation(
-        nextGameId,
-        "First play decision",
-        abortController.signal,
-        {
-          flow: "main",
-          seed,
-        }
-      )
+      await runTurnSequence(nextGameId, 1, abortController.signal, {
+        flow: "main",
+        seed,
+      })
     } catch (error) {
       if (isAbortError(error)) {
         if (!pendingRerunRunIdRef.current) {
@@ -874,8 +897,9 @@ export function App() {
 
   async function resetGameState(
     currentGameId: string,
-    target: "initial" | "opening_hand_snapshot",
-    signal?: AbortSignal
+    target: "initial" | "opening_hand_snapshot" | "turn_snapshot",
+    signal?: AbortSignal,
+    turnNumber?: number
   ) {
     const response = await fetch(`${GOLDFISH_SERVER_URL}/reset-game-state`, {
       method: "POST",
@@ -886,6 +910,7 @@ export function App() {
       body: JSON.stringify({
         gameId: currentGameId,
         target,
+        ...(typeof turnNumber === "number" ? { turnNumber } : {}),
       }),
     })
 
@@ -901,18 +926,19 @@ export function App() {
 
   async function runTurnSimulation(
     currentGameId: string,
-    title: string,
+    turnNumber: number,
     signal?: AbortSignal,
     options?: {
       flow?: SimulationPromptRunFlow
       seed?: number | null
     }
   ) {
-    const turnRun = createPromptRun(title, {
+    const turnRun = createPromptRun(getTurnRunTitle(turnNumber), {
       kind: "turn",
       flow: options?.flow ?? "main",
       gameId: currentGameId,
       seed: options?.seed ?? null,
+      turnNumber,
     })
     setPromptRuns((currentRuns) => [...currentRuns, turnRun])
 
@@ -935,28 +961,53 @@ export function App() {
         const detailMessage =
           "details" in promptPayload && Array.isArray(promptPayload.details)
             ? promptPayload.details
-              .map((detail) => detail.message)
-              .filter(Boolean)
-              .join(" ")
+                .map((detail) => detail.message)
+                .filter(Boolean)
+                .join(" ")
             : ""
         throw new Error(
           detailMessage ||
             ("error" in promptPayload && promptPayload.error) ||
-            "Failed to simulate the turn."
+            `Failed to simulate turn ${turnNumber}.`
         )
       }
 
-      return await readPromptStream(turnResponse, setPromptRuns, turnRun.id, signal)
+      return await readPromptStream(
+        turnResponse,
+        setPromptRuns,
+        turnRun.id,
+        signal
+      )
     } catch (error) {
       if (!isAbortError(error)) {
         const message =
-          error instanceof Error ? error.message : "Failed to simulate the turn."
+          error instanceof Error
+            ? error.message
+            : `Failed to simulate turn ${turnNumber}.`
         setPromptRuns((currentRuns) =>
           markPromptRunFailed(currentRuns, turnRun.id, message)
         )
       }
 
       throw error
+    }
+  }
+
+  async function runTurnSequence(
+    currentGameId: string,
+    startingTurnNumber: number,
+    signal?: AbortSignal,
+    options?: {
+      flow?: SimulationPromptRunFlow
+      seed?: number | null
+    }
+  ) {
+    for (
+      let turnNumber = startingTurnNumber;
+      turnNumber <= MAX_SIMULATED_TURNS;
+      turnNumber += 1
+    ) {
+      await runTurnSimulation(currentGameId, turnNumber, signal, options)
     }
   }
 
@@ -999,9 +1050,9 @@ export function App() {
         const detailMessage =
           "details" in promptPayload && Array.isArray(promptPayload.details)
             ? promptPayload.details
-              .map((detail) => detail.message)
-              .filter(Boolean)
-              .join(" ")
+                .map((detail) => detail.message)
+                .filter(Boolean)
+                .join(" ")
             : ""
         throw new Error(
           detailMessage ||
@@ -1101,7 +1152,9 @@ export function App() {
         }
       } else {
         setSimulationError(
-          error instanceof Error ? error.message : "Failed to rerun the simulation."
+          error instanceof Error
+            ? error.message
+            : "Failed to rerun the simulation."
         )
       }
     } finally {
@@ -1148,18 +1201,22 @@ export function App() {
 
     setPromptRuns((currentRuns) => [
       ...currentRuns,
-      createStartingHandValidationRun(startingHandValidation, openingHandRun.keptHandCards, {
-        flow: "main",
-        gameId: nextGameId,
-        seed,
-      }),
+      createStartingHandValidationRun(
+        startingHandValidation,
+        openingHandRun.keptHandCards,
+        {
+          flow: "main",
+          gameId: nextGameId,
+          seed,
+        }
+      ),
     ])
 
     if (!startingHandValidation.isValid) {
       throw new Error(startingHandValidation.message)
     }
 
-    await runTurnSimulation(nextGameId, "First play decision", signal, {
+    await runTurnSequence(nextGameId, 1, signal, {
       flow: "main",
       seed,
     })
@@ -1170,12 +1227,20 @@ export function App() {
     run: SimulationPromptRun,
     signal?: AbortSignal
   ) {
+    const turnNumber = getPromptRunTurnNumber(run)
+
+    if (turnNumber === null) {
+      throw new Error(
+        "That turn cannot be rerun because its turn number is missing."
+      )
+    }
+
     setPromptRuns((currentRuns) => currentRuns.slice(0, runIndex))
-    await resetGameState(run.gameId, "opening_hand_snapshot", signal)
+    await resetGameState(run.gameId, "turn_snapshot", signal, turnNumber)
     setGameId(run.gameId)
     setCurrentSimulationSeed(run.seed)
 
-    await runTurnSimulation(run.gameId, "First play decision", signal, {
+    await runTurnSequence(run.gameId, turnNumber, signal, {
       flow: "main",
       seed: run.seed,
     })
@@ -1606,8 +1671,3 @@ export function App() {
 }
 
 export default App
-
-
-
-
-

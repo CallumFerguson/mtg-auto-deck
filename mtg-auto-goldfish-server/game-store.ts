@@ -1,12 +1,12 @@
-import { randomInt, randomUUID } from 'node:crypto'
+import { randomInt, randomUUID } from "node:crypto"
 import {
   existsSync,
   mkdirSync,
   readFileSync,
   renameSync,
   writeFileSync,
-} from 'node:fs'
-import { dirname } from 'node:path'
+} from "node:fs"
+import { dirname } from "node:path"
 
 const ONE_HOUR_IN_MS = 60 * 60 * 1000
 const GAME_RETENTION_IN_MS = 24 * ONE_HOUR_IN_MS
@@ -37,6 +37,18 @@ export type OpeningHandSnapshot = {
   validation: OpeningHandSnapshotValidation
 }
 
+export type TurnSnapshot = {
+  turnNumber: number
+  openingHand: string[]
+  library: string[]
+  gameState?: string
+}
+
+type ActiveTurnSimulation = {
+  turnNumber: number
+  hasUpdatedGameState: boolean
+}
+
 type GameRecord = {
   id: string
   createdAt: number
@@ -44,8 +56,11 @@ type GameRecord = {
   commanders: GameCard[]
   initialLibrary: GameCard[]
   library: string[]
+  currentTurn: number
   currentGameState?: string
   openingHandSnapshot?: OpeningHandSnapshot
+  turnSnapshots: TurnSnapshot[]
+  activeTurnSimulation?: ActiveTurnSimulation
   hasDrawnStartingHand: boolean
   mulliganCount: number
   randomState: number
@@ -64,14 +79,14 @@ export type DrawResult =
     }
   | {
       ok: false
-      reason: 'game_not_found' | 'empty_library'
+      reason: "game_not_found" | "empty_library"
     }
 
 export type DrawStartingHandResult =
   | DrawResult
   | {
       ok: false
-      reason: 'starting_hand_already_drawn'
+      reason: "starting_hand_already_drawn"
     }
 
 export type MulliganResult =
@@ -84,7 +99,7 @@ export type MulliganResult =
     }
   | {
       ok: false
-      reason: 'game_not_found' | 'starting_hand_not_drawn'
+      reason: "game_not_found" | "starting_hand_not_drawn"
     }
 
 export type ReturnCardToLibraryResult =
@@ -96,7 +111,7 @@ export type ReturnCardToLibraryResult =
     }
   | {
       ok: false
-      reason: 'game_not_found'
+      reason: "game_not_found"
     }
 
 export type ReturnCardsToLibraryResult =
@@ -107,7 +122,7 @@ export type ReturnCardsToLibraryResult =
     }
   | {
       ok: false
-      reason: 'game_not_found'
+      reason: "game_not_found"
     }
 
 export type TakeCardsFromLibraryMatch = {
@@ -123,7 +138,7 @@ export type TakeCardsFromLibraryResult =
     }
   | {
       ok: false
-      reason: 'game_not_found'
+      reason: "game_not_found"
     }
 
 export type ShuffleLibraryResult =
@@ -133,7 +148,7 @@ export type ShuffleLibraryResult =
     }
   | {
       ok: false
-      reason: 'game_not_found'
+      reason: "game_not_found"
     }
 
 export type GetGamePromptContextResult =
@@ -143,12 +158,14 @@ export type GetGamePromptContextResult =
       commanders: GameCard[]
       initialLibrary: GameCard[]
       currentLibrary: string[]
+      currentTurn: number
       currentGameState?: string
       openingHandSnapshot?: OpeningHandSnapshot
+      turnSnapshots: TurnSnapshot[]
     }
   | {
       ok: false
-      reason: 'game_not_found'
+      reason: "game_not_found"
     }
 
 export type SaveOpeningHandSnapshotResult =
@@ -157,7 +174,7 @@ export type SaveOpeningHandSnapshotResult =
     } & OpeningHandSnapshot)
   | {
       ok: false
-      reason: 'game_not_found'
+      reason: "game_not_found"
     }
 
 export type GetOpeningHandSnapshotStatusResult =
@@ -168,7 +185,7 @@ export type GetOpeningHandSnapshotStatusResult =
     }
   | {
       ok: false
-      reason: 'game_not_found'
+      reason: "game_not_found"
     }
 
 export type ResetGameToInitialStateResult =
@@ -178,7 +195,7 @@ export type ResetGameToInitialStateResult =
     }
   | {
       ok: false
-      reason: 'game_not_found'
+      reason: "game_not_found"
     }
 
 export type RestoreOpeningHandSnapshotResult =
@@ -190,17 +207,55 @@ export type RestoreOpeningHandSnapshotResult =
     }
   | {
       ok: false
-      reason: 'game_not_found' | 'opening_hand_snapshot_not_found'
+      reason: "game_not_found" | "opening_hand_snapshot_not_found"
+    }
+
+export type RestoreTurnSnapshotResult =
+  | {
+      ok: true
+      cardsRemaining: number
+      turnNumber: number
+      gameState?: string
+    }
+  | {
+      ok: false
+      reason: "game_not_found" | "turn_snapshot_not_found"
+    }
+
+export type StartTurnSimulationResult =
+  | {
+      ok: true
+      turnNumber: number
+    }
+  | {
+      ok: false
+      reason: "game_not_found" | "turn_simulation_already_active"
+    }
+
+export type EndTurnSimulationResult =
+  | {
+      ok: true
+      turnNumber?: number
+      turnWasUpdated: boolean
+    }
+  | {
+      ok: false
+      reason: "game_not_found"
     }
 
 export type UpdateGameStateResult =
   | {
       ok: true
+      turnNumber: number
+      nextTurnNumber: number
       gameState: string
     }
   | {
       ok: false
-      reason: 'game_not_found'
+      reason:
+        | "game_not_found"
+        | "no_active_turn_simulation"
+        | "turn_already_updated"
     }
 
 export type GameStoreOptions = {
@@ -251,14 +306,20 @@ export class GameStore {
       commanders: [...commanders],
       initialLibrary: sortedInitialLibrary,
       library: [],
+      currentTurn: 1,
       currentGameState: undefined,
       openingHandSnapshot: undefined,
+      turnSnapshots: [],
+      activeTurnSimulation: undefined,
       hasDrawnStartingHand: false,
       mulliganCount: 0,
       randomState: resolvedSeed >>> 0,
     }
 
-    game.library = shuffle(deck.map((card) => card.name), () => nextRandom(game))
+    game.library = shuffle(
+      deck.map((card) => card.name),
+      () => nextRandom(game)
+    )
 
     this.games.set(id, game)
     this.persistGames()
@@ -285,11 +346,11 @@ export class GameStore {
     const game = this.games.get(gameId)
 
     if (!game) {
-      return { ok: false, reason: 'game_not_found' }
+      return { ok: false, reason: "game_not_found" }
     }
 
     if (game.library.length === 0) {
-      return { ok: false, reason: 'empty_library' }
+      return { ok: false, reason: "empty_library" }
     }
 
     const cards = game.library.splice(0, count)
@@ -308,11 +369,11 @@ export class GameStore {
     const game = this.games.get(gameId)
 
     if (!game) {
-      return { ok: false, reason: 'game_not_found' }
+      return { ok: false, reason: "game_not_found" }
     }
 
     if (game.library.length === 0) {
-      return { ok: false, reason: 'empty_library' }
+      return { ok: false, reason: "empty_library" }
     }
 
     const cards = game.library.splice(-count).reverse()
@@ -331,15 +392,15 @@ export class GameStore {
     const game = this.games.get(gameId)
 
     if (!game) {
-      return { ok: false, reason: 'game_not_found' }
+      return { ok: false, reason: "game_not_found" }
     }
 
     if (game.hasDrawnStartingHand) {
-      return { ok: false, reason: 'starting_hand_already_drawn' }
+      return { ok: false, reason: "starting_hand_already_drawn" }
     }
 
     if (game.library.length === 0) {
-      return { ok: false, reason: 'empty_library' }
+      return { ok: false, reason: "empty_library" }
     }
 
     game.hasDrawnStartingHand = true
@@ -360,15 +421,16 @@ export class GameStore {
     const game = this.games.get(gameId)
 
     if (!game) {
-      return { ok: false, reason: 'game_not_found' }
+      return { ok: false, reason: "game_not_found" }
     }
 
     if (!game.hasDrawnStartingHand) {
-      return { ok: false, reason: 'starting_hand_not_drawn' }
+      return { ok: false, reason: "starting_hand_not_drawn" }
     }
 
-    game.library = shuffle(game.initialLibrary.map((card) => card.name), () =>
-      nextRandom(game)
+    game.library = shuffle(
+      game.initialLibrary.map((card) => card.name),
+      () => nextRandom(game)
     )
     game.mulliganCount += 1
 
@@ -387,7 +449,7 @@ export class GameStore {
   returnCardToLibrary(
     gameId: string,
     card: string,
-    side: 'top' | 'bottom',
+    side: "top" | "bottom",
     position: number
   ): ReturnCardToLibraryResult {
     this.deleteExpiredGames()
@@ -395,12 +457,15 @@ export class GameStore {
     const game = this.games.get(gameId)
 
     if (!game) {
-      return { ok: false, reason: 'game_not_found' }
+      return { ok: false, reason: "game_not_found" }
     }
 
-    const normalizedPosition = Math.max(0, Math.min(position, game.library.length))
+    const normalizedPosition = Math.max(
+      0,
+      Math.min(position, game.library.length)
+    )
     const insertIndex =
-      side === 'top'
+      side === "top"
         ? normalizedPosition
         : Math.max(0, game.library.length - normalizedPosition)
 
@@ -418,7 +483,7 @@ export class GameStore {
   returnCardsToLibrary(
     gameId: string,
     cards: readonly string[],
-    side: 'top' | 'bottom',
+    side: "top" | "bottom",
     randomizeOrder: boolean
   ): ReturnCardsToLibraryResult {
     this.deleteExpiredGames()
@@ -426,7 +491,7 @@ export class GameStore {
     const game = this.games.get(gameId)
 
     if (!game) {
-      return { ok: false, reason: 'game_not_found' }
+      return { ok: false, reason: "game_not_found" }
     }
 
     const cardsToInsert = randomizeOrder
@@ -434,7 +499,7 @@ export class GameStore {
       : [...cards]
 
     for (const card of cardsToInsert) {
-      if (side === 'top') {
+      if (side === "top") {
         game.library.unshift(card)
       } else {
         game.library.push(card)
@@ -459,11 +524,14 @@ export class GameStore {
     const game = this.games.get(gameId)
 
     if (!game) {
-      return { ok: false, reason: 'game_not_found' }
+      return { ok: false, reason: "game_not_found" }
     }
 
     const matches = requestedCards.map((requestedCard) => {
-      const matchedIndex = findBestLibraryMatchIndex(game.library, requestedCard)
+      const matchedIndex = findBestLibraryMatchIndex(
+        game.library,
+        requestedCard
+      )
 
       if (matchedIndex === -1) {
         return {
@@ -495,7 +563,7 @@ export class GameStore {
     const game = this.games.get(gameId)
 
     if (!game) {
-      return { ok: false, reason: 'game_not_found' }
+      return { ok: false, reason: "game_not_found" }
     }
 
     game.library = shuffle(game.library, () => nextRandom(game))
@@ -516,7 +584,7 @@ export class GameStore {
     const game = this.games.get(gameId)
 
     if (!game) {
-      return { ok: false, reason: 'game_not_found' }
+      return { ok: false, reason: "game_not_found" }
     }
 
     game.openingHandSnapshot = createOpeningHandSnapshot(
@@ -525,6 +593,16 @@ export class GameStore {
       game.commanders.length,
       game.mulliganCount
     )
+    game.currentTurn = 1
+    game.currentGameState = undefined
+    game.turnSnapshots = [
+      createTurnSnapshot(
+        1,
+        game.openingHandSnapshot.startingHand,
+        game.openingHandSnapshot.library
+      ),
+    ]
+    game.activeTurnSimulation = undefined
     this.persistGames()
 
     return {
@@ -535,13 +613,15 @@ export class GameStore {
     }
   }
 
-  getOpeningHandSnapshotStatus(gameId: string): GetOpeningHandSnapshotStatusResult {
+  getOpeningHandSnapshotStatus(
+    gameId: string
+  ): GetOpeningHandSnapshotStatusResult {
     this.deleteExpiredGames()
 
     const game = this.games.get(gameId)
 
     if (!game) {
-      return { ok: false, reason: 'game_not_found' }
+      return { ok: false, reason: "game_not_found" }
     }
 
     return {
@@ -563,15 +643,19 @@ export class GameStore {
     const game = this.games.get(gameId)
 
     if (!game) {
-      return { ok: false, reason: 'game_not_found' }
+      return { ok: false, reason: "game_not_found" }
     }
 
     game.randomState = game.seed >>> 0
-    game.library = shuffle(game.initialLibrary.map((card) => card.name), () =>
-      nextRandom(game)
+    game.library = shuffle(
+      game.initialLibrary.map((card) => card.name),
+      () => nextRandom(game)
     )
+    game.currentTurn = 1
     game.currentGameState = undefined
     game.openingHandSnapshot = undefined
+    game.turnSnapshots = []
+    game.activeTurnSimulation = undefined
     game.hasDrawnStartingHand = false
     game.mulliganCount = 0
     this.persistGames()
@@ -588,15 +672,24 @@ export class GameStore {
     const game = this.games.get(gameId)
 
     if (!game) {
-      return { ok: false, reason: 'game_not_found' }
+      return { ok: false, reason: "game_not_found" }
     }
 
     if (!game.openingHandSnapshot) {
-      return { ok: false, reason: 'opening_hand_snapshot_not_found' }
+      return { ok: false, reason: "opening_hand_snapshot_not_found" }
     }
 
+    const turnOneSnapshot = game.turnSnapshots.find(
+      (snapshot) => snapshot.turnNumber === 1
+    )
+
     game.library = [...game.openingHandSnapshot.library]
+    game.currentTurn = 1
     game.currentGameState = undefined
+    game.turnSnapshots = turnOneSnapshot
+      ? [cloneTurnSnapshot(turnOneSnapshot)]
+      : []
+    game.activeTurnSimulation = undefined
     game.hasDrawnStartingHand = true
     game.mulliganCount = game.openingHandSnapshot.validation.mulliganCount
     this.persistGames()
@@ -609,20 +702,133 @@ export class GameStore {
     }
   }
 
+  restoreTurnSnapshot(
+    gameId: string,
+    turnNumber: number
+  ): RestoreTurnSnapshotResult {
+    this.deleteExpiredGames()
+
+    const game = this.games.get(gameId)
+
+    if (!game) {
+      return { ok: false, reason: "game_not_found" }
+    }
+
+    const snapshot = game.turnSnapshots.find(
+      (currentSnapshot) => currentSnapshot.turnNumber === turnNumber
+    )
+
+    if (!snapshot) {
+      return { ok: false, reason: "turn_snapshot_not_found" }
+    }
+
+    game.library = [...snapshot.library]
+    game.currentTurn = snapshot.turnNumber
+    game.currentGameState = snapshot.gameState
+    game.turnSnapshots = game.turnSnapshots
+      .filter((currentSnapshot) => currentSnapshot.turnNumber <= turnNumber)
+      .map(cloneTurnSnapshot)
+    game.activeTurnSimulation = undefined
+    game.hasDrawnStartingHand = true
+    game.mulliganCount = game.openingHandSnapshot?.validation.mulliganCount ?? 0
+    this.persistGames()
+
+    return {
+      ok: true,
+      cardsRemaining: game.library.length,
+      turnNumber: snapshot.turnNumber,
+      gameState: snapshot.gameState,
+    }
+  }
+
+  startTurnSimulation(gameId: string): StartTurnSimulationResult {
+    this.deleteExpiredGames()
+
+    const game = this.games.get(gameId)
+
+    if (!game) {
+      return { ok: false, reason: "game_not_found" }
+    }
+
+    if (game.activeTurnSimulation) {
+      return { ok: false, reason: "turn_simulation_already_active" }
+    }
+
+    game.activeTurnSimulation = {
+      turnNumber: game.currentTurn,
+      hasUpdatedGameState: false,
+    }
+    this.persistGames()
+
+    return {
+      ok: true,
+      turnNumber: game.currentTurn,
+    }
+  }
+
+  endTurnSimulation(gameId: string): EndTurnSimulationResult {
+    this.deleteExpiredGames()
+
+    const game = this.games.get(gameId)
+
+    if (!game) {
+      return { ok: false, reason: "game_not_found" }
+    }
+
+    const activeTurnSimulation = game.activeTurnSimulation
+
+    game.activeTurnSimulation = undefined
+    this.persistGames()
+
+    return {
+      ok: true,
+      turnNumber: activeTurnSimulation?.turnNumber,
+      turnWasUpdated: activeTurnSimulation?.hasUpdatedGameState ?? false,
+    }
+  }
+
   updateGameState(gameId: string, gameState: string): UpdateGameStateResult {
     this.deleteExpiredGames()
 
     const game = this.games.get(gameId)
 
     if (!game) {
-      return { ok: false, reason: 'game_not_found' }
+      return { ok: false, reason: "game_not_found" }
     }
 
+    if (!game.activeTurnSimulation) {
+      return { ok: false, reason: "no_active_turn_simulation" }
+    }
+
+    if (game.activeTurnSimulation.hasUpdatedGameState) {
+      return { ok: false, reason: "turn_already_updated" }
+    }
+
+    const completedTurnNumber = game.activeTurnSimulation.turnNumber
+
     game.currentGameState = gameState
+    game.currentTurn = completedTurnNumber + 1
+    game.turnSnapshots = [
+      ...game.turnSnapshots.filter(
+        (snapshot) => snapshot.turnNumber <= completedTurnNumber
+      ),
+      createTurnSnapshot(
+        game.currentTurn,
+        game.openingHandSnapshot?.startingHand ?? [],
+        game.library,
+        gameState
+      ),
+    ]
+    game.activeTurnSimulation = {
+      ...game.activeTurnSimulation,
+      hasUpdatedGameState: true,
+    }
     this.persistGames()
 
     return {
       ok: true,
+      turnNumber: completedTurnNumber,
+      nextTurnNumber: game.currentTurn,
       gameState,
     }
   }
@@ -633,7 +839,7 @@ export class GameStore {
     const game = this.games.get(gameId)
 
     if (!game) {
-      return { ok: false, reason: 'game_not_found' }
+      return { ok: false, reason: "game_not_found" }
     }
 
     return {
@@ -644,6 +850,7 @@ export class GameStore {
       currentLibrary: [...game.library].sort((leftCard, rightCard) =>
         leftCard.localeCompare(rightCard)
       ),
+      currentTurn: game.currentTurn,
       currentGameState: game.currentGameState,
       openingHandSnapshot: game.openingHandSnapshot
         ? {
@@ -652,6 +859,7 @@ export class GameStore {
             validation: { ...game.openingHandSnapshot.validation },
           }
         : undefined,
+      turnSnapshots: game.turnSnapshots.map(cloneTurnSnapshot),
     }
   }
 
@@ -678,7 +886,7 @@ export class GameStore {
     }
 
     try {
-      const rawValue = readFileSync(this.persistencePath, 'utf8')
+      const rawValue = readFileSync(this.persistencePath, "utf8")
 
       if (!rawValue.trim()) {
         return
@@ -703,6 +911,7 @@ export class GameStore {
           commanders: game.commanders.map((card) => ({ ...card })),
           initialLibrary: game.initialLibrary.map((card) => ({ ...card })),
           library: [...game.library],
+          currentTurn: game.currentTurn ?? 1,
           currentGameState: game.currentGameState,
           openingHandSnapshot: game.openingHandSnapshot
             ? {
@@ -711,16 +920,18 @@ export class GameStore {
                 validation: { ...game.openingHandSnapshot.validation },
               }
             : undefined,
+          turnSnapshots: game.turnSnapshots?.map(cloneTurnSnapshot) ?? [],
+          activeTurnSimulation: undefined,
         })
       }
 
       this.deleteExpiredGames()
     } catch (error) {
       console.warn(
-        '[game_store_persist]',
+        "[game_store_persist]",
         error instanceof Error
           ? `Failed to load persisted game store: ${error.message}`
-          : 'Failed to load persisted game store.'
+          : "Failed to load persisted game store."
       )
     }
   }
@@ -737,6 +948,7 @@ export class GameStore {
         commanders: game.commanders.map((card) => ({ ...card })),
         initialLibrary: game.initialLibrary.map((card) => ({ ...card })),
         library: [...game.library],
+        currentTurn: game.currentTurn,
         currentGameState: game.currentGameState,
         openingHandSnapshot: game.openingHandSnapshot
           ? {
@@ -745,6 +957,8 @@ export class GameStore {
               validation: { ...game.openingHandSnapshot.validation },
             }
           : undefined,
+        turnSnapshots: game.turnSnapshots.map(cloneTurnSnapshot),
+        activeTurnSimulation: undefined,
       })),
     }
 
@@ -771,14 +985,14 @@ function shuffle<T>(cards: readonly T[], random: () => number) {
 }
 
 function normalizeSeed(seed: number | undefined) {
-  if (typeof seed === 'number' && Number.isInteger(seed)) {
+  if (typeof seed === "number" && Number.isInteger(seed)) {
     return seed >>> 0
   }
 
   return randomInt(0, 2 ** 32)
 }
 
-function nextRandom(game: Pick<GameRecord, 'randomState'>) {
+function nextRandom(game: Pick<GameRecord, "randomState">) {
   game.randomState = (game.randomState + 0x6d2b79f5) >>> 0
   let next = Math.imul(
     game.randomState ^ (game.randomState >>> 15),
@@ -810,6 +1024,29 @@ function createOpeningHandSnapshot(
       commanderCount,
       mulliganCount
     ),
+  }
+}
+
+function createTurnSnapshot(
+  turnNumber: number,
+  openingHand: readonly string[],
+  library: readonly string[],
+  gameState?: string
+): TurnSnapshot {
+  return {
+    turnNumber,
+    openingHand: [...openingHand],
+    library: [...library],
+    gameState,
+  }
+}
+
+function cloneTurnSnapshot(snapshot: TurnSnapshot): TurnSnapshot {
+  return {
+    turnNumber: snapshot.turnNumber,
+    openingHand: [...snapshot.openingHand],
+    library: [...snapshot.library],
+    gameState: snapshot.gameState,
   }
 }
 
@@ -846,45 +1083,67 @@ function getExpectedStartingHandSize(mulliganCount: number) {
 }
 
 function isValidPersistedGameRecord(value: unknown): value is GameRecord {
-  if (value === null || typeof value !== 'object') {
+  if (value === null || typeof value !== "object") {
     return false
   }
 
   const record = value as Partial<GameRecord>
 
   return (
-    typeof record.id === 'string' &&
-    typeof record.createdAt === 'number' &&
-    typeof record.seed === 'number' &&
+    typeof record.id === "string" &&
+    typeof record.createdAt === "number" &&
+    typeof record.seed === "number" &&
     Array.isArray(record.commanders) &&
     record.commanders.every(isGameCard) &&
     Array.isArray(record.initialLibrary) &&
     record.initialLibrary.every(isGameCard) &&
     Array.isArray(record.library) &&
-    record.library.every((card) => typeof card === 'string') &&
+    record.library.every((card) => typeof card === "string") &&
+    (record.currentTurn === undefined ||
+      typeof record.currentTurn === "number") &&
     (record.currentGameState === undefined ||
-      typeof record.currentGameState === 'string') &&
-    typeof record.hasDrawnStartingHand === 'boolean' &&
-    typeof record.mulliganCount === 'number' &&
-    typeof record.randomState === 'number' &&
+      typeof record.currentGameState === "string") &&
+    (record.turnSnapshots === undefined ||
+      (Array.isArray(record.turnSnapshots) &&
+        record.turnSnapshots.every(isTurnSnapshot))) &&
+    typeof record.hasDrawnStartingHand === "boolean" &&
+    typeof record.mulliganCount === "number" &&
+    typeof record.randomState === "number" &&
     (record.openingHandSnapshot === undefined ||
       isOpeningHandSnapshot(record.openingHandSnapshot))
+  )
+}
+
+function isTurnSnapshot(value: unknown): value is TurnSnapshot {
+  if (value === null || typeof value !== "object") {
+    return false
+  }
+
+  const snapshot = value as Partial<TurnSnapshot>
+
+  return (
+    typeof snapshot.turnNumber === "number" &&
+    Array.isArray(snapshot.openingHand) &&
+    snapshot.openingHand.every((card) => typeof card === "string") &&
+    Array.isArray(snapshot.library) &&
+    snapshot.library.every((card) => typeof card === "string") &&
+    (snapshot.gameState === undefined || typeof snapshot.gameState === "string")
   )
 }
 
 function isGameCard(value: unknown): value is GameCard {
   return (
     value !== null &&
-    typeof value === 'object' &&
-    'name' in value &&
-    typeof value.name === 'string' &&
-    'cardText' in value &&
-    typeof value.cardText === 'string'
+    typeof value === "object" &&
+    "name" in value &&
+    typeof value.name === "string" &&
+    "cardText" in value &&
+    typeof value.cardText === "string"
   )
 }
 
 function isOpeningHandSnapshot(value: unknown): value is OpeningHandSnapshot {
-  if (value === null || typeof value !== 'object') {
+  if (value === null || typeof value !== "object") {
     return false
   }
 
@@ -892,9 +1151,9 @@ function isOpeningHandSnapshot(value: unknown): value is OpeningHandSnapshot {
 
   return (
     Array.isArray(snapshot.startingHand) &&
-    snapshot.startingHand.every((card) => typeof card === 'string') &&
+    snapshot.startingHand.every((card) => typeof card === "string") &&
     Array.isArray(snapshot.library) &&
-    snapshot.library.every((card) => typeof card === 'string') &&
+    snapshot.library.every((card) => typeof card === "string") &&
     snapshot.validation !== undefined &&
     isOpeningHandSnapshotValidation(snapshot.validation)
   )
@@ -903,22 +1162,22 @@ function isOpeningHandSnapshot(value: unknown): value is OpeningHandSnapshot {
 function isOpeningHandSnapshotValidation(
   value: unknown
 ): value is OpeningHandSnapshotValidation {
-  if (value === null || typeof value !== 'object') {
+  if (value === null || typeof value !== "object") {
     return false
   }
 
   const validation = value as Partial<OpeningHandSnapshotValidation>
 
   return (
-    typeof validation.isValid === 'boolean' &&
-    typeof validation.message === 'string' &&
-    typeof validation.totalGameCards === 'number' &&
-    typeof validation.expectedGameCards === 'number' &&
-    typeof validation.startingHandSize === 'number' &&
-    typeof validation.expectedStartingHandSize === 'number' &&
-    typeof validation.librarySize === 'number' &&
-    typeof validation.commanderCount === 'number' &&
-    typeof validation.mulliganCount === 'number'
+    typeof validation.isValid === "boolean" &&
+    typeof validation.message === "string" &&
+    typeof validation.totalGameCards === "number" &&
+    typeof validation.expectedGameCards === "number" &&
+    typeof validation.startingHandSize === "number" &&
+    typeof validation.expectedStartingHandSize === "number" &&
+    typeof validation.librarySize === "number" &&
+    typeof validation.commanderCount === "number" &&
+    typeof validation.mulliganCount === "number"
   )
 }
 
@@ -943,18 +1202,22 @@ function findBestLibraryMatchIndex(
       continue
     }
 
-    const distance = levenshteinDistance(normalizedRequestedCard, normalizedCard)
-    const maxLength = Math.max(normalizedRequestedCard.length, normalizedCard.length)
+    const distance = levenshteinDistance(
+      normalizedRequestedCard,
+      normalizedCard
+    )
+    const maxLength = Math.max(
+      normalizedRequestedCard.length,
+      normalizedCard.length
+    )
     const score = maxLength === 0 ? 1 : 1 - distance / maxLength
 
     if (
       score > bestMatchScore ||
       (score === bestMatchScore && distance < bestMatchDistance) ||
-      (
-        score === bestMatchScore &&
+      (score === bestMatchScore &&
         distance === bestMatchDistance &&
-        card.localeCompare(library[bestMatchIndex] ?? '') < 0
-      )
+        card.localeCompare(library[bestMatchIndex] ?? "") < 0)
     ) {
       bestMatchIndex = index
       bestMatchScore = score
@@ -984,7 +1247,7 @@ function findBestLibraryMatchIndex(
 }
 
 function normalizeCardNameForFuzzyMatch(cardName: string) {
-  return cardName.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+  return cardName.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "")
 }
 
 function isReasonablyCloseFuzzyMatch(
@@ -1046,8 +1309,3 @@ function levenshteinDistance(left: string, right: string) {
 
   return previousRow[right.length]
 }
-
-
-
-
-
