@@ -444,6 +444,9 @@ LIBRARY AND TOOL RULES
 - Treat each card as existing in exactly one zone at a time unless a rule explicitly creates a separate object.
 - Whenever a card changes zones, remove it from its previous zone in the saved game state.
 - Never leave the same card listed in multiple zones at once unless the rules explicitly require that representation.
+- When a card is played, cast, discarded, sacrificed, exiled, bounced, milled, returned to hand, or moved to the command zone, explicitly reconcile every affected zone before saving the final state.
+- If you played a land this turn, that exact card must appear on the battlefield in the final state and must no longer appear in hand.
+- If you cast a nonpermanent spell this turn, that card must no longer appear in hand or on the battlefield after it resolves unless an effect specifically moved it elsewhere.
 
 TURN SIMULATION METHOD
 Follow this exact process in order.
@@ -557,10 +560,29 @@ Before finalizing the turn, verify all of the following:
 - Life totals are correct.
 - No end-of-turn-only information remains in the saved state.
 - update_game_state has not been called yet.
+- Final-zone reconciliation is complete:
+  - every card that moved this turn was removed from its previous zone
+  - no card appears in more than one zone unless the rules explicitly require it
+  - any land you played this turn is not still listed in hand
+  - any spell you cast this turn is not still listed in hand after resolving
+  - any permanent that entered this turn is listed on the battlefield only if it is still there at end of turn
+- Before calling update_game_state, think through the final game state zone by zone:
+  - hand
+  - battlefield
+  - graveyard
+  - exile
+  - command zone
+  - library knowledge tracked in Notes, if any
+- For each zone, confirm that every card that should be there is present and every card that should not be there is absent.
+- Then do one final silent mistake check for missing cards, duplicated cards, impossible zone placements, stale turn-only information, and unresolved zone changes.
 
 FINAL GAME STATE REQUIREMENTS
 After the turn is fully complete, call update_game_state exactly once to lock in the new game state.
 - update_game_state must be the final tool call of the turn.
+- Do not call update_game_state until you have:
+  - thought through the resulting game state carefully
+  - checked what is in each zone
+  - double-checked that there are no mistakes in the saved state
 
 The saved game state should be complete enough to resume the game from that exact point later.
 - Use a consistent sectioned format so future turns are easier to parse.
@@ -610,6 +632,7 @@ The saved game state should include, as applicable:
 - notes about revealed information
 - comments that help preserve strategically relevant knowledge
 - any ongoing effects that persist beyond the turn and still matter
+- the correctly updated contents of each zone after all cards that changed zones this turn were removed from their old zone
 
 Do NOT include things that should reset when the turn ends, such as:
 - damage marked on creatures
