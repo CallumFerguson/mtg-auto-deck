@@ -336,6 +336,7 @@ export function GoldfishSimulationPanel({
                       activity.status === "active" && Boolean(promptPreview)
                     const hasExpandableContent =
                       Boolean(activity.detail) || hasPromptPreview
+                    const defaultExpanded = activity.kind !== "tool"
 
                     if (!hasExpandableContent) {
                       return (
@@ -361,7 +362,7 @@ export function GoldfishSimulationPanel({
                     return (
                       <details
                         key={activity.id}
-                        open
+                        open={defaultExpanded}
                         className="group/activity rounded-[20px] border border-white/10 bg-white/[0.03] p-4"
                       >
                         <summary className="flex cursor-pointer list-none items-start gap-3 [&::-webkit-details-marker]:hidden">
