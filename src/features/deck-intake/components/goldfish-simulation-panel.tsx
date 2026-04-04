@@ -342,7 +342,9 @@ export function GoldfishSimulationPanel({
                       activity.status === "active" && Boolean(promptPreview)
                     const hasExpandableContent =
                       Boolean(activity.detail) || hasPromptPreview
-                    const defaultExpanded = activity.kind !== "tool"
+                    const defaultExpanded =
+                      activity.kind !== "tool" ||
+                      activity.toolName !== "update_game_state"
 
                     if (!hasExpandableContent) {
                       return (

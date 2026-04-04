@@ -81,6 +81,7 @@ export type SimulationActivity = {
   id: string
   kind: "thinking" | "tool"
   title: string
+  toolName?: string
   detail?: SimulationActivityDetail
   status: "active" | "done" | "error"
   transient?: boolean
@@ -415,18 +416,21 @@ function applyPromptStreamEvent(
         )
       } else if (event.event === "tool_call.arguments") {
         nextActivities = updateLatestToolActivity(nextActivities, {
+          toolName: event.tool,
           title: getToolActivityTitle(event.tool),
           detail: getToolActivityDetail(event),
         })
       } else if (event.event === "tool_call.success") {
         nextActivities = updateLatestToolActivity(nextActivities, {
           status: "done",
+          toolName: event.tool,
           title: getToolActivityTitle(event.tool),
           detail: getToolActivityDetail(event),
         })
       } else if (event.event === "tool_call.failure") {
         nextActivities = updateLatestToolActivity(nextActivities, {
           status: "error",
+          toolName: event.tool,
           title: getToolActivityTitle(event.tool),
           detail: getToolActivityDetail(event),
         })
@@ -581,6 +585,7 @@ function createToolActivity(
     id: activityId,
     kind: "tool",
     title: toolName ? `Calling ${toolName}` : "Calling tool",
+    toolName,
     status: "active",
   }
 }
