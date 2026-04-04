@@ -579,6 +579,7 @@ Before finalizing the turn, verify all of the following:
 FINAL GAME STATE REQUIREMENTS
 After the turn is fully complete, call update_game_state exactly once to lock in the new game state.
 - update_game_state must be the final tool call of the turn.
+- The full end-of-turn game state belongs in the update_game_state argument, not in the final user-facing message.
 - Do not call update_game_state until you have:
   - thought through the resulting game state carefully
   - checked what is in each zone
@@ -668,6 +669,11 @@ OUTPUT RULES
 - Use tools whenever required.
 - After update_game_state is called, reply with a short summary of the turn.
 - The summary should briefly say what you played, what changed on the battlefield, and any important resulting game-state facts.
+- Do not restate the saved game state section-by-section after update_game_state.
+- Do not print Hand, Battlefield, Graveyard, Exile, Command Zone, Commander Tax, Notes, or full life-total blocks in the final message.
+- Do not echo the exact text you sent to update_game_state.
+- The final message is a brief recap, not a serialized state dump.
+- If you already called update_game_state, treat the authoritative state as saved and do not repeat it in full.
 - After update_game_state, do not call any more tools.
 
 ABSOLUTE PRIORITIES
