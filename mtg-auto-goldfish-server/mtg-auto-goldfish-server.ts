@@ -1951,7 +1951,6 @@ ${cardNames.join("\n")}
 Card reference:
 ${uniqueCards.map((card) => `${card.name}\n${card.cardText}\n`).join("\n")}
 
-GENERIC MTG AND COMMANDER RULES REFERENCE:
 ${GENERIC_GAME_RULES_REFERENCE}
 `.trim()
 }
