@@ -513,25 +513,16 @@ Before making plays, evaluate:
 - whether playing the commander now is correct
 - whether holding something is better than casting it now
 
-LAND PLAY AND MANA-SEQUENCING HEURISTICS
-- Treat land choice as an important strategic decision
-- When choosing which land to play, compare both immediate mana needs and likely future turns.
-- If you do NOT need the land to enter untapped this turn, usually prefer playing a land that enters tapped now and save untapped or more flexible lands for later turns.
-- Preserve future flexibility when possible:
-  - save untapped lands for turns where the extra immediate mana may matter
-  - save lands with broader color fixing for turns where color requirements are tighter
-  - save lands with optional utility, channel, cycling, sacrifice, or activated abilities if their flexibility may matter later
-- If you DO need untapped mana this turn for the best line, play the untapped land you need.
-- Do not automatically play the untapped land first just because it can enter untapped.
-- When several land plays are legal, choose the one that best supports both this turn's line and the next turns' likely mana development.
-- For tapped-vs-untapped land choices, use this default:
-  - if current-turn mana is unaffected, prefer the tapped land
-  - if current-turn color access is unaffected, prefer the land that preserves better color flexibility for future turns
-  - if one land has meaningful extra utility later, prefer using the lower-opportunity-cost land first
+LAND PLAY AND MANA-SEQUENCING GUIDANCE
+- Treat land choice as an important strategic decision.
+- When choosing which land to play, compare both immediate mana needs and how that play affects future turns.
+- Consider untapped access, color fixing, and any extra utility the land may provide later.
+- When several land plays are legal, choose the one that best supports the strongest overall line, not just the most obvious immediate use of mana.
+- In tapped-vs-untapped land decisions, weigh whether the untapped mana matters now, whether future turns are likely to need that flexibility more, and whether one land has higher future value than another.
 - Before locking in a land play, do a quick check:
-  - What am I likely to cast next turn or the turn after?
-  - Which land play leaves me with the best chance to curve out cleanly?
-  - Am I wasting a land that could have been more valuable later?
+  - What strong plays are available right now?
+  - What am I likely to want to cast next turn or the turn after?
+  - Which land play leaves the best overall mana development?
 
 Then execute the best legal sequence.
 For every action:
@@ -577,10 +568,8 @@ In general:
 - Avoid lines that only work if hidden information is assumed.
 - Use the commander if it is correct to do so.
 - Consider future turns, not only this turn.
-- If multiple legal lines are close, choose the one with the best long-term board development and mana efficiency.
-- Do not treat "spend the most mana this turn" as the default tie-breaker.
-- Value future mana quality, future untapped mana, and future color flexibility when comparing otherwise similar lines.
-- Land sequencing matters. Make the land play that best supports the current turn and the next turns, especially when choosing between tapped lands and untapped lands.
+- If multiple legal lines are close, choose the one with the best overall mix of immediate development, long-term board progress, and mana efficiency.
+- Land sequencing matters, but it should support the best overall line rather than override clearly strong current-turn plays.
 
 LEGALITY CHECKLIST
 Before finalizing the turn, verify all of the following:
