@@ -9,6 +9,7 @@ type PromptStreamModalProps = {
   isOpen: boolean
   promptRuns: SimulationPromptRun[]
   isStarting: boolean
+  initialSelectedRunId?: string | null
   onClose: () => void
 }
 
@@ -16,6 +17,7 @@ export function PromptStreamModal({
   isOpen,
   promptRuns,
   isStarting,
+  initialSelectedRunId,
   onClose,
 }: PromptStreamModalProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
@@ -111,11 +113,13 @@ export function PromptStreamModal({
 
   useEffect(() => {
     if (isOpen && !wasOpenRef.current) {
-      setSelectedRunId(promptRuns[promptRuns.length - 1]?.id ?? null)
+      setSelectedRunId(
+        initialSelectedRunId ?? promptRuns[promptRuns.length - 1]?.id ?? null
+      )
     }
 
     wasOpenRef.current = isOpen
-  }, [isOpen, promptRuns])
+  }, [initialSelectedRunId, isOpen, promptRuns])
 
   useEffect(() => {
     if (!promptRuns.length) {

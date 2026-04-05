@@ -179,22 +179,6 @@ function getPromptRunTurnNumber(run: SimulationPromptRun) {
   return Number.isSafeInteger(parsedTurnNumber) ? parsedTurnNumber : null
 }
 
-function getLatestSimulatedTurnNumber(promptRuns: SimulationPromptRun[]) {
-  return promptRuns.reduce((latestTurnNumber, run) => {
-    if (run.kind !== "turn") {
-      return latestTurnNumber
-    }
-
-    const turnNumber = getPromptRunTurnNumber(run)
-
-    if (turnNumber === null) {
-      return latestTurnNumber
-    }
-
-    return Math.max(latestTurnNumber, turnNumber)
-  }, 0)
-}
-
 function getNextTurnPromptNumber(promptRuns: SimulationPromptRun[]) {
   const lastRun = promptRuns.at(-1)
 
@@ -411,6 +395,9 @@ export function App() {
   const [isProcessing, setIsProcessing] = useState(false)
   const [isResetModalOpen, setIsResetModalOpen] = useState(false)
   const [isPromptStreamModalOpen, setIsPromptStreamModalOpen] = useState(false)
+  const [selectedPromptStreamRunId, setSelectedPromptStreamRunId] = useState<
+    string | null
+  >(null)
   const [isCustomPromptTestModalOpen, setIsCustomPromptTestModalOpen] =
     useState(false)
   const [isStartingSimulation, setIsStartingSimulation] = useState(false)
@@ -1238,11 +1225,6 @@ export function App() {
     if (!startingHandValidation.isValid) {
       throw new Error(startingHandValidation.message)
     }
-
-    await runTurnSimulation(nextGameId, 1, signal, {
-      flow: "main",
-      seed,
-    })
   }
 
   async function rerunMainTurnSimulation(
@@ -1258,26 +1240,14 @@ export function App() {
       )
     }
 
-    const lastSimulatedTurnNumber = Math.max(
-      getLatestSimulatedTurnNumber(promptRuns),
-      turnNumber
-    )
-
     setPromptRuns((currentRuns) => currentRuns.slice(0, runIndex))
     await resetGameState(run.gameId, "turn_snapshot", signal, turnNumber)
     setGameId(run.gameId)
     setCurrentSimulationSeed(run.seed)
-
-    for (
-      let replayTurnNumber = turnNumber;
-      replayTurnNumber <= lastSimulatedTurnNumber;
-      replayTurnNumber += 1
-    ) {
-      await runTurnSimulation(run.gameId, replayTurnNumber, signal, {
-        flow: "main",
-        seed: run.seed,
-      })
-    }
+    await runTurnSimulation(run.gameId, turnNumber, signal, {
+      flow: "main",
+      seed: run.seed,
+    })
   }
 
   async function simulateNextTurn() {
@@ -1725,7 +1695,10 @@ export function App() {
           onCancelPromptRun={cancelSimulation}
           onRerunPromptRun={rerunPromptRun}
           onSimulateNextTurn={simulateNextTurn}
-          onOpenPromptStream={() => setIsPromptStreamModalOpen(true)}
+          onOpenPromptStream={(runId) => {
+            setSelectedPromptStreamRunId(runId ?? null)
+            setIsPromptStreamModalOpen(true)
+          }}
           onOpenCustomPromptTest={() => setIsCustomPromptTestModalOpen(true)}
           onCreateDevGame={createDevGame}
           onStart={startSimulation}
@@ -1742,7 +1715,11 @@ export function App() {
         isOpen={isPromptStreamModalOpen}
         promptRuns={promptRuns}
         isStarting={isStartingSimulation}
-        onClose={() => setIsPromptStreamModalOpen(false)}
+        initialSelectedRunId={selectedPromptStreamRunId}
+        onClose={() => {
+          setIsPromptStreamModalOpen(false)
+          setSelectedPromptStreamRunId(null)
+        }}
       />
 
       <CustomPromptTestModal

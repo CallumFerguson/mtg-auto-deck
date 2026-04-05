@@ -36,7 +36,7 @@ type GoldfishSimulationPanelProps = {
   onCancelPromptRun: (runId: string) => void
   onRerunPromptRun: (runId: string) => void
   onSimulateNextTurn: () => void
-  onOpenPromptStream: () => void
+  onOpenPromptStream: (runId?: string) => void
   onOpenCustomPromptTest: () => void
   onCreateDevGame: () => void
   onStart: () => void
@@ -91,8 +91,10 @@ function InitiallyOpenDetails({
 
 const PromptRunBody = memo(function PromptRunBody({
   run,
+  onOpenPromptStream,
 }: {
   run: SimulationPromptRun
+  onOpenPromptStream: (runId?: string) => void
 }) {
   const promptPreview = run.rawPromptStream.trim()
     ? getPromptPreview(run.rawPromptStream)
@@ -105,6 +107,8 @@ const PromptRunBody = memo(function PromptRunBody({
           key={activity.id}
           activity={activity}
           promptPreview={promptPreview}
+          runId={run.id}
+          onOpenPromptStream={onOpenPromptStream}
         />
       ))}
 
@@ -114,19 +118,33 @@ const PromptRunBody = memo(function PromptRunBody({
 }, arePromptRunBodyPropsEqual)
 
 function arePromptRunBodyPropsEqual(
-  previousProps: { run: SimulationPromptRun },
-  nextProps: { run: SimulationPromptRun }
+  previousProps: {
+    run: SimulationPromptRun
+    onOpenPromptStream: (runId?: string) => void
+  },
+  nextProps: {
+    run: SimulationPromptRun
+    onOpenPromptStream: (runId?: string) => void
+  }
 ) {
-  return previousProps.run === nextProps.run
+  return (
+    previousProps.run === nextProps.run &&
+    previousProps.onOpenPromptStream === nextProps.onOpenPromptStream
+  )
 }
 
 const SimulationActivityCard = memo(function SimulationActivityCard({
   activity,
   promptPreview,
+  runId,
+  onOpenPromptStream,
 }: {
   activity: SimulationActivity
   promptPreview: string
+  runId: string
+  onOpenPromptStream: (runId?: string) => void
 }) {
+  const isThinkingActivity = activity.kind === "thinking"
   const hasPromptPreview =
     activity.status === "active" && Boolean(promptPreview)
   const hasExpandableContent = Boolean(activity.detail) || hasPromptPreview
@@ -134,6 +152,47 @@ const SimulationActivityCard = memo(function SimulationActivityCard({
     activity.toolName === "update_game_state" && Boolean(activity.detail)
   const defaultExpanded =
     activity.kind !== "tool" || activity.toolName !== "update_game_state"
+
+  if (isThinkingActivity) {
+    return (
+      <button
+        type="button"
+        className="w-full cursor-pointer rounded-[20px] border border-white/10 bg-white/[0.03] p-4 text-left"
+        onClick={() => onOpenPromptStream(runId)}
+      >
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5 shrink-0">
+            <ActivityIcon status={activity.status} />
+          </div>
+
+          <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-stone-100">
+                {activity.title}
+              </p>
+            </div>
+            <Eye className="mt-0.5 size-4 shrink-0 text-stone-500" />
+          </div>
+        </div>
+
+        {hasPromptPreview ? (
+          <div
+            className="mt-4 min-w-0 overflow-hidden"
+            style={{
+              maskImage:
+                "linear-gradient(to right, transparent 0%, black 18%, black 82%, transparent 100%)",
+              WebkitMaskImage:
+                "linear-gradient(to right, transparent 0%, black 18%, black 82%, transparent 100%)",
+            }}
+          >
+            <p className="overflow-hidden text-xs leading-5 whitespace-nowrap text-stone-400/80">
+              {promptPreview}
+            </p>
+          </div>
+        ) : null}
+      </button>
+    )
+  }
 
   if (!hasExpandableContent) {
     return (
@@ -212,15 +271,21 @@ function areSimulationActivityCardPropsEqual(
   previousProps: {
     activity: SimulationActivity
     promptPreview: string
+    runId: string
+    onOpenPromptStream: (runId?: string) => void
   },
   nextProps: {
     activity: SimulationActivity
     promptPreview: string
+    runId: string
+    onOpenPromptStream: (runId?: string) => void
   }
 ) {
   return (
     previousProps.activity === nextProps.activity &&
-    previousProps.promptPreview === nextProps.promptPreview
+    previousProps.promptPreview === nextProps.promptPreview &&
+    previousProps.runId === nextProps.runId &&
+    previousProps.onOpenPromptStream === nextProps.onOpenPromptStream
   )
 }
 
@@ -366,7 +431,7 @@ export function GoldfishSimulationPanel({
               variant="outline"
               className="h-11 rounded-full border-white/15 bg-white/5 px-5 text-stone-200 hover:bg-white/10 hover:text-stone-50 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-stone-900 disabled:text-stone-500"
               disabled={!hasStream}
-              onClick={onOpenPromptStream}
+              onClick={() => onOpenPromptStream()}
             >
               <Eye />
               View full prompt stream
@@ -569,7 +634,10 @@ export function GoldfishSimulationPanel({
                   </div>
                 </summary>
 
-                <PromptRunBody run={run} />
+                <PromptRunBody
+                  run={run}
+                  onOpenPromptStream={onOpenPromptStream}
+                />
               </InitiallyOpenDetails>
             )
           })}
