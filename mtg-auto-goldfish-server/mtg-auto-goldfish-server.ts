@@ -1938,7 +1938,6 @@ Opponent C Life: 40
   return `${SIMULATE_TURN_PROMPT}
 
 Game ID: ${gameId}
-Turn Number To Simulate: ${currentTurn}
 
 ===Start Game State===
 
