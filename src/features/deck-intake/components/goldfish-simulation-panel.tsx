@@ -9,7 +9,8 @@ import {
   Square,
   XCircle,
 } from "lucide-react"
-import { useEffect, useRef } from "react"
+import { memo, useEffect, useRef } from "react"
+import type { PropsWithChildren } from "react"
 
 import { Button } from "@/components/ui/button"
 import { GoldfishAnswerMarkdown } from "@/features/deck-intake/components/goldfish-answer-markdown"
@@ -63,6 +64,201 @@ function FinalAnswerIcon({
   }
 
   return <LoaderCircle className="size-5 animate-spin text-amber-200" />
+}
+
+function InitiallyOpenDetails({
+  className,
+  initiallyOpen = false,
+  children,
+}: PropsWithChildren<{
+  className?: string
+  initiallyOpen?: boolean
+}>) {
+  const detailsRef = useRef<HTMLDetailsElement | null>(null)
+
+  useEffect(() => {
+    if (initiallyOpen && detailsRef.current) {
+      detailsRef.current.open = true
+    }
+  }, [initiallyOpen])
+
+  return (
+    <details ref={detailsRef} className={className}>
+      {children}
+    </details>
+  )
+}
+
+const PromptRunBody = memo(function PromptRunBody({
+  run,
+}: {
+  run: SimulationPromptRun
+}) {
+  const promptPreview = run.rawPromptStream.trim()
+    ? getPromptPreview(run.rawPromptStream)
+    : ""
+
+  return (
+    <div className="space-y-3">
+      {run.activities.map((activity) => (
+        <SimulationActivityCard
+          key={activity.id}
+          activity={activity}
+          promptPreview={promptPreview}
+        />
+      ))}
+
+      {run.result ? <FinalAnswerCard run={run} /> : null}
+    </div>
+  )
+}, arePromptRunBodyPropsEqual)
+
+function arePromptRunBodyPropsEqual(
+  previousProps: { run: SimulationPromptRun },
+  nextProps: { run: SimulationPromptRun }
+) {
+  return previousProps.run === nextProps.run
+}
+
+const SimulationActivityCard = memo(function SimulationActivityCard({
+  activity,
+  promptPreview,
+}: {
+  activity: SimulationActivity
+  promptPreview: string
+}) {
+  const hasPromptPreview =
+    activity.status === "active" && Boolean(promptPreview)
+  const hasExpandableContent = Boolean(activity.detail) || hasPromptPreview
+  const showCollapsedDetailPreview =
+    activity.toolName === "update_game_state" && Boolean(activity.detail)
+  const defaultExpanded =
+    activity.kind !== "tool" || activity.toolName !== "update_game_state"
+
+  if (!hasExpandableContent) {
+    return (
+      <div className="rounded-[20px] border border-white/10 bg-white/[0.03] p-4">
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5 shrink-0">
+            <ActivityIcon status={activity.status} />
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-stone-100">
+              {activity.title}
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <InitiallyOpenDetails
+      initiallyOpen={defaultExpanded}
+      className="group/activity rounded-[20px] border border-white/10 bg-white/[0.03] p-4"
+    >
+      <summary className="list-none cursor-pointer [&::-webkit-details-marker]:hidden">
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5 shrink-0">
+            <ActivityIcon status={activity.status} />
+          </div>
+
+          <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-stone-100">
+                {activity.title}
+              </p>
+            </div>
+            <ChevronDown className="mt-0.5 size-4 shrink-0 -rotate-90 text-stone-500 transition-transform group-open/activity:rotate-0" />
+          </div>
+        </div>
+
+        {showCollapsedDetailPreview ? (
+          <div className="relative mt-3 overflow-hidden rounded-2xl border border-white/8 bg-black/10 p-3 group-open/activity:hidden">
+            <div className="max-h-[5.75rem] overflow-hidden">
+              {renderSimulationActivityDetail(activity.detail)}
+            </div>
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-b from-transparent via-[#171717]/80 to-[#171717]" />
+          </div>
+        ) : null}
+      </summary>
+
+      <div className="mt-4">
+        {activity.detail ? (
+          <div>{renderSimulationActivityDetail(activity.detail)}</div>
+        ) : null}
+        {hasPromptPreview ? (
+          <div
+            className={`min-w-0 overflow-hidden ${activity.detail ? "mt-4" : ""}`}
+            style={{
+              maskImage:
+                "linear-gradient(to right, transparent 0%, black 18%, black 82%, transparent 100%)",
+              WebkitMaskImage:
+                "linear-gradient(to right, transparent 0%, black 18%, black 82%, transparent 100%)",
+            }}
+          >
+            <p className="overflow-hidden text-xs leading-5 whitespace-nowrap text-stone-500/75">
+              {promptPreview}
+            </p>
+          </div>
+        ) : null}
+      </div>
+    </InitiallyOpenDetails>
+  )
+}, areSimulationActivityCardPropsEqual)
+
+function areSimulationActivityCardPropsEqual(
+  previousProps: {
+    activity: SimulationActivity
+    promptPreview: string
+  },
+  nextProps: {
+    activity: SimulationActivity
+    promptPreview: string
+  }
+) {
+  return (
+    previousProps.activity === nextProps.activity &&
+    previousProps.promptPreview === nextProps.promptPreview
+  )
+}
+
+const FinalAnswerCard = memo(function FinalAnswerCard({
+  run,
+}: {
+  run: SimulationPromptRun
+}) {
+  return (
+    <InitiallyOpenDetails
+      initiallyOpen
+      className="group/final rounded-[20px] border border-white/10 bg-white/[0.03] p-4"
+    >
+      <summary className="flex cursor-pointer list-none items-start gap-3 [&::-webkit-details-marker]:hidden">
+        <div className="mt-0.5 shrink-0">
+          <FinalAnswerIcon finalAnswerStatus={run.finalAnswerStatus} />
+        </div>
+
+        <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-stone-100">Final answer</p>
+          </div>
+          <ChevronDown className="mt-0.5 size-4 shrink-0 -rotate-90 text-stone-500 transition-transform group-open/final:rotate-0" />
+        </div>
+      </summary>
+
+      <div className="mt-4">
+        <GoldfishAnswerMarkdown content={run.result} />
+      </div>
+    </InitiallyOpenDetails>
+  )
+}, areFinalAnswerCardPropsEqual)
+
+function areFinalAnswerCardPropsEqual(
+  previousProps: { run: SimulationPromptRun },
+  nextProps: { run: SimulationPromptRun }
+) {
+  return previousProps.run === nextProps.run
 }
 
 export function GoldfishSimulationPanel({
@@ -323,14 +519,10 @@ export function GoldfishSimulationPanel({
       {promptRuns.length ? (
         <div className="mt-4 space-y-4">
           {promptRuns.map((run) => {
-            const promptPreview = run.rawPromptStream.trim()
-              ? getPromptPreview(run.rawPromptStream)
-              : ""
-
             return (
-              <details
+              <InitiallyOpenDetails
                 key={run.id}
-                open
+                initiallyOpen
                 className="group/run rounded-[24px] border border-white/10 bg-black/20 p-4"
               >
                 <summary className="flex cursor-pointer list-none items-start justify-between gap-3 border-b border-transparent pb-0 group-open/run:mb-4 group-open/run:border-white/10 group-open/run:pb-3 [&::-webkit-details-marker]:hidden">
@@ -377,127 +569,8 @@ export function GoldfishSimulationPanel({
                   </div>
                 </summary>
 
-                <div className="space-y-3">
-                  {run.activities.map((activity) => {
-                    const hasPromptPreview =
-                      activity.status === "active" && Boolean(promptPreview)
-                    const hasExpandableContent =
-                      Boolean(activity.detail) || hasPromptPreview
-                    const showCollapsedDetailPreview =
-                      activity.toolName === "update_game_state" &&
-                      Boolean(activity.detail)
-                    const defaultExpanded =
-                      activity.kind !== "tool" ||
-                      activity.toolName !== "update_game_state"
-
-                    if (!hasExpandableContent) {
-                      return (
-                        <div
-                          key={activity.id}
-                          className="rounded-[20px] border border-white/10 bg-white/[0.03] p-4"
-                        >
-                          <div className="flex items-start gap-3">
-                            <div className="mt-0.5 shrink-0">
-                              <ActivityIcon status={activity.status} />
-                            </div>
-
-                            <div className="min-w-0 flex-1">
-                              <p className="text-sm font-medium text-stone-100">
-                                {activity.title}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      )
-                    }
-
-                    return (
-                      <details
-                        key={activity.id}
-                        open={defaultExpanded}
-                        className="group/activity rounded-[20px] border border-white/10 bg-white/[0.03] p-4"
-                      >
-                        <summary className="list-none cursor-pointer [&::-webkit-details-marker]:hidden">
-                          <div className="flex items-start gap-3">
-                            <div className="mt-0.5 shrink-0">
-                              <ActivityIcon status={activity.status} />
-                            </div>
-
-                            <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
-                              <div className="min-w-0 flex-1">
-                                <p className="text-sm font-medium text-stone-100">
-                                  {activity.title}
-                                </p>
-                              </div>
-                              <ChevronDown className="mt-0.5 size-4 shrink-0 -rotate-90 text-stone-500 transition-transform group-open/activity:rotate-0" />
-                            </div>
-                          </div>
-
-                          {showCollapsedDetailPreview ? (
-                            <div className="relative mt-3 overflow-hidden rounded-2xl border border-white/8 bg-black/10 p-3 group-open/activity:hidden">
-                              <div className="max-h-[5.75rem] overflow-hidden">
-                                {renderSimulationActivityDetail(activity.detail)}
-                              </div>
-                              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-b from-transparent via-[#171717]/80 to-[#171717]" />
-                            </div>
-                          ) : null}
-                        </summary>
-
-                        <div className="mt-4">
-                          {activity.detail ? (
-                            <div>
-                              {renderSimulationActivityDetail(activity.detail)}
-                            </div>
-                          ) : null}
-                          {hasPromptPreview ? (
-                            <div
-                              className={`min-w-0 overflow-hidden ${activity.detail ? "mt-4" : ""}`}
-                              style={{
-                                maskImage:
-                                  "linear-gradient(to right, transparent 0%, black 18%, black 82%, transparent 100%)",
-                                WebkitMaskImage:
-                                  "linear-gradient(to right, transparent 0%, black 18%, black 82%, transparent 100%)",
-                              }}
-                            >
-                              <p className="overflow-hidden text-xs leading-5 whitespace-nowrap text-stone-500/75">
-                                {promptPreview}
-                              </p>
-                            </div>
-                          ) : null}
-                        </div>
-                      </details>
-                    )
-                  })}
-
-                  {run.result ? (
-                    <details
-                      open
-                      className="group/final rounded-[20px] border border-white/10 bg-white/[0.03] p-4"
-                    >
-                      <summary className="flex cursor-pointer list-none items-start gap-3 [&::-webkit-details-marker]:hidden">
-                        <div className="mt-0.5 shrink-0">
-                          <FinalAnswerIcon
-                            finalAnswerStatus={run.finalAnswerStatus}
-                          />
-                        </div>
-
-                        <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium text-stone-100">
-                              Final answer
-                            </p>
-                          </div>
-                          <ChevronDown className="mt-0.5 size-4 shrink-0 -rotate-90 text-stone-500 transition-transform group-open/final:rotate-0" />
-                        </div>
-                      </summary>
-
-                      <div className="mt-4">
-                        <GoldfishAnswerMarkdown content={run.result} />
-                      </div>
-                    </details>
-                  ) : null}
-                </div>
-              </details>
+                <PromptRunBody run={run} />
+              </InitiallyOpenDetails>
             )
           })}
 

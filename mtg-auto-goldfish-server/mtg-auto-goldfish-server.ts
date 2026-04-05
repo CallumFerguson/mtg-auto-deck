@@ -2034,7 +2034,7 @@ function formatPromptMetrics(response: PromptProcessingResult) {
 
 function estimatePromptCostUsd(response: PromptProcessingResult) {
   if (response.provider === "lm-studio" || response.provider === "llama.cpp") {
-    return 0
+    return undefined
   }
 
   const inputTokens = response.usage?.inputTokens
