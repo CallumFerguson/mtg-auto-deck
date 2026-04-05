@@ -10,6 +10,7 @@ export type StoredDeckInput = {
   commanderTwoName: string
   decklistText: string
   simulationSeedInput: string
+  autoSimulationTurnCount: number
 }
 
 export const DEFAULT_DECK_INPUT: StoredDeckInput = {
@@ -17,6 +18,7 @@ export const DEFAULT_DECK_INPUT: StoredDeckInput = {
   commanderTwoName: "",
   decklistText: DEFAULT_DECKLIST,
   simulationSeedInput: "",
+  autoSimulationTurnCount: 1,
 }
 
 export function loadStoredDeckInput(): StoredDeckInput {
@@ -50,6 +52,13 @@ export function loadStoredDeckInput(): StoredDeckInput {
         typeof parsedValue.simulationSeedInput === "string"
           ? parsedValue.simulationSeedInput
           : DEFAULT_DECK_INPUT.simulationSeedInput,
+      autoSimulationTurnCount:
+        typeof parsedValue.autoSimulationTurnCount === "number" &&
+        Number.isInteger(parsedValue.autoSimulationTurnCount) &&
+        parsedValue.autoSimulationTurnCount >= 1 &&
+        parsedValue.autoSimulationTurnCount <= 10
+          ? parsedValue.autoSimulationTurnCount
+          : DEFAULT_DECK_INPUT.autoSimulationTurnCount,
     }
   } catch {
     return DEFAULT_DECK_INPUT

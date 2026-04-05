@@ -25,11 +25,13 @@ type GoldfishSimulationPanelProps = {
   isCreatingDevGame: boolean
   gameId: string
   simulationSeedInput: string
+  autoSimulationTurnCount: number
   currentSimulationSeed: number | null
   nextTurnPromptNumber: number | null
   promptRuns: SimulationPromptRun[]
   errorMessage: string
   onSimulationSeedInputChange: (value: string) => void
+  onAutoSimulationTurnCountChange: (value: number) => void
   onCancelPromptRun: (runId: string) => void
   onRerunPromptRun: (runId: string) => void
   onSimulateNextTurn: () => void
@@ -69,11 +71,13 @@ export function GoldfishSimulationPanel({
   isCreatingDevGame,
   gameId,
   simulationSeedInput,
+  autoSimulationTurnCount,
   currentSimulationSeed,
   nextTurnPromptNumber,
   promptRuns,
   errorMessage,
   onSimulationSeedInputChange,
+  onAutoSimulationTurnCountChange,
   onCancelPromptRun,
   onRerunPromptRun,
   onSimulateNextTurn,
@@ -164,32 +168,66 @@ export function GoldfishSimulationPanel({
             <p className="max-w-3xl text-sm leading-6 text-stone-400">
               Once the full commander and deck package is resolved, create a
               game on the goldfish server, then let the configured model play
-              through the opening hand and turn 1 while you follow a
-              higher-level activity trace. After that, you can continue with
-              the simulate-next-turn button below the latest run.
+              through the opening hand and your selected number of turns while
+              you follow a higher-level activity trace. After that, you can
+              continue with the simulate-next-turn button below the latest run.
             </p>
-            <div className="pt-2">
-              <label className="block space-y-2">
-                <span className="text-xs font-medium tracking-[0.16em] text-stone-400 uppercase">
-                  Simulation seed
-                </span>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min="0"
-                  step="1"
-                  value={simulationSeedInput}
-                  onChange={(event) =>
-                    onSimulationSeedInputChange(event.target.value)
-                  }
-                  placeholder="Blank = random"
-                  className="h-11 w-full max-w-xs [appearance:textfield] appearance-none rounded-2xl border border-white/10 bg-black/30 px-4 text-sm text-stone-100 transition outline-none placeholder:text-stone-500 focus:border-amber-300/40 focus:bg-black/40 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                />
-              </label>
-              <p className="mt-2 text-xs leading-5 text-stone-500">
-                Leave blank to generate a random seed and display it here for
-                reruns.
-              </p>
+            <div className="grid gap-4 pt-2 sm:grid-cols-[minmax(0,16rem)_minmax(0,12rem)]">
+              <div>
+                <label className="block space-y-2">
+                  <span className="text-xs font-medium tracking-[0.16em] text-stone-400 uppercase">
+                    Simulation seed
+                  </span>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min="0"
+                    step="1"
+                    value={simulationSeedInput}
+                    onChange={(event) =>
+                      onSimulationSeedInputChange(event.target.value)
+                    }
+                    placeholder="Blank = random"
+                    className="h-11 w-full [appearance:textfield] appearance-none rounded-2xl border border-white/10 bg-black/30 px-4 text-sm text-stone-100 transition outline-none placeholder:text-stone-500 focus:border-amber-300/40 focus:bg-black/40 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  />
+                </label>
+                <p className="mt-2 text-xs leading-5 text-stone-500">
+                  Leave blank to generate a random seed and display it here for
+                  reruns.
+                </p>
+              </div>
+
+              <div>
+                <label className="block space-y-2">
+                  <span className="text-xs font-medium tracking-[0.16em] text-stone-400 uppercase">
+                    Auto goldfish turns
+                  </span>
+                  <select
+                    value={autoSimulationTurnCount}
+                    onChange={(event) =>
+                      onAutoSimulationTurnCountChange(Number(event.target.value))
+                    }
+                    className="h-11 w-full cursor-pointer rounded-2xl border border-white/10 bg-black/30 px-4 text-sm text-stone-100 transition outline-none focus:border-amber-300/40 focus:bg-black/40"
+                  >
+                    {Array.from({ length: 10 }, (_, index) => {
+                      const turnCount = index + 1
+
+                      return (
+                        <option
+                          key={turnCount}
+                          value={turnCount}
+                          className="bg-stone-950 text-stone-100"
+                        >
+                          {turnCount} turn{turnCount === 1 ? "" : "s"}
+                        </option>
+                      )
+                    })}
+                  </select>
+                </label>
+                <p className="mt-2 text-xs leading-5 text-stone-500">
+                  Only used when starting auto goldfish.
+                </p>
+              </div>
             </div>
           </div>
         </div>

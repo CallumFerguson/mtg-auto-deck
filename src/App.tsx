@@ -422,6 +422,9 @@ export function App() {
   const [simulationSeedInput, setSimulationSeedInput] = useState(
     storedDeckInput.simulationSeedInput
   )
+  const [autoSimulationTurnCount, setAutoSimulationTurnCount] = useState(
+    storedDeckInput.autoSimulationTurnCount
+  )
   const [currentSimulationSeed, setCurrentSimulationSeed] = useState<
     number | null
   >(storedSimulationSession.currentSimulationSeed)
@@ -867,10 +870,16 @@ export function App() {
         throw new Error(startingHandValidation.message)
       }
 
-      await runTurnSimulation(nextGameId, 1, abortController.signal, {
-        flow: "main",
-        seed,
-      })
+      for (
+        let turnNumber = 1;
+        turnNumber <= autoSimulationTurnCount;
+        turnNumber += 1
+      ) {
+        await runTurnSimulation(nextGameId, turnNumber, abortController.signal, {
+          flow: "main",
+          seed,
+        })
+      }
     } catch (error) {
       if (isAbortError(error)) {
         if (!pendingRerunRunIdRef.current) {
@@ -1345,8 +1354,15 @@ export function App() {
       commanderTwoName,
       decklistText,
       simulationSeedInput,
+      autoSimulationTurnCount,
     })
-  }, [commanderOneName, commanderTwoName, decklistText, simulationSeedInput])
+  }, [
+    autoSimulationTurnCount,
+    commanderOneName,
+    commanderTwoName,
+    decklistText,
+    simulationSeedInput,
+  ])
 
   useEffect(() => {
     if (
@@ -1471,6 +1487,7 @@ export function App() {
     setSavedSimulationPayload(null)
     setGameId("")
     setSimulationSeedInput(DEFAULT_DECK_INPUT.simulationSeedInput)
+    setAutoSimulationTurnCount(DEFAULT_DECK_INPUT.autoSimulationTurnCount)
     setCurrentSimulationSeed(null)
     setSimulationError("")
     setPromptRuns([])
@@ -1698,11 +1715,13 @@ export function App() {
           isCreatingDevGame={isCreatingDevGame}
           gameId={gameId}
           simulationSeedInput={simulationSeedInput}
+          autoSimulationTurnCount={autoSimulationTurnCount}
           currentSimulationSeed={currentSimulationSeed}
           nextTurnPromptNumber={nextTurnPromptNumber}
           promptRuns={promptRuns}
           errorMessage={simulationError}
           onSimulationSeedInputChange={setSimulationSeedInput}
+          onAutoSimulationTurnCountChange={setAutoSimulationTurnCount}
           onCancelPromptRun={cancelSimulation}
           onRerunPromptRun={rerunPromptRun}
           onSimulateNextTurn={simulateNextTurn}
