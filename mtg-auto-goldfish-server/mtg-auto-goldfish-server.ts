@@ -1921,15 +1921,16 @@ ${startingHand.join("\n")}
 Command Zone:
 ${commanderNames.join("\n")}
 
+Battlefield:
+// empty
+
 Graveyard:
 // empty
 
 Exile:
 // empty
 
-Battlefield:
-// empty
-
+Your Life: 40
 Opponent A Life: 40
 Opponent B Life: 40
 Opponent C Life: 40
