@@ -271,9 +271,26 @@ function handlePromptStreamEvent(
   setPromptRuns: Dispatch<SetStateAction<SimulationPromptRun[]>>,
   runId: string
 ) {
+  handlePromptStreamEvents([event], setPromptRuns, runId)
+}
+
+function handlePromptStreamEvents(
+  events: PromptStreamEvent[],
+  setPromptRuns: Dispatch<SetStateAction<SimulationPromptRun[]>>,
+  runId: string
+) {
+  if (!events.length) {
+    return
+  }
+
   setPromptRuns((currentRuns) =>
     currentRuns.map((run) =>
-      run.id === runId ? recordPromptStreamEvent(run, event) : run
+      run.id === runId
+        ? events.reduce(
+            (nextRun, event) => recordPromptStreamEvent(nextRun, event),
+            run
+          )
+        : run
     )
   )
 }
@@ -314,6 +331,8 @@ async function readPromptStream(
     const lines = buffer.split("\n")
     buffer = lines.pop() ?? ""
 
+    const eventsToRecord: PromptStreamEvent[] = []
+
     for (const line of lines) {
       const trimmedLine = line.trim()
 
@@ -323,7 +342,7 @@ async function readPromptStream(
 
       const parsedEvent = JSON.parse(trimmedLine) as PromptStreamEvent
       const event = await hydrateToolEvent(parsedEvent, signal)
-      handlePromptStreamEvent(event, setPromptRuns, runId)
+      eventsToRecord.push(event)
 
       if (event.type === "message") {
         finalResult += event.delta
@@ -342,6 +361,8 @@ async function readPromptStream(
         finalResult = event.result
       }
     }
+
+    handlePromptStreamEvents(eventsToRecord, setPromptRuns, runId)
   }
 
   const trailing = `${buffer}${decoder.decode()}`.trim()
