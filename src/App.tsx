@@ -458,7 +458,6 @@ export function App() {
   const commanders = [commanderOne, commanderTwo].filter(Boolean)
   const commanderCount = commanders.length
   const expectedDecklistCount = 100 - commanderCount
-  const deckCountDelta = totalCards - expectedDecklistCount
   const hasCommanderTwoWithoutCommanderOne = Boolean(
     commanderTwo && !commanderOne
   )
@@ -1644,13 +1643,7 @@ export function App() {
   return (
     <main className="min-h-svh bg-[radial-gradient(circle_at_top,rgba(245,158,11,0.2),transparent_28%),radial-gradient(circle_at_bottom_right,rgba(120,53,15,0.3),transparent_30%),linear-gradient(180deg,#09090b_0%,#111217_50%,#18181b_100%)] text-stone-100">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-4 py-6 sm:px-6 lg:px-8 lg:py-10">
-        <HeroSection
-          totalCards={totalCards}
-          expectedDecklistCount={expectedDecklistCount}
-          commanderCount={commanderCount}
-          deckCountDelta={deckCountDelta}
-          fuzzyMatchCount={fuzzyMatches.length}
-        />
+          <HeroSection />
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
           <DeckIntakeForm
