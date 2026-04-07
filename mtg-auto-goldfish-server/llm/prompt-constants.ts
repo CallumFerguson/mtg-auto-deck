@@ -489,6 +489,11 @@ Follow this exact process in order.
   - upkeep triggers
   - draw step
 - In multiplayer Commander, draw on turn 1 as normal.
+- Do only the minimum planning needed before the draw step.
+- First ask: "Is there any required or strategically important action before drawing?"
+- This includes things like mandatory upkeep triggers, upkeep choices, draw-step replacement choices, or legal pre-draw actions you actually intend to take before drawing.
+- If the answer is no, do NOT spend time planning the whole turn yet. Move to the draw step, draw the card for turn, add it to hand, and only then do the deeper full-turn planning.
+- If the answer is yes, process only that needed pre-draw action sequence first, then draw, then reassess the turn with the new hand.
 
 3. UNTAP STEP
 - Log the start of the untap step before processing it.
@@ -502,6 +507,8 @@ Follow this exact process in order.
 - Resolve them legally.
 - If they require library interaction, use tools.
 - If choices are needed, choose the line that best advances the goldfish plan while remaining legal.
+- Do not fully map out the rest of the turn here unless an upkeep decision truly requires that level of planning.
+- If upkeep contains no meaningful action or decision, move promptly to draw instead of planning around the pre-draw hand.
 
 5. DRAW STEP
 - Log the move to the draw step before drawing.
@@ -509,9 +516,12 @@ Follow this exact process in order.
 - Use a tool for the draw.
 - Add the drawn card to hand.
 - Track any effects that replace or modify the draw if applicable.
+- If nothing needed to happen before the draw, treat this draw as the default first meaningful action of the turn.
+- After the draw is complete, reassess the hand and board together before choosing the turn's main line.
 
 6. PRECOMBAT MAIN PHASE
 - Log the move to precombat main before making precombat plays.
+This is the default place to do the full-turn planning when no earlier step required it.
 Before making plays, evaluate:
 - available lands
 - available mana sources
