@@ -1,4 +1,4 @@
-import "dotenv/config"
+﻿import "dotenv/config"
 
 import type { Request, Response } from "express"
 import { mkdir, writeFile } from "node:fs/promises"
@@ -8,7 +8,12 @@ import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js"
 import { z } from "zod/v4"
 
-import { GameStore, type GameCard } from "./game-store.js"
+import {
+  GameStore,
+  type AppendSimulationEventInput,
+  type GameCard,
+  type SimulationRunKind,
+} from "./game-store.js"
 import {
   createPostgresPool,
   getRequiredDatabaseUrl,
@@ -57,10 +62,19 @@ const DEFAULT_PROMPT_LOG_DIRECTORY = resolve(
 )
 const SHOULD_LOG_PROMPTS_TO_FILE =
   process.env.LOG_PROMPTS_TO_FILE?.trim().toLowerCase() === "true"
+const SIMULATION_EVENT_BATCH_SIZE = 1000
+const SIMULATION_EVENT_FLUSH_INTERVAL_MS = 1000
 
 type ToolUiDataRecord = {
   structuredContent?: Record<string, unknown>
   uiMetadata?: Record<string, unknown>
+}
+
+type SimulationEventRecorderOptions = {
+  simulationRunId: string
+  gameId: string
+  kind: SimulationRunKind
+  turnNumber?: number
 }
 
 let gameStore!: GameStore
@@ -1278,6 +1292,17 @@ async function main() {
         gamePromptContext.commanders,
         gamePromptContext.initialLibrary
       )
+      const simulationRun = await gameStore.createSimulationRun({
+        gameId,
+        kind: "opening_hand",
+        promptText: prompt,
+        provider: llmProvider,
+      })
+      const simulationEventRecorder = new SimulationEventRecorder({
+        simulationRunId: simulationRun.simulationRunId,
+        gameId,
+        kind: "opening_hand",
+      })
 
       try {
         await writePromptLog(gameId, "opening-hand", prompt)
@@ -1288,6 +1313,7 @@ async function main() {
           openingHandPromptProcessor,
           prompt,
           (event) => {
+            simulationEventRecorder.recordEvent(event)
             keptHandCards =
               getKeepHandCardsFromPromptEvent(event) ?? keptHandCards
           }
@@ -1313,8 +1339,10 @@ async function main() {
           `${shortId(gameId)} hand=${snapshotResult.startingHand.length} library=${snapshotResult.library.length} valid=${snapshotResult.validation.isValid} len=${prompt.length} model=${response.model.key} size=${response.model.sizeBytes} ${formatPromptMetrics(response)}`
         )
 
+        await simulationEventRecorder.complete(response)
         res.end()
       } catch (error) {
+        await simulationEventRecorder.fail(error)
         const message =
           error instanceof Error ? error.message : "Failed to process prompt."
 
@@ -1408,6 +1436,19 @@ async function main() {
       gamePromptContext.initialLibrary,
       gamePromptContext.currentGameState
     )
+    const simulationRun = await gameStore.createSimulationRun({
+      gameId,
+      kind: "turn",
+      turnNumber: startTurnResult.turnNumber,
+      promptText: prompt,
+      provider: llmProvider,
+    })
+    const simulationEventRecorder = new SimulationEventRecorder({
+      simulationRunId: simulationRun.simulationRunId,
+      gameId,
+      kind: "turn",
+      turnNumber: startTurnResult.turnNumber,
+    })
 
     try {
       await writePromptLog(gameId, `turn-${startTurnResult.turnNumber}`, prompt)
@@ -1415,7 +1456,10 @@ async function main() {
       const response = await streamPromptResponse(
         res,
         turnSimulationPromptProcessor,
-        prompt
+        prompt,
+        (event) => {
+          simulationEventRecorder.recordEvent(event)
+        }
       )
 
       logInfo(
@@ -1423,8 +1467,10 @@ async function main() {
         `${shortId(gameId)} turn=${startTurnResult.turnNumber} hand=${resolvedStartingHand.length} len=${prompt.length} model=${response.model.key} size=${response.model.sizeBytes} ${formatPromptMetrics(response)}`
       )
 
+      await simulationEventRecorder.complete(response)
       res.end()
     } catch (error) {
+      await simulationEventRecorder.fail(error)
       const message =
         error instanceof Error ? error.message : "Failed to process prompt."
 
@@ -1813,6 +1859,215 @@ function respondWithMethodNotAllowed(res: Response) {
     },
     id: null,
   })
+}
+
+class SimulationEventRecorder {
+  private readonly simulationRunId: string
+  private readonly gameId: string
+  private readonly kind: SimulationRunKind
+  private readonly turnNumber?: number
+  private pendingEvents: AppendSimulationEventInput[] = []
+  private nextSequenceIndex = 0
+  private flushTimer: NodeJS.Timeout | undefined
+  private operationChain: Promise<void> = Promise.resolve()
+
+  constructor(options: SimulationEventRecorderOptions) {
+    this.simulationRunId = options.simulationRunId
+    this.gameId = options.gameId
+    this.kind = options.kind
+    this.turnNumber = options.turnNumber
+  }
+
+  recordEvent(event: PromptStreamEvent) {
+    const eventTime = new Date()
+
+    if (event.type === "start") {
+      this.queueOperation(() =>
+        gameStore.updateSimulationRunModel(this.simulationRunId, event.model)
+      )
+    }
+
+    const mappedEvents = mapPromptStreamEventToSimulationEvents(event, eventTime)
+
+    if (mappedEvents.length === 0) {
+      return
+    }
+
+    this.pendingEvents.push(...mappedEvents)
+
+    if (this.pendingEvents.length >= SIMULATION_EVENT_BATCH_SIZE) {
+      void this.flush()
+      return
+    }
+
+    this.scheduleFlush()
+  }
+
+  async complete(response: PromptProcessingResult) {
+    await this.flush()
+    await this.queueOperation(() =>
+      gameStore.completeSimulationRun({
+        simulationRunId: this.simulationRunId,
+        status: "succeeded",
+        modelKey: response.model.key,
+        modelDisplayName: response.model.displayName,
+        modelSizeBytes: response.model.sizeBytes,
+        finalResultText: response.result,
+        inputTokens: response.usage?.inputTokens,
+        outputTokens: response.usage?.outputTokens,
+        reasoningTokens: response.usage?.reasoningTokens,
+        totalTokens: response.usage?.totalTokens,
+      })
+    )
+  }
+
+  async fail(error: unknown) {
+    await this.flush()
+
+    const errorMessage =
+      error instanceof Error ? error.message : "Failed to process prompt."
+
+    await this.queueOperation(() =>
+      gameStore.completeSimulationRun({
+        simulationRunId: this.simulationRunId,
+        status: isPromptAbortError(error) ? "aborted" : "failed",
+        errorMessage,
+      })
+    )
+  }
+
+  private scheduleFlush() {
+    if (this.flushTimer) {
+      return
+    }
+
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = undefined
+      void this.flush()
+    }, SIMULATION_EVENT_FLUSH_INTERVAL_MS)
+  }
+
+  private async flush() {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer)
+      this.flushTimer = undefined
+    }
+
+    if (this.pendingEvents.length === 0) {
+      await this.operationChain
+      return
+    }
+
+    const eventsToPersist = this.pendingEvents
+    const startSequenceIndex = this.nextSequenceIndex
+
+    this.pendingEvents = []
+    this.nextSequenceIndex += eventsToPersist.length
+
+    await this.queueOperation(() =>
+      gameStore.appendSimulationEvents(
+        this.simulationRunId,
+        this.gameId,
+        this.kind,
+        this.turnNumber,
+        startSequenceIndex,
+        eventsToPersist
+      )
+    )
+  }
+
+  private async queueOperation(operation: () => Promise<void>) {
+    this.operationChain = this.operationChain.then(operation, operation)
+    await this.operationChain
+  }
+}
+
+function mapPromptStreamEventToSimulationEvents(
+  event: PromptStreamEvent,
+  eventTime: Date
+): AppendSimulationEventInput[] {
+  switch (event.type) {
+    case "start":
+      return [
+        {
+          eventType: "start",
+          eventTime,
+          metadata: {
+            modelKey: event.model.key,
+            modelDisplayName: event.model.displayName,
+            modelSizeBytes: event.model.sizeBytes,
+          },
+        },
+      ]
+    case "status":
+      return [
+        {
+          eventType: event.event,
+          eventTime,
+          metadata: {
+            progress: event.progress,
+            modelInstanceId: event.modelInstanceId,
+          },
+        },
+      ]
+    case "reasoning":
+      return [
+        {
+          eventType: "reasoning.delta",
+          eventTime,
+          reasoningTextDelta: event.delta,
+        },
+      ]
+    case "message":
+      return [
+        {
+          eventType: "message.delta",
+          eventTime,
+          messageTextDelta: event.delta,
+        },
+      ]
+    case "tool":
+      return [
+        {
+          eventType: event.event,
+          eventTime,
+          toolName: event.tool,
+          toolProvider: event.provider,
+          toolStatusEvent: event.event,
+          argumentsText: event.argumentsText,
+          outputText: event.output,
+          errorText: event.error,
+        },
+      ]
+    case "error":
+      return [
+        {
+          eventType: "error",
+          eventTime,
+          errorText: event.error,
+        },
+      ]
+    case "done":
+      return [
+        {
+          eventType: "done",
+          eventTime,
+          metadata: {
+            modelKey: event.model.key,
+            modelDisplayName: event.model.displayName,
+            modelSizeBytes: event.model.sizeBytes,
+            resultLength: event.result.length,
+            reasoningLength: event.reasoning.length,
+          },
+        },
+      ]
+    default:
+      return []
+  }
+}
+
+function isPromptAbortError(error: unknown) {
+  return error instanceof Error && error.name === "AbortError"
 }
 
 async function streamPromptResponse(
@@ -2408,6 +2663,10 @@ function takeToolUiData(toolName: string, gameId: string) {
 
   return toolUiData
 }
+
+
+
+
 
 
 

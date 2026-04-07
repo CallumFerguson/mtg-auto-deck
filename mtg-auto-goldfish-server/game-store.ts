@@ -53,6 +53,45 @@ export type TurnSnapshot = {
   gameState?: string
 }
 
+export type SimulationRunKind = "opening_hand" | "turn"
+export type SimulationRunStatus = "running" | "succeeded" | "failed" | "aborted"
+
+export type CreateSimulationRunInput = {
+  gameId: string
+  kind: SimulationRunKind
+  promptText: string
+  turnNumber?: number
+  provider?: string
+}
+
+export type AppendSimulationEventInput = {
+  eventType: string
+  eventTime?: Date
+  reasoningTextDelta?: string
+  messageTextDelta?: string
+  toolName?: string
+  toolProvider?: string
+  toolStatusEvent?: string
+  argumentsText?: string
+  outputText?: string
+  errorText?: string
+  metadata?: Record<string, unknown>
+}
+
+export type CompleteSimulationRunInput = {
+  simulationRunId: string
+  status: Exclude<SimulationRunStatus, "running">
+  modelKey?: string
+  modelDisplayName?: string
+  modelSizeBytes?: number
+  finalResultText?: string
+  errorMessage?: string
+  inputTokens?: number
+  outputTokens?: number
+  reasoningTokens?: number
+  totalTokens?: number
+}
+
 type ActiveTurnSimulation = {
   turnNumber: number
   hasUpdatedGameState: boolean
@@ -847,6 +886,188 @@ export class GameStore {
     }
   }
 
+  async createSimulationRun(input: CreateSimulationRunInput) {
+    const simulationRunId = randomUUID()
+
+    await this.pool.query(
+      `
+        INSERT INTO simulation_runs (
+          id,
+          game_id,
+          kind,
+          turn_number,
+          status,
+          provider,
+          prompt_text,
+          prompt_length_chars
+        ) VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          $5,
+          $6,
+          $7,
+          $8
+        )
+      `,
+      [
+        simulationRunId,
+        input.gameId,
+        input.kind,
+        input.turnNumber ?? null,
+        "running",
+        input.provider ?? null,
+        input.promptText,
+        input.promptText.length,
+      ]
+    )
+
+    return {
+      simulationRunId,
+    }
+  }
+
+  async appendSimulationEvents(
+    simulationRunId: string,
+    gameId: string,
+    kind: SimulationRunKind,
+    turnNumber: number | undefined,
+    startSequenceIndex: number,
+    events: readonly AppendSimulationEventInput[]
+  ) {
+    if (events.length === 0) {
+      return
+    }
+
+    const values: unknown[] = []
+    const tuples = events.map((event, index) => {
+      const baseIndex = values.length
+
+      values.push(
+        randomUUID(),
+        simulationRunId,
+        gameId,
+        kind,
+        turnNumber ?? null,
+        startSequenceIndex + index,
+        event.eventType,
+        event.eventTime ?? new Date(),
+        event.reasoningTextDelta ?? null,
+        event.messageTextDelta ?? null,
+        event.toolName ?? null,
+        event.toolProvider ?? null,
+        event.toolStatusEvent ?? null,
+        event.argumentsText ?? null,
+        event.outputText ?? null,
+        event.errorText ?? null,
+        event.metadata === undefined ? null : serializeJson(event.metadata)
+      )
+
+      return `(
+        $${baseIndex + 1},
+        $${baseIndex + 2},
+        $${baseIndex + 3},
+        $${baseIndex + 4},
+        $${baseIndex + 5},
+        $${baseIndex + 6},
+        $${baseIndex + 7},
+        $${baseIndex + 8},
+        $${baseIndex + 9},
+        $${baseIndex + 10},
+        $${baseIndex + 11},
+        $${baseIndex + 12},
+        $${baseIndex + 13},
+        $${baseIndex + 14},
+        $${baseIndex + 15},
+        $${baseIndex + 16},
+        $${baseIndex + 17}::jsonb
+      )`
+    })
+
+    await this.pool.query(
+      `
+        INSERT INTO simulation_events (
+          id,
+          simulation_run_id,
+          game_id,
+          kind,
+          turn_number,
+          sequence_index,
+          event_type,
+          event_time,
+          reasoning_text_delta,
+          message_text_delta,
+          tool_name,
+          tool_provider,
+          tool_status_event,
+          arguments_text,
+          output_text,
+          error_text,
+          metadata
+        ) VALUES ${tuples.join(",")}
+      `,
+      values
+    )
+  }
+
+  async updateSimulationRunModel(
+    simulationRunId: string,
+    model: {
+      key: string
+      displayName: string
+      sizeBytes: number
+    }
+  ) {
+    await this.pool.query(
+      `
+        UPDATE simulation_runs
+        SET
+          model_key = $2,
+          model_display_name = $3,
+          model_size_bytes = $4,
+          updated_at = NOW()
+        WHERE id = $1
+      `,
+      [simulationRunId, model.key, model.displayName, String(model.sizeBytes)]
+    )
+  }
+
+  async completeSimulationRun(input: CompleteSimulationRunInput) {
+    await this.pool.query(
+      `
+        UPDATE simulation_runs
+        SET
+          status = $2,
+          model_key = COALESCE($3, model_key),
+          model_display_name = COALESCE($4, model_display_name),
+          model_size_bytes = COALESCE($5, model_size_bytes),
+          final_result_text = COALESCE($6, final_result_text),
+          error_message = COALESCE($7, error_message),
+          input_tokens = COALESCE($8, input_tokens),
+          output_tokens = COALESCE($9, output_tokens),
+          reasoning_tokens = COALESCE($10, reasoning_tokens),
+          total_tokens = COALESCE($11, total_tokens),
+          completed_at = NOW(),
+          updated_at = NOW()
+        WHERE id = $1
+      `,
+      [
+        input.simulationRunId,
+        input.status,
+        input.modelKey ?? null,
+        input.modelDisplayName ?? null,
+        input.modelSizeBytes === undefined ? null : String(input.modelSizeBytes),
+        input.finalResultText ?? null,
+        input.errorMessage ?? null,
+        input.inputTokens ?? null,
+        input.outputTokens ?? null,
+        input.reasoningTokens ?? null,
+        input.totalTokens ?? null,
+      ]
+    )
+  }
+
   private async withTransaction<TResult>(
     execute: (client: PoolClient) => Promise<TResult>
   ) {
@@ -1450,6 +1671,8 @@ function levenshteinDistance(left: string, right: string) {
 
   return previousRow[right.length]
 }
+
+
 
 
 
