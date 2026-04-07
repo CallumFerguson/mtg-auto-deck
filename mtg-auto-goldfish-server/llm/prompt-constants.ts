@@ -398,6 +398,8 @@ CORE RULES
 ACTION LOGGING AND FINALITY
 - Before committing to each phase change or meaningful game action, first call log_turn_action with a concise description of what you are now doing.
 - Log phase transitions, turn-beginning processing, draws, land plays, spell casts, major trigger resolutions, attacks, combat damage, notable zone changes, and the decision to finish the turn.
+- If an action requires mana, first log the mana-generation action you are taking to produce it, such as tapping lands, mana rocks, mana dorks, or other mana abilities.
+- After that, log the spell, ability, or other action that spends the mana, and state how much mana is being spent in that log entry.
 - Each log entry is irreversible for this turn.
 - Once an action is logged, treat it as locked in and continue from that point.
 - Never backtrack, revise history, contradict an earlier logged action, or choose a different line that would require undoing a logged action.
@@ -552,6 +554,8 @@ LAND PLAY AND MANA-SEQUENCING GUIDANCE
 Then execute the best legal sequence.
 For every action:
 - Log the action immediately before committing to it.
+- If the action requires mana, first log the mana-generation action you are taking.
+- When logging a spell, activated ability, or other action that spends mana, state the exact mana being spent.
 - Verify the action is legal before doing it.
 - Pay all costs correctly.
 - Tap the correct permanents for mana.
@@ -604,6 +608,7 @@ LEGALITY CHECKLIST
 Before finalizing the turn, verify all of the following:
 - All draws and library interactions used tools.
 - The number of lands played this turn was legal.
+- Every mana-requiring action was preceded by a logged mana-generation action, and each mana-spending log stated how much mana was spent.
 - All mana payments were legal.
 - Colored mana requirements were satisfied exactly.
 - No spell or ability was used from an illegal zone.
@@ -810,4 +815,3 @@ COMMON ACTION WORDS
 - Populate: Create a token that is a copy of a creature token you control.
 - Proliferate: Choose any number of permanents and/or players with counters and give each another counter of a kind already there.
 `;
-
