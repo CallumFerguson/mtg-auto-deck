@@ -73,11 +73,15 @@ export async function initializePostgres(pool: Pool) {
       tool_status_event text,
       arguments_text text,
       output_text text,
+      structured_content jsonb,
+      ui_metadata jsonb,
       error_text text,
       metadata jsonb,
       created_at timestamptz NOT NULL DEFAULT NOW()
     )
   `)
+
+
 
   await pool.query(`
     CREATE INDEX IF NOT EXISTS simulation_events_run_sequence_idx
@@ -100,4 +104,5 @@ export function getRequiredDatabaseUrl() {
 
   return value
 }
+
 

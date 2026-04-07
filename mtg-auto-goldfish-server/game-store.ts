@@ -74,6 +74,8 @@ export type AppendSimulationEventInput = {
   toolStatusEvent?: string
   argumentsText?: string
   outputText?: string
+  structuredContent?: Record<string, unknown>
+  uiMetadata?: Record<string, unknown>
   errorText?: string
   metadata?: Record<string, unknown>
 }
@@ -960,6 +962,10 @@ export class GameStore {
         event.toolStatusEvent ?? null,
         event.argumentsText ?? null,
         event.outputText ?? null,
+        event.structuredContent === undefined
+          ? null
+          : serializeJson(event.structuredContent),
+        event.uiMetadata === undefined ? null : serializeJson(event.uiMetadata),
         event.errorText ?? null,
         event.metadata === undefined ? null : serializeJson(event.metadata)
       )
@@ -980,8 +986,10 @@ export class GameStore {
         $${baseIndex + 13},
         $${baseIndex + 14},
         $${baseIndex + 15},
-        $${baseIndex + 16},
-        $${baseIndex + 17}::jsonb
+        $${baseIndex + 16}::jsonb,
+        $${baseIndex + 17}::jsonb,
+        $${baseIndex + 18},
+        $${baseIndex + 19}::jsonb
       )`
     })
 
@@ -1003,6 +1011,8 @@ export class GameStore {
           tool_status_event,
           arguments_text,
           output_text,
+          structured_content,
+          ui_metadata,
           error_text,
           metadata
         ) VALUES ${tuples.join(",")}
@@ -1671,11 +1681,4 @@ function levenshteinDistance(left: string, right: string) {
 
   return previousRow[right.length]
 }
-
-
-
-
-
-
-
 

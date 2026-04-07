@@ -1,4 +1,4 @@
-﻿import "dotenv/config"
+import "dotenv/config"
 
 import type { Request, Response } from "express"
 import { mkdir, writeFile } from "node:fs/promises"
@@ -1887,7 +1887,11 @@ class SimulationEventRecorder {
       )
     }
 
-    const mappedEvents = mapPromptStreamEventToSimulationEvents(event, eventTime)
+    const mappedEvents = mapPromptStreamEventToSimulationEvents(
+      event,
+      eventTime,
+      this.gameId
+    )
 
     if (mappedEvents.length === 0) {
       return
@@ -1984,7 +1988,8 @@ class SimulationEventRecorder {
 
 function mapPromptStreamEventToSimulationEvents(
   event: PromptStreamEvent,
-  eventTime: Date
+  eventTime: Date,
+  gameId: string
 ): AppendSimulationEventInput[] {
   switch (event.type) {
     case "start":
@@ -2026,7 +2031,12 @@ function mapPromptStreamEventToSimulationEvents(
           messageTextDelta: event.delta,
         },
       ]
-    case "tool":
+    case "tool": {
+      const toolUiData =
+        event.event === "tool_call.success" && event.tool
+          ? getToolUiData(event.tool, gameId)
+          : undefined
+
       return [
         {
           eventType: event.event,
@@ -2036,9 +2046,13 @@ function mapPromptStreamEventToSimulationEvents(
           toolStatusEvent: event.event,
           argumentsText: event.argumentsText,
           outputText: event.output,
+          structuredContent:
+            event.structuredContent ?? toolUiData?.structuredContent,
+          uiMetadata: event.uiMetadata ?? toolUiData?.uiMetadata,
           errorText: event.error,
         },
       ]
+    }
     case "error":
       return [
         {
@@ -2664,11 +2678,7 @@ function takeToolUiData(toolName: string, gameId: string) {
   return toolUiData
 }
 
-
-
-
-
-
-
-
+function getToolUiData(toolName: string, gameId: string) {
+  return toolUiDataStore.get(createToolUiDataKey(toolName, gameId))
+}
 
