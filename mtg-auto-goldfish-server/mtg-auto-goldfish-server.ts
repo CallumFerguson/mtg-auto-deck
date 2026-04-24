@@ -5,8 +5,13 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js"
 import { z } from "zod/v4"
 import { closeDatabasePool, verifyDatabaseConnection } from "./db.js"
-import { ensureDecksSchema, listDecks } from "./decks-postgres.js"
+import { createDeck, ensureDecksSchema, listDecks } from "./decks-postgres.js"
 import { ensureFreshScryfallOracleCards } from "./scryfall-cache.js"
+import {
+  createExactScryfallOracleCardMatchMap,
+  normalizeScryfallCardNameForExactMatch,
+  resolveExactScryfallOracleCards,
+} from "./scryfall-postgres.js"
 
 const DEFAULT_HOST = "127.0.0.1"
 const DEFAULT_PORT = 3001
@@ -642,7 +647,7 @@ async function main() {
     }
   })
 
-  app.post("/decks", (req: Request, res: Response) => {
+  app.post("/decks", async (req: Request, res: Response) => {
     const parsedDeck = createDeckSchema.safeParse(req.body)
 
     if (!parsedDeck.success) {
@@ -678,14 +683,56 @@ async function main() {
       return
     }
 
-    console.info(
-      "Create deck request:",
-      JSON.stringify(parsedDeck.data, null, 2)
-    )
+    try {
+      const cardResolution = await resolveExactScryfallOracleCards([
+        ...parsedDeck.data.commanders,
+        ...parsedDeck.data.cards.map((card) => card.name),
+      ])
 
-    res.status(202).json({
-      ok: true,
-    })
+      if (cardResolution.missingNames.length > 0) {
+        res.status(400).json({
+          error: `Could not find exact matches for: ${cardResolution.missingNames.join(", ")}.`,
+          unmatchedCards: cardResolution.missingNames,
+        })
+        return
+      }
+
+      const exactMatchesByName = createExactScryfallOracleCardMatchMap(
+        cardResolution.matches
+      )
+      const commanderOracleIds = parsedDeck.data.commanders.map((commander) =>
+        getExactMatchOracleId(exactMatchesByName, commander)
+      )
+
+      if (new Set(commanderOracleIds).size !== commanderOracleIds.length) {
+        res.status(400).json({
+          error: "Commander cards must be different.",
+        })
+        return
+      }
+
+      const createdDeck = await createDeck({
+        name: parsedDeck.data.name,
+        desc: parsedDeck.data.desc,
+        commanders: commanderOracleIds.map((oracleId) => ({
+          oracleId,
+          quantity: 1,
+        })),
+        cards: parsedDeck.data.cards.map((card) => ({
+          oracleId: getExactMatchOracleId(exactMatchesByName, card.name),
+          quantity: card.quantity,
+        })),
+      })
+
+      res.status(201).json({
+        deck: createdDeck,
+      })
+    } catch (error) {
+      console.error("Failed to create deck:", error)
+      res.status(500).json({
+        error: "Failed to create deck.",
+      })
+    }
   })
 
   registerMcpEndpoint(app, OPENING_HAND_MCP_PATH, createOpeningHandServer)
@@ -705,6 +752,21 @@ async function main() {
       `Turn-simulation MCP endpoint available at http://${host}:${port}${TURN_SIMULATION_MCP_PATH}`
     )
   })
+}
+
+function getExactMatchOracleId(
+  matchesByName: ReturnType<typeof createExactScryfallOracleCardMatchMap>,
+  cardName: string
+) {
+  const match = matchesByName.get(
+    normalizeScryfallCardNameForExactMatch(cardName)
+  )
+
+  if (!match) {
+    throw new Error(`Missing exact card match for ${JSON.stringify(cardName)}.`)
+  }
+
+  return match.oracleId
 }
 
 function registerShutdownHandlers() {

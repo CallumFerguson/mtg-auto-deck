@@ -66,6 +66,17 @@ type SearchScryfallOracleCardsOptions = {
 
 type DbClient = pg.Client | pg.PoolClient
 
+export type ExactScryfallOracleCardMatch = {
+  requestedName: string
+  oracleId: string
+  cardName: string
+}
+
+export type ExactScryfallOracleCardResolution = {
+  matches: ExactScryfallOracleCardMatch[]
+  missingNames: string[]
+}
+
 export async function importScryfallOracleCardsToPostgres({
   oracleCardsPath,
   downloadedAt,
@@ -149,6 +160,110 @@ export async function searchScryfallOracleCardsByName({
   )
 
   return result.rows
+}
+
+export async function findMissingExactScryfallOracleCardNames(
+  cardNames: readonly string[]
+) {
+  const resolution = await resolveExactScryfallOracleCards(cardNames)
+
+  return resolution.missingNames
+}
+
+export async function resolveExactScryfallOracleCards(
+  cardNames: readonly string[]
+): Promise<ExactScryfallOracleCardResolution> {
+  const uniqueCardNames = getUniqueCardNames(cardNames)
+
+  if (uniqueCardNames.length === 0) {
+    return {
+      matches: [],
+      missingNames: [],
+    }
+  }
+
+  const normalizedCardNames = uniqueCardNames.map(normalizeCardName)
+  const result = await queryDatabase<{
+    normalized_name: string
+    oracle_id: string
+    name: string
+  }>(
+    `
+      WITH matches AS (
+        SELECT
+          card.normalized_name,
+          card.oracle_id,
+          card.name,
+          0 AS priority
+        FROM scryfall_oracle_cards card
+        WHERE card.normalized_name = ANY($1::text[])
+
+        UNION ALL
+
+        SELECT
+          face.normalized_name,
+          face.oracle_id,
+          card.name,
+          1 AS priority
+        FROM scryfall_card_faces face
+        JOIN scryfall_oracle_cards card ON card.oracle_id = face.oracle_id
+        WHERE face.normalized_name = ANY($1::text[])
+      )
+
+      SELECT DISTINCT ON (normalized_name)
+        normalized_name,
+        oracle_id,
+        name
+      FROM matches
+      ORDER BY normalized_name, priority ASC, name ASC
+    `,
+    [normalizedCardNames]
+  )
+  const matchesByNormalizedName = new Map(
+    result.rows.map((row) => [row.normalized_name, row])
+  )
+
+  return {
+    matches: uniqueCardNames
+      .map((cardName) => {
+        const match = matchesByNormalizedName.get(normalizeCardName(cardName))
+
+        if (!match) {
+          return null
+        }
+
+        return {
+          requestedName: cardName,
+          oracleId: match.oracle_id,
+          cardName: match.name,
+        }
+      })
+      .filter((match): match is ExactScryfallOracleCardMatch => match !== null),
+    missingNames: uniqueCardNames.filter(
+      (cardName) => !matchesByNormalizedName.has(normalizeCardName(cardName))
+    ),
+  }
+}
+
+function getUniqueCardNames(cardNames: readonly string[]) {
+  return Array.from(new Set(cardNames.map((name) => name.trim())))
+    .filter(Boolean)
+    .sort((firstName, secondName) => firstName.localeCompare(secondName))
+}
+
+export function normalizeScryfallCardNameForExactMatch(name: string) {
+  return normalizeCardName(name)
+}
+
+export function createExactScryfallOracleCardMatchMap(
+  matches: readonly ExactScryfallOracleCardMatch[]
+) {
+  return new Map(
+    matches.map((match) => [
+      normalizeScryfallCardNameForExactMatch(match.requestedName),
+      match,
+    ])
+  )
 }
 
 async function ensureScryfallOracleCardsSchema() {

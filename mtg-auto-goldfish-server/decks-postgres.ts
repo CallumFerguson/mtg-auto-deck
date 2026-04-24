@@ -1,4 +1,4 @@
-import { queryDatabase } from "./db.js"
+import { queryDatabase, withDatabaseTransaction } from "./db.js"
 
 export type DeckSummary = {
   id: string
@@ -7,6 +7,18 @@ export type DeckSummary = {
   format: string
   createdAt: string
   updatedAt: string
+}
+
+export type CreateDeckCardInput = {
+  oracleId: string
+  quantity: number
+}
+
+export type CreateDeckInput = {
+  name: string
+  desc: string
+  commanders: CreateDeckCardInput[]
+  cards: CreateDeckCardInput[]
 }
 
 export async function ensureDecksSchema() {
@@ -84,4 +96,87 @@ export async function listDecks(): Promise<DeckSummary[]> {
     createdAt: deck.created_at.toISOString(),
     updatedAt: deck.updated_at.toISOString(),
   }))
+}
+
+export async function createDeck({
+  cards,
+  commanders,
+  desc,
+  name,
+}: CreateDeckInput): Promise<DeckSummary> {
+  return withDatabaseTransaction(async (client) => {
+    const deckResult = await client.query<{
+      id: string
+      name: string
+      description: string | null
+      format: string
+      created_at: Date
+      updated_at: Date
+    }>(
+      `
+        INSERT INTO decks (name, description)
+        VALUES ($1, $2)
+        RETURNING id, name, description, format, created_at, updated_at
+      `,
+      [name, desc.trim() || null]
+    )
+    const deck = deckResult.rows[0]
+
+    async function insertDeckCards({
+      cards,
+      deckId,
+      zone,
+    }: {
+      cards: CreateDeckCardInput[]
+      deckId: string
+      zone: "commander" | "library"
+    }) {
+      for (const card of cards) {
+        await client.query(
+          `
+            INSERT INTO deck_cards (deck_id, oracle_id, zone, quantity)
+            VALUES ($1, $2, $3, $4)
+          `,
+          [deckId, card.oracleId, zone, card.quantity]
+        )
+      }
+    }
+
+    await insertDeckCards({
+      deckId: deck.id,
+      zone: "commander",
+      cards: mergeCardsByOracleId(commanders),
+    })
+    await insertDeckCards({
+      deckId: deck.id,
+      zone: "library",
+      cards: mergeCardsByOracleId(cards),
+    })
+
+    return {
+      id: deck.id,
+      name: deck.name,
+      description: deck.description,
+      format: deck.format,
+      createdAt: deck.created_at.toISOString(),
+      updatedAt: deck.updated_at.toISOString(),
+    }
+  })
+}
+
+function mergeCardsByOracleId(cards: readonly CreateDeckCardInput[]) {
+  const cardsByOracleId = new Map<string, CreateDeckCardInput>()
+
+  for (const card of cards) {
+    const existingCard = cardsByOracleId.get(card.oracleId)
+
+    if (existingCard) {
+      existingCard.quantity += card.quantity
+      continue
+    }
+
+    cardsByOracleId.set(card.oracleId, { ...card })
+  }
+
+  return Array.from(cardsByOracleId.values())
 }
