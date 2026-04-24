@@ -24,8 +24,6 @@ const DEFAULT_ALLOWED_HEADERS = [
   "Mcp-Protocol-Version",
 ]
 
-const gameIdSchema = z.string().trim().min(1).describe("The game ID.")
-const cardNameSchema = z.string().trim().min(1).describe("The card name.")
 const externalGameIdSchema = z
   .string()
   .trim()
@@ -33,39 +31,6 @@ const externalGameIdSchema = z
   .describe(
     "The game ID returned by the regular HTTP create-game endpoint, not by an MCP tool."
   )
-
-const cardInputSchema = z.object({
-  name: cardNameSchema,
-  cardText: z.string().trim().min(1).describe("The card text."),
-})
-const createGameSchema = z.object({
-  commanders: z.array(cardInputSchema).optional(),
-  deck: z.array(cardInputSchema).optional(),
-  seed: z.number().int().nonnegative().optional(),
-})
-const toolUiDataLookupSchema = z.object({
-  toolName: z.string().trim().min(1).describe("The tool name."),
-  gameId: gameIdSchema,
-})
-const openingHandSnapshotStatusSchema = z.object({
-  gameId: gameIdSchema,
-})
-const resetGameStateSchema = z.object({
-  gameId: gameIdSchema,
-  target: z
-    .enum(["initial", "opening_hand_snapshot", "turn_snapshot"])
-    .describe("Which saved point-in-time state to restore."),
-  turnNumber: z.number().int().positive().optional(),
-})
-const processPromptSchema = z.object({
-  prompt: z.string().trim().min(1).describe("The prompt to run."),
-})
-const simulateDrawingStartingHandSchema = z.object({
-  gameId: gameIdSchema,
-})
-const simulateTurnSchema = z.object({
-  gameId: gameIdSchema,
-})
 
 function createServer(
   name: string,
@@ -639,54 +604,8 @@ async function main() {
     res.status(200).json({
       ok: true,
       service: SERVER_NAME,
-      noop: true,
-    })
-  })
-
-  app.post("/games", (req: Request, res: Response) => {
-    respondToNoopEndpoint(res, createGameSchema.safeParse(req.body), {
-      gameId: null,
-      seed: req.body?.seed ?? null,
-    })
-  })
-
-  app.post("/tool-ui-data", (req: Request, res: Response) => {
-    respondToNoopEndpoint(res, toolUiDataLookupSchema.safeParse(req.body))
-  })
-
-  app.post("/opening-hand-snapshot-status", (req: Request, res: Response) => {
-    respondToNoopEndpoint(
-      res,
-      openingHandSnapshotStatusSchema.safeParse(req.body),
-      {
-        hasSnapshot: false,
-      }
-    )
-  })
-
-  app.post("/reset-game-state", (req: Request, res: Response) => {
-    respondToNoopEndpoint(res, resetGameStateSchema.safeParse(req.body))
-  })
-
-  app.post("/process-prompt", (req: Request, res: Response) => {
-    respondToNoopEndpoint(res, processPromptSchema.safeParse(req.body), {
-      result: "",
-    })
-  })
-
-  app.post("/simulate-drawing-starting-hand", (req: Request, res: Response) => {
-    respondToNoopEndpoint(
-      res,
-      simulateDrawingStartingHandSchema.safeParse(req.body),
-      {
-        result: "",
-      }
-    )
-  })
-
-  app.post("/simulate-turn", (req: Request, res: Response) => {
-    respondToNoopEndpoint(res, simulateTurnSchema.safeParse(req.body), {
-      result: "",
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString(),
     })
   })
 
@@ -706,33 +625,6 @@ async function main() {
     console.error(
       `Turn-simulation MCP endpoint available at http://${host}:${port}${TURN_SIMULATION_MCP_PATH}`
     )
-  })
-}
-
-function respondToNoopEndpoint(
-  res: Response,
-  parsedRequest:
-    | ReturnType<typeof createGameSchema.safeParse>
-    | ReturnType<typeof toolUiDataLookupSchema.safeParse>
-    | ReturnType<typeof openingHandSnapshotStatusSchema.safeParse>
-    | ReturnType<typeof resetGameStateSchema.safeParse>
-    | ReturnType<typeof processPromptSchema.safeParse>
-    | ReturnType<typeof simulateDrawingStartingHandSchema.safeParse>
-    | ReturnType<typeof simulateTurnSchema.safeParse>,
-  extraPayload: Record<string, unknown> = {}
-) {
-  if (!parsedRequest.success) {
-    res.status(400).json({
-      error: "Invalid request body.",
-      details: parsedRequest.error.issues,
-    })
-    return
-  }
-
-  res.status(200).json({
-    ok: true,
-    noop: true,
-    ...extraPayload,
   })
 }
 
