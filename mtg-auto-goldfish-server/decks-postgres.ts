@@ -190,6 +190,18 @@ export async function getDeck(deckId: string): Promise<DeckDetails | null> {
   }
 }
 
+export async function deleteDeck(deckId: string): Promise<boolean> {
+  const result = await queryDatabase(
+    `
+      DELETE FROM decks
+      WHERE id = $1
+    `,
+    [deckId]
+  )
+
+  return (result.rowCount ?? 0) > 0
+}
+
 export async function createDeck({
   cards,
   commanders,

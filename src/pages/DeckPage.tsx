@@ -1,20 +1,29 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react"
-import { ArrowLeft } from "lucide-react"
+import { ArrowLeft, MoreVertical, Trash2 } from "lucide-react"
 
+import { DeleteDeckModal } from "@/components/DeleteDeckModal"
 import { Button } from "@/components/ui/button"
 import { API_BASE_URL } from "@/lib/api"
 import type { DeckDetails, DeckResponse } from "@/lib/deck-types"
-import { navigateTo } from "@/lib/navigation"
+import { navigateTo, type DeckPageTab } from "@/lib/navigation"
 import { DeckSimulation } from "@/pages/DeckSimulation"
 import { ViewDeckCards } from "@/pages/ViewDeckCards"
 
-type DeckPageTab = "details" | "simulation"
-
-export function DeckPage({ deckId }: { deckId: string }) {
+export function DeckPage({
+  deckId,
+  initialTab,
+}: {
+  deckId: string
+  initialTab: DeckPageTab
+}) {
   const [deck, setDeck] = useState<DeckDetails | null>(null)
-  const [activeTab, setActiveTab] = useState<DeckPageTab>("details")
+  const [activeTab, setActiveTab] = useState<DeckPageTab>(initialTab)
   const [isLoadingDeck, setIsLoadingDeck] = useState(true)
   const [deckLoadError, setDeckLoadError] = useState<string | null>(null)
+  const [isActionsOpen, setIsActionsOpen] = useState(false)
+  const [isDeleteDeckOpen, setIsDeleteDeckOpen] = useState(false)
+  const [isDeletingDeck, setIsDeletingDeck] = useState(false)
+  const [deleteDeckError, setDeleteDeckError] = useState<string | null>(null)
 
   const loadDeck = useCallback(async () => {
     setIsLoadingDeck(true)
@@ -40,6 +49,36 @@ export function DeckPage({ deckId }: { deckId: string }) {
     void loadDeck()
   }, [loadDeck])
 
+  useEffect(() => {
+    setActiveTab(initialTab)
+  }, [initialTab])
+
+  function selectTab(tab: DeckPageTab) {
+    setActiveTab(tab)
+    navigateTo(`/decks/${deckId}?tab=${tab}`)
+  }
+
+  async function handleDeleteDeck() {
+    setIsDeletingDeck(true)
+    setDeleteDeckError(null)
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/decks/${deckId}`, {
+        method: "DELETE",
+      })
+
+      if (!response.ok) {
+        throw new Error(`Deck delete failed with ${response.status}`)
+      }
+
+      navigateTo("/")
+    } catch {
+      setDeleteDeckError("Deck could not be deleted.")
+    } finally {
+      setIsDeletingDeck(false)
+    }
+  }
+
   return (
     <main className="min-h-svh bg-background px-4 py-6 text-foreground sm:px-6 lg:px-8">
       <section className="mx-auto flex w-full max-w-6xl flex-col gap-6">
@@ -59,21 +98,65 @@ export function DeckPage({ deckId }: { deckId: string }) {
               <p className="text-sm font-medium tracking-[0.18em] text-sky-300 uppercase">
                 Deck page
               </p>
-              <h1 className="text-3xl font-semibold text-foreground sm:text-4xl">
-                {deck?.name ?? "Deck"}
-              </h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-3xl font-semibold text-foreground sm:text-4xl">
+                  {deck?.name ?? "Deck"}
+                </h1>
+                {deck ? (
+                  <div className="relative">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Open actions for ${deck.name}`}
+                      aria-expanded={isActionsOpen}
+                      title="Deck actions"
+                      onClick={() =>
+                        setIsActionsOpen((currentValue) => !currentValue)
+                      }
+                    >
+                      <MoreVertical />
+                    </Button>
+
+                    {isActionsOpen ? (
+                      <>
+                        <button
+                          className="fixed inset-0 z-10 cursor-default"
+                          type="button"
+                          aria-label="Close deck actions"
+                          onClick={() => setIsActionsOpen(false)}
+                        />
+                        <div className="absolute top-10 left-0 z-20 w-48 overflow-hidden rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-2xl shadow-black/40">
+                          <button
+                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:outline-none"
+                            type="button"
+                            onClick={() => {
+                              setIsActionsOpen(false)
+                              setDeleteDeckError(null)
+                              setIsDeleteDeckOpen(true)
+                            }}
+                          >
+                            <Trash2 data-icon="inline-start" />
+                            Delete deck
+                          </button>
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
             </div>
 
             <div className="inline-grid w-full grid-cols-2 rounded-lg border border-border bg-card/70 p-1 sm:w-auto">
               <TabButton
                 isActive={activeTab === "details"}
-                onClick={() => setActiveTab("details")}
+                onClick={() => selectTab("details")}
               >
                 Details
               </TabButton>
               <TabButton
                 isActive={activeTab === "simulation"}
-                onClick={() => setActiveTab("simulation")}
+                onClick={() => selectTab("simulation")}
               >
                 Simulation
               </TabButton>
@@ -104,6 +187,21 @@ export function DeckPage({ deckId }: { deckId: string }) {
           )
         ) : null}
       </section>
+
+      {deck && isDeleteDeckOpen ? (
+        <DeleteDeckModal
+          deckName={deck.name}
+          error={deleteDeckError}
+          isDeleting={isDeletingDeck}
+          onClose={() => {
+            if (!isDeletingDeck) {
+              setIsDeleteDeckOpen(false)
+              setDeleteDeckError(null)
+            }
+          }}
+          onConfirm={() => void handleDeleteDeck()}
+        />
+      ) : null}
     </main>
   )
 }

@@ -1,22 +1,38 @@
 import { useEffect, useState } from "react"
 
-import { getDeckIdFromPathname } from "@/lib/navigation"
+import {
+  getDeckIdFromPathname,
+  getDeckPageTabFromSearch,
+} from "@/lib/navigation"
 import { DeckListPage } from "@/pages/DeckListPage"
 import { DeckPage } from "@/pages/DeckPage"
 
 export function App() {
-  const pathname = usePathname()
-  const deckId = getDeckIdFromPathname(pathname)
+  const location = useLocation()
+  const deckId = getDeckIdFromPathname(location.pathname)
 
-  return deckId ? <DeckPage deckId={deckId} /> : <DeckListPage />
+  return deckId ? (
+    <DeckPage
+      deckId={deckId}
+      initialTab={getDeckPageTabFromSearch(location.search)}
+    />
+  ) : (
+    <DeckListPage />
+  )
 }
 
-function usePathname() {
-  const [pathname, setPathname] = useState(window.location.pathname)
+function useLocation() {
+  const [location, setLocation] = useState({
+    pathname: window.location.pathname,
+    search: window.location.search,
+  })
 
   useEffect(() => {
     function handleLocationChange() {
-      setPathname(window.location.pathname)
+      setLocation({
+        pathname: window.location.pathname,
+        search: window.location.search,
+      })
     }
 
     window.addEventListener("popstate", handleLocationChange)
@@ -28,7 +44,7 @@ function usePathname() {
     }
   }, [])
 
-  return pathname
+  return location
 }
 
 export default App

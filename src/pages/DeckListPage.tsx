@@ -1,6 +1,14 @@
-import { useEffect, useState } from "react"
-import { Plus, RefreshCw } from "lucide-react"
+import { useEffect, useState, type ReactNode } from "react"
+import {
+  FileText,
+  MoreVertical,
+  Play,
+  Plus,
+  RefreshCw,
+  Trash2,
+} from "lucide-react"
 
+import { DeleteDeckModal } from "@/components/DeleteDeckModal"
 import { Button } from "@/components/ui/button"
 import { API_BASE_URL } from "@/lib/api"
 import type { Deck, DecksResponse } from "@/lib/deck-types"
@@ -12,6 +20,10 @@ export function DeckListPage() {
   const [isLoadingDecks, setIsLoadingDecks] = useState(true)
   const [deckLoadError, setDeckLoadError] = useState<string | null>(null)
   const [isCreateDeckOpen, setIsCreateDeckOpen] = useState(false)
+  const [openMenuDeckId, setOpenMenuDeckId] = useState<string | null>(null)
+  const [deckToDelete, setDeckToDelete] = useState<Deck | null>(null)
+  const [isDeletingDeck, setIsDeletingDeck] = useState(false)
+  const [deleteDeckError, setDeleteDeckError] = useState<string | null>(null)
 
   async function loadDecks() {
     setIsLoadingDecks(true)
@@ -36,6 +48,38 @@ export function DeckListPage() {
   useEffect(() => {
     void loadDecks()
   }, [])
+
+  function openDeck(deck: Deck, tab?: "details" | "simulation") {
+    navigateTo(`/decks/${deck.id}${tab ? `?tab=${tab}` : ""}`)
+  }
+
+  async function handleDeleteDeck() {
+    if (!deckToDelete) {
+      return
+    }
+
+    setIsDeletingDeck(true)
+    setDeleteDeckError(null)
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/decks/${deckToDelete.id}`, {
+        method: "DELETE",
+      })
+
+      if (!response.ok) {
+        throw new Error(`Deck delete failed with ${response.status}`)
+      }
+
+      setDecks((currentDecks) =>
+        currentDecks.filter((deck) => deck.id !== deckToDelete.id)
+      )
+      setDeckToDelete(null)
+    } catch {
+      setDeleteDeckError("Deck could not be deleted.")
+    } finally {
+      setIsDeletingDeck(false)
+    }
+  }
 
   return (
     <main className="min-h-svh bg-background px-4 py-6 text-foreground sm:px-6 lg:px-8">
@@ -71,7 +115,7 @@ export function DeckListPage() {
           </div>
         </header>
 
-        <div className="overflow-hidden rounded-lg border border-border bg-card/70">
+        <div className="rounded-lg border border-border bg-card/70">
           {isLoadingDecks ? (
             <div className="px-4 py-8 text-sm text-muted-foreground">
               Loading decks...
@@ -90,20 +134,74 @@ export function DeckListPage() {
           ) : decks.length > 0 ? (
             <ul className="divide-y divide-border">
               {decks.map((deck) => (
-                <li key={deck.id}>
-                  <a
-                    className="group flex items-center justify-between gap-4 px-4 py-4 text-base font-medium text-foreground transition-colors hover:bg-muted/45 focus:bg-muted/45 focus:outline-none"
-                    href={`/decks/${deck.id}`}
-                    onClick={(event) => {
-                      event.preventDefault()
-                      navigateTo(`/decks/${deck.id}`)
-                    }}
+                <li key={deck.id} className="relative">
+                  <button
+                    className="group flex w-full min-w-0 items-center justify-between gap-4 px-4 py-4 pr-16 text-left text-base font-medium text-foreground transition-colors hover:bg-muted/45 focus:bg-muted/45 focus:outline-none"
+                    type="button"
+                    onClick={() => openDeck(deck)}
                   >
-                    <span>{deck.name}</span>
-                    <span className="text-sm text-muted-foreground transition-colors group-hover:text-sky-200">
-                      Open
-                    </span>
-                  </a>
+                    <span className="truncate">{deck.name}</span>
+                  </button>
+
+                  <div className="absolute inset-y-0 right-3 flex items-center">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Open actions for ${deck.name}`}
+                      aria-expanded={openMenuDeckId === deck.id}
+                      title="Deck actions"
+                      onClick={() =>
+                        setOpenMenuDeckId((currentDeckId) =>
+                          currentDeckId === deck.id ? null : deck.id
+                        )
+                      }
+                    >
+                      <MoreVertical />
+                    </Button>
+
+                    {openMenuDeckId === deck.id ? (
+                      <>
+                        <button
+                          className="fixed inset-0 z-10 cursor-default"
+                          type="button"
+                          aria-label="Close deck actions"
+                          onClick={() => setOpenMenuDeckId(null)}
+                        />
+                        <div className="absolute top-10 right-3 z-20 w-48 overflow-hidden rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-2xl shadow-black/40">
+                          <MenuButton
+                            onClick={() => {
+                              setOpenMenuDeckId(null)
+                              openDeck(deck, "details")
+                            }}
+                          >
+                            <FileText data-icon="inline-start" />
+                            Details
+                          </MenuButton>
+                          <MenuButton
+                            onClick={() => {
+                              setOpenMenuDeckId(null)
+                              openDeck(deck, "simulation")
+                            }}
+                          >
+                            <Play data-icon="inline-start" />
+                            Simulation
+                          </MenuButton>
+                          <MenuButton
+                            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                            onClick={() => {
+                              setOpenMenuDeckId(null)
+                              setDeleteDeckError(null)
+                              setDeckToDelete(deck)
+                            }}
+                          >
+                            <Trash2 data-icon="inline-start" />
+                            Delete deck
+                          </MenuButton>
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
                 </li>
               ))}
             </ul>
@@ -124,6 +222,41 @@ export function DeckListPage() {
           }}
         />
       ) : null}
+
+      {deckToDelete ? (
+        <DeleteDeckModal
+          deckName={deckToDelete.name}
+          error={deleteDeckError}
+          isDeleting={isDeletingDeck}
+          onClose={() => {
+            if (!isDeletingDeck) {
+              setDeckToDelete(null)
+              setDeleteDeckError(null)
+            }
+          }}
+          onConfirm={() => void handleDeleteDeck()}
+        />
+      ) : null}
     </main>
+  )
+}
+
+function MenuButton({
+  children,
+  className = "",
+  onClick,
+}: {
+  children: ReactNode
+  className?: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-muted/45 hover:text-foreground focus:bg-muted/45 focus:outline-none ${className}`}
+      type="button"
+      onClick={onClick}
+    >
+      {children}
+    </button>
   )
 }

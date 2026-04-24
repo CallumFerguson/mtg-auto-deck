@@ -7,6 +7,7 @@ import { z } from "zod/v4"
 import { closeDatabasePool, verifyDatabaseConnection } from "./db.js"
 import {
   createDeck,
+  deleteDeck,
   ensureDecksSchema,
   getDeck,
   listDecks,
@@ -760,6 +761,28 @@ async function main() {
       console.error("Failed to create deck:", error)
       res.status(500).json({
         error: "Failed to create deck.",
+      })
+    }
+  })
+
+  app.delete("/decks/:deckId", async (req: Request, res: Response) => {
+    const deckId = String(req.params.deckId)
+
+    try {
+      const wasDeleted = await deleteDeck(deckId)
+
+      if (!wasDeleted) {
+        res.status(404).json({
+          error: "Deck not found.",
+        })
+        return
+      }
+
+      res.status(204).send()
+    } catch (error) {
+      console.error("Failed to delete deck:", error)
+      res.status(500).json({
+        error: "Failed to delete deck.",
       })
     }
   })
