@@ -11,6 +11,7 @@ import {
   ensureDecksSchema,
   getDeck,
   listDecks,
+  updateDeckDetails,
 } from "./decks-postgres.js"
 import { ensureFreshScryfallOracleCards } from "./scryfall-cache.js"
 import {
@@ -56,6 +57,10 @@ const createDeckSchema = z.object({
       quantity: z.number().int().positive(),
     })
   ),
+})
+const updateDeckDetailsSchema = z.object({
+  name: z.string().trim().min(1),
+  description: z.string(),
 })
 
 function createServer(
@@ -677,6 +682,38 @@ async function main() {
     }
   })
 
+  app.patch("/decks/:deckId", async (req: Request, res: Response) => {
+    const deckId = String(req.params.deckId)
+    const parsedDeck = updateDeckDetailsSchema.safeParse(req.body)
+
+    if (!parsedDeck.success) {
+      res.status(400).json({
+        error: "Deck details payload is not in the expected format.",
+      })
+      return
+    }
+
+    try {
+      const updatedDeck = await updateDeckDetails(deckId, parsedDeck.data)
+
+      if (!updatedDeck) {
+        res.status(404).json({
+          error: "Deck not found.",
+        })
+        return
+      }
+
+      res.status(200).json({
+        deck: updatedDeck,
+      })
+    } catch (error) {
+      console.error("Failed to update deck details:", error)
+      res.status(500).json({
+        error: "Failed to update deck details.",
+      })
+    }
+  })
+
   app.post("/decks", async (req: Request, res: Response) => {
     const parsedDeck = createDeckSchema.safeParse(req.body)
 
@@ -850,7 +887,7 @@ function applyCors(
     res.setHeader("Access-Control-Allow-Private-Network", "true")
   }
 
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
   res.setHeader(
     "Access-Control-Allow-Headers",
     getAllowedRequestHeaders(req.headers["access-control-request-headers"])

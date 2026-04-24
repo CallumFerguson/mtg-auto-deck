@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react"
 import {
+  Edit3,
   FileText,
   MoreVertical,
   Play,
@@ -9,6 +10,7 @@ import {
 } from "lucide-react"
 
 import { DeleteDeckModal } from "@/components/DeleteDeckModal"
+import { EditDeckDetailsModal } from "@/components/EditDeckDetailsModal"
 import { Button } from "@/components/ui/button"
 import { API_BASE_URL } from "@/lib/api"
 import type { Deck, DecksResponse } from "@/lib/deck-types"
@@ -21,6 +23,7 @@ export function DeckListPage() {
   const [deckLoadError, setDeckLoadError] = useState<string | null>(null)
   const [isCreateDeckOpen, setIsCreateDeckOpen] = useState(false)
   const [openMenuDeckId, setOpenMenuDeckId] = useState<string | null>(null)
+  const [deckToEdit, setDeckToEdit] = useState<Deck | null>(null)
   const [deckToDelete, setDeckToDelete] = useState<Deck | null>(null)
   const [isDeletingDeck, setIsDeletingDeck] = useState(false)
   const [deleteDeckError, setDeleteDeckError] = useState<string | null>(null)
@@ -188,6 +191,15 @@ export function DeckListPage() {
                             Simulation
                           </MenuButton>
                           <MenuButton
+                            onClick={() => {
+                              setOpenMenuDeckId(null)
+                              setDeckToEdit(deck)
+                            }}
+                          >
+                            <Edit3 data-icon="inline-start" />
+                            Edit deck
+                          </MenuButton>
+                          <MenuButton
                             className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                             onClick={() => {
                               setOpenMenuDeckId(null)
@@ -219,6 +231,21 @@ export function DeckListPage() {
           onCreated={() => {
             setIsCreateDeckOpen(false)
             void loadDecks()
+          }}
+        />
+      ) : null}
+
+      {deckToEdit ? (
+        <EditDeckDetailsModal
+          deck={deckToEdit}
+          onClose={() => setDeckToEdit(null)}
+          onUpdated={(updatedDeck) => {
+            setDecks((currentDecks) =>
+              currentDecks.map((deck) =>
+                deck.id === updatedDeck.id ? { ...deck, ...updatedDeck } : deck
+              )
+            )
+            setDeckToEdit(null)
           }}
         />
       ) : null}

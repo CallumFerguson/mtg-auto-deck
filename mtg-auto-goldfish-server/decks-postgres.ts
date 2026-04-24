@@ -35,6 +35,11 @@ export type CreateDeckInput = {
   cards: CreateDeckCardInput[]
 }
 
+export type UpdateDeckDetailsInput = {
+  name: string
+  description: string
+}
+
 export async function ensureDecksSchema() {
   await queryDatabase("CREATE EXTENSION IF NOT EXISTS pgcrypto")
   await queryDatabase(`
@@ -200,6 +205,45 @@ export async function deleteDeck(deckId: string): Promise<boolean> {
   )
 
   return (result.rowCount ?? 0) > 0
+}
+
+export async function updateDeckDetails(
+  deckId: string,
+  { description, name }: UpdateDeckDetailsInput
+): Promise<DeckSummary | null> {
+  const result = await queryDatabase<{
+    id: string
+    name: string
+    description: string | null
+    format: string
+    created_at: Date
+    updated_at: Date
+  }>(
+    `
+      UPDATE decks
+      SET
+        name = $2,
+        description = $3,
+        updated_at = now()
+      WHERE id = $1
+      RETURNING id, name, description, format, created_at, updated_at
+    `,
+    [deckId, name, description.trim() || null]
+  )
+  const deck = result.rows[0]
+
+  if (!deck) {
+    return null
+  }
+
+  return {
+    id: deck.id,
+    name: deck.name,
+    description: deck.description,
+    format: deck.format,
+    createdAt: deck.created_at.toISOString(),
+    updatedAt: deck.updated_at.toISOString(),
+  }
 }
 
 export async function createDeck({

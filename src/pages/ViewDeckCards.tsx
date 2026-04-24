@@ -48,12 +48,6 @@ export function ViewDeckCards({ deck }: { deck: DeckDetails }) {
       </aside>
 
       <div className="space-y-6">
-        {deck.description?.trim() ? (
-          <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-            {deck.description}
-          </p>
-        ) : null}
-
         <div className={getCardColumnClassName(cardGroups.length)}>
           {cardGroups.map((group) => (
             <CardList

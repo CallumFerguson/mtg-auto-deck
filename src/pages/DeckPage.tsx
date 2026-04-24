@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react"
-import { ArrowLeft, MoreVertical, Trash2 } from "lucide-react"
+import { ArrowLeft, Edit3, MoreVertical, Trash2 } from "lucide-react"
 
 import { DeleteDeckModal } from "@/components/DeleteDeckModal"
+import { EditDeckDetailsModal } from "@/components/EditDeckDetailsModal"
 import { Button } from "@/components/ui/button"
 import { API_BASE_URL } from "@/lib/api"
 import type { DeckDetails, DeckResponse } from "@/lib/deck-types"
@@ -21,6 +22,7 @@ export function DeckPage({
   const [isLoadingDeck, setIsLoadingDeck] = useState(true)
   const [deckLoadError, setDeckLoadError] = useState<string | null>(null)
   const [isActionsOpen, setIsActionsOpen] = useState(false)
+  const [isEditDeckOpen, setIsEditDeckOpen] = useState(false)
   const [isDeleteDeckOpen, setIsDeleteDeckOpen] = useState(false)
   const [isDeletingDeck, setIsDeletingDeck] = useState(false)
   const [deleteDeckError, setDeleteDeckError] = useState<string | null>(null)
@@ -128,6 +130,17 @@ export function DeckPage({
                         />
                         <div className="absolute top-10 left-0 z-20 w-48 overflow-hidden rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-2xl shadow-black/40">
                           <button
+                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-muted/45 hover:text-foreground focus:bg-muted/45 focus:outline-none"
+                            type="button"
+                            onClick={() => {
+                              setIsActionsOpen(false)
+                              setIsEditDeckOpen(true)
+                            }}
+                          >
+                            <Edit3 data-icon="inline-start" />
+                            Edit deck
+                          </button>
+                          <button
                             className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:outline-none"
                             type="button"
                             onClick={() => {
@@ -145,6 +158,11 @@ export function DeckPage({
                   </div>
                 ) : null}
               </div>
+              {deck?.description?.trim() ? (
+                <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
+                  {deck.description}
+                </p>
+              ) : null}
             </div>
 
             <div className="inline-grid w-full grid-cols-2 rounded-lg border border-border bg-card/70 p-1 sm:w-auto">
@@ -200,6 +218,24 @@ export function DeckPage({
             }
           }}
           onConfirm={() => void handleDeleteDeck()}
+        />
+      ) : null}
+
+      {deck && isEditDeckOpen ? (
+        <EditDeckDetailsModal
+          deck={deck}
+          onClose={() => setIsEditDeckOpen(false)}
+          onUpdated={(updatedDeck) => {
+            setDeck((currentDeck) =>
+              currentDeck
+                ? {
+                    ...currentDeck,
+                    ...updatedDeck,
+                  }
+                : currentDeck
+            )
+            setIsEditDeckOpen(false)
+          }}
         />
       ) : null}
     </main>
