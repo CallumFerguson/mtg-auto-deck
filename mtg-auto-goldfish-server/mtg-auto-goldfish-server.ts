@@ -1,4 +1,5 @@
-﻿import express, { type Request, type Response } from "express"
+﻿import "dotenv/config"
+import express, { type Request, type Response } from "express"
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js"
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js"
@@ -16,6 +17,8 @@ import { Readable } from "node:stream"
 import { pipeline } from "node:stream/promises"
 import { fileURLToPath } from "node:url"
 import { z } from "zod/v4"
+import { closeDatabasePool, verifyDatabaseConnection } from "./db.js"
+import { importScryfallOracleCardsToPostgres } from "./scryfall-postgres.js"
 
 const DEFAULT_HOST = "127.0.0.1"
 const DEFAULT_PORT = 3001
@@ -73,11 +76,28 @@ type ScryfallBulkDataCatalog = {
 type ScryfallBulkDataItem = {
   type?: string
   download_uri?: string
+  updated_at?: string
 }
 
 type ScryfallOracleCardsMetadata = {
   downloaded_at?: string
   bulk_data?: ScryfallBulkDataCatalog
+  postgres_import?: ScryfallOracleCardsPostgresImportMetadata
+}
+
+type ScryfallOracleCardsPostgresImportMetadata = {
+  status: "success" | "pending" | "failed"
+  imported_at?: string
+  scryfall_updated_at?: string
+  error?: string
+}
+
+class ScryfallOracleCardsPostgresImportError extends Error {
+  constructor(cause: unknown) {
+    super("Failed to import Scryfall oracle_cards into Postgres.", {
+      cause,
+    })
+  }
 }
 
 function createServer(
@@ -625,10 +645,19 @@ function registerKeepHandTool(server: McpServer) {
 async function ensureFreshScryfallOracleCards() {
   const cacheState = await getScryfallOracleCardsCacheState()
 
-  if (cacheState.isFresh) {
+  if (cacheState.isFresh && cacheState.isImportedToPostgres) {
     console.error(
       `Using cached Scryfall oracle_cards data at ${SCRYFALL_ORACLE_CARDS_PATH}`
     )
+    return
+  }
+
+  if (cacheState.isFresh) {
+    console.error(
+      "Cached Scryfall oracle_cards data is fresh but has not been imported into Postgres. Importing..."
+    )
+
+    await importCachedScryfallOracleCardsToPostgres(cacheState.metadata)
     return
   }
 
@@ -643,6 +672,10 @@ async function ensureFreshScryfallOracleCards() {
   try {
     await downloadScryfallOracleCards()
   } catch (error) {
+    if (error instanceof ScryfallOracleCardsPostgresImportError) {
+      throw error
+    }
+
     if (cacheState.exists) {
       console.error(
         "Failed to refresh Scryfall oracle_cards data; continuing with the existing cached file.",
@@ -667,6 +700,9 @@ async function getScryfallOracleCardsCacheState() {
   return {
     exists: hasOracleCardsFile,
     isFresh: hasOracleCardsFile && ageMs <= SCRYFALL_DATA_MAX_AGE_MS,
+    isImportedToPostgres:
+      hasOracleCardsFile && metadata?.postgres_import?.status === "success",
+    metadata,
   }
 }
 
@@ -677,6 +713,7 @@ async function downloadScryfallOracleCards() {
 
   const bulkDataCatalog = await getScryfallBulkDataCatalog()
   const oracleCardsBulkItem = getScryfallOracleCardsBulkItem(bulkDataCatalog)
+  const downloadedAt = new Date().toISOString()
 
   if (!oracleCardsBulkItem.download_uri) {
     throw new Error(
@@ -703,11 +740,81 @@ async function downloadScryfallOracleCards() {
     createWriteStream(SCRYFALL_ORACLE_CARDS_TEMP_PATH)
   )
   await rename(SCRYFALL_ORACLE_CARDS_TEMP_PATH, SCRYFALL_ORACLE_CARDS_PATH)
-  await writeScryfallOracleCardsMetadata(bulkDataCatalog)
+  await writeScryfallOracleCardsMetadata(
+    bulkDataCatalog,
+    downloadedAt,
+    getPendingPostgresImportMetadata(oracleCardsBulkItem.updated_at)
+  )
+
+  try {
+    await importScryfallOracleCardsToPostgres({
+      oracleCardsPath: SCRYFALL_ORACLE_CARDS_PATH,
+      downloadedAt,
+      scryfallUpdatedAt: oracleCardsBulkItem.updated_at,
+    })
+    await writeScryfallOracleCardsMetadata(
+      bulkDataCatalog,
+      downloadedAt,
+      getSuccessfulPostgresImportMetadata(oracleCardsBulkItem.updated_at)
+    )
+  } catch (error) {
+    await writeScryfallOracleCardsMetadata(
+      bulkDataCatalog,
+      downloadedAt,
+      getFailedPostgresImportMetadata(error, oracleCardsBulkItem.updated_at)
+    )
+    throw new ScryfallOracleCardsPostgresImportError(error)
+  }
 
   console.error(
-    `Downloaded Scryfall oracle_cards data to ${SCRYFALL_ORACLE_CARDS_PATH}`
+    `Downloaded and imported Scryfall oracle_cards data from ${SCRYFALL_ORACLE_CARDS_PATH}`
   )
+}
+
+async function importCachedScryfallOracleCardsToPostgres(
+  metadata: ScryfallOracleCardsMetadata | null
+) {
+  const downloadedAt = metadata?.downloaded_at
+
+  if (!downloadedAt) {
+    throw new Error(
+      "Cannot import cached Scryfall oracle_cards because metadata is missing downloaded_at."
+    )
+  }
+
+  if (!metadata.bulk_data) {
+    throw new Error(
+      "Cannot import cached Scryfall oracle_cards because metadata is missing bulk_data."
+    )
+  }
+
+  const oracleCardsBulkItem = getScryfallOracleCardsBulkItem(metadata.bulk_data)
+
+  await writeScryfallOracleCardsMetadata(
+    metadata.bulk_data,
+    downloadedAt,
+    getPendingPostgresImportMetadata(oracleCardsBulkItem.updated_at)
+  )
+
+  try {
+    await importScryfallOracleCardsToPostgres({
+      oracleCardsPath: SCRYFALL_ORACLE_CARDS_PATH,
+      downloadedAt,
+      scryfallUpdatedAt: oracleCardsBulkItem.updated_at,
+    })
+    await writeScryfallOracleCardsMetadata(
+      metadata.bulk_data,
+      downloadedAt,
+      getSuccessfulPostgresImportMetadata(oracleCardsBulkItem.updated_at)
+    )
+  } catch (error) {
+    await writeScryfallOracleCardsMetadata(
+      metadata.bulk_data,
+      downloadedAt,
+      getFailedPostgresImportMetadata(error, oracleCardsBulkItem.updated_at)
+    )
+    throw new ScryfallOracleCardsPostgresImportError(error)
+  }
 }
 
 async function getScryfallBulkDataCatalog() {
@@ -758,11 +865,14 @@ async function readScryfallOracleCardsMetadata() {
 }
 
 async function writeScryfallOracleCardsMetadata(
-  bulkDataCatalog: ScryfallBulkDataCatalog
+  bulkDataCatalog: ScryfallBulkDataCatalog,
+  downloadedAt: string,
+  postgresImport: ScryfallOracleCardsPostgresImportMetadata
 ) {
   const metadata = {
-    downloaded_at: new Date().toISOString(),
+    downloaded_at: downloadedAt,
     bulk_data: bulkDataCatalog,
+    postgres_import: postgresImport,
   } satisfies ScryfallOracleCardsMetadata
 
   await writeFile(
@@ -774,6 +884,44 @@ async function writeScryfallOracleCardsMetadata(
     SCRYFALL_ORACLE_CARDS_METADATA_TEMP_PATH,
     SCRYFALL_ORACLE_CARDS_METADATA_PATH
   )
+}
+
+function getPendingPostgresImportMetadata(
+  scryfallUpdatedAt: string | undefined
+): ScryfallOracleCardsPostgresImportMetadata {
+  return {
+    status: "pending",
+    scryfall_updated_at: scryfallUpdatedAt,
+  }
+}
+
+function getSuccessfulPostgresImportMetadata(
+  scryfallUpdatedAt: string | undefined
+): ScryfallOracleCardsPostgresImportMetadata {
+  return {
+    status: "success",
+    imported_at: new Date().toISOString(),
+    scryfall_updated_at: scryfallUpdatedAt,
+  }
+}
+
+function getFailedPostgresImportMetadata(
+  error: unknown,
+  scryfallUpdatedAt: string | undefined
+): ScryfallOracleCardsPostgresImportMetadata {
+  return {
+    status: "failed",
+    scryfall_updated_at: scryfallUpdatedAt,
+    error: getErrorMessage(error),
+  }
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message
+  }
+
+  return String(error)
 }
 
 function getScryfallRequestHeaders() {
@@ -825,6 +973,8 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 }
 
 async function main() {
+  registerShutdownHandlers()
+  await verifyDatabaseConnection()
   await ensureFreshScryfallOracleCards()
 
   const host = DEFAULT_HOST
@@ -878,6 +1028,19 @@ async function main() {
       `Turn-simulation MCP endpoint available at http://${host}:${port}${TURN_SIMULATION_MCP_PATH}`
     )
   })
+}
+
+function registerShutdownHandlers() {
+  const shutdown = (signal: NodeJS.Signals) => {
+    void (async () => {
+      console.error(`Received ${signal}. Closing database pool...`)
+      await closeDatabasePool()
+      process.exit(0)
+    })()
+  }
+
+  process.once("SIGINT", shutdown)
+  process.once("SIGTERM", shutdown)
 }
 
 function applyCors(
@@ -1119,7 +1282,8 @@ ${GENERIC_GAME_RULES_REFERENCE}
 }
 */
 
-main().catch((error: unknown) => {
+main().catch(async (error: unknown) => {
   console.error(error)
+  await closeDatabasePool()
   process.exit(1)
 })
