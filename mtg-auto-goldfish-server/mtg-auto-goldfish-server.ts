@@ -5,6 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js"
 import { z } from "zod/v4"
 import { closeDatabasePool, verifyDatabaseConnection } from "./db.js"
+import { ensureDecksSchema, listDecks } from "./decks-postgres.js"
 import { ensureFreshScryfallOracleCards } from "./scryfall-cache.js"
 
 const DEFAULT_HOST = "127.0.0.1"
@@ -581,6 +582,7 @@ async function main() {
   registerShutdownHandlers()
   await verifyDatabaseConnection()
   await ensureFreshScryfallOracleCards()
+  await ensureDecksSchema()
 
   const host = DEFAULT_HOST
   const port = DEFAULT_PORT
@@ -614,6 +616,19 @@ async function main() {
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
     })
+  })
+
+  app.get("/decks", async (_req: Request, res: Response) => {
+    try {
+      res.status(200).json({
+        decks: await listDecks(),
+      })
+    } catch (error) {
+      console.error("Failed to list decks:", error)
+      res.status(500).json({
+        error: "Failed to list decks.",
+      })
+    }
   })
 
   registerMcpEndpoint(app, OPENING_HAND_MCP_PATH, createOpeningHandServer)
