@@ -722,20 +722,28 @@ async function handleMcpRequest(
   createScopedServer: () => McpServer
 ) {
   const server = createScopedServer()
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+  })
+  let didCleanup = false
+
+  const cleanup = () => {
+    if (didCleanup) {
+      return
+    }
+
+    didCleanup = true
+    void transport.close()
+    void server.close()
+  }
+
+  res.on("close", cleanup)
 
   try {
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-    })
-
     await server.connect(transport)
     await transport.handleRequest(req, res, req.body)
-
-    res.on("close", () => {
-      void transport.close()
-      void server.close()
-    })
   } catch (error) {
+    cleanup()
     console.error("Error handling MCP request:", error)
 
     if (!res.headersSent) {
