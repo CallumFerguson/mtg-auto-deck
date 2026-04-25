@@ -1,5 +1,23 @@
 export function navigateTo(pathname: string) {
-  window.history.pushState(null, "", pathname)
+  const currentUrl = new URL(window.location.href)
+  const nextUrl = new URL(pathname, currentUrl)
+  const nextPath = `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`
+  const isQueryOnlyNavigation = currentUrl.pathname === nextUrl.pathname
+
+  if (
+    currentUrl.pathname === nextUrl.pathname &&
+    currentUrl.search === nextUrl.search &&
+    currentUrl.hash === nextUrl.hash
+  ) {
+    return
+  }
+
+  if (isQueryOnlyNavigation) {
+    window.history.replaceState(null, "", nextPath)
+  } else {
+    window.history.pushState(null, "", nextPath)
+  }
+
   window.dispatchEvent(new Event("app:navigate"))
 }
 
