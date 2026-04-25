@@ -40,6 +40,27 @@ function getSimulationLabel(simulation: Simulation) {
   return simulation.id.slice(0, 8)
 }
 
+function getRandomDigit(maxExclusive: number) {
+  const maxUnbiasedValue = 256 - (256 % maxExclusive)
+  const randomBytes = new Uint8Array(1)
+
+  do {
+    crypto.getRandomValues(randomBytes)
+  } while (randomBytes[0] >= maxUnbiasedValue)
+
+  return randomBytes[0] % maxExclusive
+}
+
+function createRandomSimulationSeed() {
+  const digits = [String(getRandomDigit(9) + 1)]
+
+  for (let digitIndex = 1; digitIndex < 20; digitIndex += 1) {
+    digits.push(String(getRandomDigit(10)))
+  }
+
+  return digits.join("")
+}
+
 function getOpeningHandCardOptions(
   cards: readonly DeckCard[]
 ): OpeningHandCardOption[] {
@@ -247,7 +268,9 @@ export function DeckSimulation({
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            seed: useRandomSeed ? crypto.randomUUID() : trimmedSimulationSeed,
+            seed: useRandomSeed
+              ? createRandomSimulationSeed()
+              : trimmedSimulationSeed,
             turnsToSimulate: parsedTurnsToSimulate,
             startingHandId:
               openingHandMode === "provide" && selectedOpeningHand
