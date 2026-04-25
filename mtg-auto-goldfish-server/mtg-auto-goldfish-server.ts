@@ -15,8 +15,11 @@ import {
 } from "./decks-postgres.js"
 import { ensureFreshScryfallOracleCards } from "./scryfall-cache.js"
 import {
+  createStartingHand,
   ensureSimulationsSchema,
   listSimulationsForDeck,
+  listStartingHandsForDeck,
+  StartingHandValidationError,
 } from "./simulations-postgres.js"
 import {
   createExactScryfallOracleCardMatchMap,
@@ -65,6 +68,17 @@ const createDeckSchema = z.object({
 const updateDeckDetailsSchema = z.object({
   name: z.string().trim().min(1),
   description: z.string(),
+})
+const createStartingHandSchema = z.object({
+  name: z.string().trim().min(1),
+  cards: z
+    .array(
+      z.object({
+        deckCardId: z.number().int().positive(),
+        quantity: z.number().int().positive(),
+      })
+    )
+    .min(1),
 })
 
 function createServer(
@@ -710,6 +724,73 @@ async function main() {
       })
     }
   })
+
+  app.get(
+    "/decks/:deckId/starting-hands",
+    async (req: Request, res: Response) => {
+      const deckId = String(req.params.deckId)
+
+      try {
+        const deck = await getDeck(deckId)
+
+        if (!deck) {
+          res.status(404).json({
+            error: "Deck not found.",
+          })
+          return
+        }
+
+        res.status(200).json({
+          startingHands: await listStartingHandsForDeck(deckId),
+        })
+      } catch (error) {
+        console.error("Failed to list starting hands:", error)
+        res.status(500).json({
+          error: "Failed to list starting hands.",
+        })
+      }
+    }
+  )
+
+  app.post(
+    "/decks/:deckId/starting-hands",
+    async (req: Request, res: Response) => {
+      const deckId = String(req.params.deckId)
+      const parsedStartingHand = createStartingHandSchema.safeParse(req.body)
+
+      if (!parsedStartingHand.success) {
+        res.status(400).json({
+          error: "Starting hand payload is not in the expected format.",
+        })
+        return
+      }
+
+      try {
+        const startingHand = await createStartingHand(
+          deckId,
+          parsedStartingHand.data
+        )
+
+        res.status(201).json({
+          startingHand,
+        })
+      } catch (error) {
+        if (error instanceof StartingHandValidationError) {
+          const status = error.message === "Deck not found." ? 404 : 400
+
+          res.status(status).json({
+            error: error.message,
+          })
+          return
+        }
+
+        console.error("Failed to create starting hand:", error)
+        res.status(500).json({
+          error: "Failed to create starting hand.",
+        })
+      }
+    }
+  )
 
   app.patch("/decks/:deckId", async (req: Request, res: Response) => {
     const deckId = String(req.params.deckId)

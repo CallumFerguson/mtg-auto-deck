@@ -5,6 +5,7 @@ export type Deck = {
 }
 
 export type DeckCard = {
+  deckCardId: number
   oracleId: string
   name: string
   quantity: number
@@ -36,6 +37,7 @@ export type SimulationStatus =
 export type Simulation = {
   id: string
   deckId: string
+  startingHandId: string | null
   seed: string
   turnsToSimulate: number
   status: SimulationStatus
@@ -45,4 +47,31 @@ export type Simulation = {
 
 export type SimulationsResponse = {
   simulations: Simulation[]
+}
+
+export type StartingHandCard = {
+  deckCardId: number
+  oracleId: string
+  name: string
+  quantity: number
+  scryfallUri: string
+  defaultImageUrl: string | null
+  typeLine: string | null
+}
+
+export type StartingHand = {
+  id: string
+  deckId: string
+  name: string
+  cards: StartingHandCard[]
+  createdAt: string
+  updatedAt: string
+}
+
+export type StartingHandsResponse = {
+  startingHands: StartingHand[]
+}
+
+export type CreateStartingHandResponse = {
+  startingHand: StartingHand
 }

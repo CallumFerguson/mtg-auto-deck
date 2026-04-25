@@ -10,6 +10,7 @@ export type DeckSummary = {
 }
 
 export type DeckCard = {
+  deckCardId: number
   oracleId: string
   name: string
   quantity: number
@@ -140,6 +141,7 @@ export async function getDeck(deckId: string): Promise<DeckDetails | null> {
   }
 
   const cardResult = await queryDatabase<{
+    deck_card_id: number
     oracle_id: string
     name: string
     quantity: number
@@ -150,6 +152,7 @@ export async function getDeck(deckId: string): Promise<DeckDetails | null> {
   }>(
     `
       SELECT
+        deck_card.id AS deck_card_id,
         card.oracle_id,
         card.name,
         deck_card.quantity,
@@ -171,6 +174,7 @@ export async function getDeck(deckId: string): Promise<DeckDetails | null> {
     [deckId]
   )
   const mapCard = (card: (typeof cardResult.rows)[number]): DeckCard => ({
+    deckCardId: Number(card.deck_card_id),
     oracleId: card.oracle_id,
     name: card.name,
     quantity: card.quantity,
