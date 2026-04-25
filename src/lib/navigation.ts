@@ -16,3 +16,21 @@ export function getDeckPageTabFromSearch(search: string): DeckPageTab {
 
   return tab === "simulation" ? "simulation" : "details"
 }
+
+export function getDeckSimulationIdFromSearch(search: string) {
+  const simulationId = new URLSearchParams(search).get("simulation")?.trim()
+
+  return simulationId || null
+}
+
+export function getDeckSimulationPath(deckId: string, simulationId?: string) {
+  const searchParams = new URLSearchParams({
+    tab: "simulation",
+  })
+
+  if (simulationId) {
+    searchParams.set("simulation", simulationId)
+  }
+
+  return `/decks/${encodeURIComponent(deckId)}?${searchParams.toString()}`
+}

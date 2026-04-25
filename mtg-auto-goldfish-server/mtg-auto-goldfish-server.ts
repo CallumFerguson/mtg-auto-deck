@@ -15,10 +15,12 @@ import {
 } from "./decks-postgres.js"
 import { ensureFreshScryfallOracleCards } from "./scryfall-cache.js"
 import {
+  createSimulation,
   createStartingHand,
   ensureSimulationsSchema,
   listSimulationsForDeck,
   listStartingHandsForDeck,
+  SimulationValidationError,
   StartingHandValidationError,
 } from "./simulations-postgres.js"
 import {
@@ -79,6 +81,11 @@ const createStartingHandSchema = z.object({
       })
     )
     .min(1),
+})
+const createSimulationSchema = z.object({
+  seed: z.string().trim().min(1),
+  turnsToSimulate: z.number().int().nonnegative(),
+  startingHandId: z.uuid().nullable(),
 })
 
 function createServer(
@@ -724,6 +731,43 @@ async function main() {
       })
     }
   })
+
+  app.post(
+    "/decks/:deckId/simulations",
+    async (req: Request, res: Response) => {
+      const deckId = String(req.params.deckId)
+      const parsedSimulation = createSimulationSchema.safeParse(req.body)
+
+      if (!parsedSimulation.success) {
+        res.status(400).json({
+          error: "Simulation payload is not in the expected format.",
+        })
+        return
+      }
+
+      try {
+        const simulation = await createSimulation(deckId, parsedSimulation.data)
+
+        res.status(201).json({
+          simulation,
+        })
+      } catch (error) {
+        if (error instanceof SimulationValidationError) {
+          const status = error.message === "Deck not found." ? 404 : 400
+
+          res.status(status).json({
+            error: error.message,
+          })
+          return
+        }
+
+        console.error("Failed to create simulation:", error)
+        res.status(500).json({
+          error: "Failed to create simulation.",
+        })
+      }
+    }
+  )
 
   app.get(
     "/decks/:deckId/starting-hands",

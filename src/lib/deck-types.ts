@@ -49,6 +49,10 @@ export type SimulationsResponse = {
   simulations: Simulation[]
 }
 
+export type CreateSimulationResponse = {
+  simulation: Simulation
+}
+
 export type StartingHandCard = {
   deckCardId: number
   oracleId: string

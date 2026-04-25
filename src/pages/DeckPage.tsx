@@ -6,16 +6,22 @@ import { EditDeckDetailsModal } from "@/components/EditDeckDetailsModal"
 import { Button } from "@/components/ui/button"
 import { API_BASE_URL } from "@/lib/api"
 import type { DeckDetails, DeckResponse } from "@/lib/deck-types"
-import { navigateTo, type DeckPageTab } from "@/lib/navigation"
+import {
+  getDeckSimulationPath,
+  navigateTo,
+  type DeckPageTab,
+} from "@/lib/navigation"
 import { DeckSimulation } from "@/pages/DeckSimulation"
 import { ViewDeckCards } from "@/pages/ViewDeckCards"
 
 export function DeckPage({
   deckId,
   initialTab,
+  initialSimulationId,
 }: {
   deckId: string
   initialTab: DeckPageTab
+  initialSimulationId: string | null
 }) {
   const [deck, setDeck] = useState<DeckDetails | null>(null)
   const [activeTab, setActiveTab] = useState<DeckPageTab>(initialTab)
@@ -57,7 +63,11 @@ export function DeckPage({
 
   function selectTab(tab: DeckPageTab) {
     setActiveTab(tab)
-    navigateTo(`/decks/${deckId}?tab=${tab}`)
+    navigateTo(
+      tab === "simulation"
+        ? getDeckSimulationPath(deckId, initialSimulationId ?? undefined)
+        : `/decks/${deckId}?tab=${tab}`
+    )
   }
 
   async function handleDeleteDeck() {
@@ -204,6 +214,7 @@ export function DeckPage({
             <DeckSimulation
               cards={deck.cards}
               deckId={deck.id}
+              selectedSimulationIdFromUrl={initialSimulationId}
             />
           )
         ) : null}

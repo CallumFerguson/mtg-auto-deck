@@ -3,6 +3,7 @@ import { useEffect, useState } from "react"
 import {
   getDeckIdFromPathname,
   getDeckPageTabFromSearch,
+  getDeckSimulationIdFromSearch,
 } from "@/lib/navigation"
 import { DeckListPage } from "@/pages/DeckListPage"
 import { DeckPage } from "@/pages/DeckPage"
@@ -15,6 +16,7 @@ export function App() {
     <DeckPage
       deckId={deckId}
       initialTab={getDeckPageTabFromSearch(location.search)}
+      initialSimulationId={getDeckSimulationIdFromSearch(location.search)}
     />
   ) : (
     <DeckListPage />

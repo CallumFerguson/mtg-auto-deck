@@ -10,6 +10,7 @@ import { Dices, Plus, RefreshCw, Save, Sparkles, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { API_BASE_URL } from "@/lib/api"
 import type {
+  CreateSimulationResponse,
   CreateStartingHandResponse,
   DeckCard,
   Simulation,
@@ -17,6 +18,7 @@ import type {
   StartingHand,
   StartingHandsResponse,
 } from "@/lib/deck-types"
+import { getDeckSimulationPath, navigateTo } from "@/lib/navigation"
 
 type OpeningHandCardOption = {
   id: string
@@ -47,9 +49,11 @@ function getOpeningHandCardOptions(
 export function DeckSimulation({
   cards,
   deckId,
+  selectedSimulationIdFromUrl,
 }: {
   cards: DeckCard[]
   deckId: string
+  selectedSimulationIdFromUrl: string | null
 }) {
   const [simulations, setSimulations] = useState<Simulation[]>([])
   const [isLoadingSimulations, setIsLoadingSimulations] = useState(true)
@@ -62,6 +66,7 @@ export function DeckSimulation({
     null
   )
   const [isNewSimulationSelected, setIsNewSimulationSelected] = useState(true)
+  const [selectedSimulationId, setSelectedSimulationId] = useState("")
   const [simulationSeed, setSimulationSeed] = useState("")
   const [useRandomSeed, setUseRandomSeed] = useState(true)
   const [turnsToSimulate, setTurnsToSimulate] = useState("5")
@@ -70,6 +75,10 @@ export function DeckSimulation({
   >("simulate")
   const [selectedOpeningHandId, setSelectedOpeningHandId] = useState("")
   const [isCreateHandModalOpen, setIsCreateHandModalOpen] = useState(false)
+  const [createSimulationError, setCreateSimulationError] = useState<
+    string | null
+  >(null)
+  const [isCreatingSimulation, setIsCreatingSimulation] = useState(false)
   const openingHandCardOptions = useMemo(
     () => getOpeningHandCardOptions(cards),
     [cards]
@@ -78,6 +87,19 @@ export function DeckSimulation({
     () =>
       startingHands.find((hand) => hand.id === selectedOpeningHandId) ?? null,
     [startingHands, selectedOpeningHandId]
+  )
+  const selectedSimulation = useMemo(
+    () =>
+      simulations.find((simulation) => simulation.id === selectedSimulationId) ??
+      null,
+    [selectedSimulationId, simulations]
+  )
+  const selectedSimulationStartingHand = useMemo(
+    () =>
+      startingHands.find(
+        (hand) => hand.id === selectedSimulation?.startingHandId
+      ) ?? null,
+    [selectedSimulation?.startingHandId, startingHands]
   )
   const trimmedSimulationSeed = simulationSeed.trim()
   const canStartSimulation =
@@ -100,8 +122,10 @@ export function DeckSimulation({
 
       const data = (await response.json()) as SimulationsResponse
       setSimulations(data.simulations)
+      return data.simulations
     } catch {
       setSimulationLoadError("Simulations could not be loaded.")
+      return []
     } finally {
       setIsLoadingSimulations(false)
     }
@@ -147,6 +171,17 @@ export function DeckSimulation({
     void loadStartingHands()
   }, [loadStartingHands])
 
+  useEffect(() => {
+    if (selectedSimulationIdFromUrl) {
+      setSelectedSimulationId(selectedSimulationIdFromUrl)
+      setIsNewSimulationSelected(false)
+      return
+    }
+
+    setSelectedSimulationId("")
+    setIsNewSimulationSelected(true)
+  }, [selectedSimulationIdFromUrl])
+
   function selectCreatedStartingHand(hand: StartingHand) {
     setStartingHands((currentStartingHands) => [hand, ...currentStartingHands])
     setSelectedOpeningHandId(hand.id)
@@ -159,6 +194,83 @@ export function DeckSimulation({
 
     if (isChecked) {
       setSimulationSeed("")
+    }
+  }
+
+  function resetCreateSimulationForm() {
+    setSimulationSeed("")
+    setUseRandomSeed(true)
+    setTurnsToSimulate("5")
+    setOpeningHandMode("simulate")
+    setSelectedOpeningHandId(startingHands[0]?.id ?? "")
+  }
+
+  async function handleStartSimulation() {
+    if (!canStartSimulation || isCreatingSimulation) {
+      return
+    }
+
+    const parsedTurnsToSimulate = Number(turnsToSimulate)
+
+    if (!Number.isInteger(parsedTurnsToSimulate) || parsedTurnsToSimulate < 0) {
+      setCreateSimulationError(
+        "Turns to simulate must be a non-negative integer."
+      )
+      return
+    }
+
+    setCreateSimulationError(null)
+    setIsCreatingSimulation(true)
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/decks/${deckId}/simulations`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            seed: useRandomSeed ? crypto.randomUUID() : trimmedSimulationSeed,
+            turnsToSimulate: parsedTurnsToSimulate,
+            startingHandId:
+              openingHandMode === "provide" && selectedOpeningHand
+                ? selectedOpeningHand.id
+                : null,
+          }),
+        }
+      )
+
+      if (!response.ok) {
+        setCreateSimulationError(await readSimulationError(response))
+        return
+      }
+
+      const data = (await response.json()) as CreateSimulationResponse
+      const refreshedSimulations = await loadSimulations()
+
+      if (
+        refreshedSimulations.some(
+          (simulation) => simulation.id === data.simulation.id
+        )
+      ) {
+        setSelectedSimulationId(data.simulation.id)
+      } else {
+        setSimulations((currentSimulations) => [
+          data.simulation,
+          ...currentSimulations,
+        ])
+        setSimulationLoadError(null)
+        setSelectedSimulationId(data.simulation.id)
+      }
+
+      setIsNewSimulationSelected(false)
+      resetCreateSimulationForm()
+      navigateTo(getDeckSimulationPath(deckId, data.simulation.id))
+    } catch {
+      setCreateSimulationError("Simulation could not be sent to the server.")
+    } finally {
+      setIsCreatingSimulation(false)
     }
   }
 
@@ -175,7 +287,11 @@ export function DeckSimulation({
               }`}
               type="button"
               aria-pressed={isNewSimulationSelected}
-              onClick={() => setIsNewSimulationSelected(true)}
+              onClick={() => {
+                setIsNewSimulationSelected(true)
+                setSelectedSimulationId("")
+                navigateTo(getDeckSimulationPath(deckId))
+              }}
             >
               <Plus data-icon="inline-start" />
               New simulation
@@ -202,11 +318,27 @@ export function DeckSimulation({
             ) : simulations.length > 0 ? (
               <ul className="grid gap-1">
                 {simulations.map((simulation) => (
-                  <li
-                    key={simulation.id}
-                    className="rounded-md px-3 py-3 text-sm text-foreground"
-                  >
-                    {getSimulationLabel(simulation)}
+                  <li key={simulation.id}>
+                    <button
+                      className={`w-full rounded-md px-3 py-3 text-left text-sm font-medium transition-colors ${
+                        !isNewSimulationSelected &&
+                        selectedSimulationId === simulation.id
+                          ? "bg-accent text-accent-foreground"
+                          : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+                      }`}
+                      type="button"
+                      aria-pressed={
+                        !isNewSimulationSelected &&
+                        selectedSimulationId === simulation.id
+                      }
+                      onClick={() => {
+                        setSelectedSimulationId(simulation.id)
+                        setIsNewSimulationSelected(false)
+                        navigateTo(getDeckSimulationPath(deckId, simulation.id))
+                      }}
+                    >
+                      {getSimulationLabel(simulation)}
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -420,25 +552,32 @@ export function DeckSimulation({
                   <div>
                     <Button
                       type="button"
-                      disabled={!canStartSimulation}
+                      disabled={!canStartSimulation || isCreatingSimulation}
+                      onClick={() => void handleStartSimulation()}
                     >
                       <Dices data-icon="inline-start" />
-                      Start simulation
+                      {isCreatingSimulation ? "Creating..." : "Start simulation"}
                     </Button>
                   </div>
+
+                  {createSimulationError ? (
+                    <p
+                      className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                      role="alert"
+                    >
+                      {createSimulationError}
+                    </p>
+                  ) : null}
                 </div>
               </div>
             </div>
+          ) : selectedSimulation ? (
+            <SimulationDetails
+              simulation={selectedSimulation}
+              startingHand={selectedSimulationStartingHand}
+            />
           ) : (
-            <div className="grid flex-1 place-items-center px-5 py-10 text-center">
-              <div className="max-w-md space-y-3">
-                <Sparkles className="mx-auto size-8 text-sky-300" />
-                <h3 className="text-lg font-semibold">Simulation workspace</h3>
-                <p className="text-sm leading-6 text-muted-foreground">
-                  Select a simulation to view its run details here.
-                </p>
-              </div>
-            </div>
+            <EmptySimulationSelection />
           )}
         </section>
       </div>
@@ -452,6 +591,109 @@ export function DeckSimulation({
         />
       ) : null}
     </>
+  )
+}
+
+function SimulationDetails({
+  simulation,
+  startingHand,
+}: {
+  simulation: Simulation
+  startingHand: StartingHand | null
+}) {
+  const shouldSimulateOpeningHand = simulation.startingHandId === null
+
+  return (
+    <div className="flex flex-1 flex-col px-5 py-6">
+      <header className="grid gap-4 border-b border-border pb-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm text-sky-300">
+              Simulation {getSimulationLabel(simulation)}
+            </p>
+            <h3 className="text-xl font-semibold">Simulation setup</h3>
+          </div>
+          <span className="rounded-md border border-border bg-background/45 px-3 py-1 text-sm text-muted-foreground">
+            {simulation.status}
+          </span>
+        </div>
+
+        <dl className="grid gap-3 text-sm sm:grid-cols-3">
+          <div className="rounded-md border border-border bg-background/35 p-3">
+            <dt className="text-muted-foreground">Seed</dt>
+            <dd className="mt-1 break-all font-medium text-foreground">
+              {simulation.seed}
+            </dd>
+          </div>
+          <div className="rounded-md border border-border bg-background/35 p-3">
+            <dt className="text-muted-foreground">Turns to simulate</dt>
+            <dd className="mt-1 font-medium text-foreground">
+              {simulation.turnsToSimulate}
+            </dd>
+          </div>
+          <div className="rounded-md border border-border bg-background/35 p-3">
+            <dt className="text-muted-foreground">Simulate opening hand</dt>
+            <dd className="mt-1 font-medium text-foreground">
+              {shouldSimulateOpeningHand ? "Yes" : "No"}
+            </dd>
+          </div>
+        </dl>
+
+        {!shouldSimulateOpeningHand ? (
+          <div className="grid gap-2 rounded-md border border-border bg-background/35 p-3">
+            <p className="text-sm font-medium text-foreground">
+              Provided opening hand
+              {startingHand ? (
+                <span className="ml-2 text-muted-foreground">
+                  {startingHand.name}
+                </span>
+              ) : null}
+            </p>
+            {startingHand ? (
+              <ul className="grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
+                {startingHand.cards.map((card) => (
+                  <li
+                    key={card.deckCardId}
+                    className="rounded-md bg-muted/30 px-3 py-2"
+                  >
+                    {card.quantity > 1 ? (
+                      <span className="mr-2 text-sky-300">
+                        {card.quantity}x
+                      </span>
+                    ) : null}
+                    {card.name}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Opening hand details are loading.
+              </p>
+            )}
+          </div>
+        ) : null}
+      </header>
+
+      <div className="grid flex-1 place-items-center py-10 text-center">
+        <p className="text-sm text-muted-foreground">
+          Simulation has not started.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function EmptySimulationSelection() {
+  return (
+    <div className="grid flex-1 place-items-center px-5 py-10 text-center">
+      <div className="max-w-md space-y-3">
+        <Sparkles className="mx-auto size-8 text-sky-300" />
+        <h3 className="text-lg font-semibold">Simulation workspace</h3>
+        <p className="text-sm leading-6 text-muted-foreground">
+          Select a simulation to view its run details here.
+        </p>
+      </div>
+    </div>
   )
 }
 
@@ -732,4 +974,20 @@ async function readStartingHandError(response: Response) {
   }
 
   return `Starting hand could not be saved. Server responded with ${response.status}.`
+}
+
+async function readSimulationError(response: Response) {
+  try {
+    const data = (await response.json()) as {
+      error?: unknown
+    }
+
+    if (typeof data.error === "string" && data.error.trim()) {
+      return data.error
+    }
+  } catch {
+    // Fall through to the generic HTTP error.
+  }
+
+  return `Simulation could not be saved. Server responded with ${response.status}.`
 }

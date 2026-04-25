@@ -65,6 +65,19 @@ export type CreateStartingHandInput = {
   }[]
 }
 
+export type CreateSimulationInput = {
+  seed: string
+  turnsToSimulate: number
+  startingHandId: string | null
+}
+
+export class SimulationValidationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "SimulationValidationError"
+  }
+}
+
 export class StartingHandValidationError extends Error {
   constructor(message: string) {
     super(message)
@@ -292,6 +305,95 @@ export async function listSimulationsForDeck(
     createdAt: simulation.created_at.toISOString(),
     updatedAt: simulation.updated_at.toISOString(),
   }))
+}
+
+export async function createSimulation(
+  deckId: string,
+  input: CreateSimulationInput
+): Promise<SimulationSummary> {
+  const seed = input.seed.trim()
+
+  if (!seed) {
+    throw new SimulationValidationError("Simulation seed is required.")
+  }
+
+  if (
+    !Number.isInteger(input.turnsToSimulate) ||
+    input.turnsToSimulate < 0
+  ) {
+    throw new SimulationValidationError(
+      "Turns to simulate must be a non-negative integer."
+    )
+  }
+
+  const deckResult = await queryDatabase("SELECT id FROM decks WHERE id = $1", [
+    deckId,
+  ])
+
+  if (deckResult.rowCount === 0) {
+    throw new SimulationValidationError("Deck not found.")
+  }
+
+  if (input.startingHandId !== null) {
+    const startingHandResult = await queryDatabase(
+      `
+        SELECT id
+        FROM starting_hands
+        WHERE id = $1
+          AND deck_id = $2
+      `,
+      [input.startingHandId, deckId]
+    )
+
+    if (startingHandResult.rowCount === 0) {
+      throw new SimulationValidationError(
+        "Starting hand does not exist for this deck."
+      )
+    }
+  }
+
+  const result = await queryDatabase<{
+    id: string
+    deck_id: string
+    starting_hand_id: string | null
+    seed: string
+    turns_to_simulate: number
+    status: SimulationStatus
+    created_at: Date
+    updated_at: Date
+  }>(
+    `
+      INSERT INTO simulations (
+        deck_id,
+        seed,
+        turns_to_simulate,
+        starting_hand_id
+      )
+      VALUES ($1, $2, $3, $4)
+      RETURNING
+        id,
+        deck_id,
+        starting_hand_id,
+        seed,
+        turns_to_simulate,
+        status,
+        created_at,
+        updated_at
+    `,
+    [deckId, seed, input.turnsToSimulate, input.startingHandId]
+  )
+  const simulation = result.rows[0]
+
+  return {
+    id: simulation.id,
+    deckId: simulation.deck_id,
+    startingHandId: simulation.starting_hand_id,
+    seed: simulation.seed,
+    turnsToSimulate: simulation.turns_to_simulate,
+    status: simulation.status,
+    createdAt: simulation.created_at.toISOString(),
+    updatedAt: simulation.updated_at.toISOString(),
+  }
 }
 
 export async function listStartingHandsForDeck(
