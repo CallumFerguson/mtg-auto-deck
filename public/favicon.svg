@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="MTG Auto Goldfish">
+  <rect width="64" height="64" rx="14" fill="#10131b" />
+  <path
+    d="M8 32c9-14 30-14 39 0-9 14-30 14-39 0Z"
+    fill="#f4b13d"
+    stroke="#ffd56a"
+    stroke-width="3"
+    stroke-linejoin="round"
+  />
+  <path d="M46 32l12-10v20l-12-10Z" fill="#e28329" stroke="#ffd56a" stroke-width="3" stroke-linejoin="round" />
+  <circle cx="24" cy="29" r="3.25" fill="#10131b" />
+</svg>
