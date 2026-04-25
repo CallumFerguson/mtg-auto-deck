@@ -4,8 +4,18 @@ import {
   useMemo,
   useState,
   type FormEvent,
+  type ReactNode,
 } from "react"
-import { Dices, Plus, RefreshCw, Save, Sparkles, X } from "lucide-react"
+import {
+  Dices,
+  MoreVertical,
+  Plus,
+  RefreshCw,
+  Save,
+  Sparkles,
+  Trash2,
+  X,
+} from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { API_BASE_URL } from "@/lib/api"
@@ -79,6 +89,12 @@ export function DeckSimulation({
     string | null
   >(null)
   const [isCreatingSimulation, setIsCreatingSimulation] = useState(false)
+  const [openSimulationMenuId, setOpenSimulationMenuId] = useState<
+    string | null
+  >(null)
+  const [deletingSimulationId, setDeletingSimulationId] = useState<
+    string | null
+  >(null)
   const openingHandCardOptions = useMemo(
     () => getOpeningHandCardOptions(cards),
     [cards]
@@ -274,6 +290,43 @@ export function DeckSimulation({
     }
   }
 
+  async function handleDeleteSimulation(simulationId: string) {
+    if (deletingSimulationId) {
+      return
+    }
+
+    setDeletingSimulationId(simulationId)
+    setSimulationLoadError(null)
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/decks/${deckId}/simulations/${simulationId}`,
+        {
+          method: "DELETE",
+        }
+      )
+
+      if (!response.ok) {
+        throw new Error(`Simulation delete failed with ${response.status}`)
+      }
+
+      setSimulations((currentSimulations) =>
+        currentSimulations.filter((simulation) => simulation.id !== simulationId)
+      )
+      setOpenSimulationMenuId(null)
+
+      if (!isNewSimulationSelected && selectedSimulationId === simulationId) {
+        setSelectedSimulationId("")
+        setIsNewSimulationSelected(true)
+        navigateTo(getDeckSimulationPath(deckId))
+      }
+    } catch {
+      setSimulationLoadError("Simulation could not be deleted.")
+    } finally {
+      setDeletingSimulationId(null)
+    }
+  }
+
   return (
     <>
       <div className="grid min-h-[34rem] overflow-hidden rounded-lg border border-border bg-card/70 lg:grid-cols-[18rem_minmax(0,1fr)]">
@@ -318,9 +371,9 @@ export function DeckSimulation({
             ) : simulations.length > 0 ? (
               <ul className="grid gap-1">
                 {simulations.map((simulation) => (
-                  <li key={simulation.id}>
+                  <li key={simulation.id} className="group relative">
                     <button
-                      className={`w-full rounded-md px-3 py-3 text-left text-sm font-medium transition-colors ${
+                      className={`w-full rounded-md py-3 pr-11 pl-3 text-left text-sm font-medium transition-colors ${
                         !isNewSimulationSelected &&
                         selectedSimulationId === simulation.id
                           ? "bg-accent text-accent-foreground"
@@ -339,6 +392,58 @@ export function DeckSimulation({
                     >
                       {getSimulationLabel(simulation)}
                     </button>
+                    <div
+                      className={`absolute inset-y-0 right-1 flex items-center opacity-0 transition-opacity group-hover:opacity-100 ${
+                        openSimulationMenuId === simulation.id
+                          ? "opacity-100"
+                          : ""
+                      }`}
+                    >
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={`Open actions for simulation ${getSimulationLabel(
+                          simulation
+                        )}`}
+                        aria-expanded={openSimulationMenuId === simulation.id}
+                        title="Simulation actions"
+                        disabled={deletingSimulationId === simulation.id}
+                        onClick={() =>
+                          setOpenSimulationMenuId((currentSimulationId) =>
+                            currentSimulationId === simulation.id
+                              ? null
+                              : simulation.id
+                          )
+                        }
+                      >
+                        <MoreVertical />
+                      </Button>
+
+                      {openSimulationMenuId === simulation.id ? (
+                        <>
+                          <button
+                            className="fixed inset-0 z-10 cursor-default"
+                            type="button"
+                            aria-label="Close simulation actions"
+                            onClick={() => setOpenSimulationMenuId(null)}
+                          />
+                          <div className="absolute top-9 right-0 z-20 w-48 overflow-hidden rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-2xl shadow-black/40">
+                            <SimulationMenuButton
+                              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              onClick={() =>
+                                void handleDeleteSimulation(simulation.id)
+                              }
+                            >
+                              <Trash2 data-icon="inline-start" />
+                              {deletingSimulationId === simulation.id
+                                ? "Deleting..."
+                                : "Delete simulation"}
+                            </SimulationMenuButton>
+                          </div>
+                        </>
+                      ) : null}
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -591,6 +696,26 @@ export function DeckSimulation({
         />
       ) : null}
     </>
+  )
+}
+
+function SimulationMenuButton({
+  children,
+  className = "",
+  onClick,
+}: {
+  children: ReactNode
+  className?: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-muted/45 hover:text-foreground focus:bg-muted/45 focus:outline-none ${className}`}
+      type="button"
+      onClick={onClick}
+    >
+      {children}
+    </button>
   )
 }
 

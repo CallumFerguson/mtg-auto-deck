@@ -17,6 +17,7 @@ import { ensureFreshScryfallOracleCards } from "./scryfall-cache.js"
 import {
   createSimulation,
   createStartingHand,
+  deleteSimulation,
   ensureSimulationsSchema,
   listSimulationsForDeck,
   listStartingHandsForDeck,
@@ -764,6 +765,32 @@ async function main() {
         console.error("Failed to create simulation:", error)
         res.status(500).json({
           error: "Failed to create simulation.",
+        })
+      }
+    }
+  )
+
+  app.delete(
+    "/decks/:deckId/simulations/:simulationId",
+    async (req: Request, res: Response) => {
+      const deckId = String(req.params.deckId)
+      const simulationId = String(req.params.simulationId)
+
+      try {
+        const wasDeleted = await deleteSimulation(deckId, simulationId)
+
+        if (!wasDeleted) {
+          res.status(404).json({
+            error: "Simulation not found.",
+          })
+          return
+        }
+
+        res.status(204).send()
+      } catch (error) {
+        console.error("Failed to delete simulation:", error)
+        res.status(500).json({
+          error: "Failed to delete simulation.",
         })
       }
     }

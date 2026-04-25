@@ -396,6 +396,22 @@ export async function createSimulation(
   }
 }
 
+export async function deleteSimulation(
+  deckId: string,
+  simulationId: string
+): Promise<boolean> {
+  const result = await queryDatabase(
+    `
+      DELETE FROM simulations
+      WHERE id = $1
+        AND deck_id = $2
+    `,
+    [simulationId, deckId]
+  )
+
+  return (result.rowCount ?? 0) > 0
+}
+
 export async function listStartingHandsForDeck(
   deckId: string
 ): Promise<StartingHand[]> {
