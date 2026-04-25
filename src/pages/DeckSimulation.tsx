@@ -47,11 +47,9 @@ function getOpeningHandCardOptions(
 export function DeckSimulation({
   cards,
   deckId,
-  deckName,
 }: {
   cards: DeckCard[]
   deckId: string
-  deckName: string
 }) {
   const [simulations, setSimulations] = useState<Simulation[]>([])
   const [isLoadingSimulations, setIsLoadingSimulations] = useState(true)
@@ -208,218 +206,213 @@ export function DeckSimulation({
         </aside>
 
         <section className="flex min-h-[28rem] flex-col">
-          <header className="border-b border-border px-5 py-4">
-            <p className="text-sm font-medium tracking-[0.16em] text-sky-300 uppercase">
-              Simulation
-            </p>
-            <h2 className="mt-1 text-2xl font-semibold">{deckName}</h2>
-          </header>
-
           {isNewSimulationSelected ? (
-            <div className="flex flex-1 flex-col gap-6 px-5 py-6">
-              <div className="space-y-1">
-                <h3 className="text-lg font-semibold">Create simulation</h3>
-                <p className="text-sm leading-6 text-muted-foreground">
-                  Configure the starting conditions for the next run.
-                </p>
-              </div>
+            <div className="grid flex-1 place-items-center px-5 py-10">
+              <div className="grid w-full max-w-2xl gap-4">
+                <h3 className="text-center text-lg font-semibold">
+                  Create new simulation
+                </h3>
+                <div className="flex flex-col gap-6 rounded-lg border border-border bg-card/70 p-6 shadow-sm">
+                  <div className="grid gap-6">
+                    <div className="grid gap-3">
+                      <label
+                        className="text-sm font-medium text-foreground"
+                        htmlFor="simulation-seed"
+                      >
+                        Simulation seed
+                      </label>
+                      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                        <input
+                          id="simulation-seed"
+                          className="h-9 rounded-md border border-input bg-background/60 px-3 text-sm text-foreground transition-colors outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
+                          type="text"
+                          value={simulationSeed}
+                          placeholder="Seed"
+                          disabled={useRandomSeed}
+                          onChange={(event) =>
+                            setSimulationSeed(event.target.value)
+                          }
+                        />
+                        <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <input
+                            className="size-4 accent-sky-300"
+                            type="checkbox"
+                            checked={useRandomSeed}
+                            onChange={(event) =>
+                              setUseRandomSeed(event.target.checked)
+                            }
+                          />
+                          Use random seed
+                        </label>
+                      </div>
+                    </div>
 
-              <div className="grid gap-6">
-                <div className="grid gap-3">
-                  <label
-                    className="text-sm font-medium text-foreground"
-                    htmlFor="simulation-seed"
-                  >
-                    Simulation seed
-                  </label>
-                  <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-                    <input
-                      id="simulation-seed"
-                      className="h-9 rounded-md border border-input bg-background/60 px-3 text-sm text-foreground transition-colors outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
-                      type="text"
-                      value={simulationSeed}
-                      placeholder="Seed"
-                      disabled={useRandomSeed}
-                      onChange={(event) =>
-                        setSimulationSeed(event.target.value)
-                      }
-                    />
-                    <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <div className="grid gap-3">
+                      <label
+                        className="text-sm font-medium text-foreground"
+                        htmlFor="turns-to-simulate"
+                      >
+                        Turns to simulate
+                      </label>
                       <input
-                        className="size-4 accent-sky-300"
-                        type="checkbox"
-                        checked={useRandomSeed}
+                        id="turns-to-simulate"
+                        className="no-number-spinner h-9 w-full rounded-md border border-input bg-background/60 px-3 text-sm text-foreground transition-colors outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/30 sm:max-w-36"
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={turnsToSimulate}
                         onChange={(event) =>
-                          setUseRandomSeed(event.target.checked)
+                          setTurnsToSimulate(event.target.valueAsNumber || 0)
                         }
                       />
-                      Use random seed
-                    </label>
-                  </div>
-                </div>
+                    </div>
 
-                <div className="grid gap-3">
-                  <label
-                    className="text-sm font-medium text-foreground"
-                    htmlFor="turns-to-simulate"
-                  >
-                    Turns to simulate
-                  </label>
-                  <input
-                    id="turns-to-simulate"
-                    className="no-number-spinner h-9 w-full rounded-md border border-input bg-background/60 px-3 text-sm text-foreground transition-colors outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/30 sm:max-w-36"
-                    type="number"
-                    min={0}
-                    step={1}
-                    value={turnsToSimulate}
-                    onChange={(event) =>
-                      setTurnsToSimulate(event.target.valueAsNumber || 0)
-                    }
-                  />
-                </div>
-
-                <fieldset className="grid gap-3">
-                  <legend className="text-sm font-medium text-foreground">
-                    Opening hand
-                  </legend>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <label
-                      className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
-                        openingHandMode === "simulate"
-                          ? "border-ring bg-accent text-accent-foreground"
-                          : "border-border bg-background/35 text-muted-foreground"
-                      }`}
-                    >
-                      <input
-                        className="size-4 accent-sky-300"
-                        type="radio"
-                        name="opening-hand-mode"
-                        checked={openingHandMode === "simulate"}
-                        onChange={() => setOpeningHandMode("simulate")}
-                      />
-                      Simulate opening hand
-                    </label>
-                    <label
-                      className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
-                        openingHandMode === "provide"
-                          ? "border-ring bg-accent text-accent-foreground"
-                          : "border-border bg-background/35 text-muted-foreground"
-                      }`}
-                    >
-                      <input
-                        className="size-4 accent-sky-300"
-                        type="radio"
-                        name="opening-hand-mode"
-                        checked={openingHandMode === "provide"}
-                        onChange={() => setOpeningHandMode("provide")}
-                      />
-                      Provide opening hand
-                    </label>
-                  </div>
-
-                  {openingHandMode === "provide" ? (
-                    <div className="grid gap-3 rounded-md border border-border bg-background/35 p-3">
-                      {startingHandLoadError ? (
-                        <div className="grid gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2">
-                          <p className="text-sm text-destructive">
-                            {startingHandLoadError}
-                          </p>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => void loadStartingHands()}
-                          >
-                            <RefreshCw data-icon="inline-start" />
-                            Try again
-                          </Button>
-                        </div>
-                      ) : null}
-
-                      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                    <fieldset className="grid gap-3">
+                      <legend className="text-sm font-medium text-foreground">
+                        Opening hand
+                      </legend>
+                      <div className="grid gap-2 sm:grid-cols-2">
                         <label
-                          className="grid gap-2 text-sm font-medium"
-                          htmlFor="saved-opening-hand"
+                          className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
+                            openingHandMode === "simulate"
+                              ? "border-ring bg-accent text-accent-foreground"
+                              : "border-border bg-background/35 text-muted-foreground"
+                          }`}
                         >
-                          <span>Starting hand</span>
-                          <select
-                            id="saved-opening-hand"
-                            className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground transition-colors outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
-                            value={selectedOpeningHandId}
-                            disabled={
-                              isLoadingStartingHands ||
-                              startingHands.length === 0
-                            }
-                            onChange={(event) =>
-                              setSelectedOpeningHandId(event.target.value)
-                            }
-                          >
-                            {isLoadingStartingHands ? (
-                              <option value="">
-                                Loading starting hands...
-                              </option>
-                            ) : startingHands.length === 0 ? (
-                              <option value="">No starting hands yet</option>
-                            ) : null}
-                            {startingHands.map((hand) => (
-                              <option key={hand.id} value={hand.id}>
-                                {hand.name}
-                              </option>
-                            ))}
-                          </select>
+                          <input
+                            className="size-4 accent-sky-300"
+                            type="radio"
+                            name="opening-hand-mode"
+                            checked={openingHandMode === "simulate"}
+                            onChange={() => setOpeningHandMode("simulate")}
+                          />
+                          Simulate opening hand
                         </label>
-
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setIsCreateHandModalOpen(true)}
+                        <label
+                          className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
+                            openingHandMode === "provide"
+                              ? "border-ring bg-accent text-accent-foreground"
+                              : "border-border bg-background/35 text-muted-foreground"
+                          }`}
                         >
-                          <Plus data-icon="inline-start" />
-                          New starting hand
-                        </Button>
+                          <input
+                            className="size-4 accent-sky-300"
+                            type="radio"
+                            name="opening-hand-mode"
+                            checked={openingHandMode === "provide"}
+                            onChange={() => setOpeningHandMode("provide")}
+                          />
+                          Provide opening hand
+                        </label>
                       </div>
 
-                      {selectedOpeningHand ? (
-                        <div className="grid gap-2">
-                          <p className="text-sm text-sky-300">
-                            {countStartingHandCards(selectedOpeningHand)} cards
-                            selected
-                          </p>
-                          <ul className="grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
-                            {selectedOpeningHand.cards.map((card) => (
-                              <li
-                                key={card.deckCardId}
-                                className="rounded-md bg-muted/30 px-3 py-2"
+                      {openingHandMode === "provide" ? (
+                        <div className="grid gap-3 rounded-md border border-border bg-background/35 p-3">
+                          {startingHandLoadError ? (
+                            <div className="grid gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2">
+                              <p className="text-sm text-destructive">
+                                {startingHandLoadError}
+                              </p>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => void loadStartingHands()}
                               >
-                                {card.quantity > 1 ? (
-                                  <span className="mr-2 text-sky-300">
-                                    {card.quantity}x
-                                  </span>
-                                ) : null}
-                                {card.name}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      ) : !isLoadingStartingHands ? (
-                        <p className="text-sm text-muted-foreground">
-                          Choose a saved starting hand, or make a new one.
-                        </p>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </fieldset>
-              </div>
+                                <RefreshCw data-icon="inline-start" />
+                                Try again
+                              </Button>
+                            </div>
+                          ) : null}
 
-              <div>
-                <Button
-                  type="button"
-                  disabled={
-                    openingHandMode === "provide" && !selectedOpeningHand
-                  }
-                >
-                  <Dices data-icon="inline-start" />
-                  Start simulation
-                </Button>
+                          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                            <label
+                              className="grid gap-2 text-sm font-medium"
+                              htmlFor="saved-opening-hand"
+                            >
+                              <span>Starting hand</span>
+                              <select
+                                id="saved-opening-hand"
+                                className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground transition-colors outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
+                                value={selectedOpeningHandId}
+                                disabled={
+                                  isLoadingStartingHands ||
+                                  startingHands.length === 0
+                                }
+                                onChange={(event) =>
+                                  setSelectedOpeningHandId(event.target.value)
+                                }
+                              >
+                                {isLoadingStartingHands ? (
+                                  <option value="">
+                                    Loading starting hands...
+                                  </option>
+                                ) : startingHands.length === 0 ? (
+                                  <option value="">
+                                    No starting hands yet
+                                  </option>
+                                ) : null}
+                                {startingHands.map((hand) => (
+                                  <option key={hand.id} value={hand.id}>
+                                    {hand.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => setIsCreateHandModalOpen(true)}
+                            >
+                              <Plus data-icon="inline-start" />
+                              New starting hand
+                            </Button>
+                          </div>
+
+                          {selectedOpeningHand ? (
+                            <div className="grid gap-2">
+                              <p className="text-sm text-sky-300">
+                                {countStartingHandCards(selectedOpeningHand)}{" "}
+                                cards selected
+                              </p>
+                              <ul className="grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
+                                {selectedOpeningHand.cards.map((card) => (
+                                  <li
+                                    key={card.deckCardId}
+                                    className="rounded-md bg-muted/30 px-3 py-2"
+                                  >
+                                    {card.quantity > 1 ? (
+                                      <span className="mr-2 text-sky-300">
+                                        {card.quantity}x
+                                      </span>
+                                    ) : null}
+                                    {card.name}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : !isLoadingStartingHands ? (
+                            <p className="text-sm text-muted-foreground">
+                              Choose a saved starting hand, or make a new one.
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </fieldset>
+                  </div>
+
+                  <div>
+                    <Button
+                      type="button"
+                      disabled={
+                        openingHandMode === "provide" && !selectedOpeningHand
+                      }
+                    >
+                      <Dices data-icon="inline-start" />
+                      Start simulation
+                    </Button>
+                  </div>
+                </div>
               </div>
             </div>
           ) : (

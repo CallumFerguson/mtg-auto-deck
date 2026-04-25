@@ -204,7 +204,6 @@ export function DeckPage({
             <DeckSimulation
               cards={deck.cards}
               deckId={deck.id}
-              deckName={deck.name}
             />
           )
         ) : null}
