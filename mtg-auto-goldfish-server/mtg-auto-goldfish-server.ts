@@ -1260,6 +1260,7 @@ function dedupeCardsByNameAndText(cards: readonly SimulationPromptCard[]) {
 function formatCardText(card: SimulationPromptCard) {
   const lines = [
     formatCardLine("Mana Cost", card.manaCost),
+    formatCardLine("Converted Mana Cost", card.convertedManaCost),
     formatCardLine("Type", card.typeLine),
     formatCardLine("Rules Text", card.oracleText),
     formatPowerToughness(card),
@@ -1359,7 +1360,7 @@ Cards in library. Not actual order of library. Use tools to interact with librar
 ${cardNames.join("\n")}
 
 Card reference:
-${uniqueCards.map((card) => `${card.name}\n${card.cardText}\n`).join("\n")}
+${uniqueCards.map((card) => `${card.name}\n${card.cardText}\n`).join("\n")} // todo: also show converted mana cost
 
 ${GENERIC_GAME_RULES_REFERENCE}
 `.trim()

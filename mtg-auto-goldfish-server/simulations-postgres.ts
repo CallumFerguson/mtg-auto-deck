@@ -88,6 +88,7 @@ export type SimulationPromptCard = {
   quantity: number
   zone: "commander" | "library"
   manaCost: string | null
+  convertedManaCost: string | null
   typeLine: string | null
   oracleText: string | null
   power: string | null
@@ -458,6 +459,7 @@ export async function getStartingHandSimulationPromptData(
         deck_card.zone,
         card.name,
         card.mana_cost,
+        card.cmc,
         card.type_line,
         card.oracle_text,
         card.power,
@@ -702,6 +704,7 @@ type SimulationPromptCardRow = {
   zone: "commander" | "library"
   name: string
   mana_cost: string | null
+  cmc: string | null
   type_line: string | null
   oracle_text: string | null
   power: string | null
@@ -720,6 +723,7 @@ function mapSimulationPromptCard(
     quantity: row.quantity,
     zone: row.zone,
     manaCost: row.mana_cost,
+    convertedManaCost: row.cmc,
     typeLine: row.type_line,
     oracleText: row.oracle_text,
     power: row.power,
