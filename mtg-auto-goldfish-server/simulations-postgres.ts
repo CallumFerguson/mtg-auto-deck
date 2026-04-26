@@ -32,6 +32,7 @@ export type SimulationSummary = {
   deckId: string
   startingHandId: string | null
   seed: string
+  library: string[]
   turnsToSimulate: number
   status: SimulationStatus
   createdAt: string
@@ -178,6 +179,7 @@ export async function ensureSimulationsSchema() {
       seed text NOT NULL,
       turns_to_simulate integer NOT NULL CHECK (turns_to_simulate >= 0),
       starting_hand_id uuid REFERENCES starting_hands(id) ON DELETE SET NULL,
+      library jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(library) = 'array'),
 
       status simulation_status NOT NULL DEFAULT 'pending',
       started_at timestamptz,
@@ -241,6 +243,7 @@ export async function ensureSimulationsSchema() {
       simulation_id uuid NOT NULL REFERENCES simulations(id) ON DELETE CASCADE,
       llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
       attempt_number integer NOT NULL CHECK (attempt_number > 0),
+      library_snapshot jsonb CHECK (library_snapshot IS NULL OR jsonb_typeof(library_snapshot) = 'array'),
       created_at timestamptz NOT NULL DEFAULT now(),
 
       UNIQUE (simulation_id, attempt_number),
@@ -253,6 +256,7 @@ export async function ensureSimulationsSchema() {
       llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
       turn_number integer NOT NULL CHECK (turn_number > 0),
       attempt_number integer NOT NULL CHECK (attempt_number > 0),
+      library_snapshot jsonb CHECK (library_snapshot IS NULL OR jsonb_typeof(library_snapshot) = 'array'),
       created_at timestamptz NOT NULL DEFAULT now(),
 
       UNIQUE (simulation_id, turn_number, attempt_number),
@@ -306,6 +310,7 @@ export async function listSimulationsForDeck(
     deck_id: string
     starting_hand_id: string | null
     seed: string
+    library: unknown
     turns_to_simulate: number
     status: SimulationStatus
     created_at: Date
@@ -317,6 +322,7 @@ export async function listSimulationsForDeck(
         deck_id,
         starting_hand_id,
         seed,
+        library,
         turns_to_simulate,
         status,
         created_at,
@@ -333,6 +339,7 @@ export async function listSimulationsForDeck(
     deckId: simulation.deck_id,
     startingHandId: simulation.starting_hand_id,
     seed: simulation.seed,
+    library: parseStringArray(simulation.library),
     turnsToSimulate: simulation.turns_to_simulate,
     status: simulation.status,
     createdAt: simulation.created_at.toISOString(),
@@ -350,10 +357,7 @@ export async function createSimulation(
     throw new SimulationValidationError("Simulation seed is required.")
   }
 
-  if (
-    !Number.isInteger(input.turnsToSimulate) ||
-    input.turnsToSimulate < 0
-  ) {
+  if (!Number.isInteger(input.turnsToSimulate) || input.turnsToSimulate < 0) {
     throw new SimulationValidationError(
       "Turns to simulate must be a non-negative integer."
     )
@@ -385,11 +389,18 @@ export async function createSimulation(
     }
   }
 
+  const library = await createShuffledSimulationLibrary(
+    deckId,
+    seed,
+    input.startingHandId
+  )
+
   const result = await queryDatabase<{
     id: string
     deck_id: string
     starting_hand_id: string | null
     seed: string
+    library: unknown
     turns_to_simulate: number
     status: SimulationStatus
     created_at: Date
@@ -400,20 +411,28 @@ export async function createSimulation(
         deck_id,
         seed,
         turns_to_simulate,
-        starting_hand_id
+        starting_hand_id,
+        library
       )
-      VALUES ($1, $2, $3, $4)
+      VALUES ($1, $2, $3, $4, $5::jsonb)
       RETURNING
         id,
         deck_id,
         starting_hand_id,
         seed,
+        library,
         turns_to_simulate,
         status,
         created_at,
         updated_at
     `,
-    [deckId, seed, input.turnsToSimulate, input.startingHandId]
+    [
+      deckId,
+      seed,
+      input.turnsToSimulate,
+      input.startingHandId,
+      JSON.stringify(library),
+    ]
   )
   const simulation = result.rows[0]
 
@@ -422,6 +441,7 @@ export async function createSimulation(
     deckId: simulation.deck_id,
     startingHandId: simulation.starting_hand_id,
     seed: simulation.seed,
+    library: parseStringArray(simulation.library),
     turnsToSimulate: simulation.turns_to_simulate,
     status: simulation.status,
     createdAt: simulation.created_at.toISOString(),
@@ -768,6 +788,107 @@ function parseSimulationPromptCardFaces(
 
 function getOptionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value : null
+}
+
+function parseStringArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.filter((item): item is string => typeof item === "string")
+}
+
+async function createShuffledSimulationLibrary(
+  deckId: string,
+  seed: string,
+  startingHandId: string | null
+) {
+  const libraryResult = await queryDatabase<{
+    deck_card_id: string
+    quantity: number
+    name: string
+  }>(
+    `
+      SELECT
+        deck_card.id AS deck_card_id,
+        deck_card.quantity,
+        card.name
+      FROM deck_cards deck_card
+      JOIN scryfall_oracle_cards card
+        ON card.oracle_id = deck_card.oracle_id
+      WHERE deck_card.deck_id = $1
+        AND deck_card.zone = 'library'
+      ORDER BY card.name ASC, deck_card.id ASC
+    `,
+    [deckId]
+  )
+  const startingHandQuantities = startingHandId
+    ? await getStartingHandDeckCardQuantities(startingHandId)
+    : new Map<number, number>()
+  const library = libraryResult.rows.flatMap((card) => {
+    const deckCardId = Number(card.deck_card_id)
+    const startingHandQuantity = startingHandQuantities.get(deckCardId) ?? 0
+    const remainingQuantity = card.quantity - startingHandQuantity
+
+    if (remainingQuantity < 0) {
+      throw new SimulationValidationError(
+        "Starting hand contains more copies of a card than the deck has."
+      )
+    }
+
+    return Array.from({ length: remainingQuantity }, () => card.name)
+  })
+
+  return shuffleWithSeed(library, seed)
+}
+
+async function getStartingHandDeckCardQuantities(startingHandId: string) {
+  const result = await queryDatabase<{
+    deck_card_id: string
+    quantity: number
+  }>(
+    `
+      SELECT deck_card_id, quantity
+      FROM starting_hand_cards
+      WHERE starting_hand_id = $1
+    `,
+    [startingHandId]
+  )
+
+  return new Map(
+    result.rows.map((card) => [Number(card.deck_card_id), card.quantity])
+  )
+}
+
+function shuffleWithSeed<T>(items: readonly T[], seed: string) {
+  const shuffledItems = [...items]
+  const random = createSeededRandom(seed)
+
+  for (let index = shuffledItems.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1))
+    const currentItem = shuffledItems[index]
+    shuffledItems[index] = shuffledItems[swapIndex]
+    shuffledItems[swapIndex] = currentItem
+  }
+
+  return shuffledItems
+}
+
+function createSeededRandom(seed: string) {
+  let state = 0x811c9dc5
+
+  for (let index = 0; index < seed.length; index += 1) {
+    state = Math.imul(state ^ seed.charCodeAt(index), 0x01000193)
+  }
+
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0
+    let value = state
+    value = Math.imul(value ^ (value >>> 15), value | 1)
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61)
+
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296
+  }
 }
 
 function mapStartingHandRows(rows: readonly StartingHandRow[]) {

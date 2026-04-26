@@ -39,6 +39,7 @@ export type Simulation = {
   deckId: string
   startingHandId: string | null
   seed: string
+  library: string[]
   turnsToSimulate: number
   status: SimulationStatus
   createdAt: string
