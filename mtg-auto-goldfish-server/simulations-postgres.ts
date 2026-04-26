@@ -1,5 +1,9 @@
 import { queryDatabase, withDatabaseTransaction } from "./db.js"
 
+type DatabaseTransactionClient = Parameters<
+  Parameters<typeof withDatabaseTransaction>[0]
+>[0]
+
 export type SimulationStatus =
   | "pending"
   | "running"
@@ -41,6 +45,49 @@ export type SimulationSummary = {
 
 export type LibraryShuffleResult = {
   simulationId: string
+  cardsRemaining: number
+}
+
+export type LibraryDrawResult = {
+  simulationId: string
+  cards: string[]
+  cardsRemaining: number
+}
+
+export type MulliganResult = LibraryDrawResult & {
+  reason: string
+  mulliganCount: number
+  cardsToBottomIfKept: number
+  reminder: string
+  replacesPreviousOpeningHand: boolean
+  alreadyDrewReplacementHand: boolean
+}
+
+export type LibraryReturnCardResult = {
+  simulationId: string
+  card: string
+  side: "top" | "bottom"
+  position: number
+  insertedFromTop: number
+  insertedFromBottom: number
+  cardsRemaining: number
+}
+
+export type LibraryReturnCardsResult = {
+  simulationId: string
+  cards: string[]
+  side: "top" | "bottom"
+  randomizeOrder: boolean
+  cardsRemaining: number
+}
+
+export type LibraryTakeCardsResult = {
+  simulationId: string
+  matches: {
+    requestedCard: string
+    foundCard: string | null
+  }[]
+  foundCards: string[]
   cardsRemaining: number
 }
 
@@ -186,6 +233,8 @@ export async function ensureSimulationsSchema() {
       turns_to_simulate integer NOT NULL CHECK (turns_to_simulate >= 0),
       starting_hand_id uuid REFERENCES starting_hands(id) ON DELETE SET NULL,
       library jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(library) = 'array'),
+      mulligan_count integer NOT NULL DEFAULT 0 CHECK (mulligan_count >= 0),
+      has_drawn_starting_hand boolean NOT NULL DEFAULT false,
 
       status simulation_status NOT NULL DEFAULT 'pending',
       started_at timestamptz,
@@ -511,6 +560,317 @@ export async function shuffleSimulationLibrary(
   })
 }
 
+export async function drawCardsFromTop(
+  simulationId: string,
+  count: number
+): Promise<LibraryDrawResult> {
+  assertPositiveInteger(count, "Draw count")
+
+  return withDatabaseTransaction(async (client) => {
+    const simulation = await getLockedLibrarySimulation(client, simulationId)
+    const library = parseStringArray(simulation.library)
+    const cards = library.slice(0, count)
+    const remainingLibrary = library.slice(cards.length)
+
+    await updateSimulationLibrary(client, simulationId, remainingLibrary)
+
+    return {
+      simulationId,
+      cards,
+      cardsRemaining: remainingLibrary.length,
+    }
+  })
+}
+
+export async function drawCardsFromBottom(
+  simulationId: string,
+  count: number
+): Promise<LibraryDrawResult> {
+  assertPositiveInteger(count, "Draw count")
+
+  return withDatabaseTransaction(async (client) => {
+    const simulation = await getLockedLibrarySimulation(client, simulationId)
+    const library = parseStringArray(simulation.library)
+    const cardsToDraw = Math.min(count, library.length)
+    const remainingLibrary = library.slice(0, library.length - cardsToDraw)
+    const cards = library.slice(remainingLibrary.length).reverse()
+
+    await updateSimulationLibrary(client, simulationId, remainingLibrary)
+
+    return {
+      simulationId,
+      cards,
+      cardsRemaining: remainingLibrary.length,
+    }
+  })
+}
+
+export async function drawStartingHand(
+  simulationId: string
+): Promise<LibraryDrawResult> {
+  return withDatabaseTransaction(async (client) => {
+    const simulation = await getLockedLibrarySimulation(client, simulationId)
+
+    if (simulation.has_drawn_starting_hand) {
+      throw new SimulationValidationError(
+        "Starting hand has already been drawn for this simulation."
+      )
+    }
+
+    const shuffledLibrary = await rebuildAndShuffleSimulationLibrary(
+      client,
+      simulation.deck_id,
+      simulation.seed,
+      1
+    )
+    const cards = shuffledLibrary.library.slice(0, 7)
+    const remainingLibrary = shuffledLibrary.library.slice(cards.length)
+
+    await client.query(
+      `
+        UPDATE simulations
+        SET library = $2::jsonb,
+            random_state = $3,
+            mulligan_count = 0,
+            has_drawn_starting_hand = true,
+            updated_at = now()
+        WHERE id = $1
+      `,
+      [
+        simulationId,
+        JSON.stringify(remainingLibrary),
+        shuffledLibrary.randomState,
+      ]
+    )
+
+    return {
+      simulationId,
+      cards,
+      cardsRemaining: remainingLibrary.length,
+    }
+  })
+}
+
+export async function mulliganSimulation(
+  simulationId: string,
+  reason: string
+): Promise<MulliganResult> {
+  const trimmedReason = reason.trim()
+
+  if (!trimmedReason) {
+    throw new SimulationValidationError("Mulligan reason is required.")
+  }
+
+  return withDatabaseTransaction(async (client) => {
+    const simulation = await getLockedLibrarySimulation(client, simulationId)
+
+    if (!simulation.has_drawn_starting_hand) {
+      throw new SimulationValidationError(
+        "Draw a starting hand before taking a mulligan."
+      )
+    }
+
+    const mulliganCount = simulation.mulligan_count + 1
+    const shuffledLibrary = await rebuildAndShuffleSimulationLibrary(
+      client,
+      simulation.deck_id,
+      simulation.seed,
+      mulliganCount + 1
+    )
+    const cards = shuffledLibrary.library.slice(0, 7)
+    const remainingLibrary = shuffledLibrary.library.slice(cards.length)
+
+    await client.query(
+      `
+        UPDATE simulations
+        SET library = $2::jsonb,
+            random_state = $3,
+            mulligan_count = $4,
+            updated_at = now()
+        WHERE id = $1
+      `,
+      [
+        simulationId,
+        JSON.stringify(remainingLibrary),
+        shuffledLibrary.randomState,
+        mulliganCount,
+      ]
+    )
+
+    const cardsToBottomIfKept = Math.max(0, mulliganCount - 1)
+
+    return {
+      simulationId,
+      reason: trimmedReason,
+      cards,
+      cardsRemaining: remainingLibrary.length,
+      mulliganCount,
+      cardsToBottomIfKept,
+      reminder:
+        cardsToBottomIfKept > 0
+          ? `If you keep this hand, put ${cardsToBottomIfKept} card(s) on the bottom before calling keep_hand.`
+          : "This mulligan is free; no cards need to be bottomed if you keep this hand.",
+      replacesPreviousOpeningHand: true,
+      alreadyDrewReplacementHand: true,
+    }
+  })
+}
+
+export async function returnCardToSimulationLibrary({
+  card,
+  position,
+  side,
+  simulationId,
+}: {
+  simulationId: string
+  card: string
+  side: "top" | "bottom"
+  position: number
+}): Promise<LibraryReturnCardResult> {
+  const trimmedCard = card.trim()
+
+  if (!trimmedCard) {
+    throw new SimulationValidationError("Returned card name is required.")
+  }
+
+  if (!Number.isInteger(position) || position < 0) {
+    throw new SimulationValidationError(
+      "Return position must be a non-negative integer."
+    )
+  }
+
+  return withDatabaseTransaction(async (client) => {
+    const simulation = await getLockedLibrarySimulation(client, simulationId)
+    const library = parseStringArray(simulation.library)
+    const resolvedPosition = Math.min(position, library.length)
+    const insertIndex =
+      side === "top" ? resolvedPosition : library.length - resolvedPosition
+    const updatedLibrary = [
+      ...library.slice(0, insertIndex),
+      trimmedCard,
+      ...library.slice(insertIndex),
+    ]
+
+    await updateSimulationLibrary(client, simulationId, updatedLibrary)
+
+    return {
+      simulationId,
+      card: trimmedCard,
+      side,
+      position,
+      insertedFromTop: insertIndex,
+      insertedFromBottom: library.length - insertIndex,
+      cardsRemaining: updatedLibrary.length,
+    }
+  })
+}
+
+export async function returnCardsToSimulationLibrary({
+  cards,
+  randomizeOrder,
+  side,
+  simulationId,
+}: {
+  simulationId: string
+  cards: readonly string[]
+  side: "top" | "bottom"
+  randomizeOrder: boolean
+}): Promise<LibraryReturnCardsResult> {
+  const trimmedCards = cards.map((card) => card.trim())
+
+  if (trimmedCards.length === 0 || trimmedCards.some((card) => !card)) {
+    throw new SimulationValidationError(
+      "Returned cards must include at least one card name."
+    )
+  }
+
+  return withDatabaseTransaction(async (client) => {
+    const simulation = await getLockedLibrarySimulation(client, simulationId)
+    const library = parseStringArray(simulation.library)
+    let cardsToReturn = trimmedCards
+    let randomState = Number(simulation.random_state)
+
+    if (randomizeOrder) {
+      const shuffleResult = shuffleWithRandomState(cardsToReturn, randomState)
+      cardsToReturn = shuffleResult.items
+      randomState = shuffleResult.randomState
+    }
+
+    const updatedLibrary =
+      side === "top"
+        ? [...cardsToReturn].reverse().concat(library)
+        : library.concat(cardsToReturn)
+
+    await client.query(
+      `
+        UPDATE simulations
+        SET library = $2::jsonb,
+            random_state = $3,
+            updated_at = now()
+        WHERE id = $1
+      `,
+      [simulationId, JSON.stringify(updatedLibrary), randomState]
+    )
+
+    return {
+      simulationId,
+      cards: cardsToReturn,
+      side,
+      randomizeOrder,
+      cardsRemaining: updatedLibrary.length,
+    }
+  })
+}
+
+export async function takeCardsFromSimulationLibrary(
+  simulationId: string,
+  cards: readonly string[]
+): Promise<LibraryTakeCardsResult> {
+  const requestedCards = cards.map((card) => card.trim())
+
+  if (requestedCards.length === 0 || requestedCards.some((card) => !card)) {
+    throw new SimulationValidationError(
+      "Requested cards must include at least one card name."
+    )
+  }
+
+  return withDatabaseTransaction(async (client) => {
+    const simulation = await getLockedLibrarySimulation(client, simulationId)
+    const library = parseStringArray(simulation.library)
+    const matches: LibraryTakeCardsResult["matches"] = []
+    const foundCards: string[] = []
+
+    for (const requestedCard of requestedCards) {
+      const matchIndex = findBestLibraryCardMatchIndex(library, requestedCard)
+
+      if (matchIndex === -1) {
+        matches.push({
+          requestedCard,
+          foundCard: null,
+        })
+        continue
+      }
+
+      const foundCard = library[matchIndex]
+      library.splice(matchIndex, 1)
+      matches.push({
+        requestedCard,
+        foundCard,
+      })
+      foundCards.push(foundCard)
+    }
+
+    await updateSimulationLibrary(client, simulationId, library)
+
+    return {
+      simulationId,
+      matches,
+      foundCards,
+      cardsRemaining: library.length,
+    }
+  })
+}
+
 export async function deleteSimulation(
   deckId: string,
   simulationId: string
@@ -795,6 +1155,15 @@ type SimulationPromptCardRow = {
   card_faces: unknown
 }
 
+type LibrarySimulationRow = {
+  deck_id: string
+  seed: string
+  random_state: string
+  library: unknown
+  mulligan_count: number
+  has_drawn_starting_hand: boolean
+}
+
 function mapSimulationPromptCard(
   row: SimulationPromptCardRow
 ): SimulationPromptCard {
@@ -858,6 +1227,195 @@ function parseStringArray(value: unknown) {
   }
 
   return value.filter((item): item is string => typeof item === "string")
+}
+
+async function getLockedLibrarySimulation(
+  client: DatabaseTransactionClient,
+  simulationId: string
+) {
+  const result = await client.query<LibrarySimulationRow>(
+    `
+      SELECT
+        deck_id,
+        seed,
+        random_state,
+        library,
+        mulligan_count,
+        has_drawn_starting_hand
+      FROM simulations
+      WHERE id = $1
+      FOR UPDATE
+    `,
+    [simulationId]
+  )
+
+  if (result.rowCount === 0) {
+    throw new SimulationValidationError("Simulation not found.")
+  }
+
+  return result.rows[0]
+}
+
+async function updateSimulationLibrary(
+  client: DatabaseTransactionClient,
+  simulationId: string,
+  library: readonly string[]
+) {
+  await client.query(
+    `
+      UPDATE simulations
+      SET library = $2::jsonb,
+          updated_at = now()
+      WHERE id = $1
+    `,
+    [simulationId, JSON.stringify(library)]
+  )
+}
+
+async function rebuildAndShuffleSimulationLibrary(
+  client: DatabaseTransactionClient,
+  deckId: string,
+  seed: string,
+  shuffleCount: number
+) {
+  let library = await getDeckLibraryCardNames(client, deckId)
+  let randomState = createSeededRandomState(seed)
+
+  for (let index = 0; index < shuffleCount; index += 1) {
+    const shuffleResult = shuffleWithRandomState(library, randomState)
+    library = shuffleResult.items
+    randomState = shuffleResult.randomState
+  }
+
+  return {
+    library,
+    randomState,
+  }
+}
+
+async function getDeckLibraryCardNames(
+  client: DatabaseTransactionClient,
+  deckId: string
+) {
+  const libraryResult = await client.query<{
+    quantity: number
+    name: string
+  }>(
+    `
+      SELECT
+        deck_card.quantity,
+        card.name
+      FROM deck_cards deck_card
+      JOIN scryfall_oracle_cards card
+        ON card.oracle_id = deck_card.oracle_id
+      WHERE deck_card.deck_id = $1
+        AND deck_card.zone = 'library'
+      ORDER BY card.name ASC, deck_card.id ASC
+    `,
+    [deckId]
+  )
+
+  return libraryResult.rows.flatMap((card) =>
+    Array.from({ length: card.quantity }, () => card.name)
+  )
+}
+
+function assertPositiveInteger(value: number, label: string) {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new SimulationValidationError(`${label} must be a positive integer.`)
+  }
+}
+
+function findBestLibraryCardMatchIndex(
+  library: readonly string[],
+  requestedCard: string
+) {
+  const normalizedRequest = normalizeLibraryCardSearchText(requestedCard)
+
+  if (!normalizedRequest) {
+    return -1
+  }
+
+  let bestIndex = -1
+  let bestScore = 0
+
+  for (let index = 0; index < library.length; index += 1) {
+    const normalizedCandidate = normalizeLibraryCardSearchText(library[index])
+    const score = getLibraryCardMatchScore(
+      normalizedRequest,
+      normalizedCandidate
+    )
+
+    if (score === 1) {
+      return index
+    }
+
+    if (score > bestScore) {
+      bestIndex = index
+      bestScore = score
+    }
+  }
+
+  return bestScore >= 0.72 ? bestIndex : -1
+}
+
+function normalizeLibraryCardSearchText(cardName: string) {
+  return cardName
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ")
+}
+
+function getLibraryCardMatchScore(
+  requestedCard: string,
+  candidateCard: string
+) {
+  if (!candidateCard) {
+    return 0
+  }
+
+  if (requestedCard === candidateCard) {
+    return 1
+  }
+
+  if (requestedCard.length >= 3 && candidateCard.includes(requestedCard)) {
+    return requestedCard.length / candidateCard.length >= 0.5 ? 0.9 : 0.74
+  }
+
+  if (candidateCard.length >= 3 && requestedCard.includes(candidateCard)) {
+    return candidateCard.length / requestedCard.length >= 0.5 ? 0.88 : 0.72
+  }
+
+  const editDistance = getLevenshteinDistance(requestedCard, candidateCard)
+  const maxLength = Math.max(requestedCard.length, candidateCard.length)
+
+  return maxLength === 0 ? 0 : 1 - editDistance / maxLength
+}
+
+function getLevenshteinDistance(left: string, right: string) {
+  const previousRow = Array.from(
+    { length: right.length + 1 },
+    (_, index) => index
+  )
+
+  for (let leftIndex = 0; leftIndex < left.length; leftIndex += 1) {
+    const currentRow = [leftIndex + 1]
+
+    for (let rightIndex = 0; rightIndex < right.length; rightIndex += 1) {
+      const substitutionCost = left[leftIndex] === right[rightIndex] ? 0 : 1
+
+      currentRow[rightIndex + 1] = Math.min(
+        currentRow[rightIndex] + 1,
+        previousRow[rightIndex + 1] + 1,
+        previousRow[rightIndex] + substitutionCost
+      )
+    }
+
+    previousRow.splice(0, previousRow.length, ...currentRow)
+  }
+
+  return previousRow[right.length]
 }
 
 async function createShuffledSimulationLibrary(

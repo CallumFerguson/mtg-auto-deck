@@ -19,13 +19,20 @@ import {
   createSimulation,
   createStartingHand,
   deleteSimulation,
+  drawCardsFromBottom,
+  drawCardsFromTop,
+  drawStartingHand,
   ensureSimulationsSchema,
   getStartingHandSimulationPromptData,
   listSimulationsForDeck,
   listStartingHandsForDeck,
+  mulliganSimulation,
+  returnCardToSimulationLibrary,
+  returnCardsToSimulationLibrary,
   shuffleSimulationLibrary,
   SimulationValidationError,
   StartingHandValidationError,
+  takeCardsFromSimulationLibrary,
 } from "./simulations-postgres.js"
 import type {
   SimulationPromptCard,
@@ -115,6 +122,13 @@ function createServer(
   return server
 }
 
+function formatToolResultContent(summary: string, structuredContent: unknown) {
+  return `${summary}
+
+Result JSON:
+${JSON.stringify(structuredContent, null, 2)}`
+}
+
 function createOpeningHandServer() {
   return createServer(OPENING_HAND_SERVER_NAME, (server) => {
     registerDrawStartingHandTool(server)
@@ -155,17 +169,16 @@ function registerDrawCardFromTopTool(server: McpServer) {
       },
     },
     async ({ simulationId, count }) => {
-      const response = {
-        simulationId,
-        cards: [],
-        cardsRemaining: 0,
-      }
+      const response = await drawCardsFromTop(simulationId, count)
 
       return {
         content: [
           {
             type: "text" as const,
-            text: `Placeholder: would draw ${count} card(s) from the top. No cards were drawn.`,
+            text: formatToolResultContent(
+              `Drew ${response.cards.length} card(s) from the top. ${response.cardsRemaining} card(s) remain.`,
+              response
+            ),
           },
         ],
         structuredContent: response,
@@ -192,17 +205,16 @@ function registerDrawCardFromBottomTool(server: McpServer) {
       },
     },
     async ({ simulationId, count }) => {
-      const response = {
-        simulationId,
-        cards: [],
-        cardsRemaining: 0,
-      }
+      const response = await drawCardsFromBottom(simulationId, count)
 
       return {
         content: [
           {
             type: "text" as const,
-            text: `Placeholder: would draw ${count} card(s) from the bottom. No cards were drawn.`,
+            text: formatToolResultContent(
+              `Drew ${response.cards.length} card(s) from the bottom. ${response.cardsRemaining} card(s) remain.`,
+              response
+            ),
           },
         ],
         structuredContent: response,
@@ -228,17 +240,16 @@ function registerDrawStartingHandTool(server: McpServer) {
       },
     },
     async ({ simulationId }) => {
-      const response = {
-        simulationId,
-        cards: [],
-        cardsRemaining: 0,
-      }
+      const response = await drawStartingHand(simulationId)
 
       return {
         content: [
           {
             type: "text" as const,
-            text: "Placeholder: would draw the starting hand. No cards were drawn.",
+            text: formatToolResultContent(
+              `Drew the starting hand. ${response.cardsRemaining} card(s) remain in the library.`,
+              response
+            ),
           },
         ],
         structuredContent: response,
@@ -277,24 +288,16 @@ function registerMulliganTool(server: McpServer) {
       },
     },
     async ({ simulationId, reason }) => {
-      const response = {
-        simulationId,
-        reason,
-        cards: [],
-        cardsRemaining: 0,
-        mulliganCount: 1,
-        cardsToBottomIfKept: 0,
-        reminder:
-          "Placeholder: mulligan tracking is not implemented yet, so this is empty data.",
-        replacesPreviousOpeningHand: false,
-        alreadyDrewReplacementHand: false,
-      }
+      const response = await mulliganSimulation(simulationId, reason)
 
       return {
         content: [
           {
             type: "text" as const,
-            text: "Placeholder: would mulligan and draw a replacement hand. No cards were moved or drawn.",
+            text: formatToolResultContent(
+              `Mulligan ${response.mulliganCount}: drew a replacement seven-card hand. ${response.cardsRemaining} card(s) remain. ${response.reminder}`,
+              response
+            ),
           },
         ],
         structuredContent: response,
@@ -341,21 +344,21 @@ function registerReturnCardToLibraryTool(server: McpServer) {
       },
     },
     async ({ simulationId, card, side, position }) => {
-      const response = {
+      const response = await returnCardToSimulationLibrary({
         simulationId,
         card,
         side,
         position,
-        insertedFromTop: 0,
-        insertedFromBottom: 0,
-        cardsRemaining: 0,
-      }
+      })
 
       return {
         content: [
           {
             type: "text" as const,
-            text: `Placeholder: would return ${JSON.stringify(card)} to the library. No card was moved.`,
+            text: formatToolResultContent(
+              `Returned ${JSON.stringify(response.card)} to the ${side} of the library. ${response.cardsRemaining} card(s) remain.`,
+              response
+            ),
           },
         ],
         structuredContent: response,
@@ -397,19 +400,21 @@ function registerReturnCardsToLibraryTool(server: McpServer) {
       },
     },
     async ({ simulationId, cards, side, randomizeOrder }) => {
-      const response = {
+      const response = await returnCardsToSimulationLibrary({
         simulationId,
-        cards: [],
+        cards,
         side,
         randomizeOrder,
-        cardsRemaining: 0,
-      }
+      })
 
       return {
         content: [
           {
             type: "text" as const,
-            text: `Placeholder: would return ${cards.length} card(s) to the ${side} of the library. No cards were moved.`,
+            text: formatToolResultContent(
+              `Returned ${response.cards.length} card(s) to the ${side} of the library. ${response.cardsRemaining} card(s) remain.`,
+              response
+            ),
           },
         ],
         structuredContent: response,
@@ -447,21 +452,16 @@ function registerTakeCardsFromLibraryTool(server: McpServer) {
       },
     },
     async ({ simulationId, cards }) => {
-      const response = {
-        simulationId,
-        matches: cards.map((card) => ({
-          requestedCard: card,
-          foundCard: null,
-        })),
-        foundCards: [],
-        cardsRemaining: 0,
-      }
+      const response = await takeCardsFromSimulationLibrary(simulationId, cards)
 
       return {
         content: [
           {
             type: "text" as const,
-            text: "Placeholder: would take requested card(s) from the library. No cards were found or moved.",
+            text: formatToolResultContent(
+              `Found and removed ${response.foundCards.length} requested card(s). ${response.cardsRemaining} card(s) remain.`,
+              response
+            ),
           },
         ],
         structuredContent: response,
@@ -491,7 +491,10 @@ function registerShuffleLibraryTool(server: McpServer) {
         content: [
           {
             type: "text" as const,
-            text: `Shuffled the library. ${response.cardsRemaining} card(s) remain.`,
+            text: formatToolResultContent(
+              `Shuffled the library. ${response.cardsRemaining} card(s) remain.`,
+              response
+            ),
           },
         ],
         structuredContent: response,
@@ -536,7 +539,10 @@ function registerLogTurnActionTool(server: McpServer) {
         content: [
           {
             type: "text" as const,
-            text: "Placeholder: would log this turn action. No action was persisted.",
+            text: formatToolResultContent(
+              "Placeholder: would log this turn action. No action was persisted.",
+              response
+            ),
           },
         ],
         structuredContent: response,
@@ -581,7 +587,10 @@ function registerUpdateGameStateTool(server: McpServer) {
         content: [
           {
             type: "text" as const,
-            text: "Placeholder: would save the updated game state. No state was persisted.",
+            text: formatToolResultContent(
+              "Placeholder: would save the updated game state. No state was persisted.",
+              response
+            ),
           },
         ],
         structuredContent: response,
@@ -615,7 +624,7 @@ function registerKeepHandTool(server: McpServer) {
     async ({ simulationId, cards }) => {
       const response = {
         simulationId,
-        cards: [],
+        cards,
         kept: true as const,
       }
 
@@ -623,7 +632,10 @@ function registerKeepHandTool(server: McpServer) {
         content: [
           {
             type: "text" as const,
-            text: `Placeholder: would keep ${cards.length} card(s). No hand was persisted.`,
+            text: formatToolResultContent(
+              `Placeholder: would keep ${cards.length} card(s). No hand was persisted.`,
+              response
+            ),
           },
         ],
         structuredContent: response,
