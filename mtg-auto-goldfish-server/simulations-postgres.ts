@@ -39,6 +39,11 @@ export type SimulationSummary = {
   updatedAt: string
 }
 
+export type LibraryShuffleResult = {
+  simulationId: string
+  cardsRemaining: number
+}
+
 export type StartingHandCard = {
   deckCardId: number
   oracleId: string
@@ -177,6 +182,7 @@ export async function ensureSimulationsSchema() {
       deck_id uuid NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
 
       seed text NOT NULL,
+      random_state bigint NOT NULL,
       turns_to_simulate integer NOT NULL CHECK (turns_to_simulate >= 0),
       starting_hand_id uuid REFERENCES starting_hands(id) ON DELETE SET NULL,
       library jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(library) = 'array'),
@@ -244,6 +250,7 @@ export async function ensureSimulationsSchema() {
       llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
       attempt_number integer NOT NULL CHECK (attempt_number > 0),
       library_snapshot jsonb CHECK (library_snapshot IS NULL OR jsonb_typeof(library_snapshot) = 'array'),
+      random_state_snapshot bigint,
       created_at timestamptz NOT NULL DEFAULT now(),
 
       UNIQUE (simulation_id, attempt_number),
@@ -257,6 +264,7 @@ export async function ensureSimulationsSchema() {
       turn_number integer NOT NULL CHECK (turn_number > 0),
       attempt_number integer NOT NULL CHECK (attempt_number > 0),
       library_snapshot jsonb CHECK (library_snapshot IS NULL OR jsonb_typeof(library_snapshot) = 'array'),
+      random_state_snapshot bigint,
       created_at timestamptz NOT NULL DEFAULT now(),
 
       UNIQUE (simulation_id, turn_number, attempt_number),
@@ -389,7 +397,7 @@ export async function createSimulation(
     }
   }
 
-  const library = await createShuffledSimulationLibrary(
+  const shuffledLibrary = await createShuffledSimulationLibrary(
     deckId,
     seed,
     input.startingHandId
@@ -410,11 +418,12 @@ export async function createSimulation(
       INSERT INTO simulations (
         deck_id,
         seed,
+        random_state,
         turns_to_simulate,
         starting_hand_id,
         library
       )
-      VALUES ($1, $2, $3, $4, $5::jsonb)
+      VALUES ($1, $2, $3, $4, $5, $6::jsonb)
       RETURNING
         id,
         deck_id,
@@ -429,9 +438,10 @@ export async function createSimulation(
     [
       deckId,
       seed,
+      shuffledLibrary.randomState,
       input.turnsToSimulate,
       input.startingHandId,
-      JSON.stringify(library),
+      JSON.stringify(shuffledLibrary.library),
     ]
   )
   const simulation = result.rows[0]
@@ -447,6 +457,58 @@ export async function createSimulation(
     createdAt: simulation.created_at.toISOString(),
     updatedAt: simulation.updated_at.toISOString(),
   }
+}
+
+export async function shuffleSimulationLibrary(
+  simulationId: string
+): Promise<LibraryShuffleResult> {
+  return withDatabaseTransaction(async (client) => {
+    const result = await client.query<{
+      library: unknown
+      random_state: string
+    }>(
+      `
+        SELECT
+          library,
+          random_state
+        FROM simulations
+        WHERE id = $1
+        FOR UPDATE
+      `,
+      [simulationId]
+    )
+
+    if (result.rowCount === 0) {
+      throw new SimulationValidationError("Simulation not found.")
+    }
+
+    const simulation = result.rows[0]
+    const library = parseStringArray(simulation.library)
+    const shuffleResult = shuffleWithRandomState(
+      library,
+      Number(simulation.random_state)
+    )
+
+    await client.query(
+      `
+        UPDATE simulations
+        SET library = $2::jsonb,
+            random_state = $3,
+            updated_at = now()
+        WHERE id = $1
+      `,
+      [
+        simulationId,
+        JSON.stringify(shuffleResult.items),
+        shuffleResult.randomState,
+      ]
+    )
+
+    return {
+      simulationId,
+      cardsRemaining: shuffleResult.items.length,
+    }
+  })
 }
 
 export async function deleteSimulation(
@@ -839,7 +901,15 @@ async function createShuffledSimulationLibrary(
     return Array.from({ length: remainingQuantity }, () => card.name)
   })
 
-  return shuffleWithSeed(library, seed)
+  const shuffleResult = shuffleWithRandomState(
+    library,
+    createSeededRandomState(seed)
+  )
+
+  return {
+    library: shuffleResult.items,
+    randomState: shuffleResult.randomState,
+  }
 }
 
 async function getStartingHandDeckCardQuantities(startingHandId: string) {
@@ -860,34 +930,48 @@ async function getStartingHandDeckCardQuantities(startingHandId: string) {
   )
 }
 
-function shuffleWithSeed<T>(items: readonly T[], seed: string) {
+function shuffleWithRandomState<T>(
+  items: readonly T[],
+  initialRandomState: number
+) {
   const shuffledItems = [...items]
-  const random = createSeededRandom(seed)
+  let randomState = initialRandomState
 
   for (let index = shuffledItems.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(random() * (index + 1))
+    const nextRandom = getNextRandomValue(randomState)
+    randomState = nextRandom.randomState
+
+    const swapIndex = Math.floor(nextRandom.value * (index + 1))
     const currentItem = shuffledItems[index]
     shuffledItems[index] = shuffledItems[swapIndex]
     shuffledItems[swapIndex] = currentItem
   }
 
-  return shuffledItems
+  return {
+    items: shuffledItems,
+    randomState,
+  }
 }
 
-function createSeededRandom(seed: string) {
+function createSeededRandomState(seed: string) {
   let state = 0x811c9dc5
 
   for (let index = 0; index < seed.length; index += 1) {
     state = Math.imul(state ^ seed.charCodeAt(index), 0x01000193)
   }
 
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0
-    let value = state
-    value = Math.imul(value ^ (value >>> 15), value | 1)
-    value ^= value + Math.imul(value ^ (value >>> 7), value | 61)
+  return state >>> 0
+}
 
-    return ((value ^ (value >>> 14)) >>> 0) / 4294967296
+function getNextRandomValue(randomState: number) {
+  const nextRandomState = (randomState + 0x6d2b79f5) >>> 0
+  let value = nextRandomState
+  value = Math.imul(value ^ (value >>> 15), value | 1)
+  value ^= value + Math.imul(value ^ (value >>> 7), value | 61)
+
+  return {
+    randomState: nextRandomState,
+    value: ((value ^ (value >>> 14)) >>> 0) / 4294967296,
   }
 }
 

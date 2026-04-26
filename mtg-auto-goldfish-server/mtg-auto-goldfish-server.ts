@@ -23,6 +23,7 @@ import {
   getStartingHandSimulationPromptData,
   listSimulationsForDeck,
   listStartingHandsForDeck,
+  shuffleSimulationLibrary,
   SimulationValidationError,
   StartingHandValidationError,
 } from "./simulations-postgres.js"
@@ -474,8 +475,7 @@ function registerShuffleLibraryTool(server: McpServer) {
     "shuffle_library",
     {
       title: "Shuffle Library",
-      description:
-        "Shuffle the stored library for an existing simulation.",
+      description: "Shuffle the stored library for an existing simulation.",
       inputSchema: {
         simulationId: simulationIdSchema,
       },
@@ -485,16 +485,13 @@ function registerShuffleLibraryTool(server: McpServer) {
       },
     },
     async ({ simulationId }) => {
-      const response = {
-        simulationId,
-        cardsRemaining: 0,
-      }
+      const response = await shuffleSimulationLibrary(simulationId)
 
       return {
         content: [
           {
             type: "text" as const,
-            text: "Placeholder: would shuffle the library. No cards were moved.",
+            text: `Shuffled the library. ${response.cardsRemaining} card(s) remain.`,
           },
         ],
         structuredContent: response,
