@@ -29,6 +29,8 @@ import type {
   Simulation,
   SimulationDebugInfo,
   SimulationDebugLlmRunChunk,
+  SimulationResultsInfo,
+  SimulationResultsResponse,
   SimulationsResponse,
   SimulationDebugResponse,
   StartingHand,
@@ -782,6 +784,12 @@ function SimulationDetails({
   const [debugInfo, setDebugInfo] = useState<SimulationDebugInfo | null>(null)
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false)
   const isLoadingDebugInfoRef = useRef(false)
+  const [isLoadingResults, setIsLoadingResults] = useState(false)
+  const [resultsError, setResultsError] = useState<string | null>(null)
+  const [resultsInfo, setResultsInfo] = useState<SimulationResultsInfo | null>(
+    null
+  )
+  const isLoadingResultsRef = useRef(false)
   const shouldSimulateOpeningHand = simulation.startingHandId === null
 
   useEffect(() => {
@@ -796,6 +804,10 @@ function SimulationDetails({
     setDebugInfoError(null)
     setDebugInfo(null)
     setIsDebugModalOpen(false)
+    isLoadingResultsRef.current = false
+    setIsLoadingResults(false)
+    setResultsError(null)
+    setResultsInfo(null)
   }, [simulation.id])
 
   async function handleStartOpeningHandRun() {
@@ -888,6 +900,35 @@ function SimulationDetails({
     } finally {
       isLoadingDebugInfoRef.current = false
       setIsLoadingDebugInfo(false)
+    }
+  }, [deckId, simulation.id])
+
+  const handleReloadResults = useCallback(async () => {
+    if (isLoadingResultsRef.current) {
+      return
+    }
+
+    isLoadingResultsRef.current = true
+    setIsLoadingResults(true)
+    setResultsError(null)
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/results`
+      )
+
+      if (!response.ok) {
+        setResultsError(await readSimulationResultsError(response))
+        return
+      }
+
+      const data = (await response.json()) as SimulationResultsResponse
+      setResultsInfo(data.results)
+    } catch {
+      setResultsError("Simulation results could not be loaded.")
+    } finally {
+      isLoadingResultsRef.current = false
+      setIsLoadingResults(false)
     }
   }, [deckId, simulation.id])
 
@@ -1048,6 +1089,51 @@ function SimulationDetails({
         )}
       </header>
 
+      <section className="grid gap-4 pt-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h4 className="text-base font-semibold text-foreground">
+              Simulation results
+            </h4>
+            <p className="mt-1 text-sm text-muted-foreground">
+              User-facing output rebuilt from persisted LLM chunks.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={isLoadingResults}
+            onClick={() => void handleReloadResults()}
+          >
+            <RefreshCw data-icon="inline-start" />
+            {isLoadingResults ? "Reloading..." : "Reload results"}
+          </Button>
+        </div>
+
+        {resultsError ? (
+          <p
+            className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            role="alert"
+          >
+            {resultsError}
+          </p>
+        ) : null}
+
+        {isLoadingResults && !resultsInfo ? (
+          <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+            Loading simulation results...
+          </p>
+        ) : null}
+
+        {resultsInfo ? (
+          <SimulationResultsPanel resultsInfo={resultsInfo} />
+        ) : !isLoadingResults && !resultsError ? (
+          <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+            Reload results to view the saved simulation output.
+          </p>
+        ) : null}
+      </section>
+
       {isDebugModalOpen ? (
         <SimulationDebugModal
           debugInfo={debugInfo}
@@ -1151,6 +1237,169 @@ function SimulationDebugModal({
       </section>
     </div>
   )
+}
+
+function SimulationResultsPanel({
+  resultsInfo,
+}: {
+  resultsInfo: SimulationResultsInfo
+}) {
+  const runs = [
+    ...resultsInfo.openingHandLlmRuns.map((run) => ({
+      ...run,
+      resultLabel: `Opening hand attempt ${run.attemptNumber}`,
+    })),
+    ...resultsInfo.turnLlmRuns.map((run) => ({
+      ...run,
+      resultLabel: `Turn ${run.turnNumber ?? "?"} attempt ${
+        run.attemptNumber
+      }`,
+    })),
+  ]
+  const runsWithChunks = runs.filter((run) => run.chunks.length > 0)
+
+  if (runsWithChunks.length === 0) {
+    return (
+      <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+        No user-facing result chunks have been saved for this simulation yet.
+      </p>
+    )
+  }
+
+  return (
+    <div className="grid gap-3">
+      {runsWithChunks.map((run) => (
+        <section
+          key={run.llmRunId}
+          className="grid gap-3 rounded-md border border-border bg-background/35 p-3"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h5 className="text-sm font-medium text-foreground">
+                {run.resultLabel}
+              </h5>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {run.status} / {run.model}
+              </p>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {run.chunks.length} chunk{run.chunks.length === 1 ? "" : "s"}
+            </p>
+          </div>
+
+          <SimulationResultChunkCards chunks={run.chunks} />
+        </section>
+      ))}
+    </div>
+  )
+}
+
+function SimulationResultChunkCards({
+  chunks,
+}: {
+  chunks: SimulationDebugLlmRunChunk[]
+}) {
+  const blocks = formatDebugChunkBlocks(chunks)
+
+  return (
+    <div className="grid gap-2">
+      {blocks.map((block) => {
+        if (block.type === "reasoning") {
+          return (
+            <details
+              key={block.id}
+              className="rounded-md border border-border bg-black/20"
+            >
+              <summary className="cursor-pointer px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground">
+                Reasoning summary
+              </summary>
+              <p className="border-t border-border p-3 text-sm leading-6 whitespace-pre-wrap text-muted-foreground">
+                {block.text}
+              </p>
+            </details>
+          )
+        }
+
+        if (block.type === "output") {
+          return (
+            <div
+              key={block.id}
+              className="rounded-md border border-sky-500/30 bg-sky-950/20 p-3"
+            >
+              <p className="text-sm leading-6 whitespace-pre-wrap text-sky-50/90">
+                {block.text}
+              </p>
+            </div>
+          )
+        }
+
+        if (block.type === "event") {
+          return <SimulationResultEvent key={block.id} chunk={block.chunk} />
+        }
+
+        return null
+      })}
+    </div>
+  )
+}
+
+function SimulationResultEvent({
+  chunk,
+}: {
+  chunk: SimulationDebugLlmRunChunk
+}) {
+  if (chunk.kind === "mcp_call_start") {
+    return (
+      <div className="rounded-md border border-amber-500/25 bg-amber-950/15 px-3 py-2 text-sm text-amber-100/85">
+        Tool started: {chunk.mcpFunctionName ?? "unknown tool"}
+      </div>
+    )
+  }
+
+  if (chunk.kind === "mcp_call_complete") {
+    return (
+      <details className="rounded-md border border-emerald-500/25 bg-emerald-950/15">
+        <summary className="cursor-pointer px-3 py-2 text-sm text-emerald-100/85 transition-colors hover:text-emerald-50">
+          Tool completed: {chunk.mcpFunctionName ?? "unknown tool"}
+        </summary>
+        <pre className="debug-scrollbar-neutral max-h-64 max-w-full overflow-y-auto border-t border-emerald-500/20 p-3 text-xs leading-5 break-words whitespace-pre-wrap text-emerald-50/80">
+          {formatResultEventPayload(chunk.mcpFunctionOutput)}
+        </pre>
+      </details>
+    )
+  }
+
+  if (chunk.kind === "error") {
+    return (
+      <details className="rounded-md border border-destructive/35 bg-destructive/10">
+        <summary className="cursor-pointer px-3 py-2 text-sm text-destructive transition-colors hover:text-destructive/90">
+          Simulation event failed
+        </summary>
+        <pre className="debug-scrollbar-neutral max-h-64 max-w-full overflow-y-auto border-t border-destructive/20 p-3 text-xs leading-5 break-words whitespace-pre-wrap text-destructive">
+          {formatResultEventPayload(chunk.payload)}
+        </pre>
+      </details>
+    )
+  }
+
+  return (
+    <details className="rounded-md border border-border bg-black/20">
+      <summary className="cursor-pointer px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground">
+        {getDebugChunkEventLabel(chunk)}
+      </summary>
+      <pre className="debug-scrollbar-neutral max-h-64 max-w-full overflow-y-auto border-t border-border p-3 text-xs leading-5 break-words whitespace-pre-wrap text-muted-foreground">
+        {JSON.stringify(chunk, null, 2)}
+      </pre>
+    </details>
+  )
+}
+
+function formatResultEventPayload(payload: unknown) {
+  if (typeof payload === "string") {
+    return payload
+  }
+
+  return JSON.stringify(payload, null, 2)
 }
 
 function SimulationDebugPanel({
@@ -1742,4 +1991,20 @@ async function readSimulationDebugError(response: Response) {
   }
 
   return `Simulation debug info could not be loaded. Server responded with ${response.status}.`
+}
+
+async function readSimulationResultsError(response: Response) {
+  try {
+    const data = (await response.json()) as {
+      error?: unknown
+    }
+
+    if (typeof data.error === "string" && data.error.trim()) {
+      return data.error
+    }
+  } catch {
+    // Fall through to the generic HTTP error.
+  }
+
+  return `Simulation results could not be loaded. Server responded with ${response.status}.`
 }

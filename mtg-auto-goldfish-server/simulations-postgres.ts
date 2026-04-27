@@ -100,6 +100,8 @@ export type SimulationDebugInfo = {
   turnLlmRuns: SimulationDebugLlmRun[]
 }
 
+export type SimulationResultsInfo = SimulationDebugInfo
+
 export type SimulationSummary = {
   id: string
   deckId: string
@@ -1361,6 +1363,48 @@ export async function getSimulationDebugInfo(
   }
 }
 
+export async function getSimulationResultsInfo(
+  deckId: string,
+  simulationId: string
+): Promise<SimulationResultsInfo> {
+  const simulationResult = await queryDatabase(
+    `
+      SELECT id
+      FROM simulations
+      WHERE id = $1
+        AND deck_id = $2
+    `,
+    [simulationId, deckId]
+  )
+
+  if (simulationResult.rowCount === 0) {
+    throw new SimulationValidationError("Simulation not found.")
+  }
+
+  const openingHandRuns = await getSimulationDebugLlmRuns({
+    simulationId,
+    tableName: "simulation_opening_hand_llm_runs",
+    selectColumns: "run.attempt_number, NULL::integer AS turn_number",
+    orderBy: "run.attempt_number ASC",
+    excludeChunkKinds: ["raw_event", "completed"],
+  })
+  const turnRuns = await getSimulationDebugLlmRuns({
+    simulationId,
+    tableName: "simulation_turn_llm_runs",
+    selectColumns: "run.attempt_number, run.turn_number",
+    orderBy: "run.turn_number ASC, run.attempt_number ASC",
+    excludeChunkKinds: ["raw_event", "completed"],
+  })
+
+  return {
+    simulationId,
+    openingHandLlmRunCount: openingHandRuns.length,
+    turnLlmRunCount: turnRuns.length,
+    openingHandLlmRuns: openingHandRuns,
+    turnLlmRuns: turnRuns,
+  }
+}
+
 export async function deleteSimulation(
   deckId: string,
   simulationId: string
@@ -1681,6 +1725,7 @@ type SimulationDebugLlmRunRow = {
 }
 
 async function getSimulationDebugLlmRuns({
+  excludeChunkKinds = [],
   orderBy,
   selectColumns,
   simulationId,
@@ -1690,6 +1735,7 @@ async function getSimulationDebugLlmRuns({
   tableName: "simulation_opening_hand_llm_runs" | "simulation_turn_llm_runs"
   selectColumns: string
   orderBy: string
+  excludeChunkKinds?: LlmChunkKind[]
 }): Promise<SimulationDebugLlmRun[]> {
   const result = await queryDatabase<SimulationDebugLlmRunRow>(
     `
@@ -1717,10 +1763,14 @@ async function getSimulationDebugLlmRuns({
         ON llm_run.id = run.llm_run_id
       LEFT JOIN llm_run_chunks chunk
         ON chunk.llm_run_id = llm_run.id
+       AND (
+         COALESCE(array_length($2::llm_chunk_kind[], 1), 0) = 0
+         OR chunk.kind <> ALL($2::llm_chunk_kind[])
+       )
       WHERE run.simulation_id = $1
       ORDER BY ${orderBy}, chunk.sequence ASC NULLS LAST
     `,
-    [simulationId]
+    [simulationId, excludeChunkKinds]
   )
   const runsById = new Map<string, SimulationDebugLlmRun>()
 

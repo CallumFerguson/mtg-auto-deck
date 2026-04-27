@@ -106,6 +106,12 @@ export type SimulationDebugResponse = {
   debug: SimulationDebugInfo
 }
 
+export type SimulationResultsInfo = SimulationDebugInfo
+
+export type SimulationResultsResponse = {
+  results: SimulationResultsInfo
+}
+
 export type StartingHandCard = {
   deckCardId: number
   oracleId: string
