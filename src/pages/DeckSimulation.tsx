@@ -2,11 +2,13 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
   type ReactNode,
 } from "react"
 import {
+  Bug,
   Dices,
   MoreVertical,
   Plus,
@@ -132,8 +134,9 @@ export function DeckSimulation({
   )
   const selectedSimulation = useMemo(
     () =>
-      simulations.find((simulation) => simulation.id === selectedSimulationId) ??
-      null,
+      simulations.find(
+        (simulation) => simulation.id === selectedSimulationId
+      ) ?? null,
     [selectedSimulationId, simulations]
   )
   const selectedSimulationStartingHand = useMemo(
@@ -339,7 +342,9 @@ export function DeckSimulation({
       }
 
       setSimulations((currentSimulations) =>
-        currentSimulations.filter((simulation) => simulation.id !== simulationId)
+        currentSimulations.filter(
+          (simulation) => simulation.id !== simulationId
+        )
       )
       setOpenSimulationMenuId(null)
 
@@ -689,7 +694,9 @@ export function DeckSimulation({
                       onClick={() => void handleStartSimulation()}
                     >
                       <Dices data-icon="inline-start" />
-                      {isCreatingSimulation ? "Creating..." : "Start simulation"}
+                      {isCreatingSimulation
+                        ? "Creating..."
+                        : "Start simulation"}
                     </Button>
                   </div>
 
@@ -773,6 +780,8 @@ function SimulationDetails({
   const [isLoadingDebugInfo, setIsLoadingDebugInfo] = useState(false)
   const [debugInfoError, setDebugInfoError] = useState<string | null>(null)
   const [debugInfo, setDebugInfo] = useState<SimulationDebugInfo | null>(null)
+  const [isDebugModalOpen, setIsDebugModalOpen] = useState(false)
+  const isLoadingDebugInfoRef = useRef(false)
   const shouldSimulateOpeningHand = simulation.startingHandId === null
 
   useEffect(() => {
@@ -782,9 +791,11 @@ function SimulationDetails({
     setIsStoppingSimulation(false)
     setStopSimulationError(null)
     setStopSimulationResult(null)
+    isLoadingDebugInfoRef.current = false
     setIsLoadingDebugInfo(false)
     setDebugInfoError(null)
     setDebugInfo(null)
+    setIsDebugModalOpen(false)
   }, [simulation.id])
 
   async function handleStartOpeningHandRun() {
@@ -851,11 +862,12 @@ function SimulationDetails({
     }
   }
 
-  async function handleRefreshDebugInfo() {
-    if (isLoadingDebugInfo) {
+  const handleRefreshDebugInfo = useCallback(async () => {
+    if (isLoadingDebugInfoRef.current) {
       return
     }
 
+    isLoadingDebugInfoRef.current = true
     setIsLoadingDebugInfo(true)
     setDebugInfoError(null)
 
@@ -874,19 +886,36 @@ function SimulationDetails({
     } catch {
       setDebugInfoError("Simulation debug info could not be loaded.")
     } finally {
+      isLoadingDebugInfoRef.current = false
       setIsLoadingDebugInfo(false)
     }
-  }
+  }, [deckId, simulation.id])
+
+  useEffect(() => {
+    if (!isDebugModalOpen) {
+      return
+    }
+
+    void handleRefreshDebugInfo()
+  }, [handleRefreshDebugInfo, isDebugModalOpen])
 
   return (
     <div className="flex flex-1 flex-col px-5 py-6">
       <header className="grid gap-4 border-b border-border pb-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-sm text-sky-300">
-              Simulation {simulation.id}
-            </p>
-            <h3 className="text-xl font-semibold">Simulation setup</h3>
+            <p className="text-sm text-sky-300">Simulation {simulation.id}</p>
+            <div className="mt-1 flex flex-wrap items-center gap-3">
+              <h3 className="text-xl font-semibold">Simulation setup</h3>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsDebugModalOpen(true)}
+              >
+                <Bug data-icon="inline-start" />
+                View debug info
+              </Button>
+            </div>
           </div>
           <span className="rounded-md border border-border bg-background/45 px-3 py-1 text-sm text-muted-foreground">
             {simulation.status}
@@ -896,7 +925,7 @@ function SimulationDetails({
         <dl className="grid gap-3 text-sm sm:grid-cols-3">
           <div className="rounded-md border border-border bg-background/35 p-3">
             <dt className="text-muted-foreground">Seed</dt>
-            <dd className="mt-1 break-all font-medium text-foreground">
+            <dd className="mt-1 font-medium break-all text-foreground">
               {simulation.seed}
             </dd>
           </div>
@@ -1019,40 +1048,107 @@ function SimulationDetails({
         )}
       </header>
 
-      <div className="grid flex-1 place-items-center py-10 text-center">
-        <div className="grid w-full max-w-4xl gap-4 text-left">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h4 className="text-sm font-medium text-foreground">
-                Simulation debug
-              </h4>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Refresh to load run counts and saved LLM chunks.
-              </p>
-            </div>
+      {isDebugModalOpen ? (
+        <SimulationDebugModal
+          debugInfo={debugInfo}
+          error={debugInfoError}
+          isLoading={isLoadingDebugInfo}
+          onClose={() => setIsDebugModalOpen(false)}
+          onRefresh={() => void handleRefreshDebugInfo()}
+          simulationId={simulation.id}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+function SimulationDebugModal({
+  debugInfo,
+  error,
+  isLoading,
+  onClose,
+  onRefresh,
+  simulationId,
+}: {
+  debugInfo: SimulationDebugInfo | null
+  error: string | null
+  isLoading: boolean
+  onClose: () => void
+  onRefresh: () => void
+  simulationId: string
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 py-6 backdrop-blur-sm"
+      role="presentation"
+      onMouseDown={onClose}
+    >
+      <section
+        aria-labelledby="simulation-debug-title"
+        className="flex max-h-[calc(100svh-3rem)] w-full max-w-6xl flex-col rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
+        role="dialog"
+        aria-modal="true"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+          <div className="min-w-0 space-y-1">
+            <h2 id="simulation-debug-title" className="text-xl font-semibold">
+              Simulation debug
+            </h2>
+            <p className="text-sm break-all text-muted-foreground">
+              {simulationId}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
             <Button
               type="button"
               variant="outline"
-              disabled={isLoadingDebugInfo}
-              onClick={() => void handleRefreshDebugInfo()}
+              disabled={isLoading}
+              onClick={onRefresh}
             >
               <RefreshCw data-icon="inline-start" />
-              {isLoadingDebugInfo ? "Refreshing..." : "Refresh debug"}
+              {isLoading ? "Refreshing..." : "Refresh debug"}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label="Close"
+              title="Close"
+              onClick={onClose}
+            >
+              <X />
             </Button>
           </div>
+        </header>
 
-          {debugInfoError ? (
-            <p
-              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-              role="alert"
-            >
-              {debugInfoError}
-            </p>
-          ) : null}
+        <div className="debug-scrollbar-neutral min-h-0 flex-1 overflow-y-auto px-5 py-5">
+          <div className="grid gap-4">
+            {error ? (
+              <p
+                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                role="alert"
+              >
+                {error}
+              </p>
+            ) : null}
 
-          {debugInfo ? <SimulationDebugPanel debugInfo={debugInfo} /> : null}
+            {isLoading && !debugInfo ? (
+              <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+                Loading debug info...
+              </p>
+            ) : null}
+
+            {debugInfo ? (
+              <SimulationDebugPanel debugInfo={debugInfo} />
+            ) : !isLoading && !error ? (
+              <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+                Debug info has not been loaded yet.
+              </p>
+            ) : null}
+          </div>
         </div>
-      </div>
+      </section>
     </div>
   )
 }
@@ -1145,7 +1241,7 @@ function SimulationDebugRunGroup({
                     <summary className="cursor-pointer border-b border-sky-500/20 px-3 py-2 text-sm font-medium text-sky-200 transition-colors hover:text-sky-100">
                       Raw chunk JSON
                     </summary>
-                    <pre className="debug-scrollbar max-h-96 min-w-0 max-w-full overflow-y-auto whitespace-pre-wrap break-words p-3 text-xs leading-5 text-sky-50/80">
+                    <pre className="debug-scrollbar-neutral max-h-96 max-w-full min-w-0 overflow-y-auto p-3 text-xs leading-5 break-words whitespace-pre-wrap text-sky-50/80">
                       {JSON.stringify(run.chunks, null, 2)}
                     </pre>
                   </details>
@@ -1195,7 +1291,7 @@ function FormattedDebugChunks({
             <summary className="cursor-pointer px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground">
               {getDebugChunkEventLabel(block.chunk)}
             </summary>
-            <pre className="debug-scrollbar-neutral max-h-80 min-w-0 max-w-full overflow-y-auto whitespace-pre-wrap break-words border-t border-border p-3 text-xs leading-5 text-muted-foreground">
+            <pre className="debug-scrollbar-neutral max-h-80 max-w-full min-w-0 overflow-y-auto border-t border-border p-3 text-xs leading-5 break-words whitespace-pre-wrap text-muted-foreground">
               {JSON.stringify(block.chunk, null, 2)}
             </pre>
           </details>
@@ -1205,7 +1301,7 @@ function FormattedDebugChunks({
             className="rounded-md border border-border bg-black/20 p-3"
           >
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs font-medium uppercase tracking-wide text-sky-300">
+              <p className="text-xs font-medium tracking-wide text-sky-300 uppercase">
                 {block.type === "reasoning" ? "Reasoning" : "Output"}
               </p>
               <p className="text-xs text-muted-foreground">
@@ -1213,7 +1309,7 @@ function FormattedDebugChunks({
                 {block.chunks.length === 1 ? "" : "s"}
               </p>
             </div>
-            <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">
+            <p className="text-sm leading-6 whitespace-pre-wrap text-foreground">
               {block.text}
             </p>
           </section>
