@@ -37,12 +37,12 @@ import {
   markLlmRunStreaming,
   mulliganSimulation,
   requestCancelOpeningHandLlmRuns,
+  resetSimulationForOpeningHandLlmRun,
   returnCardToSimulationLibrary,
   returnCardsToSimulationLibrary,
   shuffleSimulationLibrary,
   SimulationValidationError,
   takeCardsFromSimulationLibrary,
-  verifySimulationCanStartOpeningHandLlmRun,
 } from "./simulations-postgres.js"
 import type {
   LlmRunChunkInput,
@@ -942,7 +942,7 @@ async function main() {
       try {
         const openAiConfig = getOpenAiRunConfig()
 
-        await verifySimulationCanStartOpeningHandLlmRun(deckId, simulationId)
+        await resetSimulationForOpeningHandLlmRun(deckId, simulationId)
 
         const fullPrompt = await buildStartingHandSimulationPrompt(simulationId)
         const requestPayload = buildOpeningHandOpenAiRequestPayload(

@@ -1045,6 +1045,86 @@ export async function verifySimulationCanStartOpeningHandLlmRun(
   }
 }
 
+export async function resetSimulationForOpeningHandLlmRun(
+  deckId: string,
+  simulationId: string
+) {
+  await withDatabaseTransaction(async (client) => {
+    const simulationResult = await client.query<{
+      deck_id: string
+      seed: string
+      starting_hand_id: string | null
+    }>(
+      `
+        SELECT
+          deck_id,
+          seed,
+          starting_hand_id
+        FROM simulations
+        WHERE id = $1
+          AND deck_id = $2
+        FOR UPDATE
+      `,
+      [simulationId, deckId]
+    )
+
+    if (simulationResult.rowCount === 0) {
+      throw new SimulationValidationError("Simulation not found.")
+    }
+
+    const simulation = simulationResult.rows[0]
+
+    if (simulation.starting_hand_id !== null) {
+      throw new SimulationValidationError(
+        "This simulation uses a preset starting hand, so opening-hand LLM runs are not allowed."
+      )
+    }
+
+    const activeRunResult = await client.query(
+      `
+        SELECT 1
+        FROM simulation_opening_hand_llm_runs opening_run
+        JOIN llm_runs llm_run
+          ON llm_run.id = opening_run.llm_run_id
+        WHERE opening_run.simulation_id = $1
+          AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
+        LIMIT 1
+      `,
+      [simulationId]
+    )
+
+    if ((activeRunResult.rowCount ?? 0) > 0) {
+      throw new SimulationValidationError(
+        "An opening-hand LLM run is already active for this simulation."
+      )
+    }
+
+    const shuffledLibrary = await rebuildAndShuffleSimulationLibrary(
+      client,
+      simulation.deck_id,
+      simulation.seed,
+      1
+    )
+
+    await client.query(
+      `
+        UPDATE simulations
+        SET library = $2::jsonb,
+            random_state = $3,
+            mulligan_count = 0,
+            has_drawn_starting_hand = false,
+            updated_at = now()
+        WHERE id = $1
+      `,
+      [
+        simulationId,
+        JSON.stringify(shuffledLibrary.library),
+        shuffledLibrary.randomState,
+      ]
+    )
+  })
+}
+
 export async function appendLlmRunChunks(
   llmRunId: string,
   chunks: readonly LlmRunChunkInput[]
