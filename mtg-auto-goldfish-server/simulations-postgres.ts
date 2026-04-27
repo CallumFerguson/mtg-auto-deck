@@ -52,6 +52,8 @@ export type LlmRunChunkInput = {
   kind: LlmChunkKind
   providerEventType: string | null
   itemType: string | null
+  mcpFunctionName: string | null
+  mcpFunctionOutput: unknown | null
   reasoningDelta: string | null
   outputDelta: string | null
   payload: unknown
@@ -70,6 +72,8 @@ export type SimulationDebugLlmRunChunk = {
   kind: LlmChunkKind
   providerEventType: string | null
   itemType: string | null
+  mcpFunctionName: string | null
+  mcpFunctionOutput: unknown | null
   reasoningDelta: string | null
   outputDelta: string | null
   payload: unknown
@@ -349,6 +353,8 @@ export async function ensureSimulationsSchema() {
       kind llm_chunk_kind NOT NULL,
       provider_event_type text,
       item_type text,
+      mcp_function_name text,
+      mcp_function_output jsonb,
       reasoning_delta text,
       output_delta text,
       payload jsonb NOT NULL DEFAULT '{}',
@@ -1104,7 +1110,7 @@ export async function appendLlmRunChunks(
 
   const values: unknown[] = []
   const valuePlaceholders = chunks.map((chunk, index) => {
-    const offset = index * 8
+    const offset = index * 10
 
     values.push(
       llmRunId,
@@ -1112,12 +1118,16 @@ export async function appendLlmRunChunks(
       chunk.kind,
       chunk.providerEventType,
       chunk.itemType,
+      chunk.mcpFunctionName,
+      chunk.mcpFunctionOutput === null
+        ? null
+        : JSON.stringify(chunk.mcpFunctionOutput),
       chunk.reasoningDelta,
       chunk.outputDelta,
       JSON.stringify(chunk.payload)
     )
 
-    return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}::jsonb)`
+    return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}::jsonb, $${offset + 8}, $${offset + 9}, $${offset + 10}::jsonb)`
   })
 
   await queryDatabase(
@@ -1128,6 +1138,8 @@ export async function appendLlmRunChunks(
         kind,
         provider_event_type,
         item_type,
+        mcp_function_name,
+        mcp_function_output,
         reasoning_delta,
         output_delta,
         payload
@@ -1660,6 +1672,8 @@ type SimulationDebugLlmRunRow = {
   kind: LlmChunkKind | null
   provider_event_type: string | null
   item_type: string | null
+  mcp_function_name: string | null
+  mcp_function_output: unknown | null
   reasoning_delta: string | null
   output_delta: string | null
   payload: unknown
@@ -1692,6 +1706,8 @@ async function getSimulationDebugLlmRuns({
         chunk.kind,
         chunk.provider_event_type,
         chunk.item_type,
+        chunk.mcp_function_name,
+        chunk.mcp_function_output,
         chunk.reasoning_delta,
         chunk.output_delta,
         chunk.payload,
@@ -1737,6 +1753,8 @@ async function getSimulationDebugLlmRuns({
         kind: row.kind,
         providerEventType: row.provider_event_type,
         itemType: row.item_type,
+        mcpFunctionName: row.mcp_function_name,
+        mcpFunctionOutput: row.mcp_function_output,
         reasoningDelta: row.reasoning_delta,
         outputDelta: row.output_delta,
         payload: row.payload,

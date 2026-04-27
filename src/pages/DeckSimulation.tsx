@@ -1284,6 +1284,10 @@ function getDebugChunkDeltaText(
 }
 
 function getDebugChunkEventLabel(chunk: SimulationDebugLlmRunChunk) {
+  if (chunk.mcpFunctionName) {
+    return `${chunk.providerEventType ?? chunk.kind}: ${chunk.mcpFunctionName}`
+  }
+
   return chunk.providerEventType ?? chunk.kind
 }
 

@@ -760,7 +760,10 @@ function normalizeOpenAiStreamEvent(
     eventType === "response.output_item.added" &&
     itemType === "mcp_call"
   ) {
+    const mcpFunctionName = getNestedStringProperty(eventRecord, "item", "name")
+
     return createChunk("mcp_call_start", eventType, itemType, {
+      mcpFunctionName,
       payload,
     })
   }
@@ -769,7 +772,17 @@ function normalizeOpenAiStreamEvent(
     eventType === "response.output_item.done" &&
     itemType === "mcp_call"
   ) {
+    const mcpFunctionName = getNestedStringProperty(eventRecord, "item", "name")
+    const mcpFunctionOutput = getNestedStringProperty(
+      eventRecord,
+      "item",
+      "output"
+    )
+
     return createChunk("mcp_call_complete", eventType, itemType, {
+      mcpFunctionName,
+      mcpFunctionOutput:
+        mcpFunctionOutput === null ? null : JSON.parse(mcpFunctionOutput),
       payload,
     })
   }
@@ -803,6 +816,8 @@ function createChunk(
   providerEventType: string | null,
   itemType: string | null,
   values: {
+    mcpFunctionName?: string | null
+    mcpFunctionOutput?: unknown | null
     reasoningDelta?: string | null
     outputDelta?: string | null
     payload: unknown
@@ -812,6 +827,8 @@ function createChunk(
     kind,
     providerEventType,
     itemType,
+    mcpFunctionName: values.mcpFunctionName ?? null,
+    mcpFunctionOutput: values.mcpFunctionOutput ?? null,
     reasoningDelta: values.reasoningDelta ?? null,
     outputDelta: values.outputDelta ?? null,
     payload: values.payload,

@@ -74,6 +74,8 @@ export type SimulationDebugLlmRunChunk = {
   kind: string
   providerEventType: string | null
   itemType: string | null
+  mcpFunctionName: string | null
+  mcpFunctionOutput: unknown | null
   reasoningDelta: string | null
   outputDelta: string | null
   payload: unknown
