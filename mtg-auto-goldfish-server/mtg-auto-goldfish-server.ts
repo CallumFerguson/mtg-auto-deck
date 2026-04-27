@@ -865,6 +865,24 @@ function normalizeOpenAiStreamEvent(
   }
 
   if (
+    eventType === "response.output_item.added" &&
+    itemType === "mcp_call"
+  ) {
+    return createChunk("mcp_call_start", eventType, itemType, {
+      payload,
+    })
+  }
+
+  if (
+    eventType === "response.output_item.done" &&
+    itemType === "mcp_call"
+  ) {
+    return createChunk("mcp_call_complete", eventType, itemType, {
+      payload,
+    })
+  }
+
+  if (
     eventType === "response.failed" ||
     eventType === "response.incomplete" ||
     eventType?.endsWith(".failed")

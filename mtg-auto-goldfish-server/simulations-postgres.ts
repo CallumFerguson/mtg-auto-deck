@@ -26,6 +26,8 @@ export type LlmChunkKind =
   | "message_delta"
   | "reasoning_delta"
   | "completed"
+  | "mcp_call_start"
+  | "mcp_call_complete"
   | "error"
 
 export type CreateOpeningHandLlmRunInput = {
@@ -257,6 +259,8 @@ export async function ensureSimulationsSchema() {
     "message_delta",
     "reasoning_delta",
     "completed",
+    "mcp_call_start",
+    "mcp_call_complete",
     "error",
   ])
 
@@ -350,44 +354,20 @@ export async function ensureSimulationsSchema() {
       payload jsonb NOT NULL DEFAULT '{}',
       received_at timestamptz NOT NULL DEFAULT now(),
 
+      CONSTRAINT llm_run_chunks_kind_active_values_check
+        CHECK (
+          kind IN (
+            'raw_event',
+            'message_delta',
+            'reasoning_delta',
+            'completed',
+            'mcp_call_start',
+            'mcp_call_complete',
+            'error'
+          )
+        ),
       UNIQUE (llm_run_id, sequence)
     )
-  `)
-  await queryDatabase(`
-    ALTER TABLE llm_run_chunks
-      ADD COLUMN IF NOT EXISTS item_type text
-  `)
-  await queryDatabase(`
-    UPDATE llm_run_chunks
-    SET kind = CASE
-      WHEN provider_event_type = 'response.completed' THEN 'completed'::llm_chunk_kind
-      ELSE 'raw_event'::llm_chunk_kind
-    END
-    WHERE provider_event_type = 'response.completed'
-      OR kind NOT IN (
-        'raw_event',
-        'message_delta',
-        'reasoning_delta',
-        'completed',
-        'error'
-      )
-  `)
-  await queryDatabase(`
-    ALTER TABLE llm_run_chunks
-      DROP CONSTRAINT IF EXISTS llm_run_chunks_kind_active_values_check
-  `)
-  await queryDatabase(`
-    ALTER TABLE llm_run_chunks
-      ADD CONSTRAINT llm_run_chunks_kind_active_values_check
-      CHECK (
-        kind IN (
-          'raw_event',
-          'message_delta',
-          'reasoning_delta',
-          'completed',
-          'error'
-        )
-      )
   `)
   await queryDatabase(`
     CREATE TABLE IF NOT EXISTS simulation_opening_hand_llm_runs (
@@ -2262,22 +2242,15 @@ function isUniqueViolation(error: unknown) {
 }
 
 async function createEnumType(name: string, values: readonly string[]) {
-  const enumValues = values.map((value) => `'${value}'`).join(", ")
-
   await queryDatabase(`
     DO $$
     BEGIN
-      CREATE TYPE ${name} AS ENUM (${enumValues});
+      CREATE TYPE ${name} AS ENUM (${values
+        .map((value) => `'${value}'`)
+        .join(", ")});
     EXCEPTION
       WHEN duplicate_object THEN null;
     END
     $$;
   `)
-
-  for (const value of values) {
-    await queryDatabase(`
-      ALTER TYPE ${name}
-        ADD VALUE IF NOT EXISTS '${value}'
-    `)
-  }
 }
