@@ -298,6 +298,7 @@ export async function ensureSimulationsSchema() {
       simulation_id uuid NOT NULL REFERENCES simulations(id) ON DELETE CASCADE,
       llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
       attempt_number integer NOT NULL CHECK (attempt_number > 0),
+      opening_hand jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(opening_hand) = 'array'),
       library_snapshot jsonb CHECK (library_snapshot IS NULL OR jsonb_typeof(library_snapshot) = 'array'),
       random_state_snapshot bigint,
       created_at timestamptz NOT NULL DEFAULT now(),
