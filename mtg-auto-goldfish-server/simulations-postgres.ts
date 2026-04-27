@@ -714,7 +714,7 @@ export async function mulliganSimulation(
       cardsToBottomIfKept,
       reminder:
         cardsToBottomIfKept > 0
-          ? `If you keep this hand, put ${cardsToBottomIfKept} card(s) on the bottom before calling keep_hand.`
+          ? `If you keep this hand, put ${cardsToBottomIfKept} card(s) on the bottom before producing the final JSON response.`
           : "This mulligan is free; no cards need to be bottomed if you keep this hand.",
       replacesPreviousOpeningHand: true,
       alreadyDrewReplacementHand: true,
@@ -875,27 +875,6 @@ export async function takeCardsFromSimulationLibrary(
       cardsRemaining: library.length,
     }
   })
-}
-
-export async function assertCanKeepSimulationHand(simulationId: string) {
-  const result = await queryDatabase<{
-    starting_hand_id: string | null
-  }>(
-    `
-      SELECT starting_hand_id
-      FROM simulations
-      WHERE id = $1
-    `,
-    [simulationId]
-  )
-
-  const simulation = result.rows[0]
-
-  if (!simulation) {
-    throw new SimulationValidationError("Simulation not found.")
-  }
-
-  assertSimulationDoesNotHavePresetStartingHand(simulation)
 }
 
 export async function deleteSimulation(

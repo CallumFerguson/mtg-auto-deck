@@ -16,7 +16,6 @@ import {
 } from "./decks-postgres.js"
 import { ensureFreshScryfallOracleCards } from "./scryfall-cache.js"
 import {
-  assertCanKeepSimulationHand,
   createSimulation,
   createStartingHand,
   deleteSimulation,
@@ -134,7 +133,6 @@ function createOpeningHandServer() {
   return createServer(OPENING_HAND_SERVER_NAME, (server) => {
     registerDrawStartingHandTool(server)
     registerMulliganTool(server)
-    registerKeepHandTool(server)
     registerReturnCardsToLibraryTool(server)
   })
 }
@@ -148,7 +146,6 @@ function createTurnSimulationServer() {
     registerReturnCardToLibraryTool(server)
     registerReturnCardsToLibraryTool(server)
     registerShuffleLibraryTool(server)
-    registerUpdateGameStateTool(server)
   })
 }
 
@@ -542,101 +539,6 @@ function registerLogTurnActionTool(server: McpServer) {
             type: "text" as const,
             text: formatToolResultContent(
               "Placeholder: would log this turn action. No action was persisted.",
-              response
-            ),
-          },
-        ],
-        structuredContent: response,
-      }
-    }
-  )
-}
-
-function registerUpdateGameStateTool(server: McpServer) {
-  server.registerTool(
-    "update_game_state",
-    {
-      title: "Update Game State",
-      description:
-        "Save the current game state text for the active turn simulation. This can only be called once per turn, and it must be the final tool call for that turn.",
-      inputSchema: {
-        simulationId: simulationIdSchema,
-        gameState: z
-          .string()
-          .describe(
-            "The full end-of-turn game state string in any format the model chooses."
-          ),
-      },
-      outputSchema: {
-        simulationId: z.string(),
-        turnNumber: z.number().int().positive(),
-        nextTurnNumber: z.number().int().positive(),
-        gameState: z.string(),
-        updated: z.literal(true),
-      },
-    },
-    async ({ simulationId, gameState }) => {
-      const response = {
-        simulationId,
-        turnNumber: 1,
-        nextTurnNumber: 2,
-        gameState,
-        updated: true as const,
-      }
-
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: formatToolResultContent(
-              "Placeholder: would save the updated game state. No state was persisted.",
-              response
-            ),
-          },
-        ],
-        structuredContent: response,
-      }
-    }
-  )
-}
-
-function registerKeepHandTool(server: McpServer) {
-  server.registerTool(
-    "keep_hand",
-    {
-      title: "Keep Hand",
-      description:
-        "Confirm the final opening hand after all mulligans and any bottoming decisions are complete. Call this exactly once, after you have fully decided to keep and after any required bottoming has already happened.",
-      inputSchema: {
-        simulationId: simulationIdSchema,
-        cards: z
-          .array(z.string().trim().min(1))
-          .min(1)
-          .describe(
-            "The exact cards in the final kept opening hand after all mulligans and any cards bottomed to the library."
-          ),
-      },
-      outputSchema: {
-        simulationId: z.string(),
-        cards: z.array(z.string()),
-        kept: z.literal(true),
-      },
-    },
-    async ({ simulationId, cards }) => {
-      await assertCanKeepSimulationHand(simulationId)
-
-      const response = {
-        simulationId,
-        cards,
-        kept: true as const,
-      }
-
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: formatToolResultContent(
-              `Placeholder: would keep ${cards.length} card(s). No hand was persisted.`,
               response
             ),
           },
