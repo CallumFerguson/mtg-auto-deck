@@ -31,6 +31,40 @@ export type LlmChunkKind =
   | "error"
   | "metadata"
 
+export type CreateOpeningHandLlmRunInput = {
+  simulationId: string
+  provider: string
+  model: string
+  runtimeStreamKey: string
+  fullPrompt: string
+  requestPayload: unknown
+}
+
+export type OpeningHandLlmRun = {
+  simulationId: string
+  llmRunId: string
+  attemptNumber: number
+  runtimeStreamKey: string
+  status: LlmRunStatus
+}
+
+export type LlmRunChunkInput = {
+  sequence: number
+  kind: LlmChunkKind
+  providerEventType: string | null
+  reasoningDelta: string | null
+  outputDelta: string | null
+  content: string | null
+  payload: unknown
+}
+
+export type ActiveOpeningHandLlmRun = {
+  simulationId: string
+  llmRunId: string
+  runtimeStreamKey: string
+  status: LlmRunStatus
+}
+
 export type SimulationSummary = {
   id: string
   deckId: string
@@ -875,6 +909,361 @@ export async function takeCardsFromSimulationLibrary(
       foundCards,
       cardsRemaining: library.length,
     }
+  })
+}
+
+export async function createOpeningHandLlmRun(
+  deckId: string,
+  input: CreateOpeningHandLlmRunInput
+): Promise<OpeningHandLlmRun> {
+  return withDatabaseTransaction(async (client) => {
+    const simulationResult = await client.query<{
+      id: string
+      starting_hand_id: string | null
+    }>(
+      `
+        SELECT id, starting_hand_id
+        FROM simulations
+        WHERE id = $1
+          AND deck_id = $2
+        FOR UPDATE
+      `,
+      [input.simulationId, deckId]
+    )
+
+    if (simulationResult.rowCount === 0) {
+      throw new SimulationValidationError("Simulation not found.")
+    }
+
+    if (simulationResult.rows[0].starting_hand_id !== null) {
+      throw new SimulationValidationError(
+        "This simulation uses a preset starting hand, so opening-hand LLM runs are not allowed."
+      )
+    }
+
+    const activeRunResult = await client.query(
+      `
+        SELECT 1
+        FROM simulation_opening_hand_llm_runs opening_run
+        JOIN llm_runs llm_run
+          ON llm_run.id = opening_run.llm_run_id
+        WHERE opening_run.simulation_id = $1
+          AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
+        LIMIT 1
+      `,
+      [input.simulationId]
+    )
+
+    if ((activeRunResult.rowCount ?? 0) > 0) {
+      throw new SimulationValidationError(
+        "An opening-hand LLM run is already active for this simulation."
+      )
+    }
+
+    const attemptResult = await client.query<{ attempt_number: number }>(
+      `
+        SELECT COALESCE(MAX(attempt_number), 0) + 1 AS attempt_number
+        FROM simulation_opening_hand_llm_runs
+        WHERE simulation_id = $1
+      `,
+      [input.simulationId]
+    )
+    const attemptNumber = Number(attemptResult.rows[0].attempt_number)
+    const llmRunResult = await client.query<{
+      id: string
+      status: LlmRunStatus
+      runtime_stream_key: string
+    }>(
+      `
+        INSERT INTO llm_runs (
+          phase,
+          provider,
+          model,
+          runtime_stream_key,
+          full_prompt,
+          request_payload
+        )
+        VALUES (
+          'opening_hand',
+          $1,
+          $2,
+          $3,
+          $4,
+          $5::jsonb
+        )
+        RETURNING id, status, runtime_stream_key
+      `,
+      [
+        input.provider,
+        input.model,
+        input.runtimeStreamKey,
+        input.fullPrompt,
+        JSON.stringify(input.requestPayload),
+      ]
+    )
+    const llmRun = llmRunResult.rows[0]
+
+    await client.query(
+      `
+        INSERT INTO simulation_opening_hand_llm_runs (
+          simulation_id,
+          llm_run_id,
+          attempt_number
+        )
+        VALUES ($1, $2, $3)
+      `,
+      [input.simulationId, llmRun.id, attemptNumber]
+    )
+
+    return {
+      simulationId: input.simulationId,
+      llmRunId: llmRun.id,
+      attemptNumber,
+      runtimeStreamKey: llmRun.runtime_stream_key,
+      status: llmRun.status,
+    }
+  })
+}
+
+export async function verifySimulationCanStartOpeningHandLlmRun(
+  deckId: string,
+  simulationId: string
+) {
+  const simulationResult = await queryDatabase<{
+    starting_hand_id: string | null
+  }>(
+    `
+      SELECT starting_hand_id
+      FROM simulations
+      WHERE id = $1
+        AND deck_id = $2
+    `,
+    [simulationId, deckId]
+  )
+
+  if (simulationResult.rowCount === 0) {
+    throw new SimulationValidationError("Simulation not found.")
+  }
+
+  if (simulationResult.rows[0].starting_hand_id !== null) {
+    throw new SimulationValidationError(
+      "This simulation uses a preset starting hand, so opening-hand LLM runs are not allowed."
+    )
+  }
+}
+
+export async function appendLlmRunChunks(
+  llmRunId: string,
+  chunks: readonly LlmRunChunkInput[]
+) {
+  if (chunks.length === 0) {
+    return
+  }
+
+  const values: unknown[] = []
+  const valuePlaceholders = chunks.map((chunk, index) => {
+    const offset = index * 8
+
+    values.push(
+      llmRunId,
+      chunk.sequence,
+      chunk.kind,
+      chunk.providerEventType,
+      chunk.reasoningDelta,
+      chunk.outputDelta,
+      chunk.content,
+      JSON.stringify(chunk.payload)
+    )
+
+    return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}::jsonb)`
+  })
+
+  await queryDatabase(
+    `
+      INSERT INTO llm_run_chunks (
+        llm_run_id,
+        sequence,
+        kind,
+        provider_event_type,
+        reasoning_delta,
+        output_delta,
+        content,
+        payload
+      )
+      VALUES ${valuePlaceholders.join(", ")}
+      ON CONFLICT (llm_run_id, sequence) DO NOTHING
+    `,
+    values
+  )
+}
+
+export async function markLlmRunStreaming(llmRunId: string) {
+  await queryDatabase(
+    `
+      UPDATE llm_runs
+      SET status = 'streaming',
+          started_at = COALESCE(started_at, now()),
+          updated_at = now()
+      WHERE id = $1
+        AND status = 'pending'
+    `,
+    [llmRunId]
+  )
+}
+
+export async function completeOpeningHandLlmRun({
+  llmRunId,
+  openingHand,
+  responseMetadata,
+  usage,
+}: {
+  llmRunId: string
+  openingHand: readonly string[]
+  responseMetadata: unknown
+  usage: unknown
+}) {
+  await withDatabaseTransaction(async (client) => {
+    const snapshotResult = await client.query<{
+      library: unknown
+      random_state: string
+    }>(
+      `
+        SELECT simulation.library, simulation.random_state
+        FROM simulation_opening_hand_llm_runs opening_run
+        JOIN simulations simulation
+          ON simulation.id = opening_run.simulation_id
+        WHERE opening_run.llm_run_id = $1
+      `,
+      [llmRunId]
+    )
+
+    if (snapshotResult.rowCount === 0) {
+      throw new SimulationValidationError("Opening-hand LLM run not found.")
+    }
+
+    const snapshot = snapshotResult.rows[0]
+
+    await client.query(
+      `
+        UPDATE simulation_opening_hand_llm_runs
+        SET opening_hand = $2::jsonb,
+            library_snapshot = $3::jsonb,
+            random_state_snapshot = $4
+        WHERE llm_run_id = $1
+      `,
+      [
+        llmRunId,
+        JSON.stringify(openingHand),
+        JSON.stringify(parseStringArray(snapshot.library)),
+        snapshot.random_state,
+      ]
+    )
+
+    await client.query(
+      `
+        UPDATE llm_runs
+        SET status = 'completed',
+            response_metadata = $2::jsonb,
+            usage = $3::jsonb,
+            completed_at = now(),
+            updated_at = now()
+        WHERE id = $1
+      `,
+      [llmRunId, JSON.stringify(responseMetadata), JSON.stringify(usage)]
+    )
+  })
+}
+
+export async function failLlmRun(llmRunId: string, failureMessage: string) {
+  await queryDatabase(
+    `
+      UPDATE llm_runs
+      SET status = 'failed',
+          failed_at = now(),
+          failure_message = $2,
+          updated_at = now()
+      WHERE id = $1
+        AND status <> 'completed'
+    `,
+    [llmRunId, failureMessage]
+  )
+}
+
+export async function cancelLlmRun(llmRunId: string, failureMessage?: string) {
+  await queryDatabase(
+    `
+      UPDATE llm_runs
+      SET status = 'cancelled',
+          cancelled_at = now(),
+          failure_message = COALESCE($2, failure_message),
+          updated_at = now()
+      WHERE id = $1
+        AND status <> 'completed'
+    `,
+    [llmRunId, failureMessage ?? null]
+  )
+}
+
+export async function requestCancelOpeningHandLlmRuns(
+  deckId: string,
+  simulationId: string
+): Promise<ActiveOpeningHandLlmRun[]> {
+  return withDatabaseTransaction(async (client) => {
+    const simulationResult = await client.query(
+      `
+        SELECT id
+        FROM simulations
+        WHERE id = $1
+          AND deck_id = $2
+      `,
+      [simulationId, deckId]
+    )
+
+    if (simulationResult.rowCount === 0) {
+      throw new SimulationValidationError("Simulation not found.")
+    }
+
+    const activeRunsResult = await client.query<{
+      simulation_id: string
+      llm_run_id: string
+      runtime_stream_key: string
+      status: LlmRunStatus
+    }>(
+      `
+        SELECT
+          opening_run.simulation_id,
+          llm_run.id AS llm_run_id,
+          llm_run.runtime_stream_key,
+          llm_run.status
+        FROM simulation_opening_hand_llm_runs opening_run
+        JOIN llm_runs llm_run
+          ON llm_run.id = opening_run.llm_run_id
+        WHERE opening_run.simulation_id = $1
+          AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
+      `,
+      [simulationId]
+    )
+
+    if (activeRunsResult.rows.length > 0) {
+      await client.query(
+        `
+          UPDATE llm_runs
+          SET status = 'cancel_requested',
+              cancel_requested_at = COALESCE(cancel_requested_at, now()),
+              updated_at = now()
+          WHERE id = ANY($1::uuid[])
+            AND status IN ('pending', 'streaming', 'cancel_requested')
+        `,
+        [activeRunsResult.rows.map((run) => run.llm_run_id)]
+      )
+    }
+
+    return activeRunsResult.rows.map((run) => ({
+      simulationId: run.simulation_id,
+      llmRunId: run.llm_run_id,
+      runtimeStreamKey: run.runtime_stream_key,
+      status: run.status,
+    }))
   })
 }
 

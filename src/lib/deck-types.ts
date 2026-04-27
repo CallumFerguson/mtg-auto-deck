@@ -54,6 +54,20 @@ export type CreateSimulationResponse = {
   simulation: Simulation
 }
 
+export type CreateOpeningHandLlmRunResponse = {
+  simulationId: string
+  llmRunId: string
+  attemptNumber: number
+  runtimeStreamKey: string
+  status: string
+}
+
+export type StopSimulationResponse = {
+  simulationId: string
+  stoppedOpeningHandLlmRunIds: string[]
+  cancelRequestedOpeningHandLlmRunIds: string[]
+}
+
 export type StartingHandCard = {
   deckCardId: number
   oracleId: string

@@ -3,6 +3,8 @@ import express, { type Request, type Response } from "express"
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js"
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js"
+import { randomUUID } from "node:crypto"
+import OpenAI from "openai"
 import { z } from "zod/v4"
 import { closeDatabasePool, verifyDatabaseConnection } from "./db.js"
 import { DRAW_STARTING_HAND_PROMPT } from "./llm/prompt-constants.js"
@@ -16,6 +18,10 @@ import {
 } from "./decks-postgres.js"
 import { ensureFreshScryfallOracleCards } from "./scryfall-cache.js"
 import {
+  appendLlmRunChunks,
+  cancelLlmRun,
+  completeOpeningHandLlmRun,
+  createOpeningHandLlmRun,
   createSimulation,
   createStartingHand,
   deleteSimulation,
@@ -23,18 +29,24 @@ import {
   drawCardsFromTop,
   drawStartingHand,
   ensureSimulationsSchema,
+  failLlmRun,
   getStartingHandSimulationPromptData,
   listSimulationsForDeck,
   listStartingHandsForDeck,
+  markLlmRunStreaming,
   mulliganSimulation,
+  requestCancelOpeningHandLlmRuns,
   returnCardToSimulationLibrary,
   returnCardsToSimulationLibrary,
   shuffleSimulationLibrary,
   SimulationValidationError,
   StartingHandValidationError,
   takeCardsFromSimulationLibrary,
+  verifySimulationCanStartOpeningHandLlmRun,
 } from "./simulations-postgres.js"
 import type {
+  LlmChunkKind,
+  LlmRunChunkInput,
   SimulationPromptCard,
   StartingHandSimulationPromptData,
 } from "./simulations-postgres.js"
@@ -51,6 +63,9 @@ const OPENING_HAND_SERVER_NAME = "opening-hand-server"
 const TURN_SIMULATION_SERVER_NAME = "turn-simulation-server"
 const OPENING_HAND_MCP_PATH = "/mcp/opening-hand"
 const TURN_SIMULATION_MCP_PATH = "/mcp/turn-simulation"
+const OPENING_HAND_MCP_SERVER_LABEL = "opening_hand"
+const OPENAI_PROVIDER = "openai"
+const STREAM_FLUSH_INTERVAL_MS = 1000
 const DEFAULT_ALLOWED_ORIGINS = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
@@ -100,6 +115,32 @@ const createSimulationSchema = z.object({
   turnsToSimulate: z.number().int().nonnegative(),
   startingHandId: z.uuid().nullable(),
 })
+const reasoningEffortSchema = z.enum([
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+])
+
+type OpenAiRunConfig = {
+  apiKey: string
+  model: string
+  reasoningEffort: z.infer<typeof reasoningEffortSchema>
+  openingHandMcpPublicUrl: string
+}
+
+type ActiveLlmRunRuntime = {
+  abortController: AbortController
+  chunkBuffer: LlmRunChunkInput[]
+  flushTimer: NodeJS.Timeout | null
+  flushPromise: Promise<void> | null
+  llmRunId: string
+  nextSequence: number
+}
+
+const activeLlmRunRuntimes = new Map<string, ActiveLlmRunRuntime>()
 
 function createServer(
   name: string,
@@ -549,6 +590,410 @@ function registerLogTurnActionTool(server: McpServer) {
   )
 }
 
+class OpenAiConfigurationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "OpenAiConfigurationError"
+  }
+}
+
+function getOpenAiRunConfig(): OpenAiRunConfig {
+  const missingVariables = [
+    "OPENAI_API_KEY",
+    "OPENAI_MODEL",
+    "OPENAI_REASONING_EFFORT",
+    "OPENING_HAND_MCP_PUBLIC_URL",
+  ].filter((environmentVariable) => !process.env[environmentVariable]?.trim())
+
+  if (missingVariables.length > 0) {
+    throw new OpenAiConfigurationError(
+      `Missing OpenAI environment variable(s): ${missingVariables.join(", ")}. Add them to your repo-root .env file.`
+    )
+  }
+
+  const parsedReasoningEffort = reasoningEffortSchema.safeParse(
+    process.env.OPENAI_REASONING_EFFORT?.trim()
+  )
+
+  if (!parsedReasoningEffort.success) {
+    throw new OpenAiConfigurationError(
+      "OPENAI_REASONING_EFFORT must be one of: none, minimal, low, medium, high, xhigh."
+    )
+  }
+
+  return {
+    apiKey: process.env.OPENAI_API_KEY!.trim(),
+    model: process.env.OPENAI_MODEL!.trim(),
+    reasoningEffort: parsedReasoningEffort.data,
+    openingHandMcpPublicUrl: process.env.OPENING_HAND_MCP_PUBLIC_URL!.trim(),
+  }
+}
+
+function buildOpeningHandOpenAiRequestPayload(
+  config: OpenAiRunConfig,
+  fullPrompt: string,
+  simulationId: string
+) {
+  return {
+    model: config.model,
+    input: fullPrompt,
+    stream: true as const,
+    metadata: {
+      simulationId,
+      phase: "opening_hand",
+    },
+    reasoning: {
+      effort: config.reasoningEffort,
+      summary: "auto" as const,
+    },
+    tools: [
+      {
+        type: "mcp" as const,
+        server_label: OPENING_HAND_MCP_SERVER_LABEL,
+        server_description:
+          "Tools for drawing, mulliganing, and finalizing a Magic: The Gathering opening hand simulation.",
+        server_url: config.openingHandMcpPublicUrl,
+        require_approval: "never" as const,
+      },
+    ],
+  }
+}
+
+function getPersistableOpenAiRequestPayload(
+  requestPayload: ReturnType<typeof buildOpeningHandOpenAiRequestPayload>
+) {
+  return {
+    ...requestPayload,
+    input: "[stored in llm_runs.full_prompt]",
+  }
+}
+
+function startOpeningHandLlmRun({
+  config,
+  fullPrompt,
+  llmRunId,
+  requestPayload,
+  runtimeStreamKey,
+}: {
+  config: OpenAiRunConfig
+  fullPrompt: string
+  llmRunId: string
+  requestPayload: ReturnType<typeof buildOpeningHandOpenAiRequestPayload>
+  runtimeStreamKey: string
+}) {
+  void runOpeningHandLlmRun({
+    config,
+    fullPrompt,
+    llmRunId,
+    requestPayload,
+    runtimeStreamKey,
+  })
+}
+
+async function runOpeningHandLlmRun({
+  config,
+  llmRunId,
+  requestPayload,
+  runtimeStreamKey,
+}: {
+  config: OpenAiRunConfig
+  fullPrompt: string
+  llmRunId: string
+  requestPayload: ReturnType<typeof buildOpeningHandOpenAiRequestPayload>
+  runtimeStreamKey: string
+}) {
+  const runtime: ActiveLlmRunRuntime = {
+    abortController: new AbortController(),
+    chunkBuffer: [],
+    flushTimer: null,
+    flushPromise: null,
+    llmRunId,
+    nextSequence: 1,
+  }
+  let outputText = ""
+  let responseMetadata: unknown = {}
+  let usage: unknown = {}
+
+  activeLlmRunRuntimes.set(runtimeStreamKey, runtime)
+
+  try {
+    await markLlmRunStreaming(llmRunId)
+
+    const client = new OpenAI({
+      apiKey: config.apiKey,
+    })
+    const stream = await client.responses.create(requestPayload, {
+      signal: runtime.abortController.signal,
+    })
+
+    for await (const event of stream) {
+      const eventRecord = asRecord(event)
+      const eventType = getStringProperty(eventRecord, "type")
+
+      if (eventType === "response.output_text.delta") {
+        outputText += getStringProperty(eventRecord, "delta") ?? ""
+      } else if (eventType === "response.output_text.done") {
+        outputText = getStringProperty(eventRecord, "text") ?? outputText
+      } else if (eventType === "response.completed") {
+        const response = eventRecord.response
+        const responseRecord = asRecord(response)
+        responseMetadata = response ?? {}
+        usage = responseRecord.usage ?? {}
+      }
+
+      appendRuntimeChunk(runtime, normalizeOpenAiStreamEvent(event))
+    }
+
+    await forceFlushRuntimeChunks(runtime)
+    const parsedOpeningHand = parseOpeningHandFromResponseText(outputText)
+
+    await completeOpeningHandLlmRun({
+      llmRunId,
+      openingHand: parsedOpeningHand.keptHand,
+      responseMetadata,
+      usage,
+    })
+  } catch (error) {
+    appendRuntimeChunk(runtime, createErrorChunk(error))
+    await forceFlushRuntimeChunks(runtime)
+
+    if (isAbortError(error) || runtime.abortController.signal.aborted) {
+      await cancelLlmRun(llmRunId, "Opening-hand LLM run was cancelled.")
+      return
+    }
+
+    console.error("Opening-hand LLM run failed:", error)
+    await failLlmRun(llmRunId, getErrorMessage(error))
+  } finally {
+    clearRuntimeFlushTimer(runtime)
+    activeLlmRunRuntimes.delete(runtimeStreamKey)
+  }
+}
+
+function appendRuntimeChunk(
+  runtime: ActiveLlmRunRuntime,
+  chunk: Omit<LlmRunChunkInput, "sequence">
+) {
+  runtime.chunkBuffer.push({
+    ...chunk,
+    sequence: runtime.nextSequence,
+  })
+  runtime.nextSequence += 1
+  scheduleRuntimeFlush(runtime)
+}
+
+function scheduleRuntimeFlush(runtime: ActiveLlmRunRuntime) {
+  if (runtime.flushTimer || runtime.flushPromise) {
+    return
+  }
+
+  runtime.flushTimer = setTimeout(() => {
+    runtime.flushTimer = null
+    void flushRuntimeChunks(runtime)
+  }, STREAM_FLUSH_INTERVAL_MS)
+}
+
+async function flushRuntimeChunks(runtime: ActiveLlmRunRuntime) {
+  if (runtime.flushPromise) {
+    await runtime.flushPromise
+    return
+  }
+
+  const chunks = runtime.chunkBuffer.splice(0)
+
+  if (chunks.length === 0) {
+    return
+  }
+
+  runtime.flushPromise = appendLlmRunChunks(runtime.llmRunId, chunks).finally(
+    () => {
+      runtime.flushPromise = null
+
+      if (runtime.chunkBuffer.length > 0) {
+        scheduleRuntimeFlush(runtime)
+      }
+    }
+  )
+  await runtime.flushPromise
+}
+
+async function forceFlushRuntimeChunks(runtime: ActiveLlmRunRuntime) {
+  clearRuntimeFlushTimer(runtime)
+
+  while (runtime.flushPromise || runtime.chunkBuffer.length > 0) {
+    await flushRuntimeChunks(runtime)
+  }
+}
+
+function clearRuntimeFlushTimer(runtime: ActiveLlmRunRuntime) {
+  if (!runtime.flushTimer) {
+    return
+  }
+
+  clearTimeout(runtime.flushTimer)
+  runtime.flushTimer = null
+}
+
+function normalizeOpenAiStreamEvent(
+  event: unknown
+): Omit<LlmRunChunkInput, "sequence"> {
+  const eventRecord = asRecord(event)
+  const eventType = getStringProperty(eventRecord, "type")
+  const payload = event ?? {}
+
+  if (eventType === "response.output_text.delta") {
+    const delta = getStringProperty(eventRecord, "delta")
+
+    return createChunk("message_delta", eventType, {
+      outputDelta: delta,
+      content: delta,
+      payload,
+    })
+  }
+
+  if (eventType === "response.reasoning_summary_text.delta") {
+    const delta = getStringProperty(eventRecord, "delta")
+
+    return createChunk("reasoning_delta", eventType, {
+      reasoningDelta: delta,
+      content: delta,
+      payload,
+    })
+  }
+
+  if (eventType?.startsWith("response.mcp_call.completed")) {
+    return createChunk("tool_result", eventType, {
+      content: stringifyEventContent(event),
+      payload,
+    })
+  }
+
+  if (
+    eventType?.startsWith("response.mcp_call") ||
+    eventType?.startsWith("response.mcp_list_tools")
+  ) {
+    return createChunk("tool_call", eventType, {
+      content: stringifyEventContent(event),
+      payload,
+    })
+  }
+
+  if (eventType === "response.completed") {
+    return createChunk("usage", eventType, {
+      content: stringifyEventContent(asRecord(eventRecord.response).usage),
+      payload,
+    })
+  }
+
+  if (
+    eventType === "response.failed" ||
+    eventType === "response.incomplete" ||
+    eventType?.endsWith(".failed")
+  ) {
+    return createChunk("error", eventType, {
+      content: stringifyEventContent(event),
+      payload,
+    })
+  }
+
+  if (eventType?.startsWith("response.reasoning_summary")) {
+    return createChunk("metadata", eventType, {
+      content: stringifyEventContent(event),
+      payload,
+    })
+  }
+
+  return createChunk("raw_event", eventType ?? null, {
+    content: stringifyEventContent(event),
+    payload,
+  })
+}
+
+function createErrorChunk(error: unknown): Omit<LlmRunChunkInput, "sequence"> {
+  return createChunk("error", "server.error", {
+    content: getErrorMessage(error),
+    payload: {
+      message: getErrorMessage(error),
+      name: error instanceof Error ? error.name : null,
+    },
+  })
+}
+
+function createChunk(
+  kind: LlmChunkKind,
+  providerEventType: string | null,
+  values: {
+    reasoningDelta?: string | null
+    outputDelta?: string | null
+    content?: string | null
+    payload: unknown
+  }
+): Omit<LlmRunChunkInput, "sequence"> {
+  return {
+    kind,
+    providerEventType,
+    reasoningDelta: values.reasoningDelta ?? null,
+    outputDelta: values.outputDelta ?? null,
+    content: values.content ?? null,
+    payload: values.payload,
+  }
+}
+
+function parseOpeningHandFromResponseText(responseText: string) {
+  const parsedResponse = JSON.parse(responseText) as unknown
+  const responseRecord = asRecord(parsedResponse)
+  const keptHand = responseRecord.keptHand
+
+  if (
+    !Array.isArray(keptHand) ||
+    keptHand.some((card) => typeof card !== "string")
+  ) {
+    throw new Error("Opening-hand LLM response did not include keptHand.")
+  }
+
+  return {
+    keptHand,
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : {}
+}
+
+function getStringProperty(
+  record: Record<string, unknown>,
+  property: string
+) {
+  const value = record[property]
+
+  return typeof value === "string" ? value : null
+}
+
+function stringifyEventContent(value: unknown) {
+  if (typeof value === "string") {
+    return value
+  }
+
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  return JSON.stringify(value)
+}
+
+function isAbortError(error: unknown) {
+  return (
+    error instanceof Error &&
+    (error.name === "APIUserAbortError" || error.name === "AbortError")
+  )
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error)
+}
+
 async function main() {
   registerShutdownHandlers()
   await verifyDatabaseConnection()
@@ -683,6 +1128,114 @@ async function main() {
         console.error("Failed to create simulation:", error)
         res.status(500).json({
           error: "Failed to create simulation.",
+        })
+      }
+    }
+  )
+
+  app.post(
+    "/decks/:deckId/simulations/:simulationId/opening-hand-llm-runs",
+    async (req: Request, res: Response) => {
+      const deckId = String(req.params.deckId)
+      const simulationId = String(req.params.simulationId)
+
+      try {
+        const openAiConfig = getOpenAiRunConfig()
+
+        await verifySimulationCanStartOpeningHandLlmRun(deckId, simulationId)
+
+        const fullPrompt = await buildStartingHandSimulationPrompt(simulationId)
+        const requestPayload = buildOpeningHandOpenAiRequestPayload(
+          openAiConfig,
+          fullPrompt,
+          simulationId
+        )
+        const openingHandRun = await createOpeningHandLlmRun(deckId, {
+          simulationId,
+          provider: OPENAI_PROVIDER,
+          model: openAiConfig.model,
+          runtimeStreamKey: randomUUID(),
+          fullPrompt,
+          requestPayload: getPersistableOpenAiRequestPayload(requestPayload),
+        })
+
+        startOpeningHandLlmRun({
+          config: openAiConfig,
+          fullPrompt,
+          llmRunId: openingHandRun.llmRunId,
+          requestPayload,
+          runtimeStreamKey: openingHandRun.runtimeStreamKey,
+        })
+
+        res.status(202).json(openingHandRun)
+      } catch (error) {
+        if (error instanceof SimulationValidationError) {
+          const status = error.message === "Simulation not found." ? 404 : 400
+
+          res.status(status).json({
+            error: error.message,
+          })
+          return
+        }
+
+        if (error instanceof OpenAiConfigurationError) {
+          res.status(500).json({
+            error: error.message,
+          })
+          return
+        }
+
+        console.error("Failed to start opening-hand LLM run:", error)
+        res.status(500).json({
+          error: "Failed to start opening-hand LLM run.",
+        })
+      }
+    }
+  )
+
+  app.post(
+    "/decks/:deckId/simulations/:simulationId/stop",
+    async (req: Request, res: Response) => {
+      const deckId = String(req.params.deckId)
+      const simulationId = String(req.params.simulationId)
+
+      try {
+        const activeRuns = await requestCancelOpeningHandLlmRuns(
+          deckId,
+          simulationId
+        )
+        const stoppedRunIds: string[] = []
+        const cancelRequestedRunIds: string[] = []
+
+        for (const run of activeRuns) {
+          const runtime = activeLlmRunRuntimes.get(run.runtimeStreamKey)
+
+          if (runtime) {
+            runtime.abortController.abort()
+            stoppedRunIds.push(run.llmRunId)
+          } else {
+            cancelRequestedRunIds.push(run.llmRunId)
+          }
+        }
+
+        res.status(200).json({
+          simulationId,
+          stoppedOpeningHandLlmRunIds: stoppedRunIds,
+          cancelRequestedOpeningHandLlmRunIds: cancelRequestedRunIds,
+        })
+      } catch (error) {
+        if (error instanceof SimulationValidationError) {
+          const status = error.message === "Simulation not found." ? 404 : 400
+
+          res.status(status).json({
+            error: error.message,
+          })
+          return
+        }
+
+        console.error("Failed to stop simulation:", error)
+        res.status(500).json({
+          error: "Failed to stop simulation.",
         })
       }
     }

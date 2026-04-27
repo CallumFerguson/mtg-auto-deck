@@ -20,6 +20,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { API_BASE_URL } from "@/lib/api"
 import type {
+  CreateOpeningHandLlmRunResponse,
   CreateSimulationResponse,
   CreateStartingHandResponse,
   DeckCard,
@@ -27,6 +28,7 @@ import type {
   SimulationsResponse,
   StartingHand,
   StartingHandsResponse,
+  StopSimulationResponse,
 } from "@/lib/deck-types"
 import { getDeckSimulationPath, navigateTo } from "@/lib/navigation"
 
@@ -701,6 +703,7 @@ export function DeckSimulation({
             </div>
           ) : selectedSimulation ? (
             <SimulationDetails
+              deckId={deckId}
               simulation={selectedSimulation}
               startingHand={selectedSimulationStartingHand}
             />
@@ -743,13 +746,101 @@ function SimulationMenuButton({
 }
 
 function SimulationDetails({
+  deckId,
   simulation,
   startingHand,
 }: {
+  deckId: string
   simulation: Simulation
   startingHand: StartingHand | null
 }) {
+  const [isStartingOpeningHandRun, setIsStartingOpeningHandRun] =
+    useState(false)
+  const [openingHandRunError, setOpeningHandRunError] = useState<string | null>(
+    null
+  )
+  const [openingHandRun, setOpeningHandRun] =
+    useState<CreateOpeningHandLlmRunResponse | null>(null)
+  const [isStoppingSimulation, setIsStoppingSimulation] = useState(false)
+  const [stopSimulationError, setStopSimulationError] = useState<string | null>(
+    null
+  )
+  const [stopSimulationResult, setStopSimulationResult] =
+    useState<StopSimulationResponse | null>(null)
   const shouldSimulateOpeningHand = simulation.startingHandId === null
+
+  useEffect(() => {
+    setIsStartingOpeningHandRun(false)
+    setOpeningHandRunError(null)
+    setOpeningHandRun(null)
+    setIsStoppingSimulation(false)
+    setStopSimulationError(null)
+    setStopSimulationResult(null)
+  }, [simulation.id])
+
+  async function handleStartOpeningHandRun() {
+    if (!shouldSimulateOpeningHand || isStartingOpeningHandRun) {
+      return
+    }
+
+    setIsStartingOpeningHandRun(true)
+    setOpeningHandRunError(null)
+    setStopSimulationResult(null)
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/opening-hand-llm-runs`,
+        {
+          method: "POST",
+        }
+      )
+
+      if (!response.ok) {
+        setOpeningHandRunError(await readOpeningHandRunError(response))
+        return
+      }
+
+      const data = (await response.json()) as CreateOpeningHandLlmRunResponse
+      setOpeningHandRun(data)
+    } catch {
+      setOpeningHandRunError(
+        "Opening hand run could not be sent to the server."
+      )
+    } finally {
+      setIsStartingOpeningHandRun(false)
+    }
+  }
+
+  async function handleStopSimulation() {
+    if (isStoppingSimulation) {
+      return
+    }
+
+    setIsStoppingSimulation(true)
+    setStopSimulationError(null)
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/stop`,
+        {
+          method: "POST",
+        }
+      )
+
+      if (!response.ok) {
+        setStopSimulationError(await readStopSimulationError(response))
+        return
+      }
+
+      const data = (await response.json()) as StopSimulationResponse
+      setStopSimulationResult(data)
+      setOpeningHandRun(null)
+    } catch {
+      setStopSimulationError("Simulation stop could not be sent to the server.")
+    } finally {
+      setIsStoppingSimulation(false)
+    }
+  }
 
   return (
     <div className="flex flex-1 flex-col px-5 py-6">
@@ -819,7 +910,77 @@ function SimulationDetails({
               </p>
             )}
           </div>
-        ) : null}
+        ) : (
+          <div className="grid gap-3 rounded-md border border-border bg-background/35 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  Opening hand simulation
+                </p>
+                {openingHandRun ? (
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Run {openingHandRun.llmRunId.slice(0, 8)} started.
+                  </p>
+                ) : null}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  disabled={
+                    isStartingOpeningHandRun ||
+                    isStoppingSimulation ||
+                    Boolean(openingHandRun)
+                  }
+                  onClick={() => void handleStartOpeningHandRun()}
+                >
+                  <Sparkles data-icon="inline-start" />
+                  {openingHandRun
+                    ? "Run started"
+                    : isStartingOpeningHandRun
+                      ? "Starting..."
+                      : "Start opening hand run"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={isStoppingSimulation || isStartingOpeningHandRun}
+                  onClick={() => void handleStopSimulation()}
+                >
+                  <X data-icon="inline-start" />
+                  {isStoppingSimulation ? "Stopping..." : "Stop simulation"}
+                </Button>
+              </div>
+            </div>
+
+            {openingHandRunError ? (
+              <p
+                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                role="alert"
+              >
+                {openingHandRunError}
+              </p>
+            ) : null}
+
+            {stopSimulationError ? (
+              <p
+                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                role="alert"
+              >
+                {stopSimulationError}
+              </p>
+            ) : null}
+
+            {stopSimulationResult ? (
+              <p className="text-sm text-muted-foreground">
+                Stop requested for{" "}
+                {stopSimulationResult.stoppedOpeningHandLlmRunIds.length +
+                  stopSimulationResult.cancelRequestedOpeningHandLlmRunIds
+                    .length}{" "}
+                opening hand run(s).
+              </p>
+            ) : null}
+          </div>
+        )}
       </header>
 
       <div className="grid flex-1 place-items-center py-10 text-center">
@@ -1138,4 +1299,36 @@ async function readSimulationError(response: Response) {
   }
 
   return `Simulation could not be saved. Server responded with ${response.status}.`
+}
+
+async function readOpeningHandRunError(response: Response) {
+  try {
+    const data = (await response.json()) as {
+      error?: unknown
+    }
+
+    if (typeof data.error === "string" && data.error.trim()) {
+      return data.error
+    }
+  } catch {
+    // Fall through to the generic HTTP error.
+  }
+
+  return `Opening hand run could not be started. Server responded with ${response.status}.`
+}
+
+async function readStopSimulationError(response: Response) {
+  try {
+    const data = (await response.json()) as {
+      error?: unknown
+    }
+
+    if (typeof data.error === "string" && data.error.trim()) {
+      return data.error
+    }
+  } catch {
+    // Fall through to the generic HTTP error.
+  }
+
+  return `Simulation could not be stopped. Server responded with ${response.status}.`
 }
