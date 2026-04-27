@@ -357,10 +357,6 @@ export async function ensureSimulationsSchema() {
     )
   `)
   await queryDatabase(`
-    ALTER TABLE llm_run_chunks
-      DROP COLUMN IF EXISTS content
-  `)
-  await queryDatabase(`
     CREATE TABLE IF NOT EXISTS simulation_opening_hand_llm_runs (
       simulation_id uuid NOT NULL REFERENCES simulations(id) ON DELETE CASCADE,
       llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
