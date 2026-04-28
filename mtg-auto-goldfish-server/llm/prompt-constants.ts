@@ -470,7 +470,7 @@ LIBRARY AND TOOL RULES
 - If the order of some cards is known, preserve that knowledge correctly.
 - If the library becomes randomized, clear any knowledge that is no longer valid.
 - Treat each card as existing in exactly one zone at a time unless a rule explicitly creates a separate object.
-- Whenever a card changes zones, remove it from its previous zone in finalGameState.
+- Whenever a card changes zones, remove it from its previous zone in the final gameState string.
 - Never leave the same card listed in multiple zones at once unless the rules explicitly require that representation.
 - When a card is played, cast, discarded, sacrificed, exiled, bounced, milled, returned to hand, or moved to the command zone, explicitly reconcile every affected zone before saving the final state.
 - If you played a land this turn, that exact card must appear on the battlefield in the final state and must no longer appear in hand.
@@ -598,7 +598,7 @@ For every action:
 - Remove marked damage from creatures.
 - Discard to maximum hand size if required.
 - End floating mana if applicable.
-- Remove all temporary turn-only information that should not exist in finalGameState after the turn ends.
+- Remove all temporary turn-only information that should not exist in gameState after the turn ends.
 
 DECISION POLICY
 Choose the best turn for goldfishing.
@@ -627,14 +627,14 @@ Before finalizing the turn, verify all of the following:
 - Counters are correct.
 - Commander tax is updated if relevant.
 - Life totals are correct.
-- No end-of-turn-only information remains in finalGameState.
+- No end-of-turn-only information remains in gameState.
 - Final-zone reconciliation is complete:
   - every card that moved this turn was removed from its previous zone
   - no card appears in more than one zone unless the rules explicitly require it
   - any land you played this turn is not still listed in hand
   - any spell you cast this turn is not still listed in hand after resolving
   - any permanent that entered this turn is listed on the battlefield only if it is still there at end of turn
-- Before producing the final JSON response, think through finalGameState zone by zone:
+- Before producing the final JSON response, think through gameState zone by zone:
   - hand
   - battlefield
   - graveyard
@@ -645,36 +645,20 @@ Before finalizing the turn, verify all of the following:
 - Then do one final silent mistake check for missing cards, duplicated cards, impossible zone placements, stale turn-only information, and unresolved zone changes.
 
 FINAL GAME STATE REQUIREMENTS
-After the turn is fully complete, return exactly one final JSON response that includes finalGameState and summary.
+After the turn is fully complete, return exactly one final JSON response that includes gameState and summary.
 - Log that you are finalizing the turn immediately before producing the final JSON response.
 - The final JSON response must be the final action of the turn.
-- The full end-of-turn game state belongs in the finalGameState field.
+- The full end-of-turn game state belongs in the gameState field.
 - Do not produce the final JSON response until you have:
   - thought through the resulting game state carefully
   - checked what is in each zone
-  - double-checked that there are no mistakes in finalGameState
+  - double-checked that there are no mistakes in gameState
 
-finalGameState should be complete enough to resume the game from that exact point later.
-Use this JSON shape for finalGameState:
-{
-  "hand": ["Card Name"],
-  "commandZone": ["Card Name"],
-  "battlefield": ["Permanent with tapped/untapped state and lasting details"],
-  "graveyard": ["Card Name"],
-  "exile": ["Card Name with linked information if it matters"],
-  "lifeTotals": {
-    "you": 40,
-    "opponentA": 40,
-    "opponentB": 40,
-    "opponentC": 40
-  },
-  "notes": ["Durable, legally known information only"]
-}
+gameState must be a single string. It should be complete enough to resume the game from that exact point later, but it does not have a rigid structure.
+Format gameState in a clear, compact, readable way. Include empty zones when useful for clarity.
+Do not use gameState as a turn log, action log, rules explanation, or justification for why a play was made.
 
-Use empty arrays for empty zones or empty notes.
-Do not use notes as a turn log, action log, rules explanation, or justification for why a play was made.
-
-finalGameState should include, as applicable:
+gameState should include, as applicable:
 - hand
 - battlefield
 - graveyard
@@ -687,9 +671,9 @@ finalGameState should include, as applicable:
 - tapped / untapped state
 - transformed / face-down / copied status
 - chosen modes, chosen values, linked choices, and remembered choices that still matter
-- notes about known private information
-- notes about revealed information
-- comments that help preserve strategically relevant knowledge
+- known private information
+- revealed information
+- strategically relevant knowledge
 - any ongoing effects that persist beyond the turn and still matter
 - the correctly updated contents of each zone after all cards that changed zones this turn were removed from their old zone
 
@@ -705,10 +689,10 @@ Do NOT include things that should reset when the turn ends, such as:
 - anything else that resets automatically by end of turn unless it creates a lasting consequence
 - the full library contents or any unknown library order
 - explanations of how a permanent entered, why you made a play, or what you assumed during this turn unless that information remains legally relevant later
-- turn-specific narration that belongs in summary instead of finalGameState
+- turn-specific narration that belongs in summary instead of gameState
 
 COMMENTS / NOTES
-- Use notes in finalGameState to preserve information you know and will need later.
+- Use notes in gameState to preserve information you know and will need later.
 - Examples:
   - known top card of library
   - cards known to be on the bottom
@@ -729,24 +713,11 @@ OUTPUT RULES
 - Do not include Markdown, code fences, prose before the JSON, prose after the JSON, or extra keys.
 - The JSON object must have exactly this shape:
 {
-  "finalGameState": {
-    "hand": ["Card Name"],
-    "commandZone": ["Card Name"],
-    "battlefield": ["Permanent with tapped/untapped state and lasting details"],
-    "graveyard": ["Card Name"],
-    "exile": ["Card Name with linked information if it matters"],
-    "lifeTotals": {
-      "you": 40,
-      "opponentA": 40,
-      "opponentB": 40,
-      "opponentC": 40
-    },
-    "notes": ["Durable, legally known information only"]
-  },
+  "gameState": "Complete end-of-turn game state as a readable string.",
   "summary": "Short summary."
 }
 - summary should briefly say what you played, what changed on the battlefield, and any important resulting game-state facts.
-- finalGameState is the serialized state dump; summary is only a brief recap.
+- gameState is the serialized state dump; summary is only a brief recap.
 - After the final JSON response, do not call any more tools.
 
 ABSOLUTE PRIORITIES
@@ -754,7 +725,7 @@ ABSOLUTE PRIORITIES
 2. Use tools correctly for library interaction.
 3. Preserve the game state accurately.
 4. Choose a strong line.
-5. Finalize the turn with exactly one JSON response containing finalGameState and summary.
+5. Finalize the turn with exactly one JSON response containing gameState and summary.
 `;
 
 export const GENERIC_GAME_RULES_REFERENCE = `
