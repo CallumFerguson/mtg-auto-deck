@@ -377,133 +377,142 @@ export function DeckSimulation({
 
   return (
     <>
-      <div className="grid min-h-[34rem] overflow-hidden rounded-lg border border-border bg-card/70 lg:grid-cols-[18rem_minmax(0,1fr)]">
-        <aside className="border-b border-border bg-background/35 lg:border-r lg:border-b-0">
-          <nav className="grid gap-1 p-2" aria-label="Simulations">
-            <button
-              className={`flex w-full items-center gap-2 rounded-md px-3 py-3 text-left text-sm font-medium transition-colors ${
-                isNewSimulationSelected
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
-              }`}
-              type="button"
-              aria-pressed={isNewSimulationSelected}
-              onClick={() => {
-                setIsNewSimulationSelected(true)
-                setSelectedSimulationId("")
-                navigateTo(getDeckSimulationPath(deckId))
-              }}
-            >
-              <Plus data-icon="inline-start" />
-              New simulation
-            </button>
+      <div className="grid h-full min-h-0 grid-rows-[minmax(11rem,16rem)_minmax(0,1fr)] overflow-hidden rounded-lg border border-border bg-card/70 lg:grid-cols-[18rem_minmax(0,1fr)] lg:grid-rows-1">
+        <aside className="min-h-0 min-w-0 border-b border-border bg-background/35 lg:border-r lg:border-b-0">
+          <nav
+            className="debug-scrollbar-neutral h-full overflow-y-auto"
+            aria-label="Simulations"
+          >
+            <div className="sticky top-0 z-10 border-b border-border bg-card p-2">
+              <button
+                className={`flex w-full items-center gap-2 rounded-md px-3 py-3 text-left text-sm font-medium transition-colors ${
+                  isNewSimulationSelected
+                    ? "bg-accent text-accent-foreground"
+                    : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+                }`}
+                type="button"
+                aria-pressed={isNewSimulationSelected}
+                onClick={() => {
+                  setIsNewSimulationSelected(true)
+                  setSelectedSimulationId("")
+                  navigateTo(getDeckSimulationPath(deckId))
+                }}
+              >
+                <Plus data-icon="inline-start" />
+                New simulation
+              </button>
+            </div>
 
-            {isLoadingSimulations ? (
-              <div className="rounded-md px-3 py-3 text-sm text-muted-foreground">
-                Loading simulations...
-              </div>
-            ) : simulationLoadError ? (
-              <div className="grid gap-3 rounded-md px-3 py-3">
-                <p className="text-sm text-destructive">
-                  {simulationLoadError}
-                </p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => void loadSimulations()}
-                >
-                  <RefreshCw data-icon="inline-start" />
-                  Try again
-                </Button>
-              </div>
-            ) : simulations.length > 0 ? (
-              <ul className="grid gap-1">
-                {simulations.map((simulation) => (
-                  <li key={simulation.id} className="group relative">
-                    <button
-                      className={`w-full rounded-md py-3 pr-11 pl-3 text-left text-sm font-medium transition-colors ${
-                        !isNewSimulationSelected &&
-                        selectedSimulationId === simulation.id
-                          ? "bg-accent text-accent-foreground"
-                          : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
-                      }`}
-                      type="button"
-                      aria-pressed={
-                        !isNewSimulationSelected &&
-                        selectedSimulationId === simulation.id
-                      }
-                      onClick={() => {
-                        setSelectedSimulationId(simulation.id)
-                        setIsNewSimulationSelected(false)
-                        navigateTo(getDeckSimulationPath(deckId, simulation.id))
-                      }}
-                    >
-                      {getSimulationLabel(simulation)}
-                    </button>
-                    <div
-                      className={`absolute inset-y-0 right-1 flex items-center opacity-0 transition-opacity group-hover:opacity-100 ${
-                        openSimulationMenuId === simulation.id
-                          ? "opacity-100"
-                          : ""
-                      }`}
-                    >
-                      <Button
+            <div className="p-2">
+              {isLoadingSimulations ? (
+                <div className="rounded-md px-3 py-3 text-sm text-muted-foreground">
+                  Loading simulations...
+                </div>
+              ) : simulationLoadError ? (
+                <div className="grid gap-3 rounded-md px-3 py-3">
+                  <p className="text-sm text-destructive">
+                    {simulationLoadError}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void loadSimulations()}
+                  >
+                    <RefreshCw data-icon="inline-start" />
+                    Try again
+                  </Button>
+                </div>
+              ) : simulations.length > 0 ? (
+                <ul className="grid gap-1">
+                  {simulations.map((simulation) => (
+                    <li key={simulation.id} className="group relative">
+                      <button
+                        className={`w-full rounded-md py-3 pr-11 pl-3 text-left text-sm font-medium transition-colors ${
+                          !isNewSimulationSelected &&
+                          selectedSimulationId === simulation.id
+                            ? "bg-accent text-accent-foreground"
+                            : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+                        }`}
                         type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={`Open actions for simulation ${getSimulationLabel(
-                          simulation
-                        )}`}
-                        aria-expanded={openSimulationMenuId === simulation.id}
-                        title="Simulation actions"
-                        disabled={deletingSimulationId === simulation.id}
-                        onClick={() =>
-                          setOpenSimulationMenuId((currentSimulationId) =>
-                            currentSimulationId === simulation.id
-                              ? null
-                              : simulation.id
-                          )
+                        aria-pressed={
+                          !isNewSimulationSelected &&
+                          selectedSimulationId === simulation.id
                         }
+                        onClick={() => {
+                          setSelectedSimulationId(simulation.id)
+                          setIsNewSimulationSelected(false)
+                          navigateTo(
+                            getDeckSimulationPath(deckId, simulation.id)
+                          )
+                        }}
                       >
-                        <MoreVertical />
-                      </Button>
+                        {getSimulationLabel(simulation)}
+                      </button>
+                      <div
+                        className={`absolute inset-y-0 right-1 flex items-center opacity-0 transition-opacity group-hover:opacity-100 ${
+                          openSimulationMenuId === simulation.id
+                            ? "opacity-100"
+                            : ""
+                        }`}
+                      >
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={`Open actions for simulation ${getSimulationLabel(
+                            simulation
+                          )}`}
+                          aria-expanded={openSimulationMenuId === simulation.id}
+                          title="Simulation actions"
+                          disabled={deletingSimulationId === simulation.id}
+                          onClick={() =>
+                            setOpenSimulationMenuId((currentSimulationId) =>
+                              currentSimulationId === simulation.id
+                                ? null
+                                : simulation.id
+                            )
+                          }
+                        >
+                          <MoreVertical />
+                        </Button>
 
-                      {openSimulationMenuId === simulation.id ? (
-                        <>
-                          <button
-                            className="fixed inset-0 z-10 cursor-default"
-                            type="button"
-                            aria-label="Close simulation actions"
-                            onClick={() => setOpenSimulationMenuId(null)}
-                          />
-                          <div className="absolute top-9 right-0 z-20 w-48 overflow-hidden rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-2xl shadow-black/40">
-                            <SimulationMenuButton
-                              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                              onClick={() =>
-                                void handleDeleteSimulation(simulation.id)
-                              }
-                            >
-                              <Trash2 data-icon="inline-start" />
-                              {deletingSimulationId === simulation.id
-                                ? "Deleting..."
-                                : "Delete simulation"}
-                            </SimulationMenuButton>
-                          </div>
-                        </>
-                      ) : null}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="rounded-md px-3 py-3 text-sm text-muted-foreground">
-                No simulations yet.
-              </div>
-            )}
+                        {openSimulationMenuId === simulation.id ? (
+                          <>
+                            <button
+                              className="fixed inset-0 z-10 cursor-default"
+                              type="button"
+                              aria-label="Close simulation actions"
+                              onClick={() => setOpenSimulationMenuId(null)}
+                            />
+                            <div className="absolute top-9 right-0 z-20 w-48 overflow-hidden rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-2xl shadow-black/40">
+                              <SimulationMenuButton
+                                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                onClick={() =>
+                                  void handleDeleteSimulation(simulation.id)
+                                }
+                              >
+                                <Trash2 data-icon="inline-start" />
+                                {deletingSimulationId === simulation.id
+                                  ? "Deleting..."
+                                  : "Delete simulation"}
+                              </SimulationMenuButton>
+                            </div>
+                          </>
+                        ) : null}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="rounded-md px-3 py-3 text-sm text-muted-foreground">
+                  No simulations yet.
+                </div>
+              )}
+            </div>
           </nav>
         </aside>
 
-        <section className="flex min-h-[28rem] flex-col">
+        <section className="debug-scrollbar-neutral min-h-0 min-w-0 overflow-y-auto">
           {isNewSimulationSelected ? (
             <div className="grid flex-1 place-items-center px-5 py-10">
               <div className="grid w-full max-w-2xl gap-4">

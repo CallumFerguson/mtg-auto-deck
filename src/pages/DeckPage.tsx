@@ -98,9 +98,19 @@ export function DeckPage({
     }
   }
 
+  const isSimulationTab = activeTab === "simulation"
+
   return (
-    <main className="min-h-svh bg-background px-4 py-6 text-foreground sm:px-6 lg:px-8">
-      <section className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+    <main
+      className={`bg-background px-4 py-6 text-foreground sm:px-6 lg:px-8 ${
+        isSimulationTab ? "flex h-svh overflow-hidden" : "min-h-svh"
+      }`}
+    >
+      <section
+        className={`mx-auto flex w-full flex-col gap-6 ${
+          isSimulationTab ? "min-h-0 min-w-0 flex-1" : "max-w-6xl"
+        }`}
+      >
         <header className="flex flex-col gap-4 border-b border-border pb-5">
           <Button
             type="button"
@@ -218,11 +228,13 @@ export function DeckPage({
           activeTab === "details" ? (
             <ViewDeckCards deck={deck} />
           ) : (
-            <DeckSimulation
-              cards={deck.cards}
-              deckId={deck.id}
-              selectedSimulationIdFromUrl={initialSimulationId}
-            />
+            <div className="min-h-0 min-w-0 flex-1">
+              <DeckSimulation
+                cards={deck.cards}
+                deckId={deck.id}
+                selectedSimulationIdFromUrl={initialSimulationId}
+              />
+            </div>
           )
         ) : null}
       </section>
