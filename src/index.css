@@ -131,4 +131,33 @@
   .debug-scrollbar-neutral::-webkit-scrollbar-corner {
     background: oklch(0.269 0 0 / 70%);
   }
+
+  .simulation-scrollbar {
+    scrollbar-color: oklch(0.708 0 0 / 70%) transparent;
+    scrollbar-width: thin;
+  }
+
+  .simulation-scrollbar::-webkit-scrollbar {
+    width: 0.75rem;
+    height: 0.75rem;
+  }
+
+  .simulation-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .simulation-scrollbar::-webkit-scrollbar-thumb {
+    background: oklch(0.708 0 0 / 70%);
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background-clip: padding-box;
+  }
+
+  .simulation-scrollbar::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  .simulation-sidebar-surface {
+    background: oklch(0.172 0 0);
+  }
 }

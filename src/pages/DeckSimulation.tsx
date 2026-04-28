@@ -378,12 +378,12 @@ export function DeckSimulation({
   return (
     <>
       <div className="grid h-full min-h-0 grid-rows-[minmax(11rem,16rem)_minmax(0,1fr)] overflow-hidden rounded-lg border border-border bg-card/70 lg:grid-cols-[18rem_minmax(0,1fr)] lg:grid-rows-1">
-        <aside className="min-h-0 min-w-0 border-b border-border bg-background/35 lg:border-r lg:border-b-0">
+        <aside className="simulation-sidebar-surface min-h-0 min-w-0 border-b border-border lg:border-r lg:border-b-0">
           <nav
-            className="debug-scrollbar-neutral h-full overflow-y-auto"
+            className="simulation-scrollbar h-full overflow-y-auto"
             aria-label="Simulations"
           >
-            <div className="sticky top-0 z-10 border-b border-border bg-card p-2">
+            <div className="simulation-sidebar-surface sticky top-0 z-10 border-b border-border p-2">
               <button
                 className={`flex w-full items-center gap-2 rounded-md px-3 py-3 text-left text-sm font-medium transition-colors ${
                   isNewSimulationSelected
@@ -512,7 +512,7 @@ export function DeckSimulation({
           </nav>
         </aside>
 
-        <section className="debug-scrollbar-neutral min-h-0 min-w-0 overflow-y-auto">
+        <section className="simulation-scrollbar min-h-0 min-w-0 overflow-y-auto">
           {isNewSimulationSelected ? (
             <div className="grid flex-1 place-items-center px-5 py-10">
               <div className="grid w-full max-w-2xl gap-4">
