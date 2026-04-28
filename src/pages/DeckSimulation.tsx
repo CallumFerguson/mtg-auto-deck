@@ -868,6 +868,12 @@ function SimulationDetails({
     setStopSimulationResult(null)
 
     try {
+      const stopResult = await stopSimulation()
+
+      if (!stopResult) {
+        return
+      }
+
       const response = await fetch(
         `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/opening-hand-llm-runs`,
         {
@@ -911,6 +917,12 @@ function SimulationDetails({
     setStopSimulationResult(null)
 
     try {
+      const stopResult = await stopSimulation()
+
+      if (!stopResult) {
+        return
+      }
+
       const response = await fetch(
         `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/turn-llm-runs`,
         {
@@ -940,11 +952,7 @@ function SimulationDetails({
     }
   }
 
-  async function handleStopSimulation() {
-    if (isStoppingSimulation) {
-      return
-    }
-
+  async function stopSimulation() {
     setIsStoppingSimulation(true)
     setStopSimulationError(null)
 
@@ -960,18 +968,28 @@ function SimulationDetails({
         setStopSimulationError(
           await readApiError(response, "Simulation could not be stopped.")
         )
-        return
+        return null
       }
 
       const data = (await response.json()) as StopSimulationResponse
       setStopSimulationResult(data)
       setOpeningHandRun(null)
       setTurnRun(null)
+      return data
     } catch {
       setStopSimulationError("Simulation stop could not be sent to the server.")
+      return null
     } finally {
       setIsStoppingSimulation(false)
     }
+  }
+
+  async function handleStopSimulation() {
+    if (isStoppingSimulation) {
+      return
+    }
+
+    await stopSimulation()
   }
 
   const handleRefreshDebugInfo = useCallback(async () => {
