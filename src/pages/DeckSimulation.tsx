@@ -939,6 +939,7 @@ function SimulationDetails({
       const data = (await response.json()) as StopSimulationResponse
       setStopSimulationResult(data)
       setOpeningHandRun(null)
+      setTurnRun(null)
     } catch {
       setStopSimulationError("Simulation stop could not be sent to the server.")
     } finally {
@@ -1098,9 +1099,34 @@ function SimulationDetails({
               </p>
             )}
           </div>
-        ) : (
-          <div className="grid gap-3 rounded-md border border-border bg-background/35 p-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+        ) : null}
+      </header>
+
+      <section className="grid gap-3 border-b border-border py-5">
+        <div className="grid gap-3 rounded-md border border-border bg-background/35 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h4 className="text-base font-semibold text-foreground">
+                LLM simulations
+              </h4>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={
+                isStoppingSimulation ||
+                isStartingOpeningHandRun ||
+                isStartingTurnRun
+              }
+              onClick={() => void handleStopSimulation()}
+            >
+              <X data-icon="inline-start" />
+              {isStoppingSimulation ? "Stopping..." : "Stop simulation"}
+            </Button>
+          </div>
+
+          {shouldSimulateOpeningHand ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
               <div>
                 <p className="text-sm font-medium text-foreground">
                   Opening hand simulation
@@ -1111,69 +1137,26 @@ function SimulationDetails({
                   </p>
                 ) : null}
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  disabled={
-                    isStartingOpeningHandRun ||
-                    isStoppingSimulation ||
-                    Boolean(openingHandRun)
-                  }
-                  onClick={() => void handleStartOpeningHandRun()}
-                >
-                  <Sparkles data-icon="inline-start" />
-                  {openingHandRun
-                    ? "Run started"
-                    : isStartingOpeningHandRun
-                      ? "Starting..."
-                      : "Start opening hand run"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={isStoppingSimulation || isStartingOpeningHandRun}
-                  onClick={() => void handleStopSimulation()}
-                >
-                  <X data-icon="inline-start" />
-                  {isStoppingSimulation ? "Stopping..." : "Stop simulation"}
-                </Button>
-              </div>
+              <Button
+                type="button"
+                disabled={
+                  isStartingOpeningHandRun ||
+                  isStoppingSimulation ||
+                  Boolean(openingHandRun)
+                }
+                onClick={() => void handleStartOpeningHandRun()}
+              >
+                <Sparkles data-icon="inline-start" />
+                {openingHandRun
+                  ? "Run started"
+                  : isStartingOpeningHandRun
+                    ? "Starting..."
+                    : "Start opening hand run"}
+              </Button>
             </div>
+          ) : null}
 
-            {openingHandRunError ? (
-              <p
-                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-                role="alert"
-              >
-                {openingHandRunError}
-              </p>
-            ) : null}
-
-            {stopSimulationError ? (
-              <p
-                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-                role="alert"
-              >
-                {stopSimulationError}
-              </p>
-            ) : null}
-
-            {stopSimulationResult ? (
-              <p className="text-sm text-muted-foreground">
-                Stop requested for{" "}
-                {stopSimulationResult.stoppedOpeningHandLlmRunIds.length +
-                  stopSimulationResult.cancelRequestedOpeningHandLlmRunIds
-                    .length}{" "}
-                opening hand run(s).
-              </p>
-            ) : null}
-          </div>
-        )}
-      </header>
-
-      <section className="grid gap-3 border-b border-border py-5">
-        <div className="grid gap-3 rounded-md border border-border bg-background/35 p-3">
-          <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="flex flex-wrap items-end justify-between gap-3 border-t border-border pt-3">
             <div className="grid gap-2">
               <label
                 className="text-sm font-medium text-foreground"
@@ -1226,6 +1209,33 @@ function SimulationDetails({
               role="alert"
             >
               {turnRunError}
+            </p>
+          ) : null}
+
+          {openingHandRunError ? (
+            <p
+              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              role="alert"
+            >
+              {openingHandRunError}
+            </p>
+          ) : null}
+
+          {stopSimulationError ? (
+            <p
+              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              role="alert"
+            >
+              {stopSimulationError}
+            </p>
+          ) : null}
+
+          {stopSimulationResult ? (
+            <p className="text-sm text-muted-foreground">
+              Stop requested for{" "}
+              {stopSimulationResult.stoppedLlmRunIds.length +
+                stopSimulationResult.cancelRequestedLlmRunIds.length}{" "}
+              LLM run(s).
             </p>
           ) : null}
         </div>

@@ -68,8 +68,8 @@ export type CreateTurnLlmRunResponse = CreateOpeningHandLlmRunResponse & {
 
 export type StopSimulationResponse = {
   simulationId: string
-  stoppedOpeningHandLlmRunIds: string[]
-  cancelRequestedOpeningHandLlmRunIds: string[]
+  stoppedLlmRunIds: string[]
+  cancelRequestedLlmRunIds: string[]
 }
 
 export type SimulationDebugLlmRunChunk = {

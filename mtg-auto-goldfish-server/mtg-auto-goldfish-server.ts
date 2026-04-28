@@ -43,7 +43,7 @@ import {
   listSimulationsForDeck,
   markLlmRunStreaming,
   mulliganSimulation,
-  requestCancelOpeningHandLlmRuns,
+  requestCancelSimulationLlmRuns,
   resetSimulationForOpeningHandLlmRun,
   returnCardToSimulationLibrary,
   returnCardsToSimulationLibrary,
@@ -54,6 +54,7 @@ import {
 } from "./simulations-postgres.js"
 import type {
   LlmRunChunkInput,
+  LlmRunPhase,
   SimulationPromptCard,
   StartingHandSimulationPromptData,
   TurnSimulationPromptData,
@@ -657,6 +658,18 @@ function getPersistableOpenAiRequestPayload<
     ...requestPayload,
     input: "[stored in llm_runs.full_prompt]",
   }
+}
+
+function formatLlmRunPhase(phase: LlmRunPhase) {
+  if (phase === "opening_hand") {
+    return "Opening-hand"
+  }
+
+  if (phase === "turn") {
+    return "Turn"
+  }
+
+  return "Simulation"
 }
 
 function startOpeningHandLlmRun({
@@ -1306,7 +1319,7 @@ async function main() {
       const simulationId = String(req.params.simulationId)
 
       try {
-        const activeRuns = await requestCancelOpeningHandLlmRuns(
+        const activeRuns = await requestCancelSimulationLlmRuns(
           deckId,
           simulationId
         )
@@ -1321,7 +1334,7 @@ async function main() {
             stoppedRunIds.push(run.llmRunId)
           } else {
             const cancellationMessage =
-              "Opening-hand LLM run was cancelled before its active runtime could be found."
+              `${formatLlmRunPhase(run.phase)} LLM run was cancelled before its active runtime could be found.`
 
             await appendLlmRunChunkAtNextSequence(
               run.llmRunId,
@@ -1334,8 +1347,8 @@ async function main() {
 
         res.status(200).json({
           simulationId,
-          stoppedOpeningHandLlmRunIds: stoppedRunIds,
-          cancelRequestedOpeningHandLlmRunIds: cancelRequestedRunIds,
+          stoppedLlmRunIds: stoppedRunIds,
+          cancelRequestedLlmRunIds: cancelRequestedRunIds,
         })
       } catch (error) {
         if (error instanceof SimulationValidationError) {

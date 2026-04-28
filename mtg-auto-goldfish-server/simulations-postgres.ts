@@ -88,9 +88,10 @@ export type LlmRunChunkInput = {
   payload: unknown
 }
 
-export type ActiveOpeningHandLlmRun = {
+export type ActiveSimulationLlmRun = {
   simulationId: string
   llmRunId: string
+  phase: LlmRunPhase
   runtimeStreamKey: string
   status: LlmRunStatus
 }
@@ -1591,10 +1592,10 @@ export async function cancelLlmRun(llmRunId: string, failureMessage?: string) {
   )
 }
 
-export async function requestCancelOpeningHandLlmRuns(
+export async function requestCancelSimulationLlmRuns(
   deckId: string,
   simulationId: string
-): Promise<ActiveOpeningHandLlmRun[]> {
+): Promise<ActiveSimulationLlmRun[]> {
   return withDatabaseTransaction(async (client) => {
     const simulationResult = await client.query(
       `
@@ -1613,6 +1614,7 @@ export async function requestCancelOpeningHandLlmRuns(
     const activeRunsResult = await client.query<{
       simulation_id: string
       llm_run_id: string
+      phase: LlmRunPhase
       runtime_stream_key: string
       status: LlmRunStatus
     }>(
@@ -1620,12 +1622,25 @@ export async function requestCancelOpeningHandLlmRuns(
         SELECT
           opening_run.simulation_id,
           llm_run.id AS llm_run_id,
+          llm_run.phase,
           llm_run.runtime_stream_key,
           llm_run.status
         FROM simulation_opening_hand_llm_runs opening_run
         JOIN llm_runs llm_run
           ON llm_run.id = opening_run.llm_run_id
         WHERE opening_run.simulation_id = $1
+          AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
+        UNION ALL
+        SELECT
+          turn_run.simulation_id,
+          llm_run.id AS llm_run_id,
+          llm_run.phase,
+          llm_run.runtime_stream_key,
+          llm_run.status
+        FROM simulation_turn_llm_runs turn_run
+        JOIN llm_runs llm_run
+          ON llm_run.id = turn_run.llm_run_id
+        WHERE turn_run.simulation_id = $1
           AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
       `,
       [simulationId]
@@ -1648,6 +1663,7 @@ export async function requestCancelOpeningHandLlmRuns(
     return activeRunsResult.rows.map((run) => ({
       simulationId: run.simulation_id,
       llmRunId: run.llm_run_id,
+      phase: run.phase,
       runtimeStreamKey: run.runtime_stream_key,
       status: run.status,
     }))
