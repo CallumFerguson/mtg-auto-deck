@@ -183,6 +183,81 @@ type ActiveLlmRunRuntime = {
 
 const activeLlmRunRuntimes = new Map<string, ActiveLlmRunRuntime>()
 
+function logOpenAiApiCallStarted({
+  llmRunId,
+  model,
+  phase,
+}: {
+  llmRunId: string
+  model: string
+  phase: LlmRunPhase
+}) {
+  console.log(
+    `OpenAI API call started: phase=${phase} llmRunId=${llmRunId} model=${model}`
+  )
+}
+
+function logOpenAiApiCallFinished({
+  llmRunId,
+  phase,
+  usage,
+}: {
+  llmRunId: string
+  phase: LlmRunPhase
+  usage: unknown
+}) {
+  const tokenUsage = getOpenAiTokenUsageSummary(usage)
+
+  console.log(
+    `OpenAI API call finished: phase=${phase} llmRunId=${llmRunId} totalTokens=${tokenUsage.total} inputTokens=${tokenUsage.input} reasoningTokens=${tokenUsage.reasoning} outputTokens=${tokenUsage.output}`
+  )
+}
+
+function getOpenAiTokenUsageSummary(usage: unknown) {
+  const usageRecord = asRecord(usage)
+  const outputTokens = getNumberProperty(usageRecord, "output_tokens")
+  const outputDetails = asRecord(usageRecord.output_tokens_details)
+  const reasoningTokens =
+    getNumberProperty(outputDetails, "reasoning_tokens") ?? 0
+  const visibleOutputTokens =
+    outputTokens === null ? null : Math.max(outputTokens - reasoningTokens, 0)
+  const totalTokens =
+    getNumberProperty(usageRecord, "total_tokens") ??
+    sumTokenCounts([
+      getNumberProperty(usageRecord, "input_tokens"),
+      reasoningTokens,
+      visibleOutputTokens,
+    ])
+
+  return {
+    input: formatTokenCount(getNumberProperty(usageRecord, "input_tokens")),
+    output: formatTokenCount(visibleOutputTokens),
+    reasoning: formatTokenCount(reasoningTokens),
+    total: formatTokenCount(totalTokens),
+  }
+}
+
+function getNumberProperty(record: Record<string, unknown>, property: string) {
+  const value = record[property]
+
+  return typeof value === "number" && Number.isFinite(value) ? value : null
+}
+
+function sumTokenCounts(tokenCounts: Array<number | null>) {
+  if (tokenCounts.some((tokenCount) => tokenCount === null)) {
+    return null
+  }
+
+  return tokenCounts.reduce<number>(
+    (sum, tokenCount) => sum + (tokenCount ?? 0),
+    0
+  )
+}
+
+function formatTokenCount(tokenCount: number | null) {
+  return tokenCount === null ? "unknown" : String(tokenCount)
+}
+
 function createServer(
   name: string,
   registerTools: (server: McpServer) => void
@@ -739,6 +814,11 @@ async function runOpeningHandLlmRun({
     const client = new OpenAI({
       apiKey: config.apiKey,
     })
+    logOpenAiApiCallStarted({
+      llmRunId,
+      model: requestPayload.model,
+      phase: "opening_hand",
+    })
     const stream = await client.responses.create(requestPayload, {
       signal: runtime.abortController.signal,
     })
@@ -776,6 +856,12 @@ async function runOpeningHandLlmRun({
     if (!didReceiveCompletedResponse) {
       throw new Error("Opening-hand LLM stream ended without response.completed.")
     }
+
+    logOpenAiApiCallFinished({
+      llmRunId,
+      phase: "opening_hand",
+      usage,
+    })
 
     const parsedOpeningHand = parseOpeningHandFromResponseText(outputText)
 
@@ -864,6 +950,11 @@ async function runTurnLlmRun({
     const client = new OpenAI({
       apiKey: config.apiKey,
     })
+    logOpenAiApiCallStarted({
+      llmRunId,
+      model: requestPayload.model,
+      phase: "turn",
+    })
     const stream = await client.responses.create(requestPayload, {
       signal: runtime.abortController.signal,
     })
@@ -901,6 +992,12 @@ async function runTurnLlmRun({
     if (!didReceiveCompletedResponse) {
       throw new Error("Turn LLM stream ended without response.completed.")
     }
+
+    logOpenAiApiCallFinished({
+      llmRunId,
+      phase: "turn",
+      usage,
+    })
 
     const parsedTurn = parseTurnSimulationFromResponseText(outputText)
 
