@@ -807,6 +807,7 @@ function SimulationDetails({
     null
   )
   const isLoadingResultsRef = useRef(false)
+  const resultsAbortControllerRef = useRef<AbortController | null>(null)
   const shouldSimulateOpeningHand = simulation.startingHandId === null
 
   useEffect(() => {
@@ -825,6 +826,8 @@ function SimulationDetails({
     setDebugInfoError(null)
     setDebugInfo(null)
     setIsDebugModalOpen(false)
+    resultsAbortControllerRef.current?.abort()
+    resultsAbortControllerRef.current = null
     isLoadingResultsRef.current = false
     setIsLoadingResults(false)
     setResultsError(null)
@@ -986,13 +989,18 @@ function SimulationDetails({
       return
     }
 
+    const abortController = new AbortController()
+    resultsAbortControllerRef.current = abortController
     isLoadingResultsRef.current = true
     setIsLoadingResults(true)
     setResultsError(null)
 
     try {
       const response = await fetch(
-        `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/results`
+        `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/results`,
+        {
+          signal: abortController.signal,
+        }
       )
 
       if (!response.ok) {
@@ -1008,12 +1016,34 @@ function SimulationDetails({
       const data = (await response.json()) as SimulationResultsResponse
       setResultsInfo(data.results)
     } catch {
+      if (abortController.signal.aborted) {
+        return
+      }
+
       setResultsError("Simulation results could not be loaded.")
     } finally {
-      isLoadingResultsRef.current = false
-      setIsLoadingResults(false)
+      if (resultsAbortControllerRef.current === abortController) {
+        resultsAbortControllerRef.current = null
+        isLoadingResultsRef.current = false
+        setIsLoadingResults(false)
+      }
     }
   }, [deckId, simulation.id])
+
+  useEffect(() => {
+    void handleReloadResults()
+
+    const intervalId = window.setInterval(() => {
+      void handleReloadResults()
+    }, 1000)
+
+    return () => {
+      window.clearInterval(intervalId)
+      resultsAbortControllerRef.current?.abort()
+      resultsAbortControllerRef.current = null
+      isLoadingResultsRef.current = false
+    }
+  }, [handleReloadResults])
 
   useEffect(() => {
     if (!isDebugModalOpen) {
