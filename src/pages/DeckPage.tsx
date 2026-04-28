@@ -101,20 +101,13 @@ export function DeckPage({
   const isSimulationTab = activeTab === "simulation"
 
   return (
-    <main
-      className={`bg-background px-4 py-6 text-foreground sm:px-6 lg:px-8 ${
-        isSimulationTab ? "flex h-svh overflow-hidden" : "min-h-svh"
-      }`}
-    >
-      <section
-        className={`mx-auto flex w-full flex-col gap-6 ${
-          isSimulationTab ? "min-h-0 min-w-0 flex-1" : "max-w-6xl"
-        }`}
-      >
-        <header className="flex flex-col gap-4 border-b border-border pb-5">
+    <main className="flex h-svh overflow-hidden bg-background pt-3 text-foreground">
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <header className="flex flex-col gap-2.5 border-b border-border px-4 pb-4 sm:px-6 lg:px-8">
           <Button
             type="button"
             variant="ghost"
+            size="default"
             className="w-fit"
             onClick={() => navigateTo("/")}
           >
@@ -123,12 +116,12 @@ export function DeckPage({
           </Button>
 
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <p className="text-sm font-medium tracking-[0.18em] text-sky-300 uppercase">
                 Deck page
               </p>
               <div className="flex items-center gap-2">
-                <h1 className="text-3xl font-semibold text-foreground sm:text-4xl">
+                <h1 className="text-3xl font-semibold text-foreground">
                   {deck?.name ?? "Deck"}
                 </h1>
                 {deck ? (
@@ -209,25 +202,23 @@ export function DeckPage({
           </div>
         </header>
 
-        {isLoadingDeck ? (
-          <div className="rounded-lg border border-border bg-card/70 px-4 py-8 text-sm text-muted-foreground">
-            Loading deck...
-          </div>
-        ) : deckLoadError ? (
-          <div className="flex flex-col gap-3 rounded-lg border border-border bg-card/70 px-4 py-8 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-destructive">{deckLoadError}</p>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => void loadDeck()}
-            >
-              Try again
-            </Button>
-          </div>
-        ) : deck ? (
-          activeTab === "details" ? (
-            <ViewDeckCards deck={deck} />
-          ) : (
+        {isSimulationTab ? (
+          isLoadingDeck ? (
+            <div className="mx-4 mt-6 rounded-lg border border-border bg-card/70 px-4 py-8 text-sm text-muted-foreground sm:mx-6 lg:mx-8">
+              Loading deck...
+            </div>
+          ) : deckLoadError ? (
+            <div className="mx-4 mt-6 flex flex-col gap-3 rounded-lg border border-border bg-card/70 px-4 py-8 sm:mx-6 sm:flex-row sm:items-center sm:justify-between lg:mx-8">
+              <p className="text-sm text-destructive">{deckLoadError}</p>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void loadDeck()}
+              >
+                Try again
+              </Button>
+            </div>
+          ) : deck ? (
             <div className="min-h-0 min-w-0 flex-1">
               <DeckSimulation
                 cards={deck.cards}
@@ -235,8 +226,31 @@ export function DeckPage({
                 selectedSimulationIdFromUrl={initialSimulationId}
               />
             </div>
-          )
-        ) : null}
+          ) : null
+        ) : (
+          <div className="simulation-scrollbar min-h-0 flex-1 overflow-y-auto">
+            <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
+              {isLoadingDeck ? (
+                <div className="rounded-lg border border-border bg-card/70 px-4 py-8 text-sm text-muted-foreground">
+                  Loading deck...
+                </div>
+              ) : deckLoadError ? (
+                <div className="flex flex-col gap-3 rounded-lg border border-border bg-card/70 px-4 py-8 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-sm text-destructive">{deckLoadError}</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void loadDeck()}
+                  >
+                    Try again
+                  </Button>
+                </div>
+              ) : deck ? (
+                <ViewDeckCards deck={deck} />
+              ) : null}
+            </div>
+          </div>
+        )}
       </section>
 
       {deck && isDeleteDeckOpen ? (

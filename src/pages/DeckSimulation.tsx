@@ -379,7 +379,7 @@ export function DeckSimulation({
 
   return (
     <>
-      <div className="grid h-full min-h-0 grid-rows-[minmax(11rem,16rem)_minmax(0,1fr)] overflow-hidden rounded-lg border border-border bg-card/70 lg:grid-cols-[18rem_minmax(0,1fr)] lg:grid-rows-1">
+      <div className="grid h-full min-h-0 grid-rows-[minmax(11rem,16rem)_minmax(0,1fr)] overflow-hidden lg:grid-cols-[18rem_minmax(0,1fr)] lg:grid-rows-1">
         <aside className="simulation-sidebar-surface min-h-0 min-w-0 border-b border-border lg:border-r lg:border-b-0">
           <nav
             className="simulation-scrollbar h-full overflow-y-auto"
