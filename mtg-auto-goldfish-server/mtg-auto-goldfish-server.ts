@@ -41,6 +41,7 @@ import {
   getStartingHandSimulationPromptData,
   getTurnSimulationPromptData,
   listSimulationsForDeck,
+  logTurnAction,
   markLlmRunStreaming,
   mulliganSimulation,
   requestCancelSimulationLlmRuns,
@@ -505,16 +506,11 @@ function registerLogTurnActionTool(server: McpServer) {
       },
     },
     async ({ simulationId, action }) => {
-      const response = {
-        simulationId,
-        turnNumber: 1,
-        latestAction: action,
-        actions: [],
-      }
+      const response = await logTurnAction(simulationId, action)
 
       return {
         content: createToolResultContent(
-          "Placeholder: would log this turn action. No action was persisted.",
+          `Logged turn action ${response.latestAction.sequence}.`,
           response
         ),
       }

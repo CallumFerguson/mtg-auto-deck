@@ -195,6 +195,21 @@ export type LibraryTakeCardsResult = {
   cardsRemaining: number
 }
 
+export type TurnActionLogEntry = {
+  sequence: number
+  action: string
+  createdAt: string
+}
+
+export type TurnActionLogResult = {
+  simulationId: string
+  llmRunId: string
+  turnNumber: number
+  attemptNumber: number
+  latestAction: TurnActionLogEntry
+  actions: TurnActionLogEntry[]
+}
+
 export type CreateSimulationInput = {
   seed: string
   turnsToSimulate: number
@@ -400,6 +415,18 @@ export async function ensureSimulationsSchema() {
     ALTER TABLE simulation_turn_llm_runs
     ADD COLUMN IF NOT EXISTS outdated boolean NOT NULL DEFAULT false
   `)
+  await queryDatabase(`
+    CREATE TABLE IF NOT EXISTS simulation_turn_actions (
+      id bigserial PRIMARY KEY,
+
+      turn_llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
+      sequence integer NOT NULL CHECK (sequence > 0),
+      action text NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now(),
+
+      UNIQUE (turn_llm_run_id, sequence)
+    )
+  `)
 
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS simulations_deck_id_idx
@@ -428,6 +455,10 @@ export async function ensureSimulationsSchema() {
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS simulation_turn_llm_runs_simulation_id_turn_number_idx
       ON simulation_turn_llm_runs (simulation_id, turn_number)
+  `)
+  await queryDatabase(`
+    CREATE INDEX IF NOT EXISTS simulation_turn_actions_turn_llm_run_id_sequence_idx
+      ON simulation_turn_actions (turn_llm_run_id, sequence)
   `)
 }
 
@@ -947,6 +978,117 @@ export async function takeCardsFromSimulationLibrary(
       cardsRemaining: library.length,
     }
   })
+}
+
+export async function logTurnAction(
+  simulationId: string,
+  action: string
+): Promise<TurnActionLogResult> {
+  const trimmedAction = action.trim()
+
+  if (!trimmedAction) {
+    throw new SimulationValidationError("Turn action is required.")
+  }
+
+  return withDatabaseTransaction(async (client) => {
+    const turnRunResult = await client.query<{
+      simulation_id: string
+      llm_run_id: string
+      turn_number: number
+      attempt_number: number
+    }>(
+      `
+        SELECT
+          turn_run.simulation_id,
+          turn_run.llm_run_id,
+          turn_run.turn_number,
+          turn_run.attempt_number
+        FROM simulation_turn_llm_runs turn_run
+        JOIN llm_runs llm_run
+          ON llm_run.id = turn_run.llm_run_id
+        WHERE turn_run.simulation_id = $1
+          AND llm_run.phase = 'turn'
+          AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
+        ORDER BY turn_run.turn_number DESC, turn_run.attempt_number DESC
+        LIMIT 1
+        FOR UPDATE OF turn_run
+      `,
+      [simulationId]
+    )
+
+    if (turnRunResult.rowCount === 0) {
+      throw new SimulationValidationError(
+        "No active turn LLM run exists for this simulation."
+      )
+    }
+
+    const turnRun = turnRunResult.rows[0]
+    const sequenceResult = await client.query<{ sequence: number }>(
+      `
+        SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence
+        FROM simulation_turn_actions
+        WHERE turn_llm_run_id = $1
+      `,
+      [turnRun.llm_run_id]
+    )
+    const sequence = Number(sequenceResult.rows[0].sequence)
+
+    await client.query(
+      `
+        INSERT INTO simulation_turn_actions (
+          turn_llm_run_id,
+          sequence,
+          action
+        )
+        VALUES ($1, $2, $3)
+      `,
+      [turnRun.llm_run_id, sequence, trimmedAction]
+    )
+
+    const actionsResult = await client.query<{
+      sequence: number
+      action: string
+      created_at: Date
+    }>(
+      `
+        SELECT
+          sequence,
+          action,
+          created_at
+        FROM simulation_turn_actions
+        WHERE turn_llm_run_id = $1
+        ORDER BY sequence ASC
+      `,
+      [turnRun.llm_run_id]
+    )
+    const actions = actionsResult.rows.map(mapTurnActionLogEntry)
+    const latestAction = actions.find((entry) => entry.sequence === sequence)
+
+    if (!latestAction) {
+      throw new SimulationValidationError("Logged turn action not found.")
+    }
+
+    return {
+      simulationId: turnRun.simulation_id,
+      llmRunId: turnRun.llm_run_id,
+      turnNumber: turnRun.turn_number,
+      attemptNumber: turnRun.attempt_number,
+      latestAction,
+      actions,
+    }
+  })
+}
+
+function mapTurnActionLogEntry(row: {
+  sequence: number
+  action: string
+  created_at: Date
+}): TurnActionLogEntry {
+  return {
+    sequence: row.sequence,
+    action: row.action,
+    createdAt: row.created_at.toISOString(),
+  }
 }
 
 export async function createOpeningHandLlmRun(
