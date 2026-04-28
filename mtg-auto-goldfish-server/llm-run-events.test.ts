@@ -9,6 +9,7 @@ import {
 } from "./llm-run-events.js"
 import {
   SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
+  STALE_IN_FLIGHT_LLM_RUN_CANCELLATION_MESSAGE,
   isValidCompletedOpeningHand,
 } from "./simulations-postgres.js"
 
@@ -113,6 +114,18 @@ test("normal results exclude only raw and completed chunks", () => {
     "raw_event",
     "completed",
   ])
+})
+
+test("startup stale-run cancellation message is explicit", () => {
+  const chunk = createCancellationChunk(
+    STALE_IN_FLIGHT_LLM_RUN_CANCELLATION_MESSAGE
+  )
+
+  assert.equal(chunk.kind, "cancelled")
+  assert.deepEqual(chunk.payload, {
+    message:
+      "LLM run was cancelled because the server restarted before the in-flight API stream completed.",
+  })
 })
 
 test("validates completed opening hand size after commander mulligans", () => {

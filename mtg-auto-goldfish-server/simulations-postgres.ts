@@ -135,6 +135,13 @@ export type SimulationDebugInfo = {
 
 export type SimulationResultsInfo = SimulationDebugInfo
 
+export type StaleInFlightLlmRunCleanupResult = {
+  cancelledLlmRunIds: string[]
+}
+
+export const STALE_IN_FLIGHT_LLM_RUN_CANCELLATION_MESSAGE =
+  "LLM run was cancelled because the server restarted before the in-flight API stream completed."
+
 export type SimulationSummary = {
   id: string
   deckId: string
@@ -1732,6 +1739,73 @@ export async function cancelLlmRun(llmRunId: string, failureMessage?: string) {
     `,
     [llmRunId, failureMessage ?? null]
   )
+}
+
+export async function cancelStaleInFlightLlmRuns(): Promise<
+  StaleInFlightLlmRunCleanupResult
+> {
+  return withDatabaseTransaction(async (client) => {
+    const activeRunsResult = await client.query<{ id: string }>(
+      `
+        SELECT id
+        FROM llm_runs
+        WHERE status IN ('pending', 'streaming', 'cancel_requested')
+        ORDER BY created_at ASC, id ASC
+        FOR UPDATE
+      `
+    )
+    const cancelledLlmRunIds: string[] = []
+
+    for (const run of activeRunsResult.rows) {
+      const sequenceResult = await client.query<{ sequence: number }>(
+        `
+          SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence
+          FROM llm_run_chunks
+          WHERE llm_run_id = $1
+        `,
+        [run.id]
+      )
+      const sequence = Number(sequenceResult.rows[0].sequence)
+      const insertChunkQuery = buildAppendLlmRunChunksQuery(run.id, [
+        {
+          sequence,
+          kind: "cancelled",
+          providerEventType: "server.cancelled",
+          itemType: null,
+          mcpFunctionName: null,
+          mcpFunctionOutput: null,
+          reasoningDelta: null,
+          outputDelta: null,
+          payload: {
+            message: STALE_IN_FLIGHT_LLM_RUN_CANCELLATION_MESSAGE,
+          },
+        },
+      ])
+
+      await client.query(insertChunkQuery.text, insertChunkQuery.values)
+
+      const cancelledRunResult = await client.query(
+        `
+          UPDATE llm_runs
+          SET status = 'cancelled',
+              cancelled_at = now(),
+              failure_message = $2,
+              updated_at = now()
+          WHERE id = $1
+            AND status IN ('pending', 'streaming', 'cancel_requested')
+        `,
+        [run.id, STALE_IN_FLIGHT_LLM_RUN_CANCELLATION_MESSAGE]
+      )
+
+      if ((cancelledRunResult.rowCount ?? 0) > 0) {
+        cancelledLlmRunIds.push(run.id)
+      }
+    }
+
+    return {
+      cancelledLlmRunIds,
+    }
+  })
 }
 
 export async function requestCancelSimulationLlmRuns(

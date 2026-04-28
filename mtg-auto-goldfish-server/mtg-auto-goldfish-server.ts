@@ -25,6 +25,7 @@ import {
   appendLlmRunChunkAtNextSequence,
   appendLlmRunChunks,
   cancelLlmRun,
+  cancelStaleInFlightLlmRuns,
   completeOpeningHandLlmRun,
   completeTurnLlmRun,
   createOpeningHandLlmRun,
@@ -1155,6 +1156,13 @@ async function main() {
   await ensureDecksSchema()
   await ensureStartingHandsSchema()
   await ensureSimulationsSchema()
+  const staleLlmRunCleanup = await cancelStaleInFlightLlmRuns()
+
+  if (staleLlmRunCleanup.cancelledLlmRunIds.length > 0) {
+    console.error(
+      `Cancelled ${staleLlmRunCleanup.cancelledLlmRunIds.length} stale in-flight LLM run(s) from a previous server process.`
+    )
+  }
 
   const host = DEFAULT_HOST
   const port = DEFAULT_PORT
