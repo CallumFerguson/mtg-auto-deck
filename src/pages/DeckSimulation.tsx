@@ -1280,9 +1280,11 @@ function SimulationResultsPanel({
       resultLabel: `Turn ${run.turnNumber ?? "?"} attempt ${run.attemptNumber}`,
     })),
   ]
-  const runsWithChunks = runs.filter((run) => run.chunks.length > 0)
+  const runsWithResults = runs.filter(
+    (run) => run.chunks.length > 0 || run.gameState
+  )
 
-  if (runsWithChunks.length === 0) {
+  if (runsWithResults.length === 0) {
     return (
       <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
         No user-facing result chunks have been saved for this simulation yet.
@@ -1292,7 +1294,7 @@ function SimulationResultsPanel({
 
   return (
     <div className="grid gap-3">
-      {runsWithChunks.map((run) => (
+      {runsWithResults.map((run) => (
         <section
           key={run.llmRunId}
           className="grid gap-3 rounded-md border border-border bg-background/35 p-3"
@@ -1311,7 +1313,20 @@ function SimulationResultsPanel({
             </p>
           </div>
 
-          <SimulationResultChunkCards chunks={run.chunks} />
+          {run.gameState ? (
+            <details className="rounded-md border border-emerald-500/30 bg-emerald-950/20">
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-emerald-100 transition-colors hover:text-emerald-50">
+                Game state
+              </summary>
+              <p className="border-t border-emerald-500/20 p-3 text-sm leading-6 whitespace-pre-wrap text-emerald-50/90">
+                {run.gameState}
+              </p>
+            </details>
+          ) : null}
+
+          {run.chunks.length > 0 ? (
+            <SimulationResultChunkCards chunks={run.chunks} />
+          ) : null}
         </section>
       ))}
     </div>
@@ -1535,6 +1550,17 @@ function SimulationDebugRunGroup({
                 </span>
               </p>
             </div>
+
+            {run.gameState ? (
+              <details className="rounded-md border border-emerald-500/35 bg-emerald-950/20 shadow-sm shadow-emerald-950/20">
+                <summary className="cursor-pointer border-b border-emerald-500/20 px-3 py-2 text-sm font-medium text-emerald-200 transition-colors hover:text-emerald-100">
+                  Game state
+                </summary>
+                <pre className="debug-scrollbar-neutral max-h-96 max-w-full min-w-0 overflow-y-auto p-3 text-xs leading-5 break-words whitespace-pre-wrap text-emerald-50/80">
+                  {run.gameState}
+                </pre>
+              </details>
+            ) : null}
 
             <div className="grid gap-2">
               <p className="text-sm text-muted-foreground">

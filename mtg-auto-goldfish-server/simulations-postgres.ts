@@ -96,6 +96,7 @@ export type SimulationDebugLlmRun = {
   runtimeStreamKey: string | null
   attemptNumber: number
   turnNumber?: number
+  gameState?: string
   openingHandIsValid?: boolean
   chunks: SimulationDebugLlmRunChunk[]
 }
@@ -357,6 +358,7 @@ export async function ensureSimulationsSchema() {
       llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
       turn_number integer NOT NULL CHECK (turn_number > 0),
       attempt_number integer NOT NULL CHECK (attempt_number > 0),
+      game_state text,
       library_snapshot jsonb CHECK (library_snapshot IS NULL OR jsonb_typeof(library_snapshot) = 'array'),
       random_state_snapshot bigint,
       created_at timestamptz NOT NULL DEFAULT now(),
@@ -364,6 +366,10 @@ export async function ensureSimulationsSchema() {
       UNIQUE (simulation_id, turn_number, attempt_number),
       UNIQUE (llm_run_id)
     )
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulation_turn_llm_runs
+    ADD COLUMN IF NOT EXISTS game_state text
   `)
 
   await queryDatabase(`
@@ -1447,14 +1453,14 @@ export async function getSimulationDebugInfo(
     simulationId,
     tableName: "simulation_opening_hand_llm_runs",
     selectColumns:
-      "run.attempt_number, NULL::integer AS turn_number, run.opening_hand_is_valid",
+      "run.attempt_number, NULL::integer AS turn_number, NULL::text AS game_state, run.opening_hand_is_valid",
     orderBy: "run.attempt_number ASC",
   })
   const turnRuns = await getSimulationDebugLlmRuns({
     simulationId,
     tableName: "simulation_turn_llm_runs",
     selectColumns:
-      "run.attempt_number, run.turn_number, NULL::boolean AS opening_hand_is_valid",
+      "run.attempt_number, run.turn_number, run.game_state, NULL::boolean AS opening_hand_is_valid",
     orderBy: "run.turn_number ASC, run.attempt_number ASC",
   })
 
@@ -1489,7 +1495,7 @@ export async function getSimulationResultsInfo(
     simulationId,
     tableName: "simulation_opening_hand_llm_runs",
     selectColumns:
-      "run.attempt_number, NULL::integer AS turn_number, run.opening_hand_is_valid",
+      "run.attempt_number, NULL::integer AS turn_number, NULL::text AS game_state, run.opening_hand_is_valid",
     orderBy: "run.attempt_number ASC",
     excludeChunkKinds: SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
   })
@@ -1497,7 +1503,7 @@ export async function getSimulationResultsInfo(
     simulationId,
     tableName: "simulation_turn_llm_runs",
     selectColumns:
-      "run.attempt_number, run.turn_number, NULL::boolean AS opening_hand_is_valid",
+      "run.attempt_number, run.turn_number, run.game_state, NULL::boolean AS opening_hand_is_valid",
     orderBy: "run.turn_number ASC, run.attempt_number ASC",
     excludeChunkKinds: SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
   })
@@ -1694,6 +1700,7 @@ type SimulationDebugLlmRunRow = {
   runtime_stream_key: string | null
   attempt_number: number
   turn_number: number | null
+  game_state: string | null
   opening_hand_is_valid: boolean | null
   chunk_id: string | null
   sequence: number | null
@@ -1775,6 +1782,10 @@ async function getSimulationDebugLlmRuns({
 
       if (row.turn_number !== null) {
         run.turnNumber = row.turn_number
+      }
+
+      if (row.game_state !== null) {
+        run.gameState = row.game_state
       }
 
       if (row.opening_hand_is_valid !== null) {
