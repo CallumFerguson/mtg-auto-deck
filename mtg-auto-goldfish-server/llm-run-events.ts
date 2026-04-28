@@ -141,6 +141,33 @@ export function parseOpeningHandFromResponseText(responseText: string) {
   }
 }
 
+export function parseTurnSimulationFromResponseText(responseText: string) {
+  if (!responseText.trim()) {
+    throw new Error("Turn LLM completed response was empty.")
+  }
+
+  let parsedResponse: unknown
+
+  try {
+    parsedResponse = JSON.parse(responseText) as unknown
+  } catch (error) {
+    throw new Error("Turn LLM completed response was not valid JSON.", {
+      cause: error,
+    })
+  }
+
+  const responseRecord = asRecord(parsedResponse)
+  const gameState = getStringProperty(responseRecord, "gameState")?.trim()
+
+  if (!gameState) {
+    throw new Error("Turn LLM response did not include gameState.")
+  }
+
+  return {
+    gameState,
+  }
+}
+
 export function getCompletedResponseOutputText(response: unknown) {
   const responseRecord = asRecord(response)
   const topLevelOutputText = getStringProperty(responseRecord, "output_text")

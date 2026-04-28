@@ -26,8 +26,10 @@ import {
   appendLlmRunChunks,
   cancelLlmRun,
   completeOpeningHandLlmRun,
+  completeTurnLlmRun,
   createOpeningHandLlmRun,
   createSimulation,
+  createTurnLlmRun,
   deleteSimulation,
   drawCardsFromBottom,
   drawCardsFromTop,
@@ -48,6 +50,7 @@ import {
   shuffleSimulationLibrary,
   SimulationValidationError,
   takeCardsFromSimulationLibrary,
+  updateLlmRunRequestData,
 } from "./simulations-postgres.js"
 import type {
   LlmRunChunkInput,
@@ -73,6 +76,7 @@ import {
   isProviderTerminalEvent,
   normalizeOpenAiStreamEvent,
   parseOpeningHandFromResponseText,
+  parseTurnSimulationFromResponseText,
 } from "./llm-run-events.js"
 import {
   createExactScryfallOracleCardMatchMap,
@@ -88,6 +92,7 @@ const TURN_SIMULATION_SERVER_NAME = "turn-simulation-server"
 const OPENING_HAND_MCP_PATH = "/mcp/opening-hand"
 const TURN_SIMULATION_MCP_PATH = "/mcp/turn-simulation"
 const OPENING_HAND_MCP_SERVER_LABEL = "opening_hand"
+const TURN_SIMULATION_MCP_SERVER_LABEL = "turn_simulation"
 const OPENAI_PROVIDER = "openai"
 const STREAM_FLUSH_INTERVAL_MS = 1000
 const DEFAULT_ALLOWED_ORIGINS = [
@@ -139,6 +144,9 @@ const createSimulationSchema = z.object({
   turnsToSimulate: z.number().int().nonnegative(),
   startingHandId: z.uuid().nullable(),
 })
+const createTurnLlmRunSchema = z.object({
+  turnNumber: z.number().int().positive(),
+})
 const reasoningEffortSchema = z.enum([
   "none",
   "minimal",
@@ -152,7 +160,14 @@ type OpenAiRunConfig = {
   apiKey: string
   model: string
   reasoningEffort: z.infer<typeof reasoningEffortSchema>
+}
+
+type OpeningHandOpenAiRunConfig = OpenAiRunConfig & {
   openingHandMcpPublicUrl: string
+}
+
+type TurnSimulationOpenAiRunConfig = OpenAiRunConfig & {
+  turnSimulationMcpPublicUrl: string
 }
 
 type ActiveLlmRunRuntime = {
@@ -518,7 +533,6 @@ function getOpenAiRunConfig(): OpenAiRunConfig {
     "OPENAI_API_KEY",
     "OPENAI_MODEL",
     "OPENAI_REASONING_EFFORT",
-    "OPENING_HAND_MCP_PUBLIC_URL",
   ].filter((environmentVariable) => !process.env[environmentVariable]?.trim())
 
   if (missingVariables.length > 0) {
@@ -541,12 +555,41 @@ function getOpenAiRunConfig(): OpenAiRunConfig {
     apiKey: process.env.OPENAI_API_KEY!.trim(),
     model: process.env.OPENAI_MODEL!.trim(),
     reasoningEffort: parsedReasoningEffort.data,
-    openingHandMcpPublicUrl: process.env.OPENING_HAND_MCP_PUBLIC_URL!.trim(),
   }
 }
 
+function getOpeningHandOpenAiRunConfig(): OpeningHandOpenAiRunConfig {
+  return {
+    ...getOpenAiRunConfig(),
+    openingHandMcpPublicUrl: getRequiredOpenAiEnvironmentVariable(
+      "OPENING_HAND_MCP_PUBLIC_URL"
+    ),
+  }
+}
+
+function getTurnSimulationOpenAiRunConfig(): TurnSimulationOpenAiRunConfig {
+  return {
+    ...getOpenAiRunConfig(),
+    turnSimulationMcpPublicUrl: getRequiredOpenAiEnvironmentVariable(
+      "TURN_SIMULATION_MCP_PUBLIC_URL"
+    ),
+  }
+}
+
+function getRequiredOpenAiEnvironmentVariable(environmentVariable: string) {
+  const value = process.env[environmentVariable]?.trim()
+
+  if (!value) {
+    throw new OpenAiConfigurationError(
+      `Missing OpenAI environment variable(s): ${environmentVariable}. Add them to your repo-root .env file.`
+    )
+  }
+
+  return value
+}
+
 function buildOpeningHandOpenAiRequestPayload(
-  config: OpenAiRunConfig,
+  config: OpeningHandOpenAiRunConfig,
   fullPrompt: string,
   simulationId: string
 ) {
@@ -575,9 +618,41 @@ function buildOpeningHandOpenAiRequestPayload(
   }
 }
 
-function getPersistableOpenAiRequestPayload(
-  requestPayload: ReturnType<typeof buildOpeningHandOpenAiRequestPayload>
+function buildTurnSimulationOpenAiRequestPayload(
+  config: TurnSimulationOpenAiRunConfig,
+  fullPrompt: string,
+  simulationId: string,
+  turnNumber: number
 ) {
+  return {
+    model: config.model,
+    input: fullPrompt,
+    stream: true as const,
+    metadata: {
+      simulationId,
+      phase: "turn",
+      turnNumber: String(turnNumber),
+    },
+    reasoning: {
+      effort: config.reasoningEffort,
+      summary: "auto" as const,
+    },
+    tools: [
+      {
+        type: "mcp" as const,
+        server_label: TURN_SIMULATION_MCP_SERVER_LABEL,
+        server_description:
+          "Tools for resolving one Magic: The Gathering goldfish turn, including library operations and turn action logging.",
+        server_url: config.turnSimulationMcpPublicUrl,
+        require_approval: "never" as const,
+      },
+    ],
+  }
+}
+
+function getPersistableOpenAiRequestPayload<
+  TRequestPayload extends { input: unknown },
+>(requestPayload: TRequestPayload) {
   return {
     ...requestPayload,
     input: "[stored in llm_runs.full_prompt]",
@@ -702,6 +777,134 @@ async function runOpeningHandLlmRun({
 
     await tryForceFlushRuntimeChunks(runtime, "failed opening-hand run")
     console.error("Opening-hand LLM run failed:", effectiveError)
+    await failLlmRun(llmRunId, getErrorMessage(effectiveError))
+  } finally {
+    clearRuntimeFlushTimer(runtime)
+    activeLlmRunRuntimes.delete(runtimeStreamKey)
+  }
+}
+
+function startTurnLlmRun({
+  config,
+  fullPrompt,
+  llmRunId,
+  requestPayload,
+  runtimeStreamKey,
+}: {
+  config: OpenAiRunConfig
+  fullPrompt: string
+  llmRunId: string
+  requestPayload: ReturnType<typeof buildTurnSimulationOpenAiRequestPayload>
+  runtimeStreamKey: string
+}) {
+  void runTurnLlmRun({
+    config,
+    fullPrompt,
+    llmRunId,
+    requestPayload,
+    runtimeStreamKey,
+  })
+}
+
+async function runTurnLlmRun({
+  config,
+  llmRunId,
+  requestPayload,
+  runtimeStreamKey,
+}: {
+  config: OpenAiRunConfig
+  fullPrompt: string
+  llmRunId: string
+  requestPayload: ReturnType<typeof buildTurnSimulationOpenAiRequestPayload>
+  runtimeStreamKey: string
+}) {
+  const runtime: ActiveLlmRunRuntime = {
+    abortController: new AbortController(),
+    chunkBuffer: [],
+    flushTimer: null,
+    flushPromise: null,
+    llmRunId,
+    nextSequence: 1,
+  }
+  let outputText = ""
+  let responseMetadata: unknown = {}
+  let usage: unknown = {}
+  let didReceiveCompletedResponse = false
+  let providerTerminalEventError: ProviderTerminalEventError | null = null
+
+  activeLlmRunRuntimes.set(runtimeStreamKey, runtime)
+
+  try {
+    await markLlmRunStreaming(llmRunId)
+
+    const client = new OpenAI({
+      apiKey: config.apiKey,
+    })
+    const stream = await client.responses.create(requestPayload, {
+      signal: runtime.abortController.signal,
+    })
+
+    for await (const event of stream) {
+      const eventRecord = asRecord(event)
+      const eventType = getStringProperty(eventRecord, "type")
+      const normalizedEvent = normalizeOpenAiStreamEvent(event)
+
+      if (eventType === "response.completed") {
+        const response = eventRecord.response
+        const responseRecord = asRecord(response)
+        didReceiveCompletedResponse = true
+        outputText = getCompletedResponseOutputText(response)
+        responseMetadata = response ?? {}
+        usage = responseRecord.usage ?? {}
+      }
+
+      appendRuntimeChunk(runtime, normalizedEvent)
+
+      if (isProviderTerminalEvent(eventType)) {
+        providerTerminalEventError = new ProviderTerminalEventError(
+          eventType,
+          event
+        )
+      }
+    }
+
+    await forceFlushRuntimeChunks(runtime)
+
+    if (providerTerminalEventError) {
+      throw providerTerminalEventError
+    }
+
+    if (!didReceiveCompletedResponse) {
+      throw new Error("Turn LLM stream ended without response.completed.")
+    }
+
+    const parsedTurn = parseTurnSimulationFromResponseText(outputText)
+
+    await completeTurnLlmRun({
+      llmRunId,
+      gameState: parsedTurn.gameState,
+      responseMetadata,
+      usage,
+    })
+  } catch (error) {
+    if (isAbortError(error) || runtime.abortController.signal.aborted) {
+      appendRuntimeChunk(
+        runtime,
+        createCancellationChunk("Turn LLM run was cancelled.")
+      )
+      await tryForceFlushRuntimeChunks(runtime, "cancelled turn run")
+      await cancelLlmRun(llmRunId, "Turn LLM run was cancelled.")
+      return
+    }
+
+    const effectiveError = providerTerminalEventError ?? error
+
+    if (!(effectiveError instanceof ProviderTerminalEventError)) {
+      appendRuntimeChunk(runtime, createServerErrorChunk(effectiveError))
+    }
+
+    await tryForceFlushRuntimeChunks(runtime, "failed turn run")
+    console.error("Turn LLM run failed:", effectiveError)
     await failLlmRun(llmRunId, getErrorMessage(effectiveError))
   } finally {
     clearRuntimeFlushTimer(runtime)
@@ -946,7 +1149,7 @@ async function main() {
       const simulationId = String(req.params.simulationId)
 
       try {
-        const openAiConfig = getOpenAiRunConfig()
+        const openAiConfig = getOpeningHandOpenAiRunConfig()
 
         await resetSimulationForOpeningHandLlmRun(deckId, simulationId)
 
@@ -994,6 +1197,103 @@ async function main() {
         console.error("Failed to start opening-hand LLM run:", error)
         res.status(500).json({
           error: "Failed to start opening-hand LLM run.",
+        })
+      }
+    }
+  )
+
+  app.post(
+    "/decks/:deckId/simulations/:simulationId/turn-llm-runs",
+    async (req: Request, res: Response) => {
+      const deckId = String(req.params.deckId)
+      const simulationId = String(req.params.simulationId)
+      const parsedTurnRun = createTurnLlmRunSchema.safeParse(req.body)
+
+      if (!parsedTurnRun.success) {
+        res.status(400).json({
+          error: "Turn LLM run payload is not in the expected format.",
+        })
+        return
+      }
+
+      let createdLlmRunId: string | null = null
+
+      try {
+        const openAiConfig = getTurnSimulationOpenAiRunConfig()
+        const turnNumber = parsedTurnRun.data.turnNumber
+        const turnRun = await createTurnLlmRun(deckId, {
+          simulationId,
+          turnNumber,
+          provider: OPENAI_PROVIDER,
+          model: openAiConfig.model,
+          runtimeStreamKey: randomUUID(),
+        })
+        createdLlmRunId = turnRun.llmRunId
+
+        const fullPrompt =
+          turnNumber === 1
+            ? await buildTurnSimulationPrompt(simulationId)
+            : await buildTurnSimulationPrompt(
+                simulationId,
+                turnRun.previousGameState ?? undefined
+              )
+        const requestPayload = buildTurnSimulationOpenAiRequestPayload(
+          openAiConfig,
+          fullPrompt,
+          simulationId,
+          turnNumber
+        )
+
+        await updateLlmRunRequestData({
+          llmRunId: turnRun.llmRunId,
+          fullPrompt,
+          requestPayload: getPersistableOpenAiRequestPayload(requestPayload),
+        })
+
+        startTurnLlmRun({
+          config: openAiConfig,
+          fullPrompt,
+          llmRunId: turnRun.llmRunId,
+          requestPayload,
+          runtimeStreamKey: turnRun.runtimeStreamKey,
+        })
+
+        res.status(202).json({
+          simulationId: turnRun.simulationId,
+          llmRunId: turnRun.llmRunId,
+          turnNumber: turnRun.turnNumber,
+          attemptNumber: turnRun.attemptNumber,
+          runtimeStreamKey: turnRun.runtimeStreamKey,
+          status: turnRun.status,
+        })
+      } catch (error) {
+        if (createdLlmRunId !== null) {
+          await failLlmRun(createdLlmRunId, getErrorMessage(error)).catch(
+            (failError: unknown) => {
+              console.error("Failed to mark turn LLM run failed:", failError)
+            }
+          )
+        }
+
+        if (error instanceof SimulationValidationError) {
+          const status = error.message === "Simulation not found." ? 404 : 400
+
+          res.status(status).json({
+            error: error.message,
+          })
+          return
+        }
+
+        if (error instanceof OpenAiConfigurationError) {
+          res.status(500).json({
+            error: error.message,
+          })
+          return
+        }
+
+        console.error("Failed to start turn LLM run:", error)
+        res.status(500).json({
+          error: "Failed to start turn LLM run.",
         })
       }
     }

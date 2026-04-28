@@ -5,6 +5,7 @@ import {
   createCancellationChunk,
   normalizeOpenAiStreamEvent,
   parseOpeningHandFromResponseText,
+  parseTurnSimulationFromResponseText,
 } from "./llm-run-events.js"
 import {
   SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
@@ -76,6 +77,34 @@ test("reports invalid completed JSON with an explicit message", () => {
   assert.throws(
     () => parseOpeningHandFromResponseText("{"),
     /Opening-hand LLM completed response was not valid JSON\./
+  )
+})
+
+test("parses completed turn game state JSON", () => {
+  assert.deepEqual(
+    parseTurnSimulationFromResponseText(
+      JSON.stringify({
+        gameState: "Hand:\nSol Ring\n\nBattlefield:\nCommand Tower",
+        summary: "Played Command Tower.",
+      })
+    ),
+    {
+      gameState: "Hand:\nSol Ring\n\nBattlefield:\nCommand Tower",
+    }
+  )
+})
+
+test("rejects completed turn JSON without game state", () => {
+  assert.throws(
+    () => parseTurnSimulationFromResponseText('{"summary":"No state."}'),
+    /Turn LLM response did not include gameState\./
+  )
+})
+
+test("reports invalid completed turn JSON with an explicit message", () => {
+  assert.throws(
+    () => parseTurnSimulationFromResponseText("{"),
+    /Turn LLM completed response was not valid JSON\./
   )
 })
 

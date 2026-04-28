@@ -46,12 +46,34 @@ export type CreateOpeningHandLlmRunInput = {
   requestPayload: unknown
 }
 
+export type CreateTurnLlmRunInput = {
+  simulationId: string
+  turnNumber: number
+  provider: string
+  model: string
+  runtimeStreamKey: string
+}
+
 export type OpeningHandLlmRun = {
   simulationId: string
   llmRunId: string
   attemptNumber: number
   runtimeStreamKey: string
   status: LlmRunStatus
+}
+
+export type TurnLlmRun = OpeningHandLlmRun & {
+  turnNumber: number
+}
+
+export type PreparedTurnLlmRun = TurnLlmRun & {
+  previousGameState: string | null
+}
+
+export type UpdateLlmRunRequestDataInput = {
+  llmRunId: string
+  fullPrompt: string
+  requestPayload: unknown
 }
 
 export type LlmRunChunkInput = {
@@ -1146,6 +1168,135 @@ export async function resetSimulationForOpeningHandLlmRun(
   })
 }
 
+export async function createTurnLlmRun(
+  deckId: string,
+  input: CreateTurnLlmRunInput
+): Promise<PreparedTurnLlmRun> {
+  assertPositiveInteger(input.turnNumber, "Turn number")
+
+  return withDatabaseTransaction(async (client) => {
+    const simulationResult = await client.query<{
+      id: string
+      deck_id: string
+      seed: string
+      starting_hand_id: string | null
+    }>(
+      `
+        SELECT
+          id,
+          deck_id,
+          seed,
+          starting_hand_id
+        FROM simulations
+        WHERE id = $1
+          AND deck_id = $2
+        FOR UPDATE
+      `,
+      [input.simulationId, deckId]
+    )
+
+    if (simulationResult.rowCount === 0) {
+      throw new SimulationValidationError("Simulation not found.")
+    }
+
+    await assertNoActiveSimulationLlmRuns(client, input.simulationId)
+
+    const previousGameState = await resetSimulationForTurnLlmRun(
+      client,
+      simulationResult.rows[0],
+      input.turnNumber
+    )
+
+    await client.query(
+      `
+        UPDATE simulation_turn_llm_runs
+        SET outdated = true
+        WHERE simulation_id = $1
+          AND turn_number >= $2
+      `,
+      [input.simulationId, input.turnNumber]
+    )
+
+    const attemptResult = await client.query<{ attempt_number: number }>(
+      `
+        SELECT COALESCE(MAX(attempt_number), 0) + 1 AS attempt_number
+        FROM simulation_turn_llm_runs
+        WHERE simulation_id = $1
+          AND turn_number = $2
+      `,
+      [input.simulationId, input.turnNumber]
+    )
+    const attemptNumber = Number(attemptResult.rows[0].attempt_number)
+    const llmRunResult = await client.query<{
+      id: string
+      status: LlmRunStatus
+      runtime_stream_key: string
+    }>(
+      `
+        INSERT INTO llm_runs (
+          phase,
+          provider,
+          model,
+          runtime_stream_key
+        )
+        VALUES (
+          'turn',
+          $1,
+          $2,
+          $3
+        )
+        RETURNING id, status, runtime_stream_key
+      `,
+      [input.provider, input.model, input.runtimeStreamKey]
+    )
+    const llmRun = llmRunResult.rows[0]
+
+    await client.query(
+      `
+        INSERT INTO simulation_turn_llm_runs (
+          simulation_id,
+          llm_run_id,
+          turn_number,
+          attempt_number
+        )
+        VALUES ($1, $2, $3, $4)
+      `,
+      [input.simulationId, llmRun.id, input.turnNumber, attemptNumber]
+    )
+
+    return {
+      simulationId: input.simulationId,
+      llmRunId: llmRun.id,
+      turnNumber: input.turnNumber,
+      attemptNumber,
+      runtimeStreamKey: llmRun.runtime_stream_key,
+      status: llmRun.status,
+      previousGameState,
+    }
+  })
+}
+
+export async function updateLlmRunRequestData({
+  fullPrompt,
+  llmRunId,
+  requestPayload,
+}: UpdateLlmRunRequestDataInput) {
+  const result = await queryDatabase(
+    `
+      UPDATE llm_runs
+      SET full_prompt = $2,
+          request_payload = $3::jsonb,
+          updated_at = now()
+      WHERE id = $1
+    `,
+    [llmRunId, fullPrompt, JSON.stringify(requestPayload)]
+  )
+
+  if (result.rowCount === 0) {
+    throw new SimulationValidationError("LLM run not found.")
+  }
+}
+
 export async function appendLlmRunChunks(
   llmRunId: string,
   chunks: readonly LlmRunChunkInput[]
@@ -1326,6 +1477,72 @@ export async function completeOpeningHandLlmRun({
         JSON.stringify(librarySnapshot),
         snapshot.random_state,
         openingHandIsValid,
+      ]
+    )
+
+    await client.query(
+      `
+        UPDATE llm_runs
+        SET status = 'completed',
+            response_metadata = $2::jsonb,
+            usage = $3::jsonb,
+            completed_at = now(),
+            updated_at = now()
+        WHERE id = $1
+      `,
+      [llmRunId, JSON.stringify(responseMetadata), JSON.stringify(usage)]
+    )
+  })
+}
+
+export async function completeTurnLlmRun({
+  gameState,
+  llmRunId,
+  responseMetadata,
+  usage,
+}: {
+  llmRunId: string
+  gameState: string
+  responseMetadata: unknown
+  usage: unknown
+}) {
+  await withDatabaseTransaction(async (client) => {
+    const snapshotResult = await client.query<{
+      library: unknown
+      random_state: string
+    }>(
+      `
+        SELECT
+          simulation.library,
+          simulation.random_state
+        FROM simulation_turn_llm_runs turn_run
+        JOIN simulations simulation
+          ON simulation.id = turn_run.simulation_id
+        WHERE turn_run.llm_run_id = $1
+      `,
+      [llmRunId]
+    )
+
+    if (snapshotResult.rowCount === 0) {
+      throw new SimulationValidationError("Turn LLM run not found.")
+    }
+
+    const snapshot = snapshotResult.rows[0]
+    const librarySnapshot = parseStringArray(snapshot.library)
+
+    await client.query(
+      `
+        UPDATE simulation_turn_llm_runs
+        SET game_state = $2,
+            library_snapshot = $3::jsonb,
+            random_state_snapshot = $4
+        WHERE llm_run_id = $1
+      `,
+      [
+        llmRunId,
+        gameState,
+        JSON.stringify(librarySnapshot),
+        snapshot.random_state,
       ]
     )
 
@@ -1854,6 +2071,300 @@ type LibrarySimulationRow = {
   has_drawn_starting_hand: boolean
 }
 
+async function assertNoActiveSimulationLlmRuns(
+  client: DatabaseTransactionClient,
+  simulationId: string
+) {
+  const activeRunResult = await client.query(
+    `
+      SELECT 1
+      FROM (
+        SELECT llm_run.id
+        FROM simulation_opening_hand_llm_runs opening_run
+        JOIN llm_runs llm_run
+          ON llm_run.id = opening_run.llm_run_id
+        WHERE opening_run.simulation_id = $1
+          AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
+        UNION ALL
+        SELECT llm_run.id
+        FROM simulation_turn_llm_runs turn_run
+        JOIN llm_runs llm_run
+          ON llm_run.id = turn_run.llm_run_id
+        WHERE turn_run.simulation_id = $1
+          AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
+      ) active_run
+      LIMIT 1
+    `,
+    [simulationId]
+  )
+
+  if ((activeRunResult.rowCount ?? 0) > 0) {
+    throw new SimulationValidationError(
+      "An LLM run is already active for this simulation."
+    )
+  }
+}
+
+async function resetSimulationForTurnLlmRun(
+  client: DatabaseTransactionClient,
+  simulation: {
+    id: string
+    deck_id: string
+    seed: string
+    starting_hand_id: string | null
+  },
+  turnNumber: number
+) {
+  if (turnNumber === 1) {
+    await resetSimulationForFirstTurnLlmRun(client, simulation)
+    return null
+  }
+
+  const latestPreviousTurnRuns = await getLatestPreviousTurnRuns(
+    client,
+    simulation.id,
+    turnNumber
+  )
+  const latestPreviousTurnRunsByTurn = new Map(
+    latestPreviousTurnRuns.map((run) => [run.turn_number, run])
+  )
+
+  for (
+    let previousTurnNumber = 1;
+    previousTurnNumber < turnNumber;
+    previousTurnNumber += 1
+  ) {
+    const previousTurnRun =
+      latestPreviousTurnRunsByTurn.get(previousTurnNumber)
+
+    if (!previousTurnRun) {
+      throw new SimulationValidationError(
+        `Turn ${previousTurnNumber} has not been simulated.`
+      )
+    }
+
+    if (previousTurnRun.status !== "completed") {
+      throw new SimulationValidationError(
+        `The most recent turn ${previousTurnNumber} LLM run is not complete.`
+      )
+    }
+
+    if (previousTurnRun.outdated) {
+      throw new SimulationValidationError(
+        `The most recent turn ${previousTurnNumber} LLM run is outdated.`
+      )
+    }
+  }
+
+  const immediatePreviousTurn = latestPreviousTurnRunsByTurn.get(
+    turnNumber - 1
+  )
+
+  if (!immediatePreviousTurn) {
+    throw new SimulationValidationError(
+      `Turn ${turnNumber - 1} has not been simulated.`
+    )
+  }
+
+  const previousGameState = immediatePreviousTurn.game_state?.trim()
+
+  if (!previousGameState) {
+    throw new SimulationValidationError(
+      `The most recent turn ${turnNumber - 1} LLM run does not have a game state.`
+    )
+  }
+
+  const librarySnapshot = parseRequiredStringArray(
+    immediatePreviousTurn.library_snapshot,
+    `The most recent turn ${turnNumber - 1} LLM run does not have a library snapshot.`
+  )
+
+  if (immediatePreviousTurn.random_state_snapshot === null) {
+    throw new SimulationValidationError(
+      `The most recent turn ${turnNumber - 1} LLM run does not have a random state snapshot.`
+    )
+  }
+
+  await updateSimulationLibraryAndRandomState(
+    client,
+    simulation.id,
+    librarySnapshot,
+    immediatePreviousTurn.random_state_snapshot
+  )
+
+  return previousGameState
+}
+
+async function resetSimulationForFirstTurnLlmRun(
+  client: DatabaseTransactionClient,
+  simulation: {
+    id: string
+    deck_id: string
+    seed: string
+    starting_hand_id: string | null
+  }
+) {
+  if (simulation.starting_hand_id !== null) {
+    const shuffledLibrary = await createShuffledSimulationLibraryWithClient(
+      client,
+      simulation.deck_id,
+      simulation.seed,
+      simulation.starting_hand_id
+    )
+
+    await client.query(
+      `
+        UPDATE simulations
+        SET library = $2::jsonb,
+            random_state = $3,
+            mulligan_count = 0,
+            has_drawn_starting_hand = true,
+            updated_at = now()
+        WHERE id = $1
+      `,
+      [
+        simulation.id,
+        JSON.stringify(shuffledLibrary.library),
+        shuffledLibrary.randomState,
+      ]
+    )
+    return
+  }
+
+  const openingHandResult = await client.query<{
+    status: LlmRunStatus
+    opening_hand_is_valid: boolean
+    library_snapshot: unknown | null
+    random_state_snapshot: string | null
+  }>(
+    `
+      SELECT
+        llm_run.status,
+        opening_run.opening_hand_is_valid,
+        opening_run.library_snapshot,
+        opening_run.random_state_snapshot
+      FROM simulation_opening_hand_llm_runs opening_run
+      JOIN llm_runs llm_run
+        ON llm_run.id = opening_run.llm_run_id
+      WHERE opening_run.simulation_id = $1
+      ORDER BY opening_run.attempt_number DESC
+      LIMIT 1
+    `,
+    [simulation.id]
+  )
+  const latestOpeningHand = openingHandResult.rows[0]
+
+  if (!latestOpeningHand) {
+    throw new SimulationValidationError(
+      "No opening-hand LLM run exists for this simulation."
+    )
+  }
+
+  if (latestOpeningHand.status !== "completed") {
+    throw new SimulationValidationError(
+      "The most recent opening-hand LLM run is not complete."
+    )
+  }
+
+  if (!latestOpeningHand.opening_hand_is_valid) {
+    throw new SimulationValidationError(
+      "The most recent opening-hand LLM run does not have a valid starting hand."
+    )
+  }
+
+  const librarySnapshot = parseRequiredStringArray(
+    latestOpeningHand.library_snapshot,
+    "The most recent opening-hand LLM run does not have a library snapshot."
+  )
+
+  if (latestOpeningHand.random_state_snapshot === null) {
+    throw new SimulationValidationError(
+      "The most recent opening-hand LLM run does not have a random state snapshot."
+    )
+  }
+
+  await client.query(
+    `
+      UPDATE simulations
+      SET library = $2::jsonb,
+          random_state = $3,
+          has_drawn_starting_hand = true,
+          updated_at = now()
+      WHERE id = $1
+    `,
+    [
+      simulation.id,
+      JSON.stringify(librarySnapshot),
+      latestOpeningHand.random_state_snapshot,
+    ]
+  )
+}
+
+async function getLatestPreviousTurnRuns(
+  client: DatabaseTransactionClient,
+  simulationId: string,
+  turnNumber: number
+) {
+  const result = await client.query<{
+    turn_number: number
+    attempt_number: number
+    status: LlmRunStatus
+    outdated: boolean
+    game_state: string | null
+    library_snapshot: unknown | null
+    random_state_snapshot: string | null
+  }>(
+    `
+      SELECT DISTINCT ON (turn_run.turn_number)
+        turn_run.turn_number,
+        turn_run.attempt_number,
+        llm_run.status,
+        turn_run.outdated,
+        turn_run.game_state,
+        turn_run.library_snapshot,
+        turn_run.random_state_snapshot
+      FROM simulation_turn_llm_runs turn_run
+      JOIN llm_runs llm_run
+        ON llm_run.id = turn_run.llm_run_id
+      WHERE turn_run.simulation_id = $1
+        AND turn_run.turn_number < $2
+      ORDER BY turn_run.turn_number ASC, turn_run.attempt_number DESC
+    `,
+    [simulationId, turnNumber]
+  )
+
+  return result.rows
+}
+
+async function updateSimulationLibraryAndRandomState(
+  client: DatabaseTransactionClient,
+  simulationId: string,
+  library: readonly string[],
+  randomState: string | number
+) {
+  await client.query(
+    `
+      UPDATE simulations
+      SET library = $2::jsonb,
+          random_state = $3,
+          updated_at = now()
+      WHERE id = $1
+    `,
+    [simulationId, JSON.stringify(library), randomState]
+  )
+}
+
+function parseRequiredStringArray(value: unknown, errorMessage: string) {
+  if (
+    !Array.isArray(value) ||
+    value.some((item) => typeof item !== "string")
+  ) {
+    throw new SimulationValidationError(errorMessage)
+  }
+
+  return value
+}
+
 async function getTurnSimulationStartingHand({
   simulationId,
   startingHandId,
@@ -2261,8 +2772,82 @@ async function createShuffledSimulationLibrary(
   }
 }
 
+async function createShuffledSimulationLibraryWithClient(
+  client: DatabaseTransactionClient,
+  deckId: string,
+  seed: string,
+  startingHandId: string | null
+) {
+  const libraryResult = await client.query<{
+    deck_card_id: string
+    quantity: number
+    name: string
+  }>(
+    `
+      SELECT
+        deck_card.id AS deck_card_id,
+        deck_card.quantity,
+        card.name
+      FROM deck_cards deck_card
+      JOIN scryfall_oracle_cards card
+        ON card.oracle_id = deck_card.oracle_id
+      WHERE deck_card.deck_id = $1
+        AND deck_card.zone = 'library'
+      ORDER BY card.name ASC, deck_card.id ASC
+    `,
+    [deckId]
+  )
+  const startingHandQuantities = startingHandId
+    ? await getStartingHandDeckCardQuantitiesWithClient(client, startingHandId)
+    : new Map<number, number>()
+  const library = libraryResult.rows.flatMap((card) => {
+    const deckCardId = Number(card.deck_card_id)
+    const startingHandQuantity = startingHandQuantities.get(deckCardId) ?? 0
+    const remainingQuantity = card.quantity - startingHandQuantity
+
+    if (remainingQuantity < 0) {
+      throw new SimulationValidationError(
+        "Starting hand contains more copies of a card than the deck has."
+      )
+    }
+
+    return Array.from({ length: remainingQuantity }, () => card.name)
+  })
+
+  const shuffleResult = shuffleWithRandomState(
+    library,
+    createSeededRandomState(seed)
+  )
+
+  return {
+    library: shuffleResult.items,
+    randomState: shuffleResult.randomState,
+  }
+}
+
 async function getStartingHandDeckCardQuantities(startingHandId: string) {
   const result = await queryDatabase<{
+    deck_card_id: string
+    quantity: number
+  }>(
+    `
+      SELECT deck_card_id, quantity
+      FROM starting_hand_cards
+      WHERE starting_hand_id = $1
+    `,
+    [startingHandId]
+  )
+
+  return new Map(
+    result.rows.map((card) => [Number(card.deck_card_id), card.quantity])
+  )
+}
+
+async function getStartingHandDeckCardQuantitiesWithClient(
+  client: DatabaseTransactionClient,
+  startingHandId: string
+) {
+  const result = await client.query<{
     deck_card_id: string
     quantity: number
   }>(

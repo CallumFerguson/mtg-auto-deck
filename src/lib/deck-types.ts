@@ -62,6 +62,10 @@ export type CreateOpeningHandLlmRunResponse = {
   status: string
 }
 
+export type CreateTurnLlmRunResponse = CreateOpeningHandLlmRunResponse & {
+  turnNumber: number
+}
+
 export type StopSimulationResponse = {
   simulationId: string
   stoppedOpeningHandLlmRunIds: string[]
