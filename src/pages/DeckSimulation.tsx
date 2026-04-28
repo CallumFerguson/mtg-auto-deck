@@ -26,6 +26,7 @@ import type {
   CreateOpeningHandLlmRunResponse,
   CreateSimulationResponse,
   CreateStartingHandResponse,
+  CreateTurnLlmRunResponse,
   DeckCard,
   Simulation,
   SimulationDebugInfo,
@@ -785,6 +786,10 @@ function SimulationDetails({
   )
   const [openingHandRun, setOpeningHandRun] =
     useState<CreateOpeningHandLlmRunResponse | null>(null)
+  const [selectedTurnNumber, setSelectedTurnNumber] = useState("1")
+  const [isStartingTurnRun, setIsStartingTurnRun] = useState(false)
+  const [turnRunError, setTurnRunError] = useState<string | null>(null)
+  const [turnRun, setTurnRun] = useState<CreateTurnLlmRunResponse | null>(null)
   const [isStoppingSimulation, setIsStoppingSimulation] = useState(false)
   const [stopSimulationError, setStopSimulationError] = useState<string | null>(
     null
@@ -808,6 +813,10 @@ function SimulationDetails({
     setIsStartingOpeningHandRun(false)
     setOpeningHandRunError(null)
     setOpeningHandRun(null)
+    setSelectedTurnNumber("1")
+    setIsStartingTurnRun(false)
+    setTurnRunError(null)
+    setTurnRun(null)
     setIsStoppingSimulation(false)
     setStopSimulationError(null)
     setStopSimulationResult(null)
@@ -854,6 +863,53 @@ function SimulationDetails({
       )
     } finally {
       setIsStartingOpeningHandRun(false)
+    }
+  }
+
+  async function handleStartTurnRun() {
+    if (isStartingTurnRun) {
+      return
+    }
+
+    const turnNumber = Number(selectedTurnNumber)
+
+    if (!Number.isInteger(turnNumber) || turnNumber < 1) {
+      setTurnRunError("Turn number must be a positive integer.")
+      return
+    }
+
+    setIsStartingTurnRun(true)
+    setTurnRunError(null)
+    setTurnRun(null)
+    setStopSimulationResult(null)
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/turn-llm-runs`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            turnNumber,
+          }),
+        }
+      )
+
+      if (!response.ok) {
+        setTurnRunError(
+          await readApiError(response, "Turn run could not be started.")
+        )
+        return
+      }
+
+      const data = (await response.json()) as CreateTurnLlmRunResponse
+      setTurnRun(data)
+    } catch {
+      setTurnRunError("Turn run could not be sent to the server.")
+    } finally {
+      setIsStartingTurnRun(false)
     }
   }
 
@@ -1114,6 +1170,66 @@ function SimulationDetails({
           </div>
         )}
       </header>
+
+      <section className="grid gap-3 border-b border-border py-5">
+        <div className="grid gap-3 rounded-md border border-border bg-background/35 p-3">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="grid gap-2">
+              <label
+                className="text-sm font-medium text-foreground"
+                htmlFor="turn-run-number"
+              >
+                Turn simulation
+              </label>
+              <select
+                id="turn-run-number"
+                className="h-9 w-28 rounded-md border border-input bg-background px-3 text-sm text-foreground transition-colors outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
+                value={selectedTurnNumber}
+                disabled={isStartingTurnRun}
+                onChange={(event) => {
+                  setSelectedTurnNumber(event.target.value)
+                  setTurnRunError(null)
+                }}
+              >
+                {Array.from({ length: 10 }, (_, turnIndex) => {
+                  const turnNumber = turnIndex + 1
+
+                  return (
+                    <option key={turnNumber} value={turnNumber}>
+                      Turn {turnNumber}
+                    </option>
+                  )
+                })}
+              </select>
+            </div>
+
+            <Button
+              type="button"
+              disabled={isStartingTurnRun || isStoppingSimulation}
+              onClick={() => void handleStartTurnRun()}
+            >
+              <Dices data-icon="inline-start" />
+              {isStartingTurnRun ? "Starting..." : "Start turn run"}
+            </Button>
+          </div>
+
+          {turnRun ? (
+            <p className="text-sm text-muted-foreground">
+              Turn {turnRun.turnNumber} run {turnRun.llmRunId.slice(0, 8)}{" "}
+              started.
+            </p>
+          ) : null}
+
+          {turnRunError ? (
+            <p
+              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              role="alert"
+            >
+              {turnRunError}
+            </p>
+          ) : null}
+        </div>
+      </section>
 
       <section className="grid gap-4 pt-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
