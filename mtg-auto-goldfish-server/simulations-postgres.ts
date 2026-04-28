@@ -1315,6 +1315,15 @@ export async function resetSimulationForOpeningHandLlmRun(
         shuffledLibrary.randomState,
       ]
     )
+
+    await client.query(
+      `
+        UPDATE simulation_turn_llm_runs
+        SET outdated = true
+        WHERE simulation_id = $1
+      `,
+      [simulationId]
+    )
   })
 }
 
@@ -1953,6 +1962,13 @@ export async function getSimulationResultsInfo(
       "run.attempt_number, NULL::integer AS turn_number, NULL::text AS game_state, NULL::boolean AS outdated, run.opening_hand_is_valid",
     orderBy: "run.attempt_number ASC",
     excludeChunkKinds: SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
+    additionalWhereSql: `
+      run.attempt_number = (
+        SELECT MAX(latest_run.attempt_number)
+        FROM simulation_opening_hand_llm_runs latest_run
+        WHERE latest_run.simulation_id = run.simulation_id
+      )
+    `,
   })
   const turnRuns = await getSimulationDebugLlmRuns({
     simulationId,
@@ -1961,6 +1977,7 @@ export async function getSimulationResultsInfo(
       "run.attempt_number, run.turn_number, run.game_state, run.outdated, NULL::boolean AS opening_hand_is_valid",
     orderBy: "run.turn_number ASC, run.attempt_number ASC",
     excludeChunkKinds: SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
+    additionalWhereSql: "run.outdated = false",
   })
 
   return {
@@ -2172,6 +2189,7 @@ type SimulationDebugLlmRunRow = {
 }
 
 async function getSimulationDebugLlmRuns({
+  additionalWhereSql,
   excludeChunkKinds = [],
   orderBy,
   selectColumns,
@@ -2183,6 +2201,7 @@ async function getSimulationDebugLlmRuns({
   selectColumns: string
   orderBy: string
   excludeChunkKinds?: readonly LlmChunkKind[]
+  additionalWhereSql?: string
 }): Promise<SimulationDebugLlmRun[]> {
   const result = await queryDatabase<SimulationDebugLlmRunRow>(
     `
@@ -2213,8 +2232,9 @@ async function getSimulationDebugLlmRuns({
        AND (
          COALESCE(array_length($2::llm_chunk_kind[], 1), 0) = 0
          OR chunk.kind <> ALL($2::llm_chunk_kind[])
-       )
+        )
       WHERE run.simulation_id = $1
+        ${additionalWhereSql ? `AND ${additionalWhereSql}` : ""}
       ORDER BY ${orderBy}, chunk.sequence ASC NULLS LAST
     `,
     [simulationId, excludeChunkKinds]
