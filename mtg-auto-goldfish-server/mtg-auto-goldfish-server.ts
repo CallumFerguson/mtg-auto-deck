@@ -1033,6 +1033,40 @@ async function runTurnLlmRun({
   }
 }
 
+async function stopActiveSimulationLlmRuns(
+  deckId: string,
+  simulationId: string
+) {
+  const activeRuns = await requestCancelSimulationLlmRuns(deckId, simulationId)
+  const stoppedRunIds: string[] = []
+  const cancelRequestedRunIds: string[] = []
+
+  for (const run of activeRuns) {
+    const runtime = activeLlmRunRuntimes.get(run.runtimeStreamKey)
+
+    if (runtime) {
+      runtime.abortController.abort()
+      stoppedRunIds.push(run.llmRunId)
+    } else {
+      const cancellationMessage =
+        `${formatLlmRunPhase(run.phase)} LLM run was cancelled before its active runtime could be found.`
+
+      await appendLlmRunChunkAtNextSequence(
+        run.llmRunId,
+        createCancellationChunk(cancellationMessage)
+      )
+      await cancelLlmRun(run.llmRunId, cancellationMessage)
+      cancelRequestedRunIds.push(run.llmRunId)
+    }
+  }
+
+  return {
+    simulationId,
+    stoppedLlmRunIds: stoppedRunIds,
+    cancelRequestedLlmRunIds: cancelRequestedRunIds,
+  }
+}
+
 function appendRuntimeChunk(
   runtime: ActiveLlmRunRuntime,
   chunk: Omit<LlmRunChunkInput, "sequence">
@@ -1427,37 +1461,9 @@ async function main() {
       const simulationId = String(req.params.simulationId)
 
       try {
-        const activeRuns = await requestCancelSimulationLlmRuns(
-          deckId,
-          simulationId
-        )
-        const stoppedRunIds: string[] = []
-        const cancelRequestedRunIds: string[] = []
-
-        for (const run of activeRuns) {
-          const runtime = activeLlmRunRuntimes.get(run.runtimeStreamKey)
-
-          if (runtime) {
-            runtime.abortController.abort()
-            stoppedRunIds.push(run.llmRunId)
-          } else {
-            const cancellationMessage =
-              `${formatLlmRunPhase(run.phase)} LLM run was cancelled before its active runtime could be found.`
-
-            await appendLlmRunChunkAtNextSequence(
-              run.llmRunId,
-              createCancellationChunk(cancellationMessage)
-            )
-            await cancelLlmRun(run.llmRunId, cancellationMessage)
-            cancelRequestedRunIds.push(run.llmRunId)
-          }
-        }
-
-        res.status(200).json({
-          simulationId,
-          stoppedLlmRunIds: stoppedRunIds,
-          cancelRequestedLlmRunIds: cancelRequestedRunIds,
-        })
+        res
+          .status(200)
+          .json(await stopActiveSimulationLlmRuns(deckId, simulationId))
       } catch (error) {
         if (error instanceof SimulationValidationError) {
           const status = error.message === "Simulation not found." ? 404 : 400
@@ -1539,6 +1545,8 @@ async function main() {
       const simulationId = String(req.params.simulationId)
 
       try {
+        await stopActiveSimulationLlmRuns(deckId, simulationId)
+
         const wasDeleted = await deleteSimulation(deckId, simulationId)
 
         if (!wasDeleted) {
@@ -1550,6 +1558,15 @@ async function main() {
 
         res.status(204).send()
       } catch (error) {
+        if (error instanceof SimulationValidationError) {
+          const status = error.message === "Simulation not found." ? 404 : 400
+
+          res.status(status).json({
+            error: error.message,
+          })
+          return
+        }
+
         console.error("Failed to delete simulation:", error)
         res.status(500).json({
           error: "Failed to delete simulation.",
