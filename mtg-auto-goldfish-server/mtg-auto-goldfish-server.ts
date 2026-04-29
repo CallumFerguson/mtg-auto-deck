@@ -378,6 +378,8 @@ async function resolveMcpSimulationId(llmRunId: string) {
 
 function createOpeningHandServer() {
   return createServer(OPENING_HAND_SERVER_NAME, (server) => {
+    registerEchoTool(server)
+    registerGetRandomNumberTool(server)
     registerDrawStartingHandTool(server)
     registerMulliganTool(server)
     registerReturnCardsToLibraryTool(server)
@@ -394,6 +396,49 @@ function createTurnSimulationServer() {
     registerReturnCardsToLibraryTool(server)
     registerShuffleLibraryTool(server)
   })
+}
+
+function registerEchoTool(server: McpServer) {
+  server.registerTool(
+    "echo",
+    {
+      title: "Echo",
+      description:
+        "Return a simple success response with the provided message.",
+      inputSchema: {
+        message: z.string().describe("The message to echo back."),
+      },
+    },
+    async ({ message }) => {
+      console.log(`Opening-hand echo tool called: message=${message}`)
+
+      return {
+        content: createToolResultContent("Success.", {
+          message,
+        }),
+      }
+    }
+  )
+}
+
+function registerGetRandomNumberTool(server: McpServer) {
+  server.registerTool(
+    "get_random_number",
+    {
+      title: "Get Random Number",
+      description: "Return a random integer between 1 and 1000000.",
+      inputSchema: {},
+    },
+    async () => {
+      const number = Math.floor(Math.random() * 1_000_000) + 1
+
+      return {
+        content: createToolResultContent("Success.", {
+          number,
+        }),
+      }
+    }
+  )
 }
 
 function registerDrawCardFromTopTool(server: McpServer) {
