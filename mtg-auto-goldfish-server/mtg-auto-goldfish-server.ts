@@ -233,6 +233,31 @@ function logOpenAiApiCallFinished({
   )
 }
 
+function logOpenAiApiCallCancelled({
+  llmRunId,
+  phase,
+}: {
+  llmRunId: string
+  phase: LlmRunPhase
+}) {
+  console.log(`OpenAI API call cancelled: phase=${phase} llmRunId=${llmRunId}`)
+}
+
+function logOpenAiApiCallStoppedWithError({
+  error,
+  llmRunId,
+  phase,
+}: {
+  error: unknown
+  llmRunId: string
+  phase: LlmRunPhase
+}) {
+  console.error(
+    `OpenAI API call stopped with error: phase=${phase} llmRunId=${llmRunId} error=${getErrorMessage(error)}`,
+    error
+  )
+}
+
 function getOpenAiTokenUsageSummary(usage: unknown) {
   const usageRecord = asRecord(usage)
   const outputTokens = getNumberProperty(usageRecord, "output_tokens")
@@ -406,6 +431,7 @@ function registerDrawStartingHandTool(server: McpServer) {
       },
     },
     async ({ simulationId }) => {
+      console.log(`MCP draw_starting_hand called: simulationId=${simulationId}`)
       const response = await drawStartingHand(simulationId)
 
       return {
@@ -896,6 +922,10 @@ async function runOpeningHandLlmRun({
     })
   } catch (error) {
     if (isAbortError(error) || runtime.abortController.signal.aborted) {
+      logOpenAiApiCallCancelled({
+        llmRunId,
+        phase: "opening_hand",
+      })
       appendRuntimeChunk(runtime, createCancellationChunk())
       await tryForceFlushRuntimeChunks(runtime, "cancelled opening-hand run")
       await cancelLlmRun(llmRunId, "Opening-hand LLM run was cancelled.")
@@ -909,6 +939,11 @@ async function runOpeningHandLlmRun({
     }
 
     await tryForceFlushRuntimeChunks(runtime, "failed opening-hand run")
+    logOpenAiApiCallStoppedWithError({
+      error: effectiveError,
+      llmRunId,
+      phase: "opening_hand",
+    })
     console.error("Opening-hand LLM run failed:", effectiveError)
     await failLlmRun(llmRunId, getErrorMessage(effectiveError))
   } finally {
@@ -1036,6 +1071,10 @@ async function runTurnLlmRun({
     })
   } catch (error) {
     if (isAbortError(error) || runtime.abortController.signal.aborted) {
+      logOpenAiApiCallCancelled({
+        llmRunId,
+        phase: "turn",
+      })
       appendRuntimeChunk(
         runtime,
         createCancellationChunk("Turn LLM run was cancelled.")
@@ -1052,6 +1091,11 @@ async function runTurnLlmRun({
     }
 
     await tryForceFlushRuntimeChunks(runtime, "failed turn run")
+    logOpenAiApiCallStoppedWithError({
+      error: effectiveError,
+      llmRunId,
+      phase: "turn",
+    })
     console.error("Turn LLM run failed:", effectiveError)
     await failLlmRun(llmRunId, getErrorMessage(effectiveError))
   } finally {
