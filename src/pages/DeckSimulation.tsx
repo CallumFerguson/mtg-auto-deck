@@ -1831,6 +1831,10 @@ function SimulationDebugRunGroup({
               <p className="text-muted-foreground">
                 Model: <span className="text-foreground">{run.model}</span>
               </p>
+              <p className="text-muted-foreground">
+                Reasoning effort:{" "}
+                <span className="text-foreground">{run.reasoningEffort}</span>
+              </p>
               <p className="break-all text-muted-foreground">
                 Runtime key:{" "}
                 <span className="text-foreground">

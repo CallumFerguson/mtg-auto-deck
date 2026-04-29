@@ -41,6 +41,7 @@ export type CreateOpeningHandLlmRunInput = {
   simulationId: string
   provider: string
   model: string
+  reasoningEffort: string
   runtimeStreamKey: string
   fullPrompt: string
   requestPayload: unknown
@@ -51,6 +52,7 @@ export type CreateTurnLlmRunInput = {
   turnNumber: number
   provider: string
   model: string
+  reasoningEffort: string
   runtimeStreamKey: string
 }
 
@@ -115,6 +117,7 @@ export type SimulationDebugLlmRun = {
   phase: LlmRunPhase
   provider: string
   model: string
+  reasoningEffort: string
   status: LlmRunStatus
   runtimeStreamKey: string | null
   attemptNumber: number
@@ -329,8 +332,7 @@ export async function ensureSimulationsSchema() {
       phase llm_run_phase NOT NULL,
       provider text NOT NULL,
       model text NOT NULL,
-      provider_run_id text,
-      provider_request_id text,
+      reasoning_effort text NOT NULL DEFAULT '',
 
       status llm_run_status NOT NULL DEFAULT 'pending',
       runtime_stream_key text UNIQUE,
@@ -350,6 +352,18 @@ export async function ensureSimulationsSchema() {
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now()
     )
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_runs
+    ADD COLUMN IF NOT EXISTS reasoning_effort text NOT NULL DEFAULT ''
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_runs
+    DROP COLUMN IF EXISTS provider_run_id
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_runs
+    DROP COLUMN IF EXISTS provider_request_id
   `)
   await queryDatabase(`
     CREATE TABLE IF NOT EXISTS llm_run_chunks (
@@ -1170,6 +1184,7 @@ export async function createOpeningHandLlmRun(
           phase,
           provider,
           model,
+          reasoning_effort,
           runtime_stream_key,
           full_prompt,
           request_payload
@@ -1180,13 +1195,15 @@ export async function createOpeningHandLlmRun(
           $2,
           $3,
           $4,
-          $5::jsonb
+          $5,
+          $6::jsonb
         )
         RETURNING id, status, runtime_stream_key
       `,
       [
         input.provider,
         input.model,
+        input.reasoningEffort,
         input.runtimeStreamKey,
         input.fullPrompt,
         JSON.stringify(input.requestPayload),
@@ -1401,17 +1418,24 @@ export async function createTurnLlmRun(
           phase,
           provider,
           model,
+          reasoning_effort,
           runtime_stream_key
         )
         VALUES (
           'turn',
           $1,
           $2,
-          $3
+          $3,
+          $4
         )
         RETURNING id, status, runtime_stream_key
       `,
-      [input.provider, input.model, input.runtimeStreamKey]
+      [
+        input.provider,
+        input.model,
+        input.reasoningEffort,
+        input.runtimeStreamKey,
+      ]
     )
     const llmRun = llmRunResult.rows[0]
 
@@ -2311,6 +2335,7 @@ type SimulationDebugLlmRunRow = {
   phase: LlmRunPhase
   provider: string
   model: string
+  reasoning_effort: string
   status: LlmRunStatus
   runtime_stream_key: string | null
   attempt_number: number
@@ -2353,6 +2378,7 @@ async function getSimulationDebugLlmRuns({
         llm_run.phase,
         llm_run.provider,
         llm_run.model,
+        llm_run.reasoning_effort,
         llm_run.status,
         llm_run.runtime_stream_key,
         ${selectColumns},
@@ -2393,6 +2419,7 @@ async function getSimulationDebugLlmRuns({
         phase: row.phase,
         provider: row.provider,
         model: row.model,
+        reasoningEffort: row.reasoning_effort,
         status: row.status,
         runtimeStreamKey: row.runtime_stream_key,
         attemptNumber: row.attempt_number,

@@ -1462,6 +1462,7 @@ async function main() {
           simulationId,
           provider: OPENAI_PROVIDER,
           model: openAiConfig.model,
+          reasoningEffort: openAiConfig.reasoningEffort,
           runtimeStreamKey: randomUUID(),
           fullPrompt: "",
           requestPayload: {},
@@ -1551,6 +1552,7 @@ async function main() {
           turnNumber,
           provider: OPENAI_PROVIDER,
           model: openAiConfig.model,
+          reasoningEffort: openAiConfig.reasoningEffort,
           runtimeStreamKey: randomUUID(),
         })
         createdLlmRunId = turnRun.llmRunId

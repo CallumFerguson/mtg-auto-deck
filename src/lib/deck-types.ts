@@ -91,6 +91,7 @@ export type SimulationDebugLlmRun = {
   phase: string
   provider: string
   model: string
+  reasoningEffort: string
   status: string
   runtimeStreamKey: string | null
   attemptNumber: number
