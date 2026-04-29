@@ -54,6 +54,7 @@ export type CreateTurnLlmRunInput = {
   model: string
   reasoningEffort: string
   runtimeStreamKey: string
+  requireAutoSimulateNextStep?: boolean
 }
 
 export type OpeningHandLlmRun = {
@@ -140,10 +141,45 @@ export type SimulationResultsInfo = SimulationDebugInfo
 
 export type StaleInFlightLlmRunCleanupResult = {
   cancelledLlmRunIds: string[]
+  cancelledSimulationIds: string[]
 }
 
 export const STALE_IN_FLIGHT_LLM_RUN_CANCELLATION_MESSAGE =
   "LLM run was cancelled because the server restarted before the in-flight API stream completed."
+export const STALE_RUNNING_SIMULATION_CANCELLATION_MESSAGE =
+  "Simulation was cancelled because the server restarted before it finished."
+export const INVALID_OPENING_HAND_SIMULATION_FAILURE_MESSAGE =
+  "Opening-hand LLM run did not produce a valid starting hand."
+export const SIMULATION_AUTO_ADVANCE_DISABLED_MESSAGE =
+  "Simulation auto-advance is disabled."
+export const SIMULATION_AUTO_ADVANCE_NOT_RUNNING_MESSAGE =
+  "Simulation auto-advance requires a running simulation."
+
+export type SimulationNextStep =
+  | {
+      type: "opening_hand"
+    }
+  | {
+      type: "turn"
+      turnNumber: number
+    }
+
+export type SimulationCreationDecision = {
+  simulationStatus: SimulationStatus
+  nextStep: SimulationNextStep | null
+}
+
+export type SimulationCompletionDecision = {
+  simulationStatus: SimulationStatus
+  nextStep: SimulationNextStep | null
+  disableAutoSimulateNextStep: boolean
+  failureMessage: string | null
+}
+
+export type SimulationLlmCompletionResult = SimulationCompletionDecision & {
+  simulationId: string
+  deckId: string
+}
 
 export type SimulationSummary = {
   id: string
@@ -224,6 +260,123 @@ export type CreateSimulationInput = {
   seed: string
   turnsToSimulate: number
   startingHandId: string | null
+}
+
+export function getSimulationCreationDecision({
+  hasPresetStartingHand,
+  turnsToSimulate,
+}: {
+  hasPresetStartingHand: boolean
+  turnsToSimulate: number
+}): SimulationCreationDecision {
+  if (!hasPresetStartingHand) {
+    return {
+      simulationStatus: "running",
+      nextStep: {
+        type: "opening_hand",
+      },
+    }
+  }
+
+  if (turnsToSimulate === 0) {
+    return {
+      simulationStatus: "completed",
+      nextStep: null,
+    }
+  }
+
+  return {
+    simulationStatus: "running",
+    nextStep: {
+      type: "turn",
+      turnNumber: 1,
+    },
+  }
+}
+
+export function getOpeningHandCompletionDecision({
+  autoSimulateNextStep,
+  openingHandIsValid,
+  turnsToSimulate,
+}: {
+  autoSimulateNextStep: boolean
+  openingHandIsValid: boolean
+  turnsToSimulate: number
+}): SimulationCompletionDecision {
+  if (!openingHandIsValid) {
+    return {
+      simulationStatus: "failed",
+      nextStep: null,
+      disableAutoSimulateNextStep: true,
+      failureMessage: INVALID_OPENING_HAND_SIMULATION_FAILURE_MESSAGE,
+    }
+  }
+
+  if (turnsToSimulate === 0) {
+    return {
+      simulationStatus: "completed",
+      nextStep: null,
+      disableAutoSimulateNextStep: false,
+      failureMessage: null,
+    }
+  }
+
+  if (autoSimulateNextStep) {
+    return {
+      simulationStatus: "running",
+      nextStep: {
+        type: "turn",
+        turnNumber: 1,
+      },
+      disableAutoSimulateNextStep: false,
+      failureMessage: null,
+    }
+  }
+
+  return {
+    simulationStatus: "running",
+    nextStep: null,
+    disableAutoSimulateNextStep: false,
+    failureMessage: null,
+  }
+}
+
+export function getTurnCompletionDecision({
+  autoSimulateNextStep,
+  turnNumber,
+  turnsToSimulate,
+}: {
+  autoSimulateNextStep: boolean
+  turnNumber: number
+  turnsToSimulate: number
+}): SimulationCompletionDecision {
+  if (turnNumber >= turnsToSimulate) {
+    return {
+      simulationStatus: "completed",
+      nextStep: null,
+      disableAutoSimulateNextStep: false,
+      failureMessage: null,
+    }
+  }
+
+  if (autoSimulateNextStep) {
+    return {
+      simulationStatus: "running",
+      nextStep: {
+        type: "turn",
+        turnNumber: turnNumber + 1,
+      },
+      disableAutoSimulateNextStep: false,
+      failureMessage: null,
+    }
+  }
+
+  return {
+    simulationStatus: "running",
+    nextStep: null,
+    disableAutoSimulateNextStep: false,
+    failureMessage: null,
+  }
 }
 
 export type SimulationPromptCardFace = {
@@ -313,6 +466,7 @@ export async function ensureSimulationsSchema() {
       library jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(library) = 'array'),
       mulligan_count integer NOT NULL DEFAULT 0 CHECK (mulligan_count >= 0),
       has_drawn_starting_hand boolean NOT NULL DEFAULT false,
+      auto_simulate_next_step boolean NOT NULL DEFAULT true,
 
       status simulation_status NOT NULL DEFAULT 'pending',
       started_at timestamptz,
@@ -324,6 +478,10 @@ export async function ensureSimulationsSchema() {
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now()
     )
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulations
+    ADD COLUMN IF NOT EXISTS auto_simulate_next_step boolean NOT NULL DEFAULT true
   `)
   await queryDatabase(`
     CREATE TABLE IF NOT EXISTS llm_runs (
@@ -637,6 +795,85 @@ export async function createSimulation(
     createdAt: simulation.created_at.toISOString(),
     updatedAt: simulation.updated_at.toISOString(),
   }
+}
+
+export async function getSimulationSummary(
+  deckId: string,
+  simulationId: string
+): Promise<SimulationSummary | null> {
+  const result = await queryDatabase<{
+    id: string
+    deck_id: string
+    starting_hand_id: string | null
+    seed: string
+    library: unknown
+    turns_to_simulate: number
+    status: SimulationStatus
+    created_at: Date
+    updated_at: Date
+  }>(
+    `
+      SELECT
+        id,
+        deck_id,
+        starting_hand_id,
+        seed,
+        library,
+        turns_to_simulate,
+        status,
+        created_at,
+        updated_at
+      FROM simulations
+      WHERE id = $1
+        AND deck_id = $2
+    `,
+    [simulationId, deckId]
+  )
+  const simulation = result.rows[0]
+
+  if (!simulation) {
+    return null
+  }
+
+  return {
+    id: simulation.id,
+    deckId: simulation.deck_id,
+    startingHandId: simulation.starting_hand_id,
+    seed: simulation.seed,
+    library: parseStringArray(simulation.library),
+    turnsToSimulate: simulation.turns_to_simulate,
+    status: simulation.status,
+    createdAt: simulation.created_at.toISOString(),
+    updatedAt: simulation.updated_at.toISOString(),
+  }
+}
+
+export async function markSimulationCompleted(simulationId: string) {
+  await withDatabaseTransaction(async (client) => {
+    await markSimulationCompletedWithClient(client, simulationId)
+  })
+}
+
+export async function markSimulationFailed(
+  simulationId: string,
+  failureMessage: string
+) {
+  await withDatabaseTransaction(async (client) => {
+    await markSimulationFailedWithClient(client, simulationId, failureMessage)
+  })
+}
+
+export async function markSimulationCancelled(
+  simulationId: string,
+  failureMessage?: string
+) {
+  await withDatabaseTransaction(async (client) => {
+    await markSimulationCancelledWithClient(
+      client,
+      simulationId,
+      failureMessage
+    )
+  })
 }
 
 export async function shuffleSimulationLibrary(
@@ -1223,6 +1460,8 @@ export async function createOpeningHandLlmRun(
       [input.simulationId, llmRun.id, attemptNumber]
     )
 
+    await markSimulationRunningWithClient(client, input.simulationId)
+
     return {
       simulationId: input.simulationId,
       llmRunId: llmRun.id,
@@ -1361,13 +1600,17 @@ export async function createTurnLlmRun(
       deck_id: string
       seed: string
       starting_hand_id: string | null
+      status: SimulationStatus
+      auto_simulate_next_step: boolean
     }>(
       `
         SELECT
           id,
           deck_id,
           seed,
-          starting_hand_id
+          starting_hand_id,
+          status,
+          auto_simulate_next_step
         FROM simulations
         WHERE id = $1
           AND deck_id = $2
@@ -1380,11 +1623,28 @@ export async function createTurnLlmRun(
       throw new SimulationValidationError("Simulation not found.")
     }
 
+    const simulation = simulationResult.rows[0]
+
+    if (
+      input.requireAutoSimulateNextStep &&
+      !simulation.auto_simulate_next_step
+    ) {
+      throw new SimulationValidationError(
+        SIMULATION_AUTO_ADVANCE_DISABLED_MESSAGE
+      )
+    }
+
+    if (input.requireAutoSimulateNextStep && simulation.status !== "running") {
+      throw new SimulationValidationError(
+        SIMULATION_AUTO_ADVANCE_NOT_RUNNING_MESSAGE
+      )
+    }
+
     await assertNoActiveSimulationLlmRuns(client, input.simulationId)
 
     const previousGameState = await resetSimulationForTurnLlmRun(
       client,
-      simulationResult.rows[0],
+      simulation,
       input.turnNumber
     )
 
@@ -1451,6 +1711,8 @@ export async function createTurnLlmRun(
       `,
       [input.simulationId, llmRun.id, input.turnNumber, attemptNumber]
     )
+
+    await markSimulationRunningWithClient(client, input.simulationId)
 
     return {
       simulationId: input.simulationId,
@@ -1608,19 +1870,27 @@ export async function completeOpeningHandLlmRun({
   openingHand: readonly string[]
   responseMetadata: unknown
   usage: unknown
-}) {
-  await withDatabaseTransaction(async (client) => {
+}): Promise<SimulationLlmCompletionResult> {
+  return withDatabaseTransaction(async (client) => {
     const snapshotResult = await client.query<{
+      simulation_id: string
+      deck_id: string
       library: unknown
       random_state: string
       mulligan_count: number
+      turns_to_simulate: number
+      auto_simulate_next_step: boolean
       deck_library_card_count: number
     }>(
       `
         SELECT
+          simulation.id AS simulation_id,
+          simulation.deck_id,
           simulation.library,
           simulation.random_state,
           simulation.mulligan_count,
+          simulation.turns_to_simulate,
+          simulation.auto_simulate_next_step,
           COALESCE(deck_counts.library_card_count, 0)::integer AS deck_library_card_count
         FROM simulation_opening_hand_llm_runs opening_run
         JOIN simulations simulation
@@ -1680,6 +1950,24 @@ export async function completeOpeningHandLlmRun({
       `,
       [llmRunId, JSON.stringify(responseMetadata), JSON.stringify(usage)]
     )
+
+    const decision = getOpeningHandCompletionDecision({
+      autoSimulateNextStep: snapshot.auto_simulate_next_step,
+      openingHandIsValid,
+      turnsToSimulate: snapshot.turns_to_simulate,
+    })
+
+    await applySimulationCompletionDecisionWithClient(
+      client,
+      snapshot.simulation_id,
+      decision
+    )
+
+    return {
+      simulationId: snapshot.simulation_id,
+      deckId: snapshot.deck_id,
+      ...decision,
+    }
   })
 }
 
@@ -1693,16 +1981,26 @@ export async function completeTurnLlmRun({
   gameState: string
   responseMetadata: unknown
   usage: unknown
-}) {
-  await withDatabaseTransaction(async (client) => {
+}): Promise<SimulationLlmCompletionResult> {
+  return withDatabaseTransaction(async (client) => {
     const snapshotResult = await client.query<{
+      simulation_id: string
+      deck_id: string
+      turn_number: number
       library: unknown
       random_state: string
+      turns_to_simulate: number
+      auto_simulate_next_step: boolean
     }>(
       `
         SELECT
+          simulation.id AS simulation_id,
+          simulation.deck_id,
+          turn_run.turn_number,
           simulation.library,
-          simulation.random_state
+          simulation.random_state,
+          simulation.turns_to_simulate,
+          simulation.auto_simulate_next_step
         FROM simulation_turn_llm_runs turn_run
         JOIN simulations simulation
           ON simulation.id = turn_run.simulation_id
@@ -1746,53 +2044,137 @@ export async function completeTurnLlmRun({
       `,
       [llmRunId, JSON.stringify(responseMetadata), JSON.stringify(usage)]
     )
+
+    const decision = getTurnCompletionDecision({
+      autoSimulateNextStep: snapshot.auto_simulate_next_step,
+      turnNumber: snapshot.turn_number,
+      turnsToSimulate: snapshot.turns_to_simulate,
+    })
+
+    await applySimulationCompletionDecisionWithClient(
+      client,
+      snapshot.simulation_id,
+      decision
+    )
+
+    return {
+      simulationId: snapshot.simulation_id,
+      deckId: snapshot.deck_id,
+      ...decision,
+    }
   })
 }
 
 export async function failLlmRun(llmRunId: string, failureMessage: string) {
-  await queryDatabase(
-    `
-      UPDATE llm_runs
-      SET status = 'failed',
-          failed_at = now(),
-          failure_message = $2,
-          updated_at = now()
-      WHERE id = $1
-        AND status <> 'completed'
-    `,
-    [llmRunId, failureMessage]
-  )
+  await withDatabaseTransaction(async (client) => {
+    await client.query(
+      `
+        UPDATE llm_runs
+        SET status = 'failed',
+            failed_at = now(),
+            failure_message = $2,
+            updated_at = now()
+        WHERE id = $1
+          AND status <> 'completed'
+      `,
+      [llmRunId, failureMessage]
+    )
+
+    await client.query(
+      `
+        UPDATE simulations
+        SET status = 'failed',
+            auto_simulate_next_step = false,
+            failed_at = now(),
+            failure_message = $2,
+            updated_at = now()
+        WHERE id IN (
+          SELECT opening_run.simulation_id
+          FROM simulation_opening_hand_llm_runs opening_run
+          WHERE opening_run.llm_run_id = $1
+          UNION
+          SELECT turn_run.simulation_id
+          FROM simulation_turn_llm_runs turn_run
+          WHERE turn_run.llm_run_id = $1
+        )
+          AND status NOT IN ('completed', 'cancelled')
+      `,
+      [llmRunId, failureMessage]
+    )
+  })
 }
 
 export async function cancelLlmRun(llmRunId: string, failureMessage?: string) {
-  await queryDatabase(
-    `
-      UPDATE llm_runs
-      SET status = 'cancelled',
-          cancelled_at = now(),
-          failure_message = COALESCE($2, failure_message),
-          updated_at = now()
-      WHERE id = $1
-        AND status <> 'completed'
-    `,
-    [llmRunId, failureMessage ?? null]
-  )
+  await withDatabaseTransaction(async (client) => {
+    await client.query(
+      `
+        UPDATE llm_runs
+        SET status = 'cancelled',
+            cancelled_at = now(),
+            failure_message = COALESCE($2, failure_message),
+            updated_at = now()
+        WHERE id = $1
+          AND status <> 'completed'
+      `,
+      [llmRunId, failureMessage ?? null]
+    )
+
+    await client.query(
+      `
+        UPDATE simulations
+        SET status = 'cancelled',
+            auto_simulate_next_step = false,
+            cancel_requested_at = COALESCE(cancel_requested_at, now()),
+            failure_message = COALESCE($2, failure_message),
+            updated_at = now()
+        WHERE id IN (
+          SELECT opening_run.simulation_id
+          FROM simulation_opening_hand_llm_runs opening_run
+          WHERE opening_run.llm_run_id = $1
+          UNION
+          SELECT turn_run.simulation_id
+          FROM simulation_turn_llm_runs turn_run
+          WHERE turn_run.llm_run_id = $1
+        )
+          AND EXISTS (
+            SELECT 1
+            FROM llm_runs llm_run
+            WHERE llm_run.id = $1
+              AND llm_run.status = 'cancelled'
+          )
+      `,
+      [llmRunId, failureMessage ?? null]
+    )
+  })
 }
 
 export async function cancelStaleInFlightLlmRuns(): Promise<
   StaleInFlightLlmRunCleanupResult
 > {
   return withDatabaseTransaction(async (client) => {
-    const activeRunsResult = await client.query<{ id: string }>(
+    const activeRunsResult = await client.query<{
+      id: string
+      simulation_id: string | null
+    }>(
       `
-        SELECT id
-        FROM llm_runs
-        WHERE status IN ('pending', 'streaming', 'cancel_requested')
-        ORDER BY created_at ASC, id ASC
-        FOR UPDATE
+        SELECT
+          llm_run.id,
+          COALESCE(
+            opening_run.simulation_id,
+            turn_run.simulation_id
+          ) AS simulation_id
+        FROM llm_runs llm_run
+        LEFT JOIN simulation_opening_hand_llm_runs opening_run
+          ON opening_run.llm_run_id = llm_run.id
+        LEFT JOIN simulation_turn_llm_runs turn_run
+          ON turn_run.llm_run_id = llm_run.id
+        WHERE llm_run.status IN ('pending', 'streaming', 'cancel_requested')
+        ORDER BY llm_run.created_at ASC, llm_run.id ASC
+        FOR UPDATE OF llm_run
       `
     )
     const cancelledLlmRunIds: string[] = []
+    const cancelledSimulationIds = new Set<string>()
 
     for (const run of activeRunsResult.rows) {
       const sequenceResult = await client.query<{ sequence: number }>(
@@ -1840,8 +2222,58 @@ export async function cancelStaleInFlightLlmRuns(): Promise<
       }
     }
 
+    const activeSimulationIds = Array.from(
+      new Set(
+        activeRunsResult.rows.flatMap((run) =>
+          run.simulation_id === null ? [] : [run.simulation_id]
+        )
+      )
+    )
+
+    if (activeSimulationIds.length > 0) {
+      const activeSimulationCleanupResult = await client.query<{ id: string }>(
+        `
+          UPDATE simulations
+          SET status = 'cancelled',
+              auto_simulate_next_step = false,
+              cancel_requested_at = COALESCE(cancel_requested_at, now()),
+              failure_message = $2,
+              updated_at = now()
+          WHERE id = ANY($1::uuid[])
+            AND status <> 'completed'
+          RETURNING id
+        `,
+        [activeSimulationIds, STALE_IN_FLIGHT_LLM_RUN_CANCELLATION_MESSAGE]
+      )
+
+      for (const simulation of activeSimulationCleanupResult.rows) {
+        cancelledSimulationIds.add(simulation.id)
+      }
+    }
+
+    const staleRunningSimulationCleanupResult = await client.query<{
+      id: string
+    }>(
+      `
+        UPDATE simulations
+        SET status = 'cancelled',
+            auto_simulate_next_step = false,
+            cancel_requested_at = COALESCE(cancel_requested_at, now()),
+            failure_message = $1,
+            updated_at = now()
+        WHERE status = 'running'
+        RETURNING id
+      `,
+      [STALE_RUNNING_SIMULATION_CANCELLATION_MESSAGE]
+    )
+
+    for (const simulation of staleRunningSimulationCleanupResult.rows) {
+      cancelledSimulationIds.add(simulation.id)
+    }
+
     return {
       cancelledLlmRunIds,
+      cancelledSimulationIds: Array.from(cancelledSimulationIds),
     }
   })
 }
@@ -1864,6 +2296,17 @@ export async function requestCancelSimulationLlmRuns(
     if (simulationResult.rowCount === 0) {
       throw new SimulationValidationError("Simulation not found.")
     }
+
+    await client.query(
+      `
+        UPDATE simulations
+        SET auto_simulate_next_step = false,
+            cancel_requested_at = COALESCE(cancel_requested_at, now()),
+            updated_at = now()
+        WHERE id = $1
+      `,
+      [simulationId]
+    )
 
     const activeRunsResult = await client.query<{
       simulation_id: string
@@ -2491,6 +2934,115 @@ type LibrarySimulationRow = {
   library: unknown
   mulligan_count: number
   has_drawn_starting_hand: boolean
+}
+
+async function markSimulationRunningWithClient(
+  client: DatabaseTransactionClient,
+  simulationId: string
+) {
+  await client.query(
+    `
+      UPDATE simulations
+      SET status = 'running',
+          started_at = COALESCE(started_at, now()),
+          completed_at = NULL,
+          failed_at = NULL,
+          cancel_requested_at = NULL,
+          failure_message = NULL,
+          updated_at = now()
+      WHERE id = $1
+    `,
+    [simulationId]
+  )
+}
+
+async function markSimulationCompletedWithClient(
+  client: DatabaseTransactionClient,
+  simulationId: string
+) {
+  await client.query(
+    `
+      UPDATE simulations
+      SET status = 'completed',
+          completed_at = now(),
+          failed_at = NULL,
+          failure_message = NULL,
+          updated_at = now()
+      WHERE id = $1
+    `,
+    [simulationId]
+  )
+}
+
+async function markSimulationFailedWithClient(
+  client: DatabaseTransactionClient,
+  simulationId: string,
+  failureMessage: string
+) {
+  await client.query(
+    `
+      UPDATE simulations
+      SET status = 'failed',
+          auto_simulate_next_step = false,
+          failed_at = now(),
+          failure_message = $2,
+          updated_at = now()
+      WHERE id = $1
+        AND status NOT IN ('completed', 'cancelled')
+    `,
+    [simulationId, failureMessage]
+  )
+}
+
+async function markSimulationCancelledWithClient(
+  client: DatabaseTransactionClient,
+  simulationId: string,
+  failureMessage?: string
+) {
+  await client.query(
+    `
+      UPDATE simulations
+      SET status = 'cancelled',
+          auto_simulate_next_step = false,
+          cancel_requested_at = COALESCE(cancel_requested_at, now()),
+          failure_message = COALESCE($2, failure_message),
+          updated_at = now()
+      WHERE id = $1
+    `,
+    [simulationId, failureMessage ?? null]
+  )
+}
+
+async function applySimulationCompletionDecisionWithClient(
+  client: DatabaseTransactionClient,
+  simulationId: string,
+  decision: SimulationCompletionDecision
+) {
+  if (decision.simulationStatus === "failed") {
+    await markSimulationFailedWithClient(
+      client,
+      simulationId,
+      decision.failureMessage ?? "Simulation failed."
+    )
+    return
+  }
+
+  if (decision.simulationStatus === "completed") {
+    await markSimulationCompletedWithClient(client, simulationId)
+    return
+  }
+
+  if (decision.disableAutoSimulateNextStep) {
+    await client.query(
+      `
+        UPDATE simulations
+        SET auto_simulate_next_step = false,
+            updated_at = now()
+        WHERE id = $1
+      `,
+      [simulationId]
+    )
+  }
 }
 
 async function assertNoActiveSimulationLlmRuns(

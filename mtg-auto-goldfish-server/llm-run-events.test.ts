@@ -8,8 +8,13 @@ import {
   parseTurnSimulationFromResponseText,
 } from "./llm-run-events.js"
 import {
+  INVALID_OPENING_HAND_SIMULATION_FAILURE_MESSAGE,
   SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
   STALE_IN_FLIGHT_LLM_RUN_CANCELLATION_MESSAGE,
+  STALE_RUNNING_SIMULATION_CANCELLATION_MESSAGE,
+  getOpeningHandCompletionDecision,
+  getSimulationCreationDecision,
+  getTurnCompletionDecision,
   isValidCompletedOpeningHand,
 } from "./simulations-postgres.js"
 import {
@@ -130,6 +135,154 @@ test("startup stale-run cancellation message is explicit", () => {
     message:
       "LLM run was cancelled because the server restarted before the in-flight API stream completed.",
   })
+})
+
+test("startup stale running simulation cancellation message is explicit", () => {
+  assert.equal(
+    STALE_RUNNING_SIMULATION_CANCELLATION_MESSAGE,
+    "Simulation was cancelled because the server restarted before it finished."
+  )
+})
+
+test("new simulations choose the correct initial step", () => {
+  assert.deepEqual(
+    getSimulationCreationDecision({
+      hasPresetStartingHand: false,
+      turnsToSimulate: 3,
+    }),
+    {
+      simulationStatus: "running",
+      nextStep: {
+        type: "opening_hand",
+      },
+    }
+  )
+  assert.deepEqual(
+    getSimulationCreationDecision({
+      hasPresetStartingHand: true,
+      turnsToSimulate: 0,
+    }),
+    {
+      simulationStatus: "completed",
+      nextStep: null,
+    }
+  )
+  assert.deepEqual(
+    getSimulationCreationDecision({
+      hasPresetStartingHand: true,
+      turnsToSimulate: 2,
+    }),
+    {
+      simulationStatus: "running",
+      nextStep: {
+        type: "turn",
+        turnNumber: 1,
+      },
+    }
+  )
+})
+
+test("opening-hand completion advances, completes, or fails by simulation state", () => {
+  assert.deepEqual(
+    getOpeningHandCompletionDecision({
+      autoSimulateNextStep: true,
+      openingHandIsValid: true,
+      turnsToSimulate: 0,
+    }),
+    {
+      simulationStatus: "completed",
+      nextStep: null,
+      disableAutoSimulateNextStep: false,
+      failureMessage: null,
+    }
+  )
+  assert.deepEqual(
+    getOpeningHandCompletionDecision({
+      autoSimulateNextStep: true,
+      openingHandIsValid: true,
+      turnsToSimulate: 2,
+    }),
+    {
+      simulationStatus: "running",
+      nextStep: {
+        type: "turn",
+        turnNumber: 1,
+      },
+      disableAutoSimulateNextStep: false,
+      failureMessage: null,
+    }
+  )
+  assert.deepEqual(
+    getOpeningHandCompletionDecision({
+      autoSimulateNextStep: false,
+      openingHandIsValid: true,
+      turnsToSimulate: 2,
+    }),
+    {
+      simulationStatus: "running",
+      nextStep: null,
+      disableAutoSimulateNextStep: false,
+      failureMessage: null,
+    }
+  )
+  assert.deepEqual(
+    getOpeningHandCompletionDecision({
+      autoSimulateNextStep: true,
+      openingHandIsValid: false,
+      turnsToSimulate: 2,
+    }),
+    {
+      simulationStatus: "failed",
+      nextStep: null,
+      disableAutoSimulateNextStep: true,
+      failureMessage: INVALID_OPENING_HAND_SIMULATION_FAILURE_MESSAGE,
+    }
+  )
+})
+
+test("turn completion advances until the target turn then completes", () => {
+  assert.deepEqual(
+    getTurnCompletionDecision({
+      autoSimulateNextStep: true,
+      turnNumber: 1,
+      turnsToSimulate: 3,
+    }),
+    {
+      simulationStatus: "running",
+      nextStep: {
+        type: "turn",
+        turnNumber: 2,
+      },
+      disableAutoSimulateNextStep: false,
+      failureMessage: null,
+    }
+  )
+  assert.deepEqual(
+    getTurnCompletionDecision({
+      autoSimulateNextStep: false,
+      turnNumber: 1,
+      turnsToSimulate: 3,
+    }),
+    {
+      simulationStatus: "running",
+      nextStep: null,
+      disableAutoSimulateNextStep: false,
+      failureMessage: null,
+    }
+  )
+  assert.deepEqual(
+    getTurnCompletionDecision({
+      autoSimulateNextStep: true,
+      turnNumber: 3,
+      turnsToSimulate: 3,
+    }),
+    {
+      simulationStatus: "completed",
+      nextStep: null,
+      disableAutoSimulateNextStep: false,
+      failureMessage: null,
+    }
+  )
 })
 
 test("validates completed opening hand size after commander mulligans", () => {

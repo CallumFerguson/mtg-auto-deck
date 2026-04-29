@@ -37,14 +37,19 @@ import {
   drawStartingHand,
   ensureSimulationsSchema,
   failLlmRun,
+  getSimulationCreationDecision,
   getSimulationDebugInfo,
   getSimulationResultsInfo,
+  getSimulationSummary,
   getStartingHandSimulationPromptData,
   getTurnSimulationPromptData,
   listActiveSimulationLlmRuns,
   listSimulationsForDeck,
   logTurnAction,
   markLlmRunStreaming,
+  markSimulationCancelled,
+  markSimulationCompleted,
+  markSimulationFailed,
   mulliganSimulation,
   requestCancelSimulationLlmRuns,
   resetSimulationForOpeningHandLlmRun,
@@ -52,6 +57,8 @@ import {
   returnCardsToSimulationLibrary,
   resolveSimulationIdentifier,
   shuffleSimulationLibrary,
+  SIMULATION_AUTO_ADVANCE_DISABLED_MESSAGE,
+  SIMULATION_AUTO_ADVANCE_NOT_RUNNING_MESSAGE,
   SimulationValidationError,
   takeCardsFromSimulationLibrary,
   updateLlmRunRequestData,
@@ -60,6 +67,7 @@ import type {
   LlmRunChunkInput,
   LlmRunPhase,
   SimulationIdentifier,
+  SimulationLlmCompletionResult,
   SimulationPromptCard,
   StartingHandSimulationPromptData,
   TurnSimulationPromptData,
@@ -861,6 +869,210 @@ function formatLlmRunPhase(phase: LlmRunPhase) {
   return "Simulation"
 }
 
+async function prepareAndStartOpeningHandLlmRun({
+  deckId,
+  resetBeforeStart,
+  simulationId,
+}: {
+  deckId: string
+  simulationId: string
+  resetBeforeStart: boolean
+}) {
+  let createdLlmRunId: string | null = null
+
+  try {
+    const openAiConfig = getOpeningHandOpenAiRunConfig()
+
+    if (resetBeforeStart) {
+      await resetSimulationForOpeningHandLlmRun(deckId, simulationId)
+    }
+
+    const openingHandRun = await createOpeningHandLlmRun(deckId, {
+      simulationId,
+      provider: OPENAI_PROVIDER,
+      model: openAiConfig.model,
+      reasoningEffort: openAiConfig.reasoningEffort,
+      runtimeStreamKey: randomUUID(),
+      fullPrompt: "",
+      requestPayload: {},
+    })
+    createdLlmRunId = openingHandRun.llmRunId
+    const fullPrompt = await buildStartingHandSimulationPrompt({
+      llmRunId: openingHandRun.llmRunId,
+    })
+    const requestPayload = buildOpeningHandOpenAiRequestPayload(
+      openAiConfig,
+      fullPrompt,
+      simulationId
+    )
+
+    await updateLlmRunRequestData({
+      llmRunId: openingHandRun.llmRunId,
+      fullPrompt,
+      requestPayload: getPersistableOpenAiRequestPayload(requestPayload),
+    })
+
+    startOpeningHandLlmRun({
+      config: openAiConfig,
+      fullPrompt,
+      llmRunId: openingHandRun.llmRunId,
+      requestPayload,
+      runtimeStreamKey: openingHandRun.runtimeStreamKey,
+    })
+
+    return openingHandRun
+  } catch (error) {
+    if (createdLlmRunId !== null) {
+      await failLlmRun(createdLlmRunId, getErrorMessage(error)).catch(
+        (failError: unknown) => {
+          console.error("Failed to mark opening-hand LLM run failed:", failError)
+        }
+      )
+    }
+
+    throw error
+  }
+}
+
+async function prepareAndStartTurnLlmRun({
+  deckId,
+  requireAutoSimulateNextStep = false,
+  simulationId,
+  turnNumber,
+}: {
+  deckId: string
+  simulationId: string
+  turnNumber: number
+  requireAutoSimulateNextStep?: boolean
+}) {
+  let createdLlmRunId: string | null = null
+
+  try {
+    const openAiConfig = getTurnSimulationOpenAiRunConfig()
+    const turnRun = await createTurnLlmRun(deckId, {
+      simulationId,
+      turnNumber,
+      provider: OPENAI_PROVIDER,
+      model: openAiConfig.model,
+      reasoningEffort: openAiConfig.reasoningEffort,
+      runtimeStreamKey: randomUUID(),
+      requireAutoSimulateNextStep,
+    })
+    createdLlmRunId = turnRun.llmRunId
+
+    const fullPrompt =
+      turnNumber === 1
+        ? await buildTurnSimulationPrompt({ llmRunId: turnRun.llmRunId })
+        : await buildTurnSimulationPrompt(
+            { llmRunId: turnRun.llmRunId },
+            turnRun.previousGameState ?? undefined
+          )
+    const requestPayload = buildTurnSimulationOpenAiRequestPayload(
+      openAiConfig,
+      fullPrompt,
+      simulationId,
+      turnNumber
+    )
+
+    await updateLlmRunRequestData({
+      llmRunId: turnRun.llmRunId,
+      fullPrompt,
+      requestPayload: getPersistableOpenAiRequestPayload(requestPayload),
+    })
+
+    startTurnLlmRun({
+      config: openAiConfig,
+      fullPrompt,
+      llmRunId: turnRun.llmRunId,
+      requestPayload,
+      runtimeStreamKey: turnRun.runtimeStreamKey,
+    })
+
+    return turnRun
+  } catch (error) {
+    if (createdLlmRunId !== null) {
+      await failLlmRun(createdLlmRunId, getErrorMessage(error)).catch(
+        (failError: unknown) => {
+          console.error("Failed to mark turn LLM run failed:", failError)
+        }
+      )
+    }
+
+    throw error
+  }
+}
+
+async function startCreatedSimulationInitialStep(
+  deckId: string,
+  simulation: {
+    id: string
+    startingHandId: string | null
+    turnsToSimulate: number
+  }
+) {
+  const decision = getSimulationCreationDecision({
+    hasPresetStartingHand: simulation.startingHandId !== null,
+    turnsToSimulate: simulation.turnsToSimulate,
+  })
+
+  if (decision.simulationStatus === "completed") {
+    await markSimulationCompleted(simulation.id)
+    return
+  }
+
+  if (decision.nextStep?.type === "opening_hand") {
+    await prepareAndStartOpeningHandLlmRun({
+      deckId,
+      simulationId: simulation.id,
+      resetBeforeStart: false,
+    })
+    return
+  }
+
+  if (decision.nextStep?.type === "turn") {
+    await prepareAndStartTurnLlmRun({
+      deckId,
+      simulationId: simulation.id,
+      turnNumber: decision.nextStep.turnNumber,
+    })
+  }
+}
+
+async function handleSimulationCompletionNextStep(
+  completion: SimulationLlmCompletionResult
+) {
+  if (completion.nextStep?.type !== "turn") {
+    return
+  }
+
+  try {
+    await prepareAndStartTurnLlmRun({
+      deckId: completion.deckId,
+      simulationId: completion.simulationId,
+      turnNumber: completion.nextStep.turnNumber,
+      requireAutoSimulateNextStep: true,
+    })
+  } catch (error) {
+    if (isBenignAutoAdvanceAbortError(error)) {
+      console.log(
+        `Simulation auto-advance skipped: simulationId=${completion.simulationId} reason=${getErrorMessage(error)}`
+      )
+      return
+    }
+
+    console.error("Failed to auto-start next simulation step:", error)
+    await markSimulationFailed(completion.simulationId, getErrorMessage(error))
+  }
+}
+
+function isBenignAutoAdvanceAbortError(error: unknown) {
+  return (
+    error instanceof SimulationValidationError &&
+    (error.message === SIMULATION_AUTO_ADVANCE_DISABLED_MESSAGE ||
+      error.message === SIMULATION_AUTO_ADVANCE_NOT_RUNNING_MESSAGE)
+  )
+}
+
 function startOpeningHandLlmRun({
   config,
   fullPrompt,
@@ -971,12 +1183,13 @@ async function runOpeningHandLlmRun({
 
     const parsedOpeningHand = parseOpeningHandFromResponseText(outputText)
 
-    await completeOpeningHandLlmRun({
+    const completion = await completeOpeningHandLlmRun({
       llmRunId,
       openingHand: parsedOpeningHand.keptHand,
       responseMetadata,
       usage,
     })
+    await handleSimulationCompletionNextStep(completion)
   } catch (error) {
     if (isAbortError(error) || runtime.abortController.signal.aborted) {
       logOpenAiApiCallCancelled({
@@ -1120,12 +1333,13 @@ async function runTurnLlmRun({
 
     const parsedTurn = parseTurnSimulationFromResponseText(outputText)
 
-    await completeTurnLlmRun({
+    const completion = await completeTurnLlmRun({
       llmRunId,
       gameState: parsedTurn.gameState,
       responseMetadata,
       usage,
     })
+    await handleSimulationCompletionNextStep(completion)
   } catch (error) {
     if (isAbortError(error) || runtime.abortController.signal.aborted) {
       logOpenAiApiCallCancelled({
@@ -1201,6 +1415,8 @@ async function stopActiveSimulationLlmRuns(
   if (remainingActiveRuns.length > 0) {
     throw new SimulationStopTimeoutError()
   }
+
+  await markSimulationCancelled(simulationId, "Simulation was stopped.")
 
   return {
     simulationId,
@@ -1302,6 +1518,12 @@ async function main() {
   if (staleLlmRunCleanup.cancelledLlmRunIds.length > 0) {
     console.error(
       `Cancelled ${staleLlmRunCleanup.cancelledLlmRunIds.length} stale in-flight LLM run(s) from a previous server process.`
+    )
+  }
+
+  if (staleLlmRunCleanup.cancelledSimulationIds.length > 0) {
+    console.error(
+      `Cancelled ${staleLlmRunCleanup.cancelledSimulationIds.length} stale running simulation(s) from a previous server process.`
     )
   }
 
@@ -1414,6 +1636,7 @@ async function main() {
     async (req: Request, res: Response) => {
       const deckId = String(req.params.deckId)
       const parsedSimulation = createSimulationSchema.safeParse(req.body)
+      let createdSimulationId: string | null = null
 
       if (!parsedSimulation.success) {
         res.status(400).json({
@@ -1424,15 +1647,37 @@ async function main() {
 
       try {
         const simulation = await createSimulation(deckId, parsedSimulation.data)
+        createdSimulationId = simulation.id
+
+        await startCreatedSimulationInitialStep(deckId, simulation)
+
+        const updatedSimulation =
+          (await getSimulationSummary(deckId, simulation.id)) ?? simulation
 
         res.status(201).json({
-          simulation,
+          simulation: updatedSimulation,
         })
       } catch (error) {
+        if (createdSimulationId !== null) {
+          await markSimulationFailed(
+            createdSimulationId,
+            getErrorMessage(error)
+          ).catch((failError: unknown) => {
+            console.error("Failed to mark simulation failed:", failError)
+          })
+        }
+
         if (error instanceof SimulationValidationError) {
           const status = error.message === "Deck not found." ? 404 : 400
 
           res.status(status).json({
+            error: error.message,
+          })
+          return
+        }
+
+        if (error instanceof OpenAiConfigurationError) {
+          res.status(500).json({
             error: error.message,
           })
           return
@@ -1451,59 +1696,16 @@ async function main() {
     async (req: Request, res: Response) => {
       const deckId = String(req.params.deckId)
       const simulationId = String(req.params.simulationId)
-      let createdLlmRunId: string | null = null
 
       try {
-        const openAiConfig = getOpeningHandOpenAiRunConfig()
-
-        await resetSimulationForOpeningHandLlmRun(deckId, simulationId)
-
-        const openingHandRun = await createOpeningHandLlmRun(deckId, {
+        const openingHandRun = await prepareAndStartOpeningHandLlmRun({
+          deckId,
           simulationId,
-          provider: OPENAI_PROVIDER,
-          model: openAiConfig.model,
-          reasoningEffort: openAiConfig.reasoningEffort,
-          runtimeStreamKey: randomUUID(),
-          fullPrompt: "",
-          requestPayload: {},
-        })
-        createdLlmRunId = openingHandRun.llmRunId
-        const fullPrompt = await buildStartingHandSimulationPrompt({
-          llmRunId: openingHandRun.llmRunId,
-        })
-        const requestPayload = buildOpeningHandOpenAiRequestPayload(
-          openAiConfig,
-          fullPrompt,
-          simulationId
-        )
-
-        await updateLlmRunRequestData({
-          llmRunId: openingHandRun.llmRunId,
-          fullPrompt,
-          requestPayload: getPersistableOpenAiRequestPayload(requestPayload),
-        })
-
-        startOpeningHandLlmRun({
-          config: openAiConfig,
-          fullPrompt,
-          llmRunId: openingHandRun.llmRunId,
-          requestPayload,
-          runtimeStreamKey: openingHandRun.runtimeStreamKey,
+          resetBeforeStart: true,
         })
 
         res.status(202).json(openingHandRun)
       } catch (error) {
-        if (createdLlmRunId !== null) {
-          await failLlmRun(createdLlmRunId, getErrorMessage(error)).catch(
-            (failError: unknown) => {
-              console.error(
-                "Failed to mark opening-hand LLM run failed:",
-                failError
-              )
-            }
-          )
-        }
-
         if (error instanceof SimulationValidationError) {
           const status = error.message === "Simulation not found." ? 404 : 400
 
@@ -1542,47 +1744,12 @@ async function main() {
         return
       }
 
-      let createdLlmRunId: string | null = null
-
       try {
-        const openAiConfig = getTurnSimulationOpenAiRunConfig()
         const turnNumber = parsedTurnRun.data.turnNumber
-        const turnRun = await createTurnLlmRun(deckId, {
+        const turnRun = await prepareAndStartTurnLlmRun({
+          deckId,
           simulationId,
           turnNumber,
-          provider: OPENAI_PROVIDER,
-          model: openAiConfig.model,
-          reasoningEffort: openAiConfig.reasoningEffort,
-          runtimeStreamKey: randomUUID(),
-        })
-        createdLlmRunId = turnRun.llmRunId
-
-        const fullPrompt =
-          turnNumber === 1
-            ? await buildTurnSimulationPrompt({ llmRunId: turnRun.llmRunId })
-            : await buildTurnSimulationPrompt(
-                { llmRunId: turnRun.llmRunId },
-                turnRun.previousGameState ?? undefined
-              )
-        const requestPayload = buildTurnSimulationOpenAiRequestPayload(
-          openAiConfig,
-          fullPrompt,
-          simulationId,
-          turnNumber
-        )
-
-        await updateLlmRunRequestData({
-          llmRunId: turnRun.llmRunId,
-          fullPrompt,
-          requestPayload: getPersistableOpenAiRequestPayload(requestPayload),
-        })
-
-        startTurnLlmRun({
-          config: openAiConfig,
-          fullPrompt,
-          llmRunId: turnRun.llmRunId,
-          requestPayload,
-          runtimeStreamKey: turnRun.runtimeStreamKey,
         })
 
         res.status(202).json({
@@ -1594,14 +1761,6 @@ async function main() {
           status: turnRun.status,
         })
       } catch (error) {
-        if (createdLlmRunId !== null) {
-          await failLlmRun(createdLlmRunId, getErrorMessage(error)).catch(
-            (failError: unknown) => {
-              console.error("Failed to mark turn LLM run failed:", failError)
-            }
-          )
-        }
-
         if (error instanceof SimulationValidationError) {
           const status = error.message === "Simulation not found." ? 404 : 400
 
