@@ -66,7 +66,6 @@ import {
 import type {
   LlmRunChunkInput,
   LlmRunPhase,
-  SimulationIdentifier,
   SimulationLlmCompletionResult,
   SimulationPromptCard,
   StartingHandSimulationPromptData,
@@ -126,23 +125,13 @@ const DEFAULT_ALLOWED_HEADERS = [
   "Mcp-Protocol-Version",
 ]
 
-const simulationIdSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .describe(
-    "Optional simulation identifier. When also providing llmRunId, this must match the simulation associated with that run."
-  )
 const llmRunIdSchema = z
   .string()
   .trim()
   .min(1)
-  .describe(
-    "Preferred identifier for this tool call. Use the LLM Run ID from the prompt."
-  )
-const simulationIdentifierSchema = {
-  llmRunId: llmRunIdSchema.optional(),
-  simulationId: simulationIdSchema.optional(),
+  .describe("The LLM Run ID from the prompt.")
+const llmRunIdentifierSchema = {
+  llmRunId: llmRunIdSchema,
 }
 const createDeckSchema = z.object({
   name: z.string().trim().min(1),
@@ -372,8 +361,12 @@ function createCompactToolResultContent(data: unknown) {
   ]
 }
 
-async function resolveMcpSimulationId(identifier: SimulationIdentifier) {
-  return resolveSimulationIdentifier(identifier)
+type LlmRunIdentifier = {
+  llmRunId: string
+}
+
+async function resolveMcpSimulationId(llmRunId: string) {
+  return resolveSimulationIdentifier({ llmRunId })
 }
 
 function createOpeningHandServer() {
@@ -404,15 +397,12 @@ function registerDrawCardFromTopTool(server: McpServer) {
       description:
         "Draw one or more cards from the top of the stored library for an existing simulation.",
       inputSchema: {
-        ...simulationIdentifierSchema,
+        ...llmRunIdentifierSchema,
         count: z.number().int().positive().describe("How many cards to draw."),
       },
     },
-    async ({ count, llmRunId, simulationId }) => {
-      const resolvedSimulationId = await resolveMcpSimulationId({
-        llmRunId,
-        simulationId,
-      })
+    async ({ count, llmRunId }) => {
+      const resolvedSimulationId = await resolveMcpSimulationId(llmRunId)
       const response = await drawCardsFromTop(resolvedSimulationId, count)
 
       return {
@@ -433,15 +423,12 @@ function registerDrawCardFromBottomTool(server: McpServer) {
       description:
         "Draw one or more cards from the bottom of the stored library for an existing simulation.",
       inputSchema: {
-        ...simulationIdentifierSchema,
+        ...llmRunIdentifierSchema,
         count: z.number().int().positive().describe("How many cards to draw."),
       },
     },
-    async ({ count, llmRunId, simulationId }) => {
-      const resolvedSimulationId = await resolveMcpSimulationId({
-        llmRunId,
-        simulationId,
-      })
+    async ({ count, llmRunId }) => {
+      const resolvedSimulationId = await resolveMcpSimulationId(llmRunId)
       const response = await drawCardsFromBottom(resolvedSimulationId, count)
 
       return {
@@ -462,14 +449,11 @@ function registerDrawStartingHandTool(server: McpServer) {
       description:
         "Draw the very first opening seven-card hand from the stored library for an existing simulation. Call this exactly once per simulation, before any mulligans. Never call this after mulligan, because mulligan already shuffles and draws the replacement seven-card hand.",
       inputSchema: {
-        ...simulationIdentifierSchema,
+        ...llmRunIdentifierSchema,
       },
     },
-    async ({ llmRunId, simulationId }) => {
-      const resolvedSimulationId = await resolveMcpSimulationId({
-        llmRunId,
-        simulationId,
-      })
+    async ({ llmRunId }) => {
+      const resolvedSimulationId = await resolveMcpSimulationId(llmRunId)
       const response = await drawStartingHand(resolvedSimulationId)
 
       return {
@@ -490,7 +474,7 @@ function registerMulliganTool(server: McpServer) {
       description:
         "Return the current opening hand to the library, shuffle, and draw a fresh seven-card hand. This can only be called after the starting hand has been drawn. Important: this tool already draws and returns the replacement hand, so do not call draw_starting_hand after using this tool.",
       inputSchema: {
-        ...simulationIdentifierSchema,
+        ...llmRunIdentifierSchema,
         reason: z
           .string()
           .trim()
@@ -500,11 +484,8 @@ function registerMulliganTool(server: McpServer) {
           ),
       },
     },
-    async ({ llmRunId, reason, simulationId }) => {
-      const resolvedSimulationId = await resolveMcpSimulationId({
-        llmRunId,
-        simulationId,
-      })
+    async ({ llmRunId, reason }) => {
+      const resolvedSimulationId = await resolveMcpSimulationId(llmRunId)
       const response = await mulliganSimulation(resolvedSimulationId, reason)
 
       return {
@@ -525,7 +506,7 @@ function registerReturnCardToLibraryTool(server: McpServer) {
       description:
         "Return a card to the library for an existing simulation, placing it a specific number of cards from the top or bottom.",
       inputSchema: {
-        ...simulationIdentifierSchema,
+        ...llmRunIdentifierSchema,
         card: z
           .string()
           .trim()
@@ -545,11 +526,8 @@ function registerReturnCardToLibraryTool(server: McpServer) {
           ),
       },
     },
-    async ({ card, llmRunId, position, side, simulationId }) => {
-      const resolvedSimulationId = await resolveMcpSimulationId({
-        llmRunId,
-        simulationId,
-      })
+    async ({ card, llmRunId, position, side }) => {
+      const resolvedSimulationId = await resolveMcpSimulationId(llmRunId)
       const response = await returnCardToSimulationLibrary({
         simulationId: resolvedSimulationId,
         card,
@@ -575,7 +553,7 @@ function registerReturnCardsToLibraryTool(server: McpServer) {
       description:
         "Return multiple cards to the top or bottom of the library for an existing simulation, optionally randomizing the order they are returned in.",
       inputSchema: {
-        ...simulationIdentifierSchema,
+        ...llmRunIdentifierSchema,
         cards: z
           .array(z.string().trim().min(1))
           .min(1)
@@ -592,11 +570,8 @@ function registerReturnCardsToLibraryTool(server: McpServer) {
           ),
       },
     },
-    async ({ cards, llmRunId, randomizeOrder, side, simulationId }) => {
-      const resolvedSimulationId = await resolveMcpSimulationId({
-        llmRunId,
-        simulationId,
-      })
+    async ({ cards, llmRunId, randomizeOrder, side }) => {
+      const resolvedSimulationId = await resolveMcpSimulationId(llmRunId)
       const response = await returnCardsToSimulationLibrary({
         simulationId: resolvedSimulationId,
         cards,
@@ -622,7 +597,7 @@ function registerTakeCardsFromLibraryTool(server: McpServer) {
       description:
         "Take one or more specific cards out of the stored library for tutor and search effects. Each requested name uses the best reasonably close fuzzy match, ignoring case and punctuation. If no close enough match exists, that request returns no card.",
       inputSchema: {
-        ...simulationIdentifierSchema,
+        ...llmRunIdentifierSchema,
         cards: z
           .array(z.string().trim().min(1))
           .min(1)
@@ -631,11 +606,8 @@ function registerTakeCardsFromLibraryTool(server: McpServer) {
           ),
       },
     },
-    async ({ cards, llmRunId, simulationId }) => {
-      const resolvedSimulationId = await resolveMcpSimulationId({
-        llmRunId,
-        simulationId,
-      })
+    async ({ cards, llmRunId }) => {
+      const resolvedSimulationId = await resolveMcpSimulationId(llmRunId)
       const response = await takeCardsFromSimulationLibrary(
         resolvedSimulationId,
         cards
@@ -658,14 +630,11 @@ function registerShuffleLibraryTool(server: McpServer) {
       title: "Shuffle Library",
       description: "Shuffle the stored library for an existing simulation.",
       inputSchema: {
-        ...simulationIdentifierSchema,
+        ...llmRunIdentifierSchema,
       },
     },
-    async ({ llmRunId, simulationId }) => {
-      const resolvedSimulationId = await resolveMcpSimulationId({
-        llmRunId,
-        simulationId,
-      })
+    async ({ llmRunId }) => {
+      const resolvedSimulationId = await resolveMcpSimulationId(llmRunId)
       const response = await shuffleSimulationLibrary(resolvedSimulationId)
 
       return {
@@ -686,7 +655,7 @@ function registerLogTurnActionTool(server: McpServer) {
       description:
         "Append an irreversible action note to the active turn log for this simulation. Use this as the authoritative turn history while resolving the turn. The response returns the full logged action list for the active turn.",
       inputSchema: {
-        ...simulationIdentifierSchema,
+        ...llmRunIdentifierSchema,
         action: z
           .string()
           .trim()
@@ -696,24 +665,19 @@ function registerLogTurnActionTool(server: McpServer) {
           ),
       },
     },
-    async ({ action, llmRunId, simulationId }) => {
-      const resolvedSimulationId = await resolveMcpSimulationId({
-        llmRunId,
-        simulationId,
-      })
+    async ({ action, llmRunId }) => {
+      const resolvedSimulationId = await resolveMcpSimulationId(llmRunId)
       const response = await logTurnAction(resolvedSimulationId, action)
 
       return {
-        content: createCompactToolResultContent(
-          {
-            data: {
-              loggedActions: response.actions.map(
-                (loggedAction) => loggedAction.action
-              ),
-            },
-            message: `Logged action: ${response.latestAction.action}`,
-          }
-        ),
+        content: createCompactToolResultContent({
+          data: {
+            loggedActions: response.actions.map(
+              (loggedAction) => loggedAction.action
+            ),
+          },
+          message: `Logged action: ${response.latestAction.action}`,
+        }),
       }
     }
   )
@@ -925,7 +889,10 @@ async function prepareAndStartOpeningHandLlmRun({
     if (createdLlmRunId !== null) {
       await failLlmRun(createdLlmRunId, getErrorMessage(error)).catch(
         (failError: unknown) => {
-          console.error("Failed to mark opening-hand LLM run failed:", failError)
+          console.error(
+            "Failed to mark opening-hand LLM run failed:",
+            failError
+          )
         }
       )
     }
@@ -1172,7 +1139,9 @@ async function runOpeningHandLlmRun({
     }
 
     if (!didReceiveCompletedResponse) {
-      throw new Error("Opening-hand LLM stream ended without response.completed.")
+      throw new Error(
+        "Opening-hand LLM stream ended without response.completed."
+      )
     }
 
     logOpenAiApiCallFinished({
@@ -1393,8 +1362,7 @@ async function stopActiveSimulationLlmRuns(
       runtimeCompletionPromises.push(runtime.completionPromise)
       stoppedRunIds.push(run.llmRunId)
     } else {
-      const cancellationMessage =
-        `${formatLlmRunPhase(run.phase)} LLM run was cancelled before its active runtime could be found.`
+      const cancellationMessage = `${formatLlmRunPhase(run.phase)} LLM run was cancelled before its active runtime could be found.`
 
       await appendLlmRunChunkAtNextSequence(
         run.llmRunId,
@@ -2322,10 +2290,8 @@ function isMcpPath(path: string) {
   return path === OPENING_HAND_MCP_PATH || path === TURN_SIMULATION_MCP_PATH
 }
 
-async function resolveSimulationPromptIdentifier(
-  identifier: SimulationIdentifier
-) {
-  const llmRunId = identifier.llmRunId?.trim()
+async function resolveSimulationPromptIdentifier(identifier: LlmRunIdentifier) {
+  const llmRunId = identifier.llmRunId.trim()
 
   if (!llmRunId) {
     throw new SimulationValidationError(
@@ -2335,12 +2301,12 @@ async function resolveSimulationPromptIdentifier(
 
   return {
     llmRunId,
-    simulationId: await resolveSimulationIdentifier(identifier),
+    simulationId: await resolveSimulationIdentifier({ llmRunId }),
   }
 }
 
 export async function buildStartingHandSimulationPrompt(
-  identifier: SimulationIdentifier
+  identifier: LlmRunIdentifier
 ) {
   const { llmRunId, simulationId } =
     await resolveSimulationPromptIdentifier(identifier)
@@ -2350,17 +2316,12 @@ export async function buildStartingHandSimulationPrompt(
     throw new Error("Simulation not found.")
   }
 
-  return buildStartingHandSimulationPromptFromData(
-    promptData,
-    llmRunId,
-    simulationId
-  )
+  return buildStartingHandSimulationPromptFromData(promptData, llmRunId)
 }
 
 function buildStartingHandSimulationPromptFromData(
   { commanders, library }: StartingHandSimulationPromptData,
-  llmRunId: string,
-  simulationId: string
+  llmRunId: string
 ) {
   const commanderLabel = commanders.length === 1 ? "Commander" : "Commanders"
   const commanderNames = expandCardNames(commanders)
@@ -2370,8 +2331,7 @@ function buildStartingHandSimulationPromptFromData(
   return `${DRAW_STARTING_HAND_PROMPT}
 
 LLM Run ID: ${llmRunId}
-Simulation ID: ${simulationId}
-Use this exact tool identifier shape: { "llmRunId": "${llmRunId}", "simulationId": "${simulationId}" }
+Use this exact tool identifier shape: { "llmRunId": "${llmRunId}" }
 
 ${commanderLabel}:
 ${commanderNames.join("\n")}
@@ -2450,7 +2410,7 @@ function formatPowerToughness({
 }
 
 export async function buildTurnSimulationPrompt(
-  identifier: SimulationIdentifier,
+  identifier: LlmRunIdentifier,
   gameState?: string
 ) {
   const { llmRunId, simulationId } =
@@ -2461,33 +2421,19 @@ export async function buildTurnSimulationPrompt(
     throw new Error("Simulation not found.")
   }
 
-  return buildTurnSimulationPromptFromData(
-    promptData,
-    llmRunId,
-    simulationId,
-    gameState
-  )
+  return buildTurnSimulationPromptFromData(promptData, llmRunId, gameState)
 }
 
 function buildTurnSimulationPromptFromData(
-  {
-    commanders,
-    library,
-    libraryCards,
-    startingHand,
-  }: TurnSimulationPromptData,
+  { commanders, library, libraryCards, startingHand }: TurnSimulationPromptData,
   llmRunId: string,
-  simulationId: string,
   gameState?: string
 ) {
   const commanderNames = expandCardNames(commanders)
   const cardNames = [...library].sort((left, right) =>
     left.localeCompare(right)
   )
-  const uniqueCards = dedupeCardsByNameAndText([
-    ...commanders,
-    ...libraryCards,
-  ])
+  const uniqueCards = dedupeCardsByNameAndText([...commanders, ...libraryCards])
   const resolvedGameState = gameState?.trim()
     ? gameState.trim()
     : buildInitialTurnGameState({
@@ -2498,8 +2444,7 @@ function buildTurnSimulationPromptFromData(
   return `${SIMULATE_TURN_PROMPT}
 
 LLM Run ID: ${llmRunId}
-Simulation ID: ${simulationId}
-Use this exact tool identifier shape: { "llmRunId": "${llmRunId}", "simulationId": "${simulationId}" }
+Use this exact tool identifier shape: { "llmRunId": "${llmRunId}" }
 
 ===Start Game State===
 

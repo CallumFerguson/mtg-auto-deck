@@ -50,8 +50,9 @@ RESPONSE TIMING
 - The only visible output for this step should be the final JSON response after all tool usage is finished.
 
 TOOL USAGE RULES
-- Every tool call must identify this run with the provided llmRunId and simulationId.
-- Use the exact llmRunId and simulationId values from this prompt.
+- Every tool call must identify this run with the provided llmRunId only.
+- Use the exact llmRunId value from this prompt.
+- Do not include a simulationId in tool calls.
 - Call draw_starting_hand exactly once to get the very first opening hand.
 - Do not call draw_starting_hand again after that.
 - If you decide a hand is not keepable, and only then, call mulligan.
@@ -372,7 +373,7 @@ Before the final JSON response, do one last silent procedural check:
 - If yes, have I finished all required bottoming first?
 - Is keptHand the exact final hand after bottoming?
 - After this, will I stop and give only the final JSON response?
-`;
+`
 
 export const SIMULATE_TURN_PROMPT = `
 You are an expert Magic: The Gathering player goldfishing a Commander deck.
@@ -457,8 +458,9 @@ Interpret mana costs exactly using normal MTG rules.
 
 LIBRARY AND TOOL RULES
 - The library is a hidden zone and must be manipulated only through tools.
-- Every tool call must identify this run with the provided llmRunId and simulationId.
-- Use the exact llmRunId and simulationId values from this prompt.
+- Every tool call must identify this run with the provided llmRunId only.
+- Use the exact llmRunId value from this prompt.
+- Do not include a simulationId in tool calls.
 - Use the correct tool for the correct job:
   - draw_card_from_top: normal draws, reveal-from-top effects, and taking known cards from the top
   - draw_card_from_bottom: only when an effect explicitly takes cards from the bottom
@@ -730,7 +732,7 @@ ABSOLUTE PRIORITIES
 3. Preserve the game state accurately.
 4. Choose a strong line.
 5. Finalize the turn with exactly one JSON response containing gameState and summary.
-`;
+`
 
 export const GENERIC_GAME_RULES_REFERENCE = `
 Common keywords and rules reference (not comprehensive):
@@ -801,4 +803,4 @@ COMMON ACTION WORDS
 - Fight: Two creatures deal damage equal to their power to each other.
 - Populate: Create a token that is a copy of a creature token you control.
 - Proliferate: Choose any number of permanents and/or players with counters and give each another counter of a kind already there.
-`;
+`
