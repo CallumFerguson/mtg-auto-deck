@@ -256,6 +256,11 @@ export type StartingHandSimulationPromptData = {
   library: SimulationPromptCard[]
 }
 
+export type SimulationIdentifier = {
+  simulationId?: string
+  llmRunId?: string
+}
+
 export type TurnSimulationPromptData = {
   simulationId: string
   deckId: string
@@ -2096,6 +2101,79 @@ export async function deleteSimulation(
 
     return true
   })
+}
+
+export async function resolveSimulationIdForActiveLlmRun(llmRunId: string) {
+  const result = await queryDatabase<{
+    simulation_id: string
+    status: LlmRunStatus
+    outdated: boolean
+  }>(
+    `
+      SELECT
+        opening_run.simulation_id,
+        llm_run.status,
+        false AS outdated
+      FROM llm_runs llm_run
+      JOIN simulation_opening_hand_llm_runs opening_run
+        ON opening_run.llm_run_id = llm_run.id
+      WHERE llm_run.id = $1
+      UNION ALL
+      SELECT
+        turn_run.simulation_id,
+        llm_run.status,
+        turn_run.outdated
+      FROM llm_runs llm_run
+      JOIN simulation_turn_llm_runs turn_run
+        ON turn_run.llm_run_id = llm_run.id
+      WHERE llm_run.id = $1
+      LIMIT 1
+    `,
+    [llmRunId]
+  )
+  const run = result.rows[0]
+
+  if (!run) {
+    throw new SimulationValidationError(
+      "LLM run not found or is not associated with a simulation."
+    )
+  }
+
+  if (!["pending", "streaming"].includes(run.status)) {
+    throw new SimulationValidationError(
+      "LLM run is not an active simulation run."
+    )
+  }
+
+  if (run.outdated) {
+    throw new SimulationValidationError("LLM run is outdated.")
+  }
+
+  return run.simulation_id
+}
+
+export async function resolveSimulationIdentifier({
+  llmRunId,
+  simulationId,
+}: SimulationIdentifier) {
+  const trimmedSimulationId = simulationId?.trim()
+  const trimmedLlmRunId = llmRunId?.trim()
+
+  if (trimmedSimulationId && trimmedLlmRunId) {
+    throw new SimulationValidationError(
+      "Provide either simulationId or llmRunId, not both."
+    )
+  }
+
+  if (trimmedSimulationId) {
+    return trimmedSimulationId
+  }
+
+  if (trimmedLlmRunId) {
+    return resolveSimulationIdForActiveLlmRun(trimmedLlmRunId)
+  }
+
+  throw new SimulationValidationError("Provide either simulationId or llmRunId.")
 }
 
 export async function getStartingHandSimulationPromptData(
