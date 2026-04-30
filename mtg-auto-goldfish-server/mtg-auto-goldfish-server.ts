@@ -3030,7 +3030,6 @@ Card reference:
 ${uniqueCards.map((card) => `${card.name}\n${formatCardText(card)}\n`).join("\n")}
 
 LLM Run ID: ${llmRunId}
-Use this exact tool identifier shape: { "llmRunId": "${llmRunId}" }
 `.trim()
 }
 
@@ -3142,7 +3141,6 @@ ${uniqueCards.map((card) => `${card.name}\n${formatCardText(card)}\n`).join("\n"
 ${GENERIC_GAME_RULES_REFERENCE}
 
 LLM Run ID: ${llmRunId}
-Use this exact tool identifier shape: { "llmRunId": "${llmRunId}" }
 
 ===Start Game State===
 
