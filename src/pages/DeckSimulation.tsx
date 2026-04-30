@@ -1148,9 +1148,7 @@ function SimulationDetails({
           return
         }
 
-        setResultsError(
-          "Simulation results stream is reconnecting."
-        )
+        setResultsError("Simulation results stream is reconnecting.")
         markStreamLoaded()
       }, 10000)
     }
@@ -1169,264 +1167,274 @@ function SimulationDetails({
   }, [handleRefreshDebugInfo, isDebugModalOpen])
 
   return (
-    <div className="flex flex-1 flex-col px-5 py-6">
-      <header className="grid gap-4 border-b border-border pb-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-sm text-sky-300">Simulation {simulation.id}</p>
-            <div className="mt-1 flex flex-wrap items-center gap-3">
-              <h3 className="text-xl font-semibold">Simulation setup</h3>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setIsDebugModalOpen(true)}
-              >
-                <Bug data-icon="inline-start" />
-                View debug info
-              </Button>
-            </div>
-          </div>
-          <span className="rounded-md border border-border bg-background/45 px-3 py-1 text-sm text-muted-foreground">
-            {simulation.status}
-          </span>
-        </div>
-
-        <dl className="grid gap-3 text-sm sm:grid-cols-3">
-          <div className="rounded-md border border-border bg-background/35 p-3">
-            <dt className="text-muted-foreground">Seed</dt>
-            <dd className="mt-1 font-medium break-all text-foreground">
-              {simulation.seed}
-            </dd>
-          </div>
-          <div className="rounded-md border border-border bg-background/35 p-3">
-            <dt className="text-muted-foreground">Turns to simulate</dt>
-            <dd className="mt-1 font-medium text-foreground">
-              {simulation.turnsToSimulate}
-            </dd>
-          </div>
-          <div className="rounded-md border border-border bg-background/35 p-3">
-            <dt className="text-muted-foreground">Simulate opening hand</dt>
-            <dd className="mt-1 font-medium text-foreground">
-              {shouldSimulateOpeningHand ? "Yes" : "No"}
-            </dd>
-          </div>
-        </dl>
-
-        {!shouldSimulateOpeningHand ? (
-          <div className="grid gap-2 rounded-md border border-border bg-background/35 p-3">
-            <p className="text-sm font-medium text-foreground">
-              Provided opening hand
-              {startingHand ? (
-                <span className="ml-2 text-muted-foreground">
-                  {startingHand.name}
-                </span>
-              ) : null}
-            </p>
-            {startingHand ? (
-              <ul className="grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
-                {startingHand.cards.map((card) => (
-                  <li
-                    key={card.deckCardId}
-                    className="rounded-md bg-muted/30 px-3 py-2"
-                  >
-                    {card.quantity > 1 ? (
-                      <span className="mr-2 text-sky-300">
-                        {card.quantity}x
-                      </span>
-                    ) : null}
-                    {card.name}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                Opening hand details are loading.
-              </p>
-            )}
-          </div>
-        ) : null}
-      </header>
-
-      <section className="grid gap-3 border-b border-border py-5">
-        <div className="grid gap-3 rounded-md border border-border bg-background/35 p-3">
+    <div className="grid min-h-full lg:h-full lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_24rem] lg:overflow-hidden">
+      <main className="min-w-0 px-5 py-6 lg:min-h-0 lg:overflow-y-auto">
+        <section className="grid gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h4 className="text-base font-semibold text-foreground">
+                Simulation results
+              </h4>
+              <p className="mt-1 text-sm text-muted-foreground">
+                User-facing output rebuilt from persisted LLM chunks.
+              </p>
+            </div>
+          </div>
+
+          {resultsError ? (
+            <p
+              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              role="alert"
+            >
+              {resultsError}
+            </p>
+          ) : null}
+
+          {isLoadingResults && !resultsInfo ? (
+            <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+              Loading simulation results...
+            </p>
+          ) : null}
+
+          {resultsInfo ? (
+            <SimulationResultsPanel resultsInfo={resultsInfo} />
+          ) : !isLoadingResults && !resultsError ? (
+            <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+              Waiting for simulation results.
+            </p>
+          ) : null}
+        </section>
+      </main>
+
+      <aside className="simulation-scrollbar simulation-sidebar-surface flex flex-col gap-5 border-t border-border px-5 py-6 lg:min-h-0 lg:overflow-y-auto lg:border-t-0 lg:border-l">
+        <header className="grid gap-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm text-sky-300">Simulation</p>
+              <h3 className="mt-1 text-lg font-semibold break-all">
+                {simulation.id}
+              </h3>
+            </div>
+            <span className="shrink-0 rounded-md border border-border bg-background/45 px-3 py-1 text-sm text-muted-foreground">
+              {simulation.status}
+            </span>
+          </div>
+        </header>
+
+        <section className="grid gap-3">
+          <div className="grid gap-3 rounded-md border border-border bg-background/35 p-3">
+            <div className="grid gap-3">
+              <h4 className="text-sm font-semibold text-foreground">
                 LLM simulations
               </h4>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={
-                isStoppingSimulation ||
-                isStartingOpeningHandRun ||
-                isStartingTurnRun
-              }
-              onClick={() => void handleStopSimulation()}
-            >
-              <X data-icon="inline-start" />
-              {isStoppingSimulation ? "Stopping..." : "Stop simulation"}
-            </Button>
-          </div>
-
-          {shouldSimulateOpeningHand ? (
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
-              <div>
-                <p className="text-sm font-medium text-foreground">
-                  Opening hand simulation
-                </p>
-                {openingHandRun ? (
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Run {openingHandRun.llmRunId.slice(0, 8)} started.
-                  </p>
-                ) : null}
-              </div>
               <Button
+                className="w-fit"
                 type="button"
+                variant="outline"
                 disabled={
+                  isStoppingSimulation ||
                   isStartingOpeningHandRun ||
-                  isStartingTurnRun ||
-                  isStoppingSimulation
+                  isStartingTurnRun
                 }
-                onClick={() => void handleStartOpeningHandRun()}
+                onClick={() => void handleStopSimulation()}
               >
-                <Sparkles data-icon="inline-start" />
-                {isStartingOpeningHandRun
-                  ? "Starting..."
-                  : "Start opening hand run"}
+                <X data-icon="inline-start" />
+                {isStoppingSimulation ? "Stopping..." : "Stop simulation"}
               </Button>
             </div>
-          ) : null}
 
-          <div className="flex flex-wrap items-end justify-between gap-3 border-t border-border pt-3">
-            <div className="grid gap-2">
+            {shouldSimulateOpeningHand ? (
+              <div className="grid gap-3 border-t border-border pt-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">
+                    Opening hand simulation
+                  </p>
+                  {openingHandRun ? (
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Run {openingHandRun.llmRunId.slice(0, 8)} started.
+                    </p>
+                  ) : null}
+                </div>
+                <Button
+                  className="w-fit"
+                  type="button"
+                  disabled={
+                    isStartingOpeningHandRun ||
+                    isStartingTurnRun ||
+                    isStoppingSimulation
+                  }
+                  onClick={() => void handleStartOpeningHandRun()}
+                >
+                  <Sparkles data-icon="inline-start" />
+                  {isStartingOpeningHandRun
+                    ? "Starting..."
+                    : "Start opening hand run"}
+                </Button>
+              </div>
+            ) : null}
+
+            <div className="grid gap-3 border-t border-border pt-3">
               <label
-                className="text-sm font-medium text-foreground"
+                className="grid gap-2 text-sm font-medium text-foreground"
                 htmlFor="turn-run-number"
               >
-                Turn simulation
+                <span>Turn simulation</span>
+                <select
+                  id="turn-run-number"
+                  className="h-9 w-28 rounded-md border border-input bg-background px-3 text-sm text-foreground transition-colors outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
+                  value={selectedTurnNumber}
+                  disabled={
+                    isStartingTurnRun ||
+                    isStartingOpeningHandRun ||
+                    isStoppingSimulation
+                  }
+                  onChange={(event) => {
+                    setSelectedTurnNumber(event.target.value)
+                    setTurnRunError(null)
+                  }}
+                >
+                  {Array.from({ length: 10 }, (_, turnIndex) => {
+                    const turnNumber = turnIndex + 1
+
+                    return (
+                      <option key={turnNumber} value={turnNumber}>
+                        Turn {turnNumber}
+                      </option>
+                    )
+                  })}
+                </select>
               </label>
-              <select
-                id="turn-run-number"
-                className="h-9 w-28 rounded-md border border-input bg-background px-3 text-sm text-foreground transition-colors outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
-                value={selectedTurnNumber}
+
+              <Button
+                className="w-fit"
+                type="button"
                 disabled={
                   isStartingTurnRun ||
                   isStartingOpeningHandRun ||
                   isStoppingSimulation
                 }
-                onChange={(event) => {
-                  setSelectedTurnNumber(event.target.value)
-                  setTurnRunError(null)
-                }}
+                onClick={() => void handleStartTurnRun()}
               >
-                {Array.from({ length: 10 }, (_, turnIndex) => {
-                  const turnNumber = turnIndex + 1
-
-                  return (
-                    <option key={turnNumber} value={turnNumber}>
-                      Turn {turnNumber}
-                    </option>
-                  )
-                })}
-              </select>
+                <Dices data-icon="inline-start" />
+                {isStartingTurnRun ? "Starting..." : "Start turn run"}
+              </Button>
             </div>
 
-            <Button
-              type="button"
-              disabled={
-                isStartingTurnRun ||
-                isStartingOpeningHandRun ||
-                isStoppingSimulation
-              }
-              onClick={() => void handleStartTurnRun()}
-            >
-              <Dices data-icon="inline-start" />
-              {isStartingTurnRun ? "Starting..." : "Start turn run"}
-            </Button>
+            {turnRun ? (
+              <p className="text-sm text-muted-foreground">
+                Turn {turnRun.turnNumber} run {turnRun.llmRunId.slice(0, 8)}{" "}
+                started.
+              </p>
+            ) : null}
+
+            {turnRunError ? (
+              <p
+                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                role="alert"
+              >
+                {turnRunError}
+              </p>
+            ) : null}
+
+            {openingHandRunError ? (
+              <p
+                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                role="alert"
+              >
+                {openingHandRunError}
+              </p>
+            ) : null}
+
+            {stopSimulationError ? (
+              <p
+                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                role="alert"
+              >
+                {stopSimulationError}
+              </p>
+            ) : null}
+
+            {stopSimulationResult ? (
+              <p className="text-sm text-muted-foreground">
+                Stop requested for{" "}
+                {stopSimulationResult.stoppedLlmRunIds.length +
+                  stopSimulationResult.cancelRequestedLlmRunIds.length}{" "}
+                LLM run(s).
+              </p>
+            ) : null}
           </div>
+        </section>
 
-          {turnRun ? (
-            <p className="text-sm text-muted-foreground">
-              Turn {turnRun.turnNumber} run {turnRun.llmRunId.slice(0, 8)}{" "}
-              started.
-            </p>
+        <section className="grid gap-3">
+          <h4 className="text-sm font-semibold text-foreground">Setup</h4>
+          <dl className="grid gap-3 text-sm">
+            <div className="rounded-md border border-border bg-background/35 p-3">
+              <dt className="text-muted-foreground">Seed</dt>
+              <dd className="mt-1 font-medium break-all text-foreground">
+                {simulation.seed}
+              </dd>
+            </div>
+            <div className="rounded-md border border-border bg-background/35 p-3">
+              <dt className="text-muted-foreground">Turns to simulate</dt>
+              <dd className="mt-1 font-medium text-foreground">
+                {simulation.turnsToSimulate}
+              </dd>
+            </div>
+            <div className="rounded-md border border-border bg-background/35 p-3">
+              <dt className="text-muted-foreground">Simulate opening hand</dt>
+              <dd className="mt-1 font-medium text-foreground">
+                {shouldSimulateOpeningHand ? "Yes" : "No"}
+              </dd>
+            </div>
+          </dl>
+
+          {!shouldSimulateOpeningHand ? (
+            <div className="grid gap-2 rounded-md border border-border bg-background/35 p-3">
+              <p className="text-sm font-medium text-foreground">
+                Provided opening hand
+                {startingHand ? (
+                  <span className="ml-2 text-muted-foreground">
+                    {startingHand.name}
+                  </span>
+                ) : null}
+              </p>
+              {startingHand ? (
+                <ul className="grid gap-1 text-sm text-muted-foreground">
+                  {startingHand.cards.map((card) => (
+                    <li
+                      key={card.deckCardId}
+                      className="rounded-md bg-muted/30 px-3 py-2"
+                    >
+                      {card.quantity > 1 ? (
+                        <span className="mr-2 text-sky-300">
+                          {card.quantity}x
+                        </span>
+                      ) : null}
+                      {card.name}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Opening hand details are loading.
+                </p>
+              )}
+            </div>
           ) : null}
+        </section>
 
-          {turnRunError ? (
-            <p
-              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-              role="alert"
-            >
-              {turnRunError}
-            </p>
-          ) : null}
-
-          {openingHandRunError ? (
-            <p
-              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-              role="alert"
-            >
-              {openingHandRunError}
-            </p>
-          ) : null}
-
-          {stopSimulationError ? (
-            <p
-              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-              role="alert"
-            >
-              {stopSimulationError}
-            </p>
-          ) : null}
-
-          {stopSimulationResult ? (
-            <p className="text-sm text-muted-foreground">
-              Stop requested for{" "}
-              {stopSimulationResult.stoppedLlmRunIds.length +
-                stopSimulationResult.cancelRequestedLlmRunIds.length}{" "}
-              LLM run(s).
-            </p>
-          ) : null}
-        </div>
-      </section>
-
-      <section className="grid gap-4 pt-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h4 className="text-base font-semibold text-foreground">
-              Simulation results
-            </h4>
-            <p className="mt-1 text-sm text-muted-foreground">
-              User-facing output rebuilt from persisted LLM chunks.
-            </p>
-          </div>
-        </div>
-
-        {resultsError ? (
-          <p
-            className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-            role="alert"
+        <footer className="mt-auto border-t border-border pt-5">
+          <Button
+            className="w-fit"
+            type="button"
+            variant="outline"
+            onClick={() => setIsDebugModalOpen(true)}
           >
-            {resultsError}
-          </p>
-        ) : null}
-
-        {isLoadingResults && !resultsInfo ? (
-          <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
-            Loading simulation results...
-          </p>
-        ) : null}
-
-        {resultsInfo ? (
-          <SimulationResultsPanel resultsInfo={resultsInfo} />
-        ) : !isLoadingResults && !resultsError ? (
-          <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
-            Waiting for simulation results.
-          </p>
-        ) : null}
-      </section>
+            <Bug data-icon="inline-start" />
+            View debug info
+          </Button>
+        </footer>
+      </aside>
 
       {isDebugModalOpen ? (
         <SimulationDebugModal
@@ -1721,7 +1729,7 @@ function SimulationResultEvent({
             ? "rounded-md border border-destructive/35 bg-destructive/10"
             : isNeutralToolCall
               ? "rounded-md border border-border bg-black/20"
-            : "rounded-md border border-emerald-500/25 bg-emerald-950/15"
+              : "rounded-md border border-emerald-500/25 bg-emerald-950/15"
         }
       >
         <summary
@@ -1730,7 +1738,7 @@ function SimulationResultEvent({
               ? "cursor-pointer px-3 py-2 text-sm text-destructive transition-colors hover:text-destructive/90"
               : isNeutralToolCall
                 ? "cursor-pointer px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
-              : "cursor-pointer px-3 py-2 text-sm text-emerald-100/85 transition-colors hover:text-emerald-50"
+                : "cursor-pointer px-3 py-2 text-sm text-emerald-100/85 transition-colors hover:text-emerald-50"
           }
         >
           {getMcpCallCompleteTitle(chunk)}
@@ -1741,7 +1749,7 @@ function SimulationResultEvent({
               ? "debug-scrollbar-neutral max-h-64 max-w-full overflow-y-auto border-t border-destructive/20 p-3 text-xs leading-5 break-words whitespace-pre-wrap text-destructive"
               : isNeutralToolCall
                 ? "debug-scrollbar-neutral max-h-64 max-w-full overflow-y-auto border-t border-border p-3 text-xs leading-5 break-words whitespace-pre-wrap text-muted-foreground"
-              : "debug-scrollbar-neutral max-h-64 max-w-full overflow-y-auto border-t border-emerald-500/20 p-3 text-xs leading-5 break-words whitespace-pre-wrap text-emerald-50/80"
+                : "debug-scrollbar-neutral max-h-64 max-w-full overflow-y-auto border-t border-emerald-500/20 p-3 text-xs leading-5 break-words whitespace-pre-wrap text-emerald-50/80"
           }
         >
           {formatResultEventPayload(getMcpCallResultPayload(chunk))}
