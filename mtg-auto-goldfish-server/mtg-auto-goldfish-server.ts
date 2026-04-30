@@ -3132,21 +3132,21 @@ function buildTurnSimulationPromptFromData(
 
   return `${SIMULATE_TURN_PROMPT}
 
-Cards in library. Not actual order of library. Use tools to interact with library:
-${cardNames.join("\n")}
+${GENERIC_GAME_RULES_REFERENCE}
 
 Card reference:
 ${uniqueCards.map((card) => `${card.name}\n${formatCardText(card)}\n`).join("\n")}
 
-${GENERIC_GAME_RULES_REFERENCE}
-
-LLM Run ID: ${llmRunId}
+Cards in library. Not actual order of library. Use tools to interact with library:
+${cardNames.join("\n")}
 
 ===Start Game State===
 
 ${resolvedGameState}
 
 ===End Game State===
+
+LLM Run ID: ${llmRunId}
 `.trim()
 }
 
