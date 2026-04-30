@@ -1207,18 +1207,16 @@ function SimulationDetails({
       </main>
 
       <aside className="simulation-scrollbar simulation-sidebar-surface flex flex-col gap-5 border-t border-border px-5 py-6 lg:min-h-0 lg:overflow-y-auto lg:border-t-0 lg:border-l">
-        <header className="grid gap-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-sm text-sky-300">Simulation</p>
-              <h3 className="mt-1 text-lg font-semibold break-all">
-                {simulation.id}
-              </h3>
-            </div>
+        <header className="grid gap-2">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm text-sky-300">Simulation</p>
             <span className="shrink-0 rounded-md border border-border bg-background/45 px-3 py-1 text-sm text-muted-foreground">
               {simulation.status}
             </span>
           </div>
+          <p className="text-sm font-medium break-all text-foreground">
+            {simulation.id}
+          </p>
         </header>
 
         <section className="grid gap-3">
