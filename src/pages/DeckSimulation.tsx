@@ -32,7 +32,6 @@ import type {
   SimulationDebugInfo,
   SimulationDebugLlmRunChunk,
   SimulationResultsInfo,
-  SimulationResultsResponse,
   SimulationResultsStreamEvent,
   SimulationsResponse,
   SimulationDebugResponse,
@@ -846,8 +845,6 @@ function SimulationDetails({
   const [resultsInfo, setResultsInfo] = useState<SimulationResultsInfo | null>(
     null
   )
-  const isLoadingResultsRef = useRef(false)
-  const resultsAbortControllerRef = useRef<AbortController | null>(null)
   const resultsEventSourceRef = useRef<EventSource | null>(null)
   const resultsStreamErrorTimeoutRef = useRef<number | null>(null)
   const [resultsStreamRestartKey, setResultsStreamRestartKey] = useState(0)
@@ -869,8 +866,6 @@ function SimulationDetails({
     setDebugInfoError(null)
     setDebugInfo(null)
     setIsDebugModalOpen(false)
-    resultsAbortControllerRef.current?.abort()
-    resultsAbortControllerRef.current = null
     resultsEventSourceRef.current?.close()
     resultsEventSourceRef.current = null
 
@@ -879,7 +874,6 @@ function SimulationDetails({
       resultsStreamErrorTimeoutRef.current = null
     }
 
-    isLoadingResultsRef.current = false
     setIsLoadingResults(false)
     setResultsError(null)
     setResultsInfo(null)
@@ -1061,52 +1055,6 @@ function SimulationDetails({
     }
   }, [deckId, simulation.id])
 
-  const handleReloadResults = useCallback(async () => {
-    if (isLoadingResultsRef.current) {
-      return
-    }
-
-    const abortController = new AbortController()
-    resultsAbortControllerRef.current = abortController
-    isLoadingResultsRef.current = true
-    setIsLoadingResults(true)
-    setResultsError(null)
-
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/results`,
-        {
-          signal: abortController.signal,
-        }
-      )
-
-      if (!response.ok) {
-        setResultsError(
-          await readApiError(
-            response,
-            "Simulation results could not be loaded."
-          )
-        )
-        return
-      }
-
-      const data = (await response.json()) as SimulationResultsResponse
-      setResultsInfo(data.results)
-    } catch {
-      if (abortController.signal.aborted) {
-        return
-      }
-
-      setResultsError("Simulation results could not be loaded.")
-    } finally {
-      if (resultsAbortControllerRef.current === abortController) {
-        resultsAbortControllerRef.current = null
-        isLoadingResultsRef.current = false
-        setIsLoadingResults(false)
-      }
-    }
-  }, [deckId, simulation.id])
-
   useEffect(() => {
     const eventSource = new EventSource(
       `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/results/stream`
@@ -1115,7 +1063,6 @@ function SimulationDetails({
 
     resultsEventSourceRef.current?.close()
     resultsEventSourceRef.current = eventSource
-    isLoadingResultsRef.current = true
     setIsLoadingResults(true)
     setResultsError(null)
 
@@ -1129,7 +1076,6 @@ function SimulationDetails({
     }
 
     function markStreamLoaded() {
-      isLoadingResultsRef.current = false
       setIsLoadingResults(false)
     }
 
@@ -1203,15 +1149,13 @@ function SimulationDetails({
         }
 
         setResultsError(
-          "Simulation results stream is reconnecting. Reload results if it does not recover."
+          "Simulation results stream is reconnecting."
         )
         markStreamLoaded()
       }, 10000)
     }
 
     return () => {
-      resultsAbortControllerRef.current?.abort()
-      resultsAbortControllerRef.current = null
       closeStream()
     }
   }, [deckId, onSimulationUpdated, resultsStreamRestartKey, simulation.id])
@@ -1458,15 +1402,6 @@ function SimulationDetails({
               User-facing output rebuilt from persisted LLM chunks.
             </p>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={isLoadingResults}
-            onClick={() => void handleReloadResults()}
-          >
-            <RefreshCw data-icon="inline-start" />
-            {isLoadingResults ? "Reloading..." : "Reload results"}
-          </Button>
         </div>
 
         {resultsError ? (
@@ -1488,7 +1423,7 @@ function SimulationDetails({
           <SimulationResultsPanel resultsInfo={resultsInfo} />
         ) : !isLoadingResults && !resultsError ? (
           <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
-            Reload results to view the saved simulation output.
+            Waiting for simulation results.
           </p>
         ) : null}
       </section>
