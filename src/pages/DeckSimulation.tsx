@@ -1172,17 +1172,6 @@ function SimulationDetails({
     <div className="grid h-full min-h-0 grid-cols-[minmax(36rem,1fr)_24rem] overflow-hidden">
       <main className="min-h-0 min-w-0 overflow-y-auto px-5 py-6">
         <section className="grid gap-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h4 className="text-base font-semibold text-foreground">
-                Simulation results
-              </h4>
-              <p className="mt-1 text-sm text-muted-foreground">
-                User-facing output rebuilt from persisted LLM chunks.
-              </p>
-            </div>
-          </div>
-
           {resultsError ? (
             <p
               className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
