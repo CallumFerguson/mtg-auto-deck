@@ -55,6 +55,63 @@ function getSimulationLabel(simulation: Simulation) {
   return `${simulation.id.slice(0, 8)} - ${simulation.completedLlmRunCount} runs`
 }
 
+function getSimulationRunCountFromResults(resultsInfo: SimulationResultsInfo) {
+  return (
+    getCurrentOpeningHandRunCount(resultsInfo) +
+    resultsInfo.turnLlmRuns.filter(isCountedTurnRun).length
+  )
+}
+
+function getActiveLlmRunCountFromResults(resultsInfo: SimulationResultsInfo) {
+  return [
+    ...resultsInfo.openingHandLlmRuns,
+    ...resultsInfo.turnLlmRuns,
+  ].filter((run) => isActiveLlmRunStatus(run.status)).length
+}
+
+function isActiveLlmRunStatus(status: string) {
+  return (
+    status === "pending" ||
+    status === "streaming" ||
+    status === "cancel_requested"
+  )
+}
+
+function getCurrentOpeningHandRunCount(resultsInfo: SimulationResultsInfo) {
+  const maxAttemptNumber = Math.max(
+    0,
+    ...resultsInfo.openingHandLlmRuns.map((run) => run.attemptNumber)
+  )
+
+  return resultsInfo.openingHandLlmRuns.filter(
+    (run) =>
+      run.attemptNumber === maxAttemptNumber && isCountedOpeningHandRun(run)
+  ).length
+}
+
+function isCountedOpeningHandRun(
+  run: SimulationResultsInfo["openingHandLlmRuns"][number]
+) {
+  return (
+    isActiveLlmRunStatus(run.status) ||
+    run.status === "failed" ||
+    run.status === "cancelled" ||
+    (run.status === "completed" && run.openingHandIsValid === true)
+  )
+}
+
+function isCountedTurnRun(
+  run: SimulationResultsInfo["turnLlmRuns"][number]
+) {
+  return (
+    run.outdated !== true &&
+    (isActiveLlmRunStatus(run.status) ||
+      run.status === "failed" ||
+      run.status === "cancelled" ||
+      (run.status === "completed" && Boolean(run.gameState?.trim())))
+  )
+}
+
 function getRandomDigit(maxExclusive: number) {
   const maxUnbiasedValue = 256 - (256 % maxExclusive)
   const randomBytes = new Uint8Array(1)
@@ -900,6 +957,7 @@ function SimulationDetails({
   const [resultsInfo, setResultsInfo] = useState<SimulationResultsInfo | null>(
     null
   )
+  const resultsInfoRef = useRef<SimulationResultsInfo | null>(null)
   const resultsEventSourceRef = useRef<EventSource | null>(null)
   const resultsStreamErrorTimeoutRef = useRef<number | null>(null)
   const resultsPanelRef = useRef<HTMLElement | null>(null)
@@ -957,6 +1015,7 @@ function SimulationDetails({
     setIsLoadingResults(false)
     setResultsError(null)
     setResultsInfo(null)
+    resultsInfoRef.current = null
     setResultsStreamRestartKey(0)
   }, [scrollResultsToBottom, simulation.id])
 
@@ -1234,9 +1293,12 @@ function SimulationDetails({
           return
         }
 
-        setResultsInfo((currentResultsInfo) =>
-          applySimulationResultsStreamEvent(currentResultsInfo, streamEvent)
+        const updatedResultsInfo = applySimulationResultsStreamEvent(
+          resultsInfoRef.current,
+          streamEvent
         )
+        resultsInfoRef.current = updatedResultsInfo
+        setResultsInfo(updatedResultsInfo)
 
         if (
           streamEvent.type === "snapshot" ||
@@ -1244,6 +1306,14 @@ function SimulationDetails({
           streamEvent.type === "done"
         ) {
           onSimulationUpdated(streamEvent.simulation)
+        } else if (updatedResultsInfo) {
+          onSimulationUpdated({
+            ...simulation,
+            activeLlmRunCount:
+              getActiveLlmRunCountFromResults(updatedResultsInfo),
+            completedLlmRunCount:
+              getSimulationRunCountFromResults(updatedResultsInfo),
+          })
         }
 
         markStreamLoaded()
