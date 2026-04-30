@@ -46,6 +46,7 @@ import type {
   StopSimulationResponse,
 } from "@/lib/deck-types"
 import { getDeckSimulationPath, navigateTo } from "@/lib/navigation"
+import { parseSimulationFinalOutput } from "@/lib/simulation-final-output"
 import { applySimulationResultsStreamEvent } from "@/lib/simulation-results-stream"
 
 type OpeningHandCardOption = {
@@ -1924,7 +1925,7 @@ function SimulationResultsPanel({
             </p>
           </div>
 
-          {run.gameState ? (
+          {run.gameState && !parseSimulationFinalOutput(run) ? (
             <details className="rounded-md border border-emerald-500/30 bg-emerald-950/20">
               <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-emerald-100 transition-colors hover:text-emerald-50">
                 Game state
@@ -1936,7 +1937,7 @@ function SimulationResultsPanel({
           ) : null}
 
           {run.resultChunks.length > 0 ? (
-            <SimulationResultChunkCards chunks={run.resultChunks} />
+            <SimulationResultChunkCards run={run} chunks={run.resultChunks} />
           ) : !run.gameState ? (
             <p className="rounded-md border border-border bg-black/20 px-3 py-2 text-sm text-muted-foreground">
               No user-facing events have been saved for this run yet.
@@ -1949,11 +1950,17 @@ function SimulationResultsPanel({
 }
 
 function SimulationResultChunkCards({
+  run,
   chunks,
 }: {
+  run: SimulationResultsInfo["openingHandLlmRuns"][number]
   chunks: SimulationDebugLlmRunChunk[]
 }) {
   const blocks = formatDebugChunkBlocks(chunks)
+  const finalOutput = parseSimulationFinalOutput(run)
+  const finalOutputBlock = finalOutput
+    ? [...blocks].reverse().find((block) => block.type === "output")
+    : undefined
 
   return (
     <div className="grid gap-2">
@@ -1975,6 +1982,15 @@ function SimulationResultChunkCards({
         }
 
         if (block.type === "output") {
+          if (block.id === finalOutputBlock?.id && finalOutput) {
+            return (
+              <SimulationFinalOutputBlock
+                key={block.id}
+                finalOutput={finalOutput}
+              />
+            )
+          }
+
           return (
             <div
               key={block.id}
@@ -1993,6 +2009,47 @@ function SimulationResultChunkCards({
 
         return null
       })}
+    </div>
+  )
+}
+
+function SimulationFinalOutputBlock({
+  finalOutput,
+}: {
+  finalOutput: NonNullable<ReturnType<typeof parseSimulationFinalOutput>>
+}) {
+  return (
+    <div className="grid gap-3 rounded-md border border-sky-500/30 bg-sky-950/20 p-3">
+      <p className="text-sm leading-6 text-sky-50/90">
+        {finalOutput.summary}
+      </p>
+
+      {finalOutput.type === "opening_hand" ? (
+        <div>
+          <p className="text-xs font-medium tracking-wide text-sky-200/80 uppercase">
+            Kept hand
+          </p>
+          <ul className="mt-2 grid gap-1 text-sm text-sky-50/90 sm:grid-cols-2">
+            {finalOutput.keptHand.map((cardName, index) => (
+              <li
+                key={`${cardName}-${index}`}
+                className="rounded border border-sky-500/20 bg-black/20 px-2 py-1"
+              >
+                {cardName}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <details className="rounded-md border border-sky-500/20 bg-black/20">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-sky-100 transition-colors hover:text-sky-50">
+            Game state
+          </summary>
+          <p className="border-t border-sky-500/20 p-3 text-sm leading-6 whitespace-pre-wrap text-sky-50/90">
+            {finalOutput.gameState}
+          </p>
+        </details>
+      )}
     </div>
   )
 }

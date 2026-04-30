@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
+import { parseSimulationFinalOutput } from "../src/lib/simulation-final-output.js"
 import { applySimulationResultsStreamEvent } from "../src/lib/simulation-results-stream.js"
 import type {
   SimulationDebugLlmRun,
@@ -94,6 +95,82 @@ test("adds auto-advanced turn runs", () => {
 
   assert.equal(updatedResults?.turnLlmRunCount, 1)
   assert.equal(updatedResults?.turnLlmRuns[0].llmRunId, "turn-run")
+})
+
+test("parses completed opening hand final output", () => {
+  const parsedOutput = parseSimulationFinalOutput(
+    createRun({
+      llmRunId: "opening-run",
+      phase: "opening_hand",
+      status: "completed",
+      chunks: [
+        createChunk({
+          id: 1,
+          sequence: 1,
+          outputDelta: '{"keptHand":["Forest",',
+        }),
+        createChunk({
+          id: 2,
+          sequence: 2,
+          outputDelta: '"Sol Ring"],"summary":"Kept a stable opener."}',
+        }),
+      ],
+    })
+  )
+
+  assert.deepEqual(parsedOutput, {
+    type: "opening_hand",
+    keptHand: ["Forest", "Sol Ring"],
+    summary: "Kept a stable opener.",
+  })
+})
+
+test("parses completed turn final output", () => {
+  const parsedOutput = parseSimulationFinalOutput(
+    createRun({
+      llmRunId: "turn-run",
+      phase: "turn",
+      status: "completed",
+      turnNumber: 1,
+      chunks: [
+        createChunk({
+          id: 1,
+          sequence: 1,
+          outputDelta: '{"gameState":"Hand: Forest\\nBattlefield: Island",',
+        }),
+        createChunk({
+          id: 2,
+          sequence: 2,
+          outputDelta: '"summary":"Played Island and passed."}',
+        }),
+      ],
+    })
+  )
+
+  assert.deepEqual(parsedOutput, {
+    type: "turn",
+    gameState: "Hand: Forest\nBattlefield: Island",
+    summary: "Played Island and passed.",
+  })
+})
+
+test("does not parse final output before completion", () => {
+  const parsedOutput = parseSimulationFinalOutput(
+    createRun({
+      llmRunId: "opening-run",
+      phase: "opening_hand",
+      status: "streaming",
+      chunks: [
+        createChunk({
+          id: null,
+          sequence: 1,
+          outputDelta: '{"keptHand":["Forest"],"summary":"Still streaming."}',
+        }),
+      ],
+    })
+  )
+
+  assert.equal(parsedOutput, null)
 })
 
 function createResults({
