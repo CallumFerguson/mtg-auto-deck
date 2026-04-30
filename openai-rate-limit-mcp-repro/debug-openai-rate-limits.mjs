@@ -2,11 +2,24 @@ import "dotenv/config"
 
 import OpenAI from "openai"
 
-let DEFAULT_PROMPT =
-  "I'm testing a problem with token usage and mcp function calling. call the echo mcp function 30 times. ignore the following lorem ipsum text. "
+const OPENAI_MODEL = "gpt-5.4-nano"
+const OPENAI_REASONING_EFFORT = "medium"
+const MCP_FUNCTION_CALL_COUNT = 30
+const APPEND_LOREM_IPSUM = true
+const LOREM_IPSUM_REPEAT_COUNT = 5000
 
-for (let i = 0; i < 5000; i += 1) {
-  DEFAULT_PROMPT += "lorem ipsum "
+function buildDefaultPrompt() {
+  let prompt = `I'm testing a problem with token usage and mcp function calling. call the echo mcp function ${MCP_FUNCTION_CALL_COUNT} times.`
+
+  if (APPEND_LOREM_IPSUM) {
+    prompt += " ignore the following lorem ipsum text. "
+
+    for (let i = 0; i < LOREM_IPSUM_REPEAT_COUNT; i += 1) {
+      prompt += "lorem ipsum "
+    }
+  }
+
+  return prompt
 }
 
 const RATE_LIMIT_HEADER_PREFIXES = [
@@ -17,20 +30,18 @@ const RATE_LIMIT_HEADER_PREFIXES = [
 ]
 
 function getRequiredEnv(name) {
-  const value = process.env[name]?.trim()
+  const value = process.env[name]?.trim() ?? ""
 
   if (!value) {
-    throw new Error(
-      `Missing ${name}. Add it to your repo-root .env file or set it in this terminal session.`
-    )
+    throw new Error(`Missing ${name}. Add it to this folder's .env file.`)
   }
 
   return value
 }
 
-function getOptionalEnv(name) {
-  const value = process.env[name]?.trim()
-  return value ? value : null
+function getOptionalConfig(value) {
+  const trimmedValue = value.trim()
+  return trimmedValue ? trimmedValue : null
 }
 
 function headersToObject(headers) {
@@ -90,7 +101,7 @@ function buildRequestPayload({
   model,
   prompt,
   reasoningEffort,
-  openingHandMcpPublicUrl,
+  mcpPublicUrl,
 }) {
   const payload = {
     model,
@@ -103,10 +114,10 @@ function buildRequestPayload({
     tools: [
       {
         type: "mcp",
-        server_label: "opening_hand",
+        server_label: "echo_repro",
         server_description:
-          "Tools for drawing, mulliganing, and finalizing a Magic: The Gathering opening hand simulation.",
-        server_url: openingHandMcpPublicUrl,
+          "A minimal MCP server exposing one echo tool for rate-limit debugging.",
+        server_url: mcpPublicUrl,
         require_approval: "never",
       },
     ],
@@ -124,16 +135,15 @@ function buildRequestPayload({
 
 async function main() {
   const apiKey = getRequiredEnv("OPENAI_API_KEY")
-  const model = getRequiredEnv("OPENAI_MODEL")
-  const reasoningEffort = getOptionalEnv("OPENAI_REASONING_EFFORT")
-  const openingHandMcpPublicUrl = getRequiredEnv("OPENING_HAND_MCP_PUBLIC_URL")
-  const prompt = process.argv.slice(2).join(" ").trim() || DEFAULT_PROMPT
+  const mcpPublicUrl = getRequiredEnv("MCP_PUBLIC_URL")
+  const reasoningEffort = getOptionalConfig(OPENAI_REASONING_EFFORT)
+  const prompt = buildDefaultPrompt()
   const client = new OpenAI({ apiKey })
   const payload = buildRequestPayload({
-    model,
+    model: OPENAI_MODEL,
     prompt,
     reasoningEffort,
-    openingHandMcpPublicUrl,
+    mcpPublicUrl,
   })
   const startedAt = Date.now()
 
