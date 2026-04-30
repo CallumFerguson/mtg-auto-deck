@@ -1,11 +1,13 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type FormEvent,
   type ReactNode,
+  type UIEvent,
 } from "react"
 import {
   Bug,
@@ -847,12 +849,35 @@ function SimulationDetails({
   )
   const resultsEventSourceRef = useRef<EventSource | null>(null)
   const resultsStreamErrorTimeoutRef = useRef<number | null>(null)
+  const resultsPanelRef = useRef<HTMLElement | null>(null)
+  const keepResultsScrolledDownRef = useRef(true)
+  const isProgrammaticResultsScrollRef = useRef(false)
+  const previousResultsScrollTopRef = useRef(0)
   const simulationPanelRef = useRef<HTMLElement | null>(null)
   const [resultsStreamRestartKey, setResultsStreamRestartKey] = useState(0)
   const shouldSimulateOpeningHand = simulation.startingHandId === null
 
+  const scrollResultsToBottom = useCallback(() => {
+    const resultsPanel = resultsPanelRef.current
+
+    if (!resultsPanel) {
+      return
+    }
+
+    isProgrammaticResultsScrollRef.current = true
+    resultsPanel.scrollTo({ top: resultsPanel.scrollHeight })
+
+    window.requestAnimationFrame(() => {
+      previousResultsScrollTopRef.current = resultsPanel.scrollTop
+      isProgrammaticResultsScrollRef.current = false
+    })
+  }, [])
+
   useEffect(() => {
     simulationPanelRef.current?.scrollTo({ top: 0 })
+    keepResultsScrolledDownRef.current = true
+    previousResultsScrollTopRef.current = 0
+    scrollResultsToBottom()
     setIsStartingOpeningHandRun(false)
     setOpeningHandRunError(null)
     setOpeningHandRun(null)
@@ -880,7 +905,52 @@ function SimulationDetails({
     setResultsError(null)
     setResultsInfo(null)
     setResultsStreamRestartKey(0)
-  }, [simulation.id])
+  }, [scrollResultsToBottom, simulation.id])
+
+  useLayoutEffect(() => {
+    if (keepResultsScrolledDownRef.current) {
+      scrollResultsToBottom()
+    }
+  }, [resultsError, resultsInfo, isLoadingResults, scrollResultsToBottom])
+
+  useEffect(() => {
+    const resultsPanel = resultsPanelRef.current
+
+    if (!resultsPanel) {
+      return
+    }
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (keepResultsScrolledDownRef.current) {
+        scrollResultsToBottom()
+      }
+    })
+
+    resizeObserver.observe(resultsPanel)
+
+    return () => {
+      resizeObserver.disconnect()
+    }
+  }, [scrollResultsToBottom])
+
+  function handleResultsScroll(event: UIEvent<HTMLElement>) {
+    const resultsPanel = event.currentTarget
+    const distanceFromBottom =
+      resultsPanel.scrollHeight -
+      resultsPanel.clientHeight -
+      resultsPanel.scrollTop
+
+    if (distanceFromBottom <= 4) {
+      keepResultsScrolledDownRef.current = true
+    } else if (
+      !isProgrammaticResultsScrollRef.current &&
+      resultsPanel.scrollTop < previousResultsScrollTopRef.current
+    ) {
+      keepResultsScrolledDownRef.current = false
+    }
+
+    previousResultsScrollTopRef.current = resultsPanel.scrollTop
+  }
 
   async function handleStartOpeningHandRun() {
     if (
@@ -1170,7 +1240,11 @@ function SimulationDetails({
 
   return (
     <div className="grid h-full min-h-0 grid-cols-[minmax(36rem,1fr)_24rem] overflow-hidden">
-      <main className="min-h-0 min-w-0 overflow-y-auto px-5 py-6">
+      <main
+        ref={resultsPanelRef}
+        className="simulation-scrollbar min-h-0 min-w-0 overflow-y-auto px-5 py-6"
+        onScroll={handleResultsScroll}
+      >
         <section className="grid gap-4">
           {resultsError ? (
             <p
