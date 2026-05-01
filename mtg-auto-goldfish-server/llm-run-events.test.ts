@@ -125,7 +125,6 @@ test("creates a first-class cancellation chunk", () => {
   const chunk = createCancellationChunk("Stopped by user.")
 
   assert.equal(chunk.kind, "cancelled")
-  assert.equal(chunk.providerEventType, "server.cancelled")
   assert.deepEqual(chunk.payload, {
     message: "Stopped by user.",
   })
@@ -144,7 +143,7 @@ test("recognizes provider terminal events as error chunks", () => {
   const error = new ProviderTerminalEventError(event.type, event)
 
   assert.equal(chunk.kind, "error")
-  assert.equal(chunk.providerEventType, "response.failed")
+  assert.equal(chunk.payload, event)
   assert.equal(
     error.message,
     "OpenAI stream ended with response.failed: provider is unavailable"

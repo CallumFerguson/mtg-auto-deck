@@ -83,7 +83,6 @@ export type UpdateLlmRunRequestDataInput = {
 export type LlmRunChunkInput = {
   sequence: number
   kind: LlmChunkKind
-  providerEventType: string | null
   itemType: string | null
   mcpFunctionName: string | null
   mcpFunctionOutput: unknown | null
@@ -104,7 +103,6 @@ export type SimulationDebugLlmRunChunk = {
   id: number
   sequence: number
   kind: LlmChunkKind
-  providerEventType: string | null
   itemType: string | null
   mcpFunctionName: string | null
   mcpFunctionOutput: unknown | null
@@ -534,7 +532,6 @@ export async function ensureSimulationsSchema() {
       llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
       sequence integer NOT NULL,
       kind llm_chunk_kind NOT NULL,
-      provider_event_type text,
       item_type text,
       mcp_function_name text,
       mcp_function_output jsonb,
@@ -558,6 +555,10 @@ export async function ensureSimulationsSchema() {
         ),
       UNIQUE (llm_run_id, sequence)
     )
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_run_chunks
+    DROP COLUMN IF EXISTS provider_event_type
   `)
   await ensureLlmRunChunksKindConstraint()
   await queryDatabase(`
@@ -1927,13 +1928,12 @@ function buildAppendLlmRunChunksQuery(
 ) {
   const values: unknown[] = []
   const valuePlaceholders = chunks.map((chunk, index) => {
-    const offset = index * 10
+    const offset = index * 9
 
     values.push(
       llmRunId,
       chunk.sequence,
       chunk.kind,
-      chunk.providerEventType,
       chunk.itemType,
       chunk.mcpFunctionName,
       chunk.mcpFunctionOutput === null
@@ -1944,7 +1944,7 @@ function buildAppendLlmRunChunksQuery(
       JSON.stringify(chunk.payload)
     )
 
-    return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}::jsonb, $${offset + 8}, $${offset + 9}, $${offset + 10}::jsonb)`
+    return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}::jsonb, $${offset + 7}, $${offset + 8}, $${offset + 9}::jsonb)`
   })
 
   return {
@@ -1953,7 +1953,6 @@ function buildAppendLlmRunChunksQuery(
         llm_run_id,
         sequence,
         kind,
-        provider_event_type,
         item_type,
         mcp_function_name,
         mcp_function_output,
@@ -2310,7 +2309,6 @@ export async function cancelStaleInFlightLlmRuns(): Promise<StaleInFlightLlmRunC
         {
           sequence,
           kind: "cancelled",
-          providerEventType: "server.cancelled",
           itemType: null,
           mcpFunctionName: null,
           mcpFunctionOutput: null,
@@ -2912,7 +2910,6 @@ type SimulationDebugLlmRunRow = {
   chunk_id: string | null
   sequence: number | null
   kind: LlmChunkKind | null
-  provider_event_type: string | null
   item_type: string | null
   mcp_function_name: string | null
   mcp_function_output: unknown | null
@@ -2952,7 +2949,6 @@ async function getSimulationDebugLlmRuns({
         chunk.id AS chunk_id,
         chunk.sequence,
         chunk.kind,
-        chunk.provider_event_type,
         chunk.item_type,
         chunk.mcp_function_name,
         chunk.mcp_function_output,
@@ -3022,7 +3018,6 @@ async function getSimulationDebugLlmRuns({
         id: Number(row.chunk_id),
         sequence: row.sequence,
         kind: row.kind,
-        providerEventType: row.provider_event_type,
         itemType: row.item_type,
         mcpFunctionName: row.mcp_function_name,
         mcpFunctionOutput: row.mcp_function_output,

@@ -2095,7 +2095,6 @@ function isRedundantMcpCallFailedEvent(
 ) {
   return (
     chunk.kind === "error" &&
-    chunk.providerEventType === "response.mcp_call.failed" &&
     nextChunk?.kind === "mcp_call_complete" &&
     getPayloadString(chunk.payload, "item_id") !== null &&
     getPayloadString(chunk.payload, "item_id") === getMcpCallItemId(nextChunk)
@@ -2613,11 +2612,14 @@ function getDebugChunkDeltaText(
 }
 
 function getDebugChunkEventLabel(chunk: SimulationDebugLlmRunChunk) {
+  const eventType = getPayloadString(chunk.payload, "type")
+  const eventLabel = eventType ?? chunk.kind
+
   if (chunk.mcpFunctionName) {
-    return `${chunk.providerEventType ?? chunk.kind}: ${chunk.mcpFunctionName}`
+    return `${eventLabel}: ${chunk.mcpFunctionName}`
   }
 
-  return chunk.providerEventType ?? chunk.kind
+  return eventLabel
 }
 
 function EmptySimulationSelection() {

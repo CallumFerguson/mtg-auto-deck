@@ -269,7 +269,6 @@ function createRuntimeStreamChunk(
     id: null,
     sequence: chunk.sequence,
     kind: chunk.kind,
-    providerEventType: chunk.providerEventType,
     itemType: chunk.itemType,
     mcpFunctionName: chunk.mcpFunctionName,
     mcpFunctionOutput: chunk.mcpFunctionOutput,

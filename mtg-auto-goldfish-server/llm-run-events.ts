@@ -23,7 +23,7 @@ export function normalizeOpenAiStreamEvent(
   if (eventType === "response.output_text.delta") {
     const delta = getStringProperty(eventRecord, "delta")
 
-    return createChunk("message_delta", eventType, itemType, {
+    return createChunk("message_delta", itemType, {
       outputDelta: delta,
       payload,
     })
@@ -32,14 +32,14 @@ export function normalizeOpenAiStreamEvent(
   if (eventType === "response.reasoning_summary_text.delta") {
     const delta = getStringProperty(eventRecord, "delta")
 
-    return createChunk("reasoning_delta", eventType, itemType, {
+    return createChunk("reasoning_delta", itemType, {
       reasoningDelta: delta,
       payload,
     })
   }
 
   if (eventType === "response.completed") {
-    return createChunk("completed", eventType, itemType, {
+    return createChunk("completed", itemType, {
       payload,
     })
   }
@@ -47,7 +47,7 @@ export function normalizeOpenAiStreamEvent(
   if (eventType === "response.output_item.added" && itemType === "mcp_call") {
     const mcpFunctionName = getNestedStringProperty(eventRecord, "item", "name")
 
-    return createChunk("mcp_call_start", eventType, itemType, {
+    return createChunk("mcp_call_start", itemType, {
       mcpFunctionName,
       payload,
     })
@@ -57,7 +57,7 @@ export function normalizeOpenAiStreamEvent(
     const mcpFunctionName = getNestedStringProperty(eventRecord, "item", "name")
     const mcpFunctionOutput = getMcpFunctionOutput(eventRecord)
 
-    return createChunk("mcp_call_complete", eventType, itemType, {
+    return createChunk("mcp_call_complete", itemType, {
       mcpFunctionName,
       mcpFunctionOutput,
       payload,
@@ -65,12 +65,12 @@ export function normalizeOpenAiStreamEvent(
   }
 
   if (isProviderTerminalEvent(eventType)) {
-    return createChunk("error", eventType, itemType, {
+    return createChunk("error", itemType, {
       payload,
     })
   }
 
-  return createChunk("raw_event", eventType ?? null, itemType, {
+  return createChunk("raw_event", itemType, {
     payload,
   })
 }
@@ -86,7 +86,7 @@ export function isProviderTerminalEvent(eventType: string | null) {
 export function createServerErrorChunk(
   error: unknown
 ): Omit<LlmRunChunkInput, "sequence"> {
-  return createChunk("error", "server.error", null, {
+  return createChunk("error", null, {
     payload: {
       message: getErrorMessage(error),
       name: error instanceof Error ? error.name : null,
@@ -97,7 +97,7 @@ export function createServerErrorChunk(
 export function createCancellationChunk(
   message = "Opening-hand LLM run was cancelled."
 ): Omit<LlmRunChunkInput, "sequence"> {
-  return createChunk("cancelled", "server.cancelled", null, {
+  return createChunk("cancelled", null, {
     payload: {
       message,
     },
@@ -237,7 +237,6 @@ export function getErrorMessage(error: unknown) {
 
 function createChunk(
   kind: LlmChunkKind,
-  providerEventType: string | null,
   itemType: string | null,
   values: {
     mcpFunctionName?: string | null
@@ -249,7 +248,6 @@ function createChunk(
 ): Omit<LlmRunChunkInput, "sequence"> {
   return {
     kind,
-    providerEventType,
     itemType,
     mcpFunctionName: values.mcpFunctionName ?? null,
     mcpFunctionOutput: values.mcpFunctionOutput ?? null,
