@@ -626,7 +626,9 @@ export function DeckSimulation({
                       >
                         {getSimulationLabel(simulation)}
                       </button>
-                      {simulation.activeLlmRunCount > 0 ? (
+                      {simulation.activeLlmRunCount > 0 &&
+                      (isNewSimulationSelected ||
+                        selectedSimulationId !== simulation.id) ? (
                         <div
                           className={`pointer-events-none absolute inset-y-0 right-1 flex items-center px-2 text-muted-foreground transition-opacity group-hover:opacity-0 ${
                             openSimulationMenuId === simulation.id
