@@ -1,8 +1,11 @@
 ﻿import "dotenv/config"
 import express, { type Request, type Response } from "express"
+import { Client } from "@modelcontextprotocol/sdk/client/index.js"
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js"
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js"
+import { OpenRouter, stepCountIs, tool, type Tool } from "@openrouter/agent"
 import { randomUUID } from "node:crypto"
 import OpenAI from "openai"
 import { z } from "zod/v4"
@@ -99,9 +102,22 @@ import {
   isAbortError,
   isProviderTerminalEvent,
   normalizeOpenAiStreamEvent,
+  normalizeOpenRouterStreamEvent,
   parseOpeningHandFromResponseText,
   parseTurnSimulationFromResponseText,
+  type OpenRouterToolCallNameMap,
 } from "./llm-run-events.js"
+import {
+  LlmConfigurationError,
+  getOpeningHandLlmRunConfig,
+  getTurnSimulationLlmRunConfig,
+  type OpenAiRunConfig,
+  type OpenRouterRunConfig,
+  type OpeningHandLlmRunConfig,
+  type OpeningHandOpenAiRunConfig,
+  type TurnSimulationLlmRunConfig,
+  type TurnSimulationOpenAiRunConfig,
+} from "./llm-config.js"
 import {
   SimulationStopTimeoutError,
   waitForSimulationStopCompletions,
@@ -115,7 +131,7 @@ import {
   type SimulationResultsStreamInfo,
   type SimulationResultsStreamRun,
 } from "./simulation-results-stream.js"
-import { estimateOpenAiTokenPriceCents } from "./openai-pricing.js"
+import { estimateLlmTokenPriceCents } from "./openai-pricing.js"
 import {
   createExactScryfallOracleCardMatchMap,
   normalizeScryfallCardNameForExactMatch,
@@ -131,7 +147,6 @@ const OPENING_HAND_MCP_PATH = "/mcp/opening-hand"
 const TURN_SIMULATION_MCP_PATH = "/mcp/turn-simulation"
 const OPENING_HAND_MCP_SERVER_LABEL = "opening_hand"
 const TURN_SIMULATION_MCP_SERVER_LABEL = "turn_simulation"
-const OPENAI_PROVIDER = "openai"
 const STREAM_FLUSH_INTERVAL_MS = 1000
 const STREAM_RECENT_CHUNK_LIMIT = 500
 const SSE_KEEPALIVE_INTERVAL_MS = 15000
@@ -194,28 +209,6 @@ const createSimulationSchema = z.object({
 const createTurnLlmRunSchema = z.object({
   turnNumber: z.number().int().positive(),
 })
-const reasoningEffortSchema = z.enum([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-])
-
-type OpenAiRunConfig = {
-  apiKey: string
-  model: string
-  reasoningEffort: z.infer<typeof reasoningEffortSchema>
-}
-
-type OpeningHandOpenAiRunConfig = OpenAiRunConfig & {
-  openingHandMcpPublicUrl: string
-}
-
-type TurnSimulationOpenAiRunConfig = OpenAiRunConfig & {
-  turnSimulationMcpPublicUrl: string
-}
 
 type ActiveLlmRunRuntime = {
   abortController: AbortController
@@ -561,88 +554,110 @@ async function publishSimulationResultsState({
   }
 }
 
-function logOpenAiApiCallStarted({
+function logLlmApiCallStarted({
   llmRunId,
   model,
   phase,
+  provider,
 }: {
   llmRunId: string
   model: string
   phase: LlmRunPhase
+  provider: string
 }) {
   console.log(
-    `OpenAI API call started: phase=${phase} llmRunId=${llmRunId} model=${model}`
+    `${formatProviderName(provider)} API call started: phase=${phase} llmRunId=${llmRunId} model=${model}`
   )
 }
 
-function logOpenAiApiCallFinished({
+function logLlmApiCallFinished({
   llmRunId,
   model,
   phase,
+  provider,
   usage,
 }: {
   llmRunId: string
   model: string
   phase: LlmRunPhase
+  provider: string
   usage: unknown
 }) {
-  const tokenUsage = getOpenAiTokenUsageSummary(usage)
-  const priceEstimate = estimateOpenAiTokenPriceCents({ model, usage })
+  const tokenUsage = getLlmTokenUsageSummary(usage)
+  const priceEstimate = estimateLlmTokenPriceCents({ model, provider, usage })
   const priceEstimateText = priceEstimate
     ? `${priceEstimate.formattedCents}c`
     : "unsupported"
 
   console.log(
-    `OpenAI API call finished: phase=${phase} llmRunId=${llmRunId} totalTokens=${tokenUsage.total} inputTokens=${tokenUsage.input} cachedInputTokens=${tokenUsage.cachedInput} reasoningTokens=${tokenUsage.reasoning} outputTokens=${tokenUsage.output} estimatedPrice=${priceEstimateText}`
+    `${formatProviderName(provider)} API call finished: phase=${phase} llmRunId=${llmRunId} totalTokens=${tokenUsage.total} inputTokens=${tokenUsage.input} cachedInputTokens=${tokenUsage.cachedInput} reasoningTokens=${tokenUsage.reasoning} outputTokens=${tokenUsage.output} estimatedPrice=${priceEstimateText}`
   )
 }
 
-function logOpenAiApiCallCancelled({
+function logLlmApiCallCancelled({
   llmRunId,
   phase,
+  provider,
 }: {
   llmRunId: string
   phase: LlmRunPhase
+  provider: string
 }) {
-  console.log(`OpenAI API call cancelled: phase=${phase} llmRunId=${llmRunId}`)
+  console.log(
+    `${formatProviderName(provider)} API call cancelled: phase=${phase} llmRunId=${llmRunId}`
+  )
 }
 
-function logOpenAiApiCallStoppedWithError({
+function logLlmApiCallStoppedWithError({
   error,
   llmRunId,
   phase,
+  provider,
 }: {
   error: unknown
   llmRunId: string
   phase: LlmRunPhase
+  provider: string
 }) {
   console.error(
-    `OpenAI API call stopped with error: phase=${phase} llmRunId=${llmRunId} error=${getErrorMessage(error)}`,
+    `${formatProviderName(provider)} API call stopped with error: phase=${phase} llmRunId=${llmRunId} error=${getErrorMessage(error)}`,
     error
   )
 }
 
-function getOpenAiTokenUsageSummary(usage: unknown) {
+function getLlmTokenUsageSummary(usage: unknown) {
   const usageRecord = asRecord(usage)
-  const inputTokens = getNumberProperty(usageRecord, "input_tokens")
-  const inputDetails = asRecord(usageRecord.input_tokens_details)
+  const inputTokens = getNumberProperty(
+    usageRecord,
+    "input_tokens",
+    "inputTokens"
+  )
+  const inputDetails = asRecord(
+    usageRecord.input_tokens_details ?? usageRecord.inputTokensDetails
+  )
   const cachedInputTokens =
     inputTokens === null
       ? null
       : Math.min(
-          getNumberProperty(inputDetails, "cached_tokens") ?? 0,
+          getNumberProperty(inputDetails, "cached_tokens", "cachedTokens") ?? 0,
           inputTokens
         )
-  const outputTokens = getNumberProperty(usageRecord, "output_tokens")
-  const outputDetails = asRecord(usageRecord.output_tokens_details)
+  const outputTokens = getNumberProperty(
+    usageRecord,
+    "output_tokens",
+    "outputTokens"
+  )
+  const outputDetails = asRecord(
+    usageRecord.output_tokens_details ?? usageRecord.outputTokensDetails
+  )
   const reasoningTokens =
-    getNumberProperty(outputDetails, "reasoning_tokens") ?? 0
+    getNumberProperty(outputDetails, "reasoning_tokens", "reasoningTokens") ?? 0
   const visibleOutputTokens =
     outputTokens === null ? null : Math.max(outputTokens - reasoningTokens, 0)
   const totalTokens =
-    getNumberProperty(usageRecord, "total_tokens") ??
+    getNumberProperty(usageRecord, "total_tokens", "totalTokens") ??
     sumTokenCounts([
-      getNumberProperty(usageRecord, "input_tokens"),
+      getNumberProperty(usageRecord, "input_tokens", "inputTokens"),
       reasoningTokens,
       visibleOutputTokens,
     ])
@@ -656,10 +671,28 @@ function getOpenAiTokenUsageSummary(usage: unknown) {
   }
 }
 
-function getNumberProperty(record: Record<string, unknown>, property: string) {
-  const value = record[property]
+function getNumberProperty(
+  record: Record<string, unknown>,
+  property: string,
+  alternateProperty?: string
+) {
+  const value =
+    record[property] ??
+    (alternateProperty === undefined ? undefined : record[alternateProperty])
 
   return typeof value === "number" && Number.isFinite(value) ? value : null
+}
+
+function formatProviderName(provider: string) {
+  if (provider === "openai") {
+    return "OpenAI"
+  }
+
+  if (provider === "openrouter") {
+    return "OpenRouter"
+  }
+
+  return provider
 }
 
 function sumTokenCounts(tokenCounts: Array<number | null>) {
@@ -1045,71 +1078,257 @@ function registerLogTurnActionTool(server: McpServer) {
   )
 }
 
-class OpenAiConfigurationError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = "OpenAiConfigurationError"
+function createOpeningHandOpenRouterTools(mcpClient: Client): Tool[] {
+  return [
+    tool({
+      name: "draw_starting_hand",
+      description:
+        "Draw the very first opening seven-card hand from the stored library for an existing simulation. Call this exactly once per simulation, before any mulligans. Never call this after mulligan, because mulligan already shuffles and draws the replacement seven-card hand.",
+      inputSchema: z.object(llmRunIdentifierSchema),
+      execute: async (input) =>
+        callMcpToolForOpenRouter(mcpClient, "draw_starting_hand", input),
+    }),
+    tool({
+      name: "mulligan",
+      description:
+        "Return the current opening hand to the library, shuffle, and draw a fresh seven-card hand. This can only be called after the starting hand has been drawn. Important: this tool already draws and returns the replacement hand, so do not call draw_starting_hand after using this tool.",
+      inputSchema: z.object({
+        ...llmRunIdentifierSchema,
+        reason: z
+          .string()
+          .trim()
+          .min(1)
+          .describe(
+            "A short explanation of why this hand is being mulliganed."
+          ),
+      }),
+      execute: async (input) =>
+        callMcpToolForOpenRouter(mcpClient, "mulligan", input),
+    }),
+    tool({
+      name: "return_cards_to_library",
+      description:
+        "Return multiple cards to the top or bottom of the library for an existing simulation, optionally randomizing the order they are returned in.",
+      inputSchema: z.object({
+        ...llmRunIdentifierSchema,
+        cards: z
+          .array(z.string().trim().min(1))
+          .min(1)
+          .describe(
+            "The cards to put back into the library. If randomizeOrder is false, they are inserted in list order, so the last card becomes the outermost card on the chosen side."
+          ),
+        side: z
+          .enum(["top", "bottom"])
+          .describe("Which end of the library to return the cards to."),
+        randomizeOrder: z
+          .boolean()
+          .describe(
+            "Whether to shuffle the returned cards before putting them back."
+          ),
+      }),
+      execute: async (input) =>
+        callMcpToolForOpenRouter(mcpClient, "return_cards_to_library", input),
+    }),
+  ]
+}
+
+function createTurnSimulationOpenRouterTools(mcpClient: Client): Tool[] {
+  return [
+    tool({
+      name: "log_turn_action",
+      description:
+        "Append an irreversible action note to the active turn log for this simulation. Use this as the authoritative turn history while resolving the turn. The response returns the full logged action list for the active turn.",
+      inputSchema: z.object({
+        ...llmRunIdentifierSchema,
+        action: z
+          .string()
+          .trim()
+          .min(1)
+          .describe(
+            "A concise description of the action being committed, such as a phase change, land play, spell cast, attack, or other turn progression."
+          ),
+      }),
+      execute: async (input) =>
+        callMcpToolForOpenRouter(mcpClient, "log_turn_action", input),
+    }),
+    tool({
+      name: "draw_card_from_top",
+      description:
+        "Draw one or more cards from the top of the stored library for an existing simulation.",
+      inputSchema: z.object({
+        ...llmRunIdentifierSchema,
+        count: z.number().int().positive().describe("How many cards to draw."),
+      }),
+      execute: async (input) =>
+        callMcpToolForOpenRouter(mcpClient, "draw_card_from_top", input),
+    }),
+    tool({
+      name: "draw_card_from_bottom",
+      description:
+        "Draw one or more cards from the bottom of the stored library for an existing simulation.",
+      inputSchema: z.object({
+        ...llmRunIdentifierSchema,
+        count: z.number().int().positive().describe("How many cards to draw."),
+      }),
+      execute: async (input) =>
+        callMcpToolForOpenRouter(mcpClient, "draw_card_from_bottom", input),
+    }),
+    tool({
+      name: "take_cards_from_library",
+      description:
+        "Take one or more specific cards out of the stored library for tutor and search effects. Each requested name uses the best reasonably close fuzzy match, ignoring case and punctuation. If no close enough match exists, that request returns no card.",
+      inputSchema: z.object({
+        ...llmRunIdentifierSchema,
+        cards: z
+          .array(z.string().trim().min(1))
+          .min(1)
+          .describe(
+            "The card names to remove from the library. Each request is matched independently against the current remaining library."
+          ),
+      }),
+      execute: async (input) =>
+        callMcpToolForOpenRouter(mcpClient, "take_cards_from_library", input),
+    }),
+    tool({
+      name: "return_card_to_library",
+      description:
+        "Return a card to the library for an existing simulation, placing it a specific number of cards from the top or bottom.",
+      inputSchema: z.object({
+        ...llmRunIdentifierSchema,
+        card: z
+          .string()
+          .trim()
+          .min(1)
+          .describe("The card name to put back into the library."),
+        side: z
+          .enum(["top", "bottom"])
+          .describe(
+            "Whether the position is measured from the top or the bottom of the library."
+          ),
+        position: z
+          .number()
+          .int()
+          .nonnegative()
+          .describe(
+            "How many cards should remain above the card if using top, or below the card if using bottom. Position 0 puts it directly on that end. For example, if you want the card 3rd from the top, use side top, position 2."
+          ),
+      }),
+      execute: async (input) =>
+        callMcpToolForOpenRouter(mcpClient, "return_card_to_library", input),
+    }),
+    tool({
+      name: "return_cards_to_library",
+      description:
+        "Return multiple cards to the top or bottom of the library for an existing simulation, optionally randomizing the order they are returned in.",
+      inputSchema: z.object({
+        ...llmRunIdentifierSchema,
+        cards: z
+          .array(z.string().trim().min(1))
+          .min(1)
+          .describe(
+            "The cards to put back into the library. If randomizeOrder is false, they are inserted in list order, so the last card becomes the outermost card on the chosen side."
+          ),
+        side: z
+          .enum(["top", "bottom"])
+          .describe("Which end of the library to return the cards to."),
+        randomizeOrder: z
+          .boolean()
+          .describe(
+            "Whether to shuffle the returned cards before putting them back."
+          ),
+      }),
+      execute: async (input) =>
+        callMcpToolForOpenRouter(mcpClient, "return_cards_to_library", input),
+    }),
+    tool({
+      name: "shuffle_library",
+      description: "Shuffle the stored library for an existing simulation.",
+      inputSchema: z.object(llmRunIdentifierSchema),
+      execute: async (input) =>
+        callMcpToolForOpenRouter(mcpClient, "shuffle_library", input),
+    }),
+  ]
+}
+
+async function callMcpToolForOpenRouter(
+  mcpClient: Client,
+  name: string,
+  args: Record<string, unknown>
+) {
+  const result = await mcpClient.callTool({
+    name,
+    arguments: args,
+  })
+
+  return formatMcpToolResultForOpenRouter(result)
+}
+
+function formatMcpToolResultForOpenRouter(result: unknown) {
+  const resultRecord = asRecord(result)
+
+  if (Object.hasOwn(resultRecord, "structuredContent")) {
+    return resultRecord.structuredContent
+  }
+
+  if (Object.hasOwn(resultRecord, "toolResult")) {
+    return resultRecord.toolResult
+  }
+
+  const textContent = getMcpToolResultTextContent(resultRecord)
+
+  if (textContent !== null) {
+    return parseMcpToolResultTextContent(textContent)
+  }
+
+  return Object.hasOwn(resultRecord, "content") ? resultRecord.content : result
+}
+
+function getMcpToolResultTextContent(resultRecord: Record<string, unknown>) {
+  const content = resultRecord.content
+
+  if (!Array.isArray(content)) {
+    return null
+  }
+
+  const textParts = content.flatMap((part) => {
+    const partRecord = asRecord(part)
+
+    if (partRecord.type !== "text") {
+      return []
+    }
+
+    const text = getStringProperty(partRecord, "text")
+
+    return text === null ? [] : [text]
+  })
+
+  return textParts.length === 0 ? null : textParts.join("\n")
+}
+
+function parseMcpToolResultTextContent(textContent: string) {
+  if (!textContent.trim()) {
+    return textContent
+  }
+
+  try {
+    return JSON.parse(textContent) as unknown
+  } catch {
+    return textContent
   }
 }
 
-function getOpenAiRunConfig(): OpenAiRunConfig {
-  const missingVariables = [
-    "OPENAI_API_KEY",
-    "OPENAI_MODEL",
-    "OPENAI_REASONING_EFFORT",
-  ].filter((environmentVariable) => !process.env[environmentVariable]?.trim())
-
-  if (missingVariables.length > 0) {
-    throw new OpenAiConfigurationError(
-      `Missing OpenAI environment variable(s): ${missingVariables.join(", ")}. Add them to your repo-root .env file.`
-    )
-  }
-
-  const parsedReasoningEffort = reasoningEffortSchema.safeParse(
-    process.env.OPENAI_REASONING_EFFORT?.trim()
+async function createOpenRouterMcpClient(path: string) {
+  const mcpClient = new Client({
+    name: `${SERVER_NAME}-openrouter-agent`,
+    version: "0.0.1",
+  })
+  const transport = new StreamableHTTPClientTransport(
+    new URL(`http://${DEFAULT_HOST}:${DEFAULT_PORT}${path}`)
   )
 
-  if (!parsedReasoningEffort.success) {
-    throw new OpenAiConfigurationError(
-      "OPENAI_REASONING_EFFORT must be one of: none, minimal, low, medium, high, xhigh."
-    )
-  }
+  await mcpClient.connect(transport)
 
-  return {
-    apiKey: process.env.OPENAI_API_KEY!.trim(),
-    model: process.env.OPENAI_MODEL!.trim(),
-    reasoningEffort: parsedReasoningEffort.data,
-  }
-}
-
-function getOpeningHandOpenAiRunConfig(): OpeningHandOpenAiRunConfig {
-  return {
-    ...getOpenAiRunConfig(),
-    openingHandMcpPublicUrl: getRequiredOpenAiEnvironmentVariable(
-      "OPENING_HAND_MCP_PUBLIC_URL"
-    ),
-  }
-}
-
-function getTurnSimulationOpenAiRunConfig(): TurnSimulationOpenAiRunConfig {
-  return {
-    ...getOpenAiRunConfig(),
-    turnSimulationMcpPublicUrl: getRequiredOpenAiEnvironmentVariable(
-      "TURN_SIMULATION_MCP_PUBLIC_URL"
-    ),
-  }
-}
-
-function getRequiredOpenAiEnvironmentVariable(environmentVariable: string) {
-  const value = process.env[environmentVariable]?.trim()
-
-  if (!value) {
-    throw new OpenAiConfigurationError(
-      `Missing OpenAI environment variable(s): ${environmentVariable}. Add them to your repo-root .env file.`
-    )
-  }
-
-  return value
+  return mcpClient
 }
 
 function buildOpeningHandOpenAiRequestPayload(
@@ -1174,7 +1393,107 @@ function buildTurnSimulationOpenAiRequestPayload(
   }
 }
 
-function getPersistableOpenAiRequestPayload<
+function buildOpeningHandOpenRouterRequestPayload(
+  config: OpenRouterRunConfig,
+  fullPrompt: string,
+  simulationId: string
+) {
+  return {
+    model: config.model,
+    input: fullPrompt,
+    metadata: {
+      simulationId,
+      phase: "opening_hand",
+    },
+    reasoning: {
+      effort: config.reasoningEffort,
+      summary: "auto" as const,
+    },
+    parallelToolCalls: false as const,
+    stopWhenStepCount: config.stopWhenStepCount,
+  }
+}
+
+function buildTurnSimulationOpenRouterRequestPayload(
+  config: OpenRouterRunConfig,
+  fullPrompt: string,
+  simulationId: string,
+  turnNumber: number
+) {
+  return {
+    model: config.model,
+    input: fullPrompt,
+    metadata: {
+      simulationId,
+      phase: "turn",
+      turnNumber: String(turnNumber),
+    },
+    reasoning: {
+      effort: config.reasoningEffort,
+      summary: "auto" as const,
+    },
+    parallelToolCalls: false as const,
+    stopWhenStepCount: config.stopWhenStepCount,
+  }
+}
+
+function buildOpeningHandLlmRequestPayload(
+  config: OpeningHandLlmRunConfig,
+  fullPrompt: string,
+  simulationId: string
+) {
+  if (config.provider === "openai") {
+    return buildOpeningHandOpenAiRequestPayload(
+      config,
+      fullPrompt,
+      simulationId
+    )
+  }
+
+  return buildOpeningHandOpenRouterRequestPayload(
+    config,
+    fullPrompt,
+    simulationId
+  )
+}
+
+function buildTurnSimulationLlmRequestPayload(
+  config: TurnSimulationLlmRunConfig,
+  fullPrompt: string,
+  simulationId: string,
+  turnNumber: number
+) {
+  if (config.provider === "openai") {
+    return buildTurnSimulationOpenAiRequestPayload(
+      config,
+      fullPrompt,
+      simulationId,
+      turnNumber
+    )
+  }
+
+  return buildTurnSimulationOpenRouterRequestPayload(
+    config,
+    fullPrompt,
+    simulationId,
+    turnNumber
+  )
+}
+
+type OpeningHandLlmRequestPayload = ReturnType<
+  typeof buildOpeningHandLlmRequestPayload
+>
+type TurnSimulationLlmRequestPayload = ReturnType<
+  typeof buildTurnSimulationLlmRequestPayload
+>
+type OpeningHandOpenRouterRequestPayload = ReturnType<
+  typeof buildOpeningHandOpenRouterRequestPayload
+>
+type TurnSimulationOpenRouterRequestPayload = ReturnType<
+  typeof buildTurnSimulationOpenRouterRequestPayload
+>
+
+function getPersistableLlmRequestPayload<
   TRequestPayload extends { input: unknown },
 >(requestPayload: TRequestPayload) {
   return {
@@ -1207,7 +1526,7 @@ async function prepareAndStartOpeningHandLlmRun({
   let createdLlmRunId: string | null = null
 
   try {
-    const openAiConfig = getOpeningHandOpenAiRunConfig()
+    const llmConfig = getOpeningHandLlmRunConfig()
 
     if (resetBeforeStart) {
       await resetSimulationForOpeningHandLlmRun(deckId, simulationId)
@@ -1215,9 +1534,9 @@ async function prepareAndStartOpeningHandLlmRun({
 
     const openingHandRun = await createOpeningHandLlmRun(deckId, {
       simulationId,
-      provider: OPENAI_PROVIDER,
-      model: openAiConfig.model,
-      reasoningEffort: openAiConfig.reasoningEffort,
+      provider: llmConfig.provider,
+      model: llmConfig.model,
+      reasoningEffort: llmConfig.reasoningEffort,
       runtimeStreamKey: randomUUID(),
       fullPrompt: "",
       requestPayload: {},
@@ -1226,8 +1545,8 @@ async function prepareAndStartOpeningHandLlmRun({
     const fullPrompt = await buildStartingHandSimulationPrompt({
       llmRunId: openingHandRun.llmRunId,
     })
-    const requestPayload = buildOpeningHandOpenAiRequestPayload(
-      openAiConfig,
+    const requestPayload = buildOpeningHandLlmRequestPayload(
+      llmConfig,
       fullPrompt,
       simulationId
     )
@@ -1235,11 +1554,11 @@ async function prepareAndStartOpeningHandLlmRun({
     await updateLlmRunRequestData({
       llmRunId: openingHandRun.llmRunId,
       fullPrompt,
-      requestPayload: getPersistableOpenAiRequestPayload(requestPayload),
+      requestPayload: getPersistableLlmRequestPayload(requestPayload),
     })
 
     startOpeningHandLlmRun({
-      config: openAiConfig,
+      config: llmConfig,
       deckId,
       fullPrompt,
       attemptNumber: openingHandRun.attemptNumber,
@@ -1280,13 +1599,13 @@ async function prepareAndStartTurnLlmRun({
   let createdLlmRunId: string | null = null
 
   try {
-    const openAiConfig = getTurnSimulationOpenAiRunConfig()
+    const llmConfig = getTurnSimulationLlmRunConfig()
     const turnRun = await createTurnLlmRun(deckId, {
       simulationId,
       turnNumber,
-      provider: OPENAI_PROVIDER,
-      model: openAiConfig.model,
-      reasoningEffort: openAiConfig.reasoningEffort,
+      provider: llmConfig.provider,
+      model: llmConfig.model,
+      reasoningEffort: llmConfig.reasoningEffort,
       runtimeStreamKey: randomUUID(),
       requireAutoSimulateNextStep,
     })
@@ -1299,8 +1618,8 @@ async function prepareAndStartTurnLlmRun({
             { llmRunId: turnRun.llmRunId },
             turnRun.previousGameState ?? undefined
           )
-    const requestPayload = buildTurnSimulationOpenAiRequestPayload(
-      openAiConfig,
+    const requestPayload = buildTurnSimulationLlmRequestPayload(
+      llmConfig,
       fullPrompt,
       simulationId,
       turnNumber
@@ -1309,11 +1628,11 @@ async function prepareAndStartTurnLlmRun({
     await updateLlmRunRequestData({
       llmRunId: turnRun.llmRunId,
       fullPrompt,
-      requestPayload: getPersistableOpenAiRequestPayload(requestPayload),
+      requestPayload: getPersistableLlmRequestPayload(requestPayload),
     })
 
     startTurnLlmRun({
-      config: openAiConfig,
+      config: llmConfig,
       deckId,
       fullPrompt,
       attemptNumber: turnRun.attemptNumber,
@@ -1413,6 +1732,250 @@ function isBenignAutoAdvanceAbortError(error: unknown) {
   )
 }
 
+type CompletedLlmStreamResult = {
+  outputText: string
+  responseMetadata: unknown
+  usage: unknown
+}
+
+type OpenAiRequestPayload =
+  | ReturnType<typeof buildOpeningHandOpenAiRequestPayload>
+  | ReturnType<typeof buildTurnSimulationOpenAiRequestPayload>
+type OpenRouterRequestPayload =
+  | OpeningHandOpenRouterRequestPayload
+  | TurnSimulationOpenRouterRequestPayload
+
+function isOpenAiRequestPayload(
+  requestPayload: OpeningHandLlmRequestPayload | TurnSimulationLlmRequestPayload
+): requestPayload is OpenAiRequestPayload {
+  return "stream" in requestPayload
+}
+
+function isOpenRouterRequestPayload(
+  requestPayload: OpeningHandLlmRequestPayload | TurnSimulationLlmRequestPayload
+): requestPayload is OpenRouterRequestPayload {
+  return "stopWhenStepCount" in requestPayload
+}
+
+function requireOpenAiRequestPayload(
+  requestPayload: OpeningHandLlmRequestPayload | TurnSimulationLlmRequestPayload
+) {
+  if (!isOpenAiRequestPayload(requestPayload)) {
+    throw new Error("LLM run config and request payload provider mismatch.")
+  }
+
+  return requestPayload
+}
+
+function requireOpenRouterRequestPayload(
+  requestPayload: OpeningHandLlmRequestPayload | TurnSimulationLlmRequestPayload
+) {
+  if (!isOpenRouterRequestPayload(requestPayload)) {
+    throw new Error("LLM run config and request payload provider mismatch.")
+  }
+
+  return requestPayload
+}
+
+async function collectOpenAiLlmStream({
+  config,
+  llmRunId,
+  phase,
+  requestPayload,
+  runtime,
+}: {
+  config: OpenAiRunConfig
+  llmRunId: string
+  phase: LlmRunPhase
+  requestPayload: OpenAiRequestPayload
+  runtime: ActiveLlmRunRuntime
+}): Promise<CompletedLlmStreamResult> {
+  let outputText = ""
+  let responseMetadata: unknown = {}
+  let usage: unknown = {}
+  let didReceiveCompletedResponse = false
+  let providerTerminalEventError: ProviderTerminalEventError | null = null
+  const client = new OpenAI({
+    apiKey: config.apiKey,
+  })
+
+  logLlmApiCallStarted({
+    llmRunId,
+    model: requestPayload.model,
+    phase,
+    provider: config.provider,
+  })
+
+  const stream = await client.responses.create(requestPayload, {
+    signal: runtime.abortController.signal,
+  })
+
+  for await (const event of stream) {
+    const eventRecord = asRecord(event)
+    const eventType = getStringProperty(eventRecord, "type")
+    const normalizedEvent = normalizeOpenAiStreamEvent(event)
+
+    if (eventType === "response.completed") {
+      const response = eventRecord.response
+      const responseRecord = asRecord(response)
+      didReceiveCompletedResponse = true
+      outputText = getCompletedResponseOutputText(response)
+      responseMetadata = response ?? {}
+      usage = responseRecord.usage ?? {}
+    }
+
+    appendRuntimeChunk(runtime, normalizedEvent)
+
+    if (isProviderTerminalEvent(eventType)) {
+      providerTerminalEventError = new ProviderTerminalEventError(
+        eventType,
+        event
+      )
+    }
+  }
+
+  if (providerTerminalEventError) {
+    throw providerTerminalEventError
+  }
+
+  if (!didReceiveCompletedResponse) {
+    throw new Error(
+      `${formatLlmRunPhase(phase)} LLM stream ended without response.completed.`
+    )
+  }
+
+  logLlmApiCallFinished({
+    llmRunId,
+    model: requestPayload.model,
+    phase,
+    provider: config.provider,
+    usage,
+  })
+
+  return {
+    outputText,
+    responseMetadata,
+    usage,
+  }
+}
+
+async function collectOpenRouterLlmStream({
+  config,
+  createTools,
+  llmRunId,
+  mcpPath,
+  phase,
+  requestPayload,
+  runtime,
+}: {
+  config: OpenRouterRunConfig
+  createTools: (mcpClient: Client) => Tool[]
+  llmRunId: string
+  mcpPath: string
+  phase: LlmRunPhase
+  requestPayload: OpenRouterRequestPayload
+  runtime: ActiveLlmRunRuntime
+}): Promise<CompletedLlmStreamResult> {
+  let outputText = ""
+  let responseMetadata: unknown = {}
+  let usage: unknown = {}
+  let didReceiveCompletedResponse = false
+  let providerTerminalEventError: ProviderTerminalEventError | null = null
+  const toolCallNamesById: OpenRouterToolCallNameMap = new Map()
+  const openrouter = new OpenRouter({
+    apiKey: config.apiKey,
+  })
+  const mcpClient = await createOpenRouterMcpClient(mcpPath)
+
+  try {
+    logLlmApiCallStarted({
+      llmRunId,
+      model: requestPayload.model,
+      phase,
+      provider: config.provider,
+    })
+
+    const result = openrouter.callModel(
+      {
+        model: requestPayload.model,
+        input: requestPayload.input,
+        metadata: requestPayload.metadata,
+        reasoning: requestPayload.reasoning,
+        parallelToolCalls: requestPayload.parallelToolCalls,
+        stopWhen: stepCountIs(requestPayload.stopWhenStepCount),
+        tools: createTools(mcpClient),
+      },
+      {
+        signal: runtime.abortController.signal,
+      }
+    )
+
+    try {
+      for await (const event of result.getFullResponsesStream()) {
+        const eventRecord = asRecord(event)
+        const eventType = getStringProperty(eventRecord, "type")
+        const normalizedEvent = normalizeOpenRouterStreamEvent(
+          event,
+          toolCallNamesById
+        )
+
+        if (eventType === "response.completed") {
+          const response = eventRecord.response
+          const responseRecord = asRecord(response)
+          didReceiveCompletedResponse = true
+          outputText = getCompletedResponseOutputText(response)
+          responseMetadata = response ?? {}
+          usage = responseRecord.usage ?? {}
+        }
+
+        appendRuntimeChunk(runtime, normalizedEvent)
+
+        if (isProviderTerminalEvent(eventType)) {
+          providerTerminalEventError = new ProviderTerminalEventError(
+            eventType,
+            event,
+            "OpenRouter"
+          )
+        }
+      }
+    } catch (error) {
+      if (runtime.abortController.signal.aborted) {
+        await result.cancel().catch(() => {})
+      }
+
+      throw error
+    }
+  } finally {
+    await mcpClient.close().catch((error: unknown) => {
+      console.error("Failed to close OpenRouter MCP client:", error)
+    })
+  }
+
+  if (providerTerminalEventError) {
+    throw providerTerminalEventError
+  }
+
+  if (!didReceiveCompletedResponse) {
+    throw new Error(
+      `${formatLlmRunPhase(phase)} LLM stream ended without response.completed.`
+    )
+  }
+
+  logLlmApiCallFinished({
+    llmRunId,
+    model: requestPayload.model,
+    phase,
+    provider: config.provider,
+    usage,
+  })
+
+  return {
+    outputText,
+    responseMetadata,
+    usage,
+  }
+}
+
 function startOpeningHandLlmRun({
   attemptNumber,
   config,
@@ -1424,11 +1987,11 @@ function startOpeningHandLlmRun({
   simulationId,
 }: {
   attemptNumber: number
-  config: OpenAiRunConfig
+  config: OpeningHandLlmRunConfig
   deckId: string
   fullPrompt: string
   llmRunId: string
-  requestPayload: ReturnType<typeof buildOpeningHandOpenAiRequestPayload>
+  requestPayload: OpeningHandLlmRequestPayload
   runtimeStreamKey: string
   simulationId: string
 }) {
@@ -1454,11 +2017,11 @@ async function runOpeningHandLlmRun({
   simulationId,
 }: {
   attemptNumber: number
-  config: OpenAiRunConfig
+  config: OpeningHandLlmRunConfig
   deckId: string
   fullPrompt: string
   llmRunId: string
-  requestPayload: ReturnType<typeof buildOpeningHandOpenAiRequestPayload>
+  requestPayload: OpeningHandLlmRequestPayload
   runtimeStreamKey: string
   simulationId: string
 }) {
@@ -1475,7 +2038,7 @@ async function runOpeningHandLlmRun({
     model: config.model,
     nextSequence: 1,
     phase: "opening_hand",
-    provider: OPENAI_PROVIDER,
+    provider: config.provider,
     reasoningEffort: config.reasoningEffort,
     recentChunks: [],
     resolveCompletion: completion.resolveCompletion,
@@ -1483,11 +2046,6 @@ async function runOpeningHandLlmRun({
     simulationId,
     status: "streaming",
   }
-  let outputText = ""
-  let responseMetadata: unknown = {}
-  let usage: unknown = {}
-  let didReceiveCompletedResponse = false
-  let providerTerminalEventError: ProviderTerminalEventError | null = null
 
   activeLlmRunRuntimes.set(runtimeStreamKey, runtime)
   publishRuntimeStarted(runtime)
@@ -1495,68 +2053,36 @@ async function runOpeningHandLlmRun({
   try {
     await markLlmRunStreaming(llmRunId)
 
-    const client = new OpenAI({
-      apiKey: config.apiKey,
-    })
-    logOpenAiApiCallStarted({
-      llmRunId,
-      model: requestPayload.model,
-      phase: "opening_hand",
-    })
-    const stream = await client.responses.create(requestPayload, {
-      signal: runtime.abortController.signal,
-    })
-
-    for await (const event of stream) {
-      const eventRecord = asRecord(event)
-      const eventType = getStringProperty(eventRecord, "type")
-      const normalizedEvent = normalizeOpenAiStreamEvent(event)
-
-      if (eventType === "response.completed") {
-        const response = eventRecord.response
-        const responseRecord = asRecord(response)
-        didReceiveCompletedResponse = true
-        outputText = getCompletedResponseOutputText(response)
-        responseMetadata = response ?? {}
-        usage = responseRecord.usage ?? {}
-      }
-
-      appendRuntimeChunk(runtime, normalizedEvent)
-
-      if (isProviderTerminalEvent(eventType)) {
-        providerTerminalEventError = new ProviderTerminalEventError(
-          eventType,
-          event
-        )
-      }
-    }
+    const streamResult =
+      config.provider === "openai"
+        ? await collectOpenAiLlmStream({
+            config,
+            llmRunId,
+            phase: "opening_hand",
+            requestPayload: requireOpenAiRequestPayload(requestPayload),
+            runtime,
+          })
+        : await collectOpenRouterLlmStream({
+            config,
+            createTools: createOpeningHandOpenRouterTools,
+            llmRunId,
+            mcpPath: OPENING_HAND_MCP_PATH,
+            phase: "opening_hand",
+            requestPayload: requireOpenRouterRequestPayload(requestPayload),
+            runtime,
+          })
 
     await forceFlushRuntimeChunks(runtime)
 
-    if (providerTerminalEventError) {
-      throw providerTerminalEventError
-    }
-
-    if (!didReceiveCompletedResponse) {
-      throw new Error(
-        "Opening-hand LLM stream ended without response.completed."
-      )
-    }
-
-    logOpenAiApiCallFinished({
-      llmRunId,
-      model: requestPayload.model,
-      phase: "opening_hand",
-      usage,
-    })
-
-    const parsedOpeningHand = parseOpeningHandFromResponseText(outputText)
+    const parsedOpeningHand = parseOpeningHandFromResponseText(
+      streamResult.outputText
+    )
 
     const completion = await completeOpeningHandLlmRun({
       llmRunId,
       openingHand: parsedOpeningHand.keptHand,
-      responseMetadata,
-      usage,
+      responseMetadata: streamResult.responseMetadata,
+      usage: streamResult.usage,
     })
     runtime.status = "completed"
     await publishSimulationResultsState({
@@ -1567,9 +2093,10 @@ async function runOpeningHandLlmRun({
     await handleSimulationCompletionNextStep(completion)
   } catch (error) {
     if (isAbortError(error) || runtime.abortController.signal.aborted) {
-      logOpenAiApiCallCancelled({
+      logLlmApiCallCancelled({
         llmRunId,
         phase: "opening_hand",
+        provider: config.provider,
       })
       appendRuntimeChunk(runtime, createCancellationChunk())
       await tryForceFlushRuntimeChunks(runtime, "cancelled opening-hand run")
@@ -1583,20 +2110,19 @@ async function runOpeningHandLlmRun({
       return
     }
 
-    const effectiveError = providerTerminalEventError ?? error
-
-    if (!(effectiveError instanceof ProviderTerminalEventError)) {
-      appendRuntimeChunk(runtime, createServerErrorChunk(effectiveError))
+    if (!(error instanceof ProviderTerminalEventError)) {
+      appendRuntimeChunk(runtime, createServerErrorChunk(error))
     }
 
     await tryForceFlushRuntimeChunks(runtime, "failed opening-hand run")
-    logOpenAiApiCallStoppedWithError({
-      error: effectiveError,
+    logLlmApiCallStoppedWithError({
+      error,
       llmRunId,
       phase: "opening_hand",
+      provider: config.provider,
     })
-    console.error("Opening-hand LLM run failed:", effectiveError)
-    await failLlmRun(llmRunId, getErrorMessage(effectiveError))
+    console.error("Opening-hand LLM run failed:", error)
+    await failLlmRun(llmRunId, getErrorMessage(error))
     runtime.status = "failed"
     await publishSimulationResultsState({
       deckId,
@@ -1622,11 +2148,11 @@ function startTurnLlmRun({
   turnNumber,
 }: {
   attemptNumber: number
-  config: OpenAiRunConfig
+  config: TurnSimulationLlmRunConfig
   deckId: string
   fullPrompt: string
   llmRunId: string
-  requestPayload: ReturnType<typeof buildTurnSimulationOpenAiRequestPayload>
+  requestPayload: TurnSimulationLlmRequestPayload
   runtimeStreamKey: string
   simulationId: string
   turnNumber: number
@@ -1655,11 +2181,11 @@ async function runTurnLlmRun({
   turnNumber,
 }: {
   attemptNumber: number
-  config: OpenAiRunConfig
+  config: TurnSimulationLlmRunConfig
   deckId: string
   fullPrompt: string
   llmRunId: string
-  requestPayload: ReturnType<typeof buildTurnSimulationOpenAiRequestPayload>
+  requestPayload: TurnSimulationLlmRequestPayload
   runtimeStreamKey: string
   simulationId: string
   turnNumber: number
@@ -1677,7 +2203,7 @@ async function runTurnLlmRun({
     model: config.model,
     nextSequence: 1,
     phase: "turn",
-    provider: OPENAI_PROVIDER,
+    provider: config.provider,
     reasoningEffort: config.reasoningEffort,
     recentChunks: [],
     resolveCompletion: completion.resolveCompletion,
@@ -1686,11 +2212,6 @@ async function runTurnLlmRun({
     status: "streaming",
     turnNumber,
   }
-  let outputText = ""
-  let responseMetadata: unknown = {}
-  let usage: unknown = {}
-  let didReceiveCompletedResponse = false
-  let providerTerminalEventError: ProviderTerminalEventError | null = null
 
   activeLlmRunRuntimes.set(runtimeStreamKey, runtime)
   publishRuntimeStarted(runtime)
@@ -1698,66 +2219,36 @@ async function runTurnLlmRun({
   try {
     await markLlmRunStreaming(llmRunId)
 
-    const client = new OpenAI({
-      apiKey: config.apiKey,
-    })
-    logOpenAiApiCallStarted({
-      llmRunId,
-      model: requestPayload.model,
-      phase: "turn",
-    })
-    const stream = await client.responses.create(requestPayload, {
-      signal: runtime.abortController.signal,
-    })
-
-    for await (const event of stream) {
-      const eventRecord = asRecord(event)
-      const eventType = getStringProperty(eventRecord, "type")
-      const normalizedEvent = normalizeOpenAiStreamEvent(event)
-
-      if (eventType === "response.completed") {
-        const response = eventRecord.response
-        const responseRecord = asRecord(response)
-        didReceiveCompletedResponse = true
-        outputText = getCompletedResponseOutputText(response)
-        responseMetadata = response ?? {}
-        usage = responseRecord.usage ?? {}
-      }
-
-      appendRuntimeChunk(runtime, normalizedEvent)
-
-      if (isProviderTerminalEvent(eventType)) {
-        providerTerminalEventError = new ProviderTerminalEventError(
-          eventType,
-          event
-        )
-      }
-    }
+    const streamResult =
+      config.provider === "openai"
+        ? await collectOpenAiLlmStream({
+            config,
+            llmRunId,
+            phase: "turn",
+            requestPayload: requireOpenAiRequestPayload(requestPayload),
+            runtime,
+          })
+        : await collectOpenRouterLlmStream({
+            config,
+            createTools: createTurnSimulationOpenRouterTools,
+            llmRunId,
+            mcpPath: TURN_SIMULATION_MCP_PATH,
+            phase: "turn",
+            requestPayload: requireOpenRouterRequestPayload(requestPayload),
+            runtime,
+          })
 
     await forceFlushRuntimeChunks(runtime)
 
-    if (providerTerminalEventError) {
-      throw providerTerminalEventError
-    }
-
-    if (!didReceiveCompletedResponse) {
-      throw new Error("Turn LLM stream ended without response.completed.")
-    }
-
-    logOpenAiApiCallFinished({
-      llmRunId,
-      model: requestPayload.model,
-      phase: "turn",
-      usage,
-    })
-
-    const parsedTurn = parseTurnSimulationFromResponseText(outputText)
+    const parsedTurn = parseTurnSimulationFromResponseText(
+      streamResult.outputText
+    )
 
     const completion = await completeTurnLlmRun({
       llmRunId,
       gameState: parsedTurn.gameState,
-      responseMetadata,
-      usage,
+      responseMetadata: streamResult.responseMetadata,
+      usage: streamResult.usage,
     })
     runtime.status = "completed"
     await publishSimulationResultsState({
@@ -1768,9 +2259,10 @@ async function runTurnLlmRun({
     await handleSimulationCompletionNextStep(completion)
   } catch (error) {
     if (isAbortError(error) || runtime.abortController.signal.aborted) {
-      logOpenAiApiCallCancelled({
+      logLlmApiCallCancelled({
         llmRunId,
         phase: "turn",
+        provider: config.provider,
       })
       appendRuntimeChunk(
         runtime,
@@ -1787,20 +2279,19 @@ async function runTurnLlmRun({
       return
     }
 
-    const effectiveError = providerTerminalEventError ?? error
-
-    if (!(effectiveError instanceof ProviderTerminalEventError)) {
-      appendRuntimeChunk(runtime, createServerErrorChunk(effectiveError))
+    if (!(error instanceof ProviderTerminalEventError)) {
+      appendRuntimeChunk(runtime, createServerErrorChunk(error))
     }
 
     await tryForceFlushRuntimeChunks(runtime, "failed turn run")
-    logOpenAiApiCallStoppedWithError({
-      error: effectiveError,
+    logLlmApiCallStoppedWithError({
+      error,
       llmRunId,
       phase: "turn",
+      provider: config.provider,
     })
-    console.error("Turn LLM run failed:", effectiveError)
-    await failLlmRun(llmRunId, getErrorMessage(effectiveError))
+    console.error("Turn LLM run failed:", error)
+    await failLlmRun(llmRunId, getErrorMessage(error))
     runtime.status = "failed"
     await publishSimulationResultsState({
       deckId,
@@ -2121,7 +2612,7 @@ async function main() {
           return
         }
 
-        if (error instanceof OpenAiConfigurationError) {
+        if (error instanceof LlmConfigurationError) {
           res.status(500).json({
             error: error.message,
           })
@@ -2160,7 +2651,7 @@ async function main() {
           return
         }
 
-        if (error instanceof OpenAiConfigurationError) {
+        if (error instanceof LlmConfigurationError) {
           res.status(500).json({
             error: error.message,
           })
@@ -2215,7 +2706,7 @@ async function main() {
           return
         }
 
-        if (error instanceof OpenAiConfigurationError) {
+        if (error instanceof LlmConfigurationError) {
           res.status(500).json({
             error: error.message,
           })

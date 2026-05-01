@@ -3,7 +3,9 @@ import test from "node:test"
 import {
   ProviderTerminalEventError,
   createCancellationChunk,
+  getCompletedResponseOutputText,
   normalizeOpenAiStreamEvent,
+  normalizeOpenRouterStreamEvent,
   parseOpeningHandFromResponseText,
   parseTurnSimulationFromResponseText,
 } from "./llm-run-events.js"
@@ -21,7 +23,15 @@ import {
   SimulationStopTimeoutError,
   waitForSimulationStopCompletions,
 } from "./simulation-stop.js"
-import { estimateOpenAiTokenPriceCents } from "./openai-pricing.js"
+import {
+  estimateLlmTokenPriceCents,
+  estimateOpenAiTokenPriceCents,
+} from "./openai-pricing.js"
+import {
+  LlmConfigurationError,
+  getOpeningHandLlmRunConfig,
+  getTurnSimulationLlmRunConfig,
+} from "./llm-config.js"
 
 test("normalizes valid MCP output JSON", () => {
   const chunk = normalizeOpenAiStreamEvent({
@@ -93,6 +103,96 @@ test("does not estimate unsupported OpenAI model prices", () => {
   assert.equal(estimate, null)
 })
 
+test("uses OpenRouter reported usage cost when estimating LLM price", () => {
+  const estimate = estimateLlmTokenPriceCents({
+    provider: "openrouter",
+    model: "openai/gpt-5-nano",
+    usage: {
+      cost: 0.00125,
+    },
+  })
+
+  assert.equal(estimate?.formattedCents, "0.1")
+})
+
+test("requires LLM_PROVIDER for LLM config", () => {
+  assert.throws(
+    () =>
+      getOpeningHandLlmRunConfig({
+        LLM_STOP_WHEN_STEP_COUNT: "3",
+        OPENAI_API_KEY: "key",
+        OPENAI_MODEL: "gpt-5.4-mini",
+        OPENAI_REASONING_EFFORT: "medium",
+        OPENING_HAND_MCP_PUBLIC_URL: "https://example.com/mcp",
+      }),
+    LlmConfigurationError
+  )
+})
+
+test("requires a shared positive integer LLM stop step count", () => {
+  assert.throws(
+    () =>
+      getOpeningHandLlmRunConfig({
+        LLM_PROVIDER: "openai",
+        LLM_STOP_WHEN_STEP_COUNT: "0",
+        OPENAI_API_KEY: "key",
+        OPENAI_MODEL: "gpt-5.4-mini",
+        OPENAI_REASONING_EFFORT: "medium",
+        OPENING_HAND_MCP_PUBLIC_URL: "https://example.com/mcp",
+      }),
+    /LLM_STOP_WHEN_STEP_COUNT must be a positive integer\./
+  )
+})
+
+test("rejects invalid provider and reasoning effort config", () => {
+  assert.throws(
+    () =>
+      getOpeningHandLlmRunConfig({
+        LLM_PROVIDER: "anthropic",
+        LLM_STOP_WHEN_STEP_COUNT: "3",
+      }),
+    /LLM_PROVIDER must be one of: openai, openrouter\./
+  )
+  assert.throws(
+    () =>
+      getOpeningHandLlmRunConfig({
+        LLM_PROVIDER: "openrouter",
+        LLM_STOP_WHEN_STEP_COUNT: "3",
+        OPENROUTER_API_KEY: "key",
+        OPENROUTER_MODEL: "openai/gpt-5-nano",
+        OPENROUTER_REASONING_EFFORT: "maximum",
+      }),
+    /OPENROUTER_REASONING_EFFORT must be one of: none, minimal, low, medium, high, xhigh\./
+  )
+})
+
+test("validates provider-specific LLM config requirements", () => {
+  assert.throws(
+    () =>
+      getTurnSimulationLlmRunConfig({
+        LLM_PROVIDER: "openai",
+        LLM_STOP_WHEN_STEP_COUNT: "3",
+        OPENAI_API_KEY: "key",
+        OPENAI_MODEL: "gpt-5.4-mini",
+        OPENAI_REASONING_EFFORT: "medium",
+      }),
+    /TURN_SIMULATION_MCP_PUBLIC_URL/
+  )
+
+  const config = getOpeningHandLlmRunConfig({
+    LLM_PROVIDER: "openrouter",
+    LLM_STOP_WHEN_STEP_COUNT: "7",
+    OPENROUTER_API_KEY: "key",
+    OPENROUTER_MODEL: "openai/gpt-5-nano",
+    OPENROUTER_REASONING_EFFORT: "high",
+  })
+
+  assert.equal(config.provider, "openrouter")
+  assert.equal(config.model, "openai/gpt-5-nano")
+  assert.equal(config.reasoningEffort, "high")
+  assert.equal(config.stopWhenStepCount, 7)
+})
+
 test("normalizes MCP tool errors from completed output items", () => {
   const chunk = normalizeOpenAiStreamEvent({
     type: "response.output_item.done",
@@ -147,6 +247,94 @@ test("recognizes provider terminal events as error chunks", () => {
   assert.equal(
     error.message,
     "OpenAI stream ended with response.failed: provider is unavailable"
+  )
+})
+
+test("normalizes OpenRouter text and reasoning stream deltas", () => {
+  const textChunk = normalizeOpenRouterStreamEvent({
+    type: "response.output_text.delta",
+    delta: "Keep the seven.",
+  })
+  const summaryChunk = normalizeOpenRouterStreamEvent({
+    type: "response.reasoning_summary_text.delta",
+    delta: "Hand has ramp.",
+  })
+  const reasoningChunk = normalizeOpenRouterStreamEvent({
+    type: "response.reasoning_text.delta",
+    delta: "Evaluating mana.",
+  })
+
+  assert.equal(textChunk.kind, "message_delta")
+  assert.equal(textChunk.outputDelta, "Keep the seven.")
+  assert.equal(summaryChunk.kind, "reasoning_delta")
+  assert.equal(summaryChunk.reasoningDelta, "Hand has ramp.")
+  assert.equal(reasoningChunk.kind, "reasoning_delta")
+  assert.equal(reasoningChunk.reasoningDelta, "Evaluating mana.")
+})
+
+test("normalizes OpenRouter function calls and tool results", () => {
+  const toolCallNamesById = new Map<string, string>()
+  const startChunk = normalizeOpenRouterStreamEvent(
+    {
+      type: "response.output_item.added",
+      item: {
+        type: "function_call",
+        id: "item_1",
+        callId: "call_1",
+        name: "draw_starting_hand",
+      },
+    },
+    toolCallNamesById
+  )
+  const resultChunk = normalizeOpenRouterStreamEvent(
+    {
+      type: "tool.result",
+      toolCallId: "call_1",
+      result: {
+        message: "Drew the starting hand.",
+      },
+    },
+    toolCallNamesById
+  )
+
+  assert.equal(startChunk.kind, "mcp_call_start")
+  assert.equal(startChunk.mcpFunctionName, "draw_starting_hand")
+  assert.equal(resultChunk.kind, "mcp_call_complete")
+  assert.equal(resultChunk.mcpFunctionName, "draw_starting_hand")
+  assert.deepEqual(resultChunk.mcpFunctionOutput, {
+    message: "Drew the starting hand.",
+  })
+})
+
+test("normalizes OpenRouter completed and failure events", () => {
+  const completedEvent = {
+    type: "response.completed",
+    response: {
+      outputText: '{"keptHand":["Sol Ring"]}',
+    },
+  }
+  const completedChunk = normalizeOpenRouterStreamEvent(completedEvent)
+  const failureEvent = {
+    type: "error",
+    message: "provider is unavailable",
+  }
+  const failureChunk = normalizeOpenRouterStreamEvent(failureEvent)
+  const error = new ProviderTerminalEventError(
+    failureEvent.type,
+    failureEvent,
+    "OpenRouter"
+  )
+
+  assert.equal(completedChunk.kind, "completed")
+  assert.equal(completedChunk.payload, completedEvent)
+  assert.equal(
+    getCompletedResponseOutputText(completedEvent.response),
+    '{"keptHand":["Sol Ring"]}'
+  )
+  assert.equal(failureChunk.kind, "error")
+  assert.equal(
+    error.message,
+    "OpenRouter stream ended with error: provider is unavailable"
   )
 })
 

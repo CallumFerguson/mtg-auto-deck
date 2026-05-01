@@ -84,6 +84,44 @@ export function estimateOpenAiTokenPriceCents({
   }
 }
 
+export function estimateLlmTokenPriceCents({
+  model,
+  provider,
+  usage,
+}: {
+  model: string
+  provider: string
+  usage: unknown
+}): OpenAiPriceEstimate | null {
+  if (provider === "openai") {
+    return estimateOpenAiTokenPriceCents({ model, usage })
+  }
+
+  if (provider === "openrouter") {
+    return estimateOpenRouterUsageCostCents(usage)
+  }
+
+  return null
+}
+
+function estimateOpenRouterUsageCostCents(
+  usage: unknown
+): OpenAiPriceEstimate | null {
+  const usageRecord = asRecord(usage)
+  const costDollars = getNumberProperty(usageRecord, "cost")
+
+  if (costDollars === null) {
+    return null
+  }
+
+  const cents = costDollars * 100
+
+  return {
+    cents,
+    formattedCents: formatPriceEstimateCents(cents),
+  }
+}
+
 function normalizeSupportedOpenAiModel(model: string) {
   const normalizedModel = model.trim().toLowerCase()
 

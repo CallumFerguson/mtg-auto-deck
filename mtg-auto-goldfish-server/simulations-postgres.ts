@@ -1,5 +1,5 @@
 import { queryDatabase, withDatabaseTransaction } from "./db.js"
-import { estimateOpenAiTokenPriceCents } from "./openai-pricing.js"
+import { estimateLlmTokenPriceCents } from "./openai-pricing.js"
 
 type DatabaseTransactionClient = Parameters<
   Parameters<typeof withDatabaseTransaction>[0]
@@ -2979,8 +2979,9 @@ async function getSimulationDebugLlmRuns({
         provider: row.provider,
         model: row.model,
         estimatedPriceCents:
-          estimateOpenAiTokenPriceCents({
+          estimateLlmTokenPriceCents({
             model: row.model,
+            provider: row.provider,
             usage: row.usage,
           })?.formattedCents ?? null,
         reasoningEffort: row.reasoning_effort,

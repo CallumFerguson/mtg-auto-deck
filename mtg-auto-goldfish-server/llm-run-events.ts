@@ -4,13 +4,19 @@ export class ProviderTerminalEventError extends Error {
   readonly eventType: string | null
   readonly payload: unknown
 
-  constructor(eventType: string | null, payload: unknown) {
-    super(getProviderTerminalFailureMessage(eventType, payload))
+  constructor(
+    eventType: string | null,
+    payload: unknown,
+    providerName = "OpenAI"
+  ) {
+    super(getProviderTerminalFailureMessage(eventType, payload, providerName))
     this.name = "ProviderTerminalEventError"
     this.eventType = eventType
     this.payload = payload
   }
 }
+
+export type OpenRouterToolCallNameMap = Map<string, string>
 
 export function normalizeOpenAiStreamEvent(
   event: unknown
@@ -83,10 +89,95 @@ export function normalizeOpenAiStreamEvent(
 
 export function isProviderTerminalEvent(eventType: string | null) {
   return (
+    eventType === "error" ||
     eventType === "response.failed" ||
     eventType === "response.incomplete" ||
     Boolean(eventType?.endsWith(".failed"))
   )
+}
+
+export function normalizeOpenRouterStreamEvent(
+  event: unknown,
+  toolCallNamesById: OpenRouterToolCallNameMap = new Map()
+): Omit<LlmRunChunkInput, "sequence"> {
+  const eventRecord = asRecord(event)
+  const eventType = getStringProperty(eventRecord, "type")
+  const rawOutputItemKind = getNestedStringProperty(eventRecord, "item", "type")
+  const payload = event ?? {}
+
+  if (eventType === "response.output_text.delta") {
+    return createChunk("message_delta", {
+      outputDelta: getStringProperty(eventRecord, "delta"),
+      payload,
+    })
+  }
+
+  if (
+    eventType === "response.reasoning_summary_text.delta" ||
+    eventType === "response.reasoning_text.delta"
+  ) {
+    return createChunk("reasoning_delta", {
+      reasoningDelta: getStringProperty(eventRecord, "delta"),
+      payload,
+    })
+  }
+
+  if (eventType === "response.completed") {
+    return createChunk("completed", {
+      payload,
+    })
+  }
+
+  if (
+    eventType === "response.output_item.added" &&
+    rawOutputItemKind === "function_call"
+  ) {
+    const itemRecord = asRecord(eventRecord.item)
+    const functionName = rememberOpenRouterToolCallName(
+      toolCallNamesById,
+      itemRecord
+    )
+
+    return createChunk("mcp_call_start", {
+      mcpFunctionName: functionName,
+      payload,
+    })
+  }
+
+  if (eventType === "response.function_call_arguments.done") {
+    const itemId = getStringProperty(eventRecord, "itemId")
+    const functionName = getStringProperty(eventRecord, "name")
+
+    if (itemId && functionName) {
+      toolCallNamesById.set(itemId, functionName)
+    }
+
+    return createChunk("raw_event", {
+      payload,
+    })
+  }
+
+  if (eventType === "tool.result") {
+    const toolCallId = getStringProperty(eventRecord, "toolCallId")
+    const functionName =
+      (toolCallId ? toolCallNamesById.get(toolCallId) : null) ?? null
+
+    return createChunk("mcp_call_complete", {
+      mcpFunctionName: functionName,
+      mcpFunctionOutput: eventRecord.result ?? null,
+      payload,
+    })
+  }
+
+  if (isProviderTerminalEvent(eventType)) {
+    return createChunk("error", {
+      payload,
+    })
+  }
+
+  return createChunk("raw_event", {
+    payload,
+  })
 }
 
 export function createServerErrorChunk(
@@ -120,12 +211,9 @@ export function parseOpeningHandFromResponseText(responseText: string) {
   try {
     parsedResponse = JSON.parse(responseText) as unknown
   } catch (error) {
-    throw new Error(
-      "Opening-hand LLM completed response was not valid JSON.",
-      {
-        cause: error,
-      }
-    )
+    throw new Error("Opening-hand LLM completed response was not valid JSON.", {
+      cause: error,
+    })
   }
 
   const responseRecord = asRecord(parsedResponse)
@@ -172,7 +260,9 @@ export function parseTurnSimulationFromResponseText(responseText: string) {
 
 export function getCompletedResponseOutputText(response: unknown) {
   const responseRecord = asRecord(response)
-  const topLevelOutputText = getStringProperty(responseRecord, "output_text")
+  const topLevelOutputText =
+    getStringProperty(responseRecord, "output_text") ??
+    getStringProperty(responseRecord, "outputText")
 
   if (topLevelOutputText) {
     return topLevelOutputText
@@ -233,7 +323,9 @@ export function getStringProperty(
 export function isAbortError(error: unknown) {
   return (
     error instanceof Error &&
-    (error.name === "APIUserAbortError" || error.name === "AbortError")
+    (error.name === "APIUserAbortError" ||
+      error.name === "AbortError" ||
+      error.name === "RequestAbortedError")
   )
 }
 
@@ -329,7 +421,8 @@ function getMcpFunctionErrorOutput(itemRecord: Record<string, unknown>) {
 
 function getProviderTerminalFailureMessage(
   eventType: string | null,
-  payload: unknown
+  payload: unknown,
+  providerName: string
 ) {
   const payloadRecord = asRecord(payload)
   const errorRecord = asRecord(payloadRecord.error)
@@ -337,13 +430,35 @@ function getProviderTerminalFailureMessage(
   const responseErrorRecord = asRecord(responseRecord.error)
   const incompleteDetailsRecord = asRecord(responseRecord.incomplete_details)
   const message =
+    getStringProperty(payloadRecord, "message") ??
     getStringProperty(errorRecord, "message") ??
     getStringProperty(responseErrorRecord, "message") ??
     getStringProperty(incompleteDetailsRecord, "reason")
 
   if (message) {
-    return `OpenAI stream ended with ${eventType ?? "a provider failure"}: ${message}`
+    return `${providerName} stream ended with ${eventType ?? "a provider failure"}: ${message}`
   }
 
-  return `OpenAI stream ended with ${eventType ?? "a provider failure"}.`
+  return `${providerName} stream ended with ${eventType ?? "a provider failure"}.`
+}
+
+function rememberOpenRouterToolCallName(
+  toolCallNamesById: OpenRouterToolCallNameMap,
+  itemRecord: Record<string, unknown>
+) {
+  const functionName = getStringProperty(itemRecord, "name")
+
+  if (!functionName) {
+    return null
+  }
+
+  for (const identifierProperty of ["callId", "id"]) {
+    const identifier = getStringProperty(itemRecord, identifierProperty)
+
+    if (identifier) {
+      toolCallNamesById.set(identifier, functionName)
+    }
+  }
+
+  return functionName
 }
