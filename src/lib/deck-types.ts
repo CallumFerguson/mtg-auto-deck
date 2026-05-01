@@ -78,7 +78,6 @@ export type SimulationDebugLlmRunChunk = {
   id: number | null
   sequence: number
   kind: string
-  itemType: string | null
   mcpFunctionName: string | null
   mcpFunctionOutput: unknown | null
   reasoningDelta: string | null

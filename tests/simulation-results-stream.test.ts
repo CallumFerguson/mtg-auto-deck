@@ -221,7 +221,6 @@ function createChunk(overrides: {
     id: overrides.id,
     sequence: overrides.sequence,
     kind: "message_delta",
-    itemType: null,
     mcpFunctionName: null,
     mcpFunctionOutput: null,
     reasoningDelta: null,
