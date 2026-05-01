@@ -12,7 +12,6 @@ import {
 import {
   Bug,
   Dices,
-  LoaderCircle,
   MoreVertical,
   Plus,
   RefreshCw,
@@ -636,7 +635,22 @@ export function DeckSimulation({
                           }`}
                           aria-hidden="true"
                         >
-                          <LoaderCircle className="size-4 animate-spin" />
+                          <svg
+                            className="size-[1.2rem] animate-spin text-sky-400"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeLinecap="round"
+                            strokeWidth="1.6"
+                          >
+                            <circle
+                              cx="12"
+                              cy="12"
+                              r="9"
+                              className="text-muted-foreground/35"
+                            />
+                            <path d="M12 3 A9 9 0 1 1 3.65 15.37" />
+                          </svg>
                         </div>
                       ) : null}
                       <div
