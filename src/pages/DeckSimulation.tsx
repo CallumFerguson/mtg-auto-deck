@@ -2525,9 +2525,9 @@ function FormattedDebugChunks({
         ) : (
           <section
             key={block.id}
-            className="rounded-md border border-border bg-black/20 p-3"
+            className="grid gap-3 rounded-md border border-border bg-black/20 p-3"
           >
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-xs font-medium tracking-wide text-sky-300 uppercase">
                 {block.type === "reasoning" ? "Reasoning" : "Output"}
               </p>
@@ -2539,10 +2539,42 @@ function FormattedDebugChunks({
             <p className="text-sm leading-6 whitespace-pre-wrap text-foreground">
               {block.text}
             </p>
+            <DebugDeltaChunkList type={block.type} chunks={block.chunks} />
           </section>
         )
       )}
     </div>
+  )
+}
+
+function DebugDeltaChunkList({
+  type,
+  chunks,
+}: {
+  type: "reasoning" | "output"
+  chunks: SimulationDebugLlmRunChunk[]
+}) {
+  return (
+    <details className="min-w-0 rounded-md border border-sky-500/25 bg-sky-950/15">
+      <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-sky-200 transition-colors hover:text-sky-100">
+        View all chunks
+      </summary>
+      <div className="grid gap-2 border-t border-sky-500/20 p-2">
+        {chunks.map((chunk) => (
+          <details
+            key={`${type}-${getDebugChunkBlockId(chunk)}`}
+            className="min-w-0 rounded-md border border-border bg-black/25"
+          >
+            <summary className="cursor-pointer px-3 py-2 text-xs leading-5 break-words text-muted-foreground transition-colors hover:text-foreground">
+              {getDebugDeltaChunkLabel(chunk, type)}
+            </summary>
+            <pre className="debug-scrollbar-neutral max-h-80 max-w-full min-w-0 overflow-y-auto border-t border-border p-3 text-xs leading-5 break-words whitespace-pre-wrap text-muted-foreground">
+              {JSON.stringify(chunk, null, 2)}
+            </pre>
+          </details>
+        ))}
+      </div>
+    </details>
   )
 }
 
@@ -2609,6 +2641,16 @@ function getDebugChunkDeltaText(
   }
 
   return chunk.outputDelta ?? ""
+}
+
+function getDebugDeltaChunkLabel(
+  chunk: SimulationDebugLlmRunChunk,
+  deltaType: "reasoning" | "output"
+) {
+  const label = deltaType === "reasoning" ? "Reasoning" : "Output"
+  const deltaText = getDebugChunkDeltaText(chunk, deltaType)
+
+  return `${label} chunk ${chunk.sequence}: ${JSON.stringify(deltaText)}`
 }
 
 function getDebugChunkEventLabel(chunk: SimulationDebugLlmRunChunk) {
