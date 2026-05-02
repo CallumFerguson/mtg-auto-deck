@@ -32,6 +32,7 @@ import {
   throwIfRuntimeAborted,
 } from "./llm-runtime-cancellation.js"
 import {
+  aggregateOpenRouterUsage,
   estimateLlmTokenPriceCents,
   estimateOpenAiTokenPriceCents,
 } from "./openai-pricing.js"
@@ -121,6 +122,71 @@ test("uses OpenRouter reported usage cost when estimating LLM price", () => {
   })
 
   assert.equal(estimate?.formattedCents, "0.1")
+})
+
+test("aggregates OpenRouter usage across agent turns", () => {
+  const usage = aggregateOpenRouterUsage([
+    {
+      inputTokens: 100,
+      inputTokensDetails: {
+        cachedTokens: 25,
+      },
+      outputTokens: 40,
+      outputTokensDetails: {
+        reasoningTokens: 10,
+      },
+      totalTokens: 140,
+      cost: 0.125,
+      costDetails: {
+        upstreamInferenceCost: 0.0625,
+        upstreamInferenceInputCost: 0.03125,
+        upstreamInferenceOutputCost: 0.03125,
+      },
+    },
+    {
+      input_tokens: 200,
+      input_tokens_details: {
+        cached_tokens: 50,
+      },
+      output_tokens: 80,
+      output_tokens_details: {
+        reasoning_tokens: 20,
+      },
+      total_tokens: 280,
+      cost: 0.25,
+      cost_details: {
+        upstream_inference_cost: 0.125,
+        upstream_inference_input_cost: 0.0625,
+        upstream_inference_output_cost: 0.0625,
+      },
+    },
+  ])
+
+  assert.deepEqual(usage, {
+    inputTokens: 300,
+    inputTokensDetails: {
+      cachedTokens: 75,
+    },
+    outputTokens: 120,
+    outputTokensDetails: {
+      reasoningTokens: 30,
+    },
+    totalTokens: 420,
+    cost: 0.375,
+    costDetails: {
+      upstreamInferenceCost: 0.1875,
+      upstreamInferenceInputCost: 0.09375,
+      upstreamInferenceOutputCost: 0.09375,
+    },
+  })
+  assert.equal(
+    estimateLlmTokenPriceCents({
+      provider: "openrouter",
+      model: "openai/gpt-5-nano",
+      usage,
+    })?.formattedCents,
+    "37.5"
+  )
 })
 
 test("requires LLM_PROVIDER for LLM config", () => {
@@ -278,6 +344,7 @@ test("runtime abortable stream treats silent abort completion as cancellation", 
 
   async function* createSilentlyClosedStream() {
     abortController.abort()
+    yield* []
   }
 
   await assert.rejects(

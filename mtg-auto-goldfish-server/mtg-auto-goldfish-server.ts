@@ -138,7 +138,10 @@ import {
   type SimulationResultsStreamInfo,
   type SimulationResultsStreamRun,
 } from "./simulation-results-stream.js"
-import { estimateLlmTokenPriceCents } from "./openai-pricing.js"
+import {
+  aggregateOpenRouterUsage,
+  estimateLlmTokenPriceCents,
+} from "./openai-pricing.js"
 import {
   createExactScryfallOracleCardMatchMap,
   normalizeScryfallCardNameForExactMatch,
@@ -1970,6 +1973,7 @@ async function collectOpenRouterLlmStream({
   let usage: unknown = {}
   let didReceiveCompletedResponse = false
   let providerTerminalEventError: ProviderTerminalEventError | null = null
+  const completedResponseUsageValues: unknown[] = []
   const toolCallNamesById: OpenRouterToolCallNameMap = new Map()
   const openrouter = new OpenRouter({
     apiKey: config.apiKey,
@@ -2031,7 +2035,8 @@ async function collectOpenRouterLlmStream({
           didReceiveCompletedResponse = true
           outputText = getCompletedResponseOutputText(response)
           responseMetadata = response ?? {}
-          usage = responseRecord.usage ?? {}
+          completedResponseUsageValues.push(responseRecord.usage ?? {})
+          usage = aggregateOpenRouterUsage(completedResponseUsageValues)
         }
 
         appendRuntimeChunk(runtime, normalizedEvent)

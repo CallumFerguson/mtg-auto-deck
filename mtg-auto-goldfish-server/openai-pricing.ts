@@ -104,6 +104,75 @@ export function estimateLlmTokenPriceCents({
   return null
 }
 
+export function aggregateOpenRouterUsage(
+  usageValues: readonly unknown[]
+): Record<string, unknown> {
+  const usageRecords = usageValues.map(asRecord)
+
+  if (usageRecords.length === 0) {
+    return {}
+  }
+
+  const inputTokens = sumRequiredNumberProperties(usageRecords, [
+    "inputTokens",
+    "input_tokens",
+  ])
+  const outputTokens = sumRequiredNumberProperties(usageRecords, [
+    "outputTokens",
+    "output_tokens",
+  ])
+  const reportedTotalTokens = sumRequiredNumberProperties(usageRecords, [
+    "totalTokens",
+    "total_tokens",
+  ])
+  const aggregate: Record<string, unknown> = {}
+
+  if (inputTokens !== null) {
+    aggregate.inputTokens = inputTokens
+    aggregate.inputTokensDetails = {
+      cachedTokens: Math.min(
+        sumOptionalNestedNumberProperties(
+          usageRecords,
+          ["inputTokensDetails", "input_tokens_details"],
+          ["cachedTokens", "cached_tokens"]
+        ),
+        inputTokens
+      ),
+    }
+  }
+
+  if (outputTokens !== null) {
+    aggregate.outputTokens = outputTokens
+    aggregate.outputTokensDetails = {
+      reasoningTokens: sumOptionalNestedNumberProperties(
+        usageRecords,
+        ["outputTokensDetails", "output_tokens_details"],
+        ["reasoningTokens", "reasoning_tokens"]
+      ),
+    }
+  }
+
+  if (reportedTotalTokens !== null) {
+    aggregate.totalTokens = reportedTotalTokens
+  } else if (inputTokens !== null && outputTokens !== null) {
+    aggregate.totalTokens = inputTokens + outputTokens
+  }
+
+  const cost = sumRequiredNumberProperties(usageRecords, ["cost"])
+
+  if (cost !== null) {
+    aggregate.cost = cost
+  }
+
+  const costDetails = aggregateOpenRouterCostDetails(usageRecords)
+
+  if (Object.keys(costDetails).length > 0) {
+    aggregate.costDetails = costDetails
+  }
+
+  return aggregate
+}
+
 function estimateOpenRouterUsageCostCents(
   usage: unknown
 ): OpenAiPriceEstimate | null {
@@ -151,8 +220,99 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {}
 }
 
-function getNumberProperty(record: Record<string, unknown>, property: string) {
-  const value = record[property]
+function getNumberProperty(
+  record: Record<string, unknown>,
+  ...properties: string[]
+) {
+  for (const property of properties) {
+    const value = record[property]
 
-  return typeof value === "number" && Number.isFinite(value) ? value : null
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value
+    }
+  }
+
+  return null
+}
+
+function sumRequiredNumberProperties(
+  records: readonly Record<string, unknown>[],
+  properties: readonly string[]
+) {
+  let total = 0
+
+  for (const record of records) {
+    const value = getNumberProperty(record, ...properties)
+
+    if (value === null) {
+      return null
+    }
+
+    total += value
+  }
+
+  return total
+}
+
+function sumOptionalNestedNumberProperties(
+  records: readonly Record<string, unknown>[],
+  parentProperties: readonly string[],
+  properties: readonly string[]
+) {
+  return records.reduce((total, record) => {
+    const nestedRecord = asRecord(
+      getFirstDefinedProperty(record, parentProperties)
+    )
+    const value = getNumberProperty(nestedRecord, ...properties)
+
+    return total + (value ?? 0)
+  }, 0)
+}
+
+function aggregateOpenRouterCostDetails(
+  usageRecords: readonly Record<string, unknown>[]
+) {
+  const costDetailsRecords = usageRecords.map((record) =>
+    asRecord(record.costDetails ?? record.cost_details)
+  )
+  const costDetails: Record<string, number> = {}
+  const upstreamInferenceCost = sumRequiredNumberProperties(
+    costDetailsRecords,
+    ["upstreamInferenceCost", "upstream_inference_cost"]
+  )
+  const upstreamInferenceInputCost = sumRequiredNumberProperties(
+    costDetailsRecords,
+    ["upstreamInferenceInputCost", "upstream_inference_input_cost"]
+  )
+  const upstreamInferenceOutputCost = sumRequiredNumberProperties(
+    costDetailsRecords,
+    ["upstreamInferenceOutputCost", "upstream_inference_output_cost"]
+  )
+
+  if (upstreamInferenceCost !== null) {
+    costDetails.upstreamInferenceCost = upstreamInferenceCost
+  }
+
+  if (upstreamInferenceInputCost !== null) {
+    costDetails.upstreamInferenceInputCost = upstreamInferenceInputCost
+  }
+
+  if (upstreamInferenceOutputCost !== null) {
+    costDetails.upstreamInferenceOutputCost = upstreamInferenceOutputCost
+  }
+
+  return costDetails
+}
+
+function getFirstDefinedProperty(
+  record: Record<string, unknown>,
+  properties: readonly string[]
+) {
+  for (const property of properties) {
+    if (record[property] !== undefined) {
+      return record[property]
+    }
+  }
+
+  return undefined
 }
