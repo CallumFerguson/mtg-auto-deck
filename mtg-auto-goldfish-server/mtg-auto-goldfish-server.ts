@@ -108,6 +108,13 @@ import {
   type OpenRouterToolCallNameMap,
 } from "./llm-run-events.js"
 import {
+  callWithRuntimeAbortSignal,
+  createRuntimeAbortError,
+  forEachRuntimeAbortableAsync,
+  registerRuntimeAbortHandler,
+  throwIfRuntimeAborted,
+} from "./llm-runtime-cancellation.js"
+import {
   LlmConfigurationError,
   getOpeningHandLlmRunConfig,
   getTurnSimulationLlmRunConfig,
@@ -1078,7 +1085,10 @@ function registerLogTurnActionTool(server: McpServer) {
   )
 }
 
-function createOpeningHandOpenRouterTools(mcpClient: Client): Tool[] {
+function createOpeningHandOpenRouterTools(
+  mcpClient: Client,
+  signal: AbortSignal
+): Tool[] {
   return [
     tool({
       name: "draw_starting_hand",
@@ -1086,7 +1096,12 @@ function createOpeningHandOpenRouterTools(mcpClient: Client): Tool[] {
         "Draw the very first opening seven-card hand from the stored library for an existing simulation. Call this exactly once per simulation, before any mulligans. Never call this after mulligan, because mulligan already shuffles and draws the replacement seven-card hand.",
       inputSchema: z.object(llmRunIdentifierSchema),
       execute: async (input) =>
-        callMcpToolForOpenRouter(mcpClient, "draw_starting_hand", input),
+        callMcpToolForOpenRouter(
+          mcpClient,
+          "draw_starting_hand",
+          input,
+          signal
+        ),
     }),
     tool({
       name: "mulligan",
@@ -1103,7 +1118,7 @@ function createOpeningHandOpenRouterTools(mcpClient: Client): Tool[] {
           ),
       }),
       execute: async (input) =>
-        callMcpToolForOpenRouter(mcpClient, "mulligan", input),
+        callMcpToolForOpenRouter(mcpClient, "mulligan", input, signal),
     }),
     tool({
       name: "return_cards_to_library",
@@ -1127,12 +1142,20 @@ function createOpeningHandOpenRouterTools(mcpClient: Client): Tool[] {
           ),
       }),
       execute: async (input) =>
-        callMcpToolForOpenRouter(mcpClient, "return_cards_to_library", input),
+        callMcpToolForOpenRouter(
+          mcpClient,
+          "return_cards_to_library",
+          input,
+          signal
+        ),
     }),
   ]
 }
 
-function createTurnSimulationOpenRouterTools(mcpClient: Client): Tool[] {
+function createTurnSimulationOpenRouterTools(
+  mcpClient: Client,
+  signal: AbortSignal
+): Tool[] {
   return [
     tool({
       name: "log_turn_action",
@@ -1149,7 +1172,7 @@ function createTurnSimulationOpenRouterTools(mcpClient: Client): Tool[] {
           ),
       }),
       execute: async (input) =>
-        callMcpToolForOpenRouter(mcpClient, "log_turn_action", input),
+        callMcpToolForOpenRouter(mcpClient, "log_turn_action", input, signal),
     }),
     tool({
       name: "draw_card_from_top",
@@ -1160,7 +1183,12 @@ function createTurnSimulationOpenRouterTools(mcpClient: Client): Tool[] {
         count: z.number().int().positive().describe("How many cards to draw."),
       }),
       execute: async (input) =>
-        callMcpToolForOpenRouter(mcpClient, "draw_card_from_top", input),
+        callMcpToolForOpenRouter(
+          mcpClient,
+          "draw_card_from_top",
+          input,
+          signal
+        ),
     }),
     tool({
       name: "draw_card_from_bottom",
@@ -1171,7 +1199,12 @@ function createTurnSimulationOpenRouterTools(mcpClient: Client): Tool[] {
         count: z.number().int().positive().describe("How many cards to draw."),
       }),
       execute: async (input) =>
-        callMcpToolForOpenRouter(mcpClient, "draw_card_from_bottom", input),
+        callMcpToolForOpenRouter(
+          mcpClient,
+          "draw_card_from_bottom",
+          input,
+          signal
+        ),
     }),
     tool({
       name: "take_cards_from_library",
@@ -1187,7 +1220,12 @@ function createTurnSimulationOpenRouterTools(mcpClient: Client): Tool[] {
           ),
       }),
       execute: async (input) =>
-        callMcpToolForOpenRouter(mcpClient, "take_cards_from_library", input),
+        callMcpToolForOpenRouter(
+          mcpClient,
+          "take_cards_from_library",
+          input,
+          signal
+        ),
     }),
     tool({
       name: "return_card_to_library",
@@ -1214,7 +1252,12 @@ function createTurnSimulationOpenRouterTools(mcpClient: Client): Tool[] {
           ),
       }),
       execute: async (input) =>
-        callMcpToolForOpenRouter(mcpClient, "return_card_to_library", input),
+        callMcpToolForOpenRouter(
+          mcpClient,
+          "return_card_to_library",
+          input,
+          signal
+        ),
     }),
     tool({
       name: "return_cards_to_library",
@@ -1238,14 +1281,19 @@ function createTurnSimulationOpenRouterTools(mcpClient: Client): Tool[] {
           ),
       }),
       execute: async (input) =>
-        callMcpToolForOpenRouter(mcpClient, "return_cards_to_library", input),
+        callMcpToolForOpenRouter(
+          mcpClient,
+          "return_cards_to_library",
+          input,
+          signal
+        ),
     }),
     tool({
       name: "shuffle_library",
       description: "Shuffle the stored library for an existing simulation.",
       inputSchema: z.object(llmRunIdentifierSchema),
       execute: async (input) =>
-        callMcpToolForOpenRouter(mcpClient, "shuffle_library", input),
+        callMcpToolForOpenRouter(mcpClient, "shuffle_library", input, signal),
     }),
   ]
 }
@@ -1253,12 +1301,22 @@ function createTurnSimulationOpenRouterTools(mcpClient: Client): Tool[] {
 async function callMcpToolForOpenRouter(
   mcpClient: Client,
   name: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  signal: AbortSignal
 ) {
-  const result = await mcpClient.callTool({
-    name,
-    arguments: args,
-  })
+  const result = await callWithRuntimeAbortSignal(
+    signal,
+    (options) =>
+      mcpClient.callTool(
+        {
+          name,
+          arguments: args,
+        },
+        undefined,
+        options
+      ),
+    `OpenRouter MCP tool ${name} was cancelled.`
+  )
 
   return formatMcpToolResultForOpenRouter(result)
 }
@@ -1317,7 +1375,9 @@ function parseMcpToolResultTextContent(textContent: string) {
   }
 }
 
-async function createOpenRouterMcpClient(path: string) {
+async function createOpenRouterMcpClient(path: string, signal: AbortSignal) {
+  throwIfRuntimeAborted(signal)
+
   const mcpClient = new Client({
     name: `${SERVER_NAME}-openrouter-agent`,
     version: "0.0.1",
@@ -1326,7 +1386,20 @@ async function createOpenRouterMcpClient(path: string) {
     new URL(`http://${DEFAULT_HOST}:${DEFAULT_PORT}${path}`)
   )
 
-  await mcpClient.connect(transport)
+  try {
+    await callWithRuntimeAbortSignal(signal, (options) =>
+      mcpClient.connect(transport, options)
+    )
+  } catch (error) {
+    await mcpClient.close().catch((closeError: unknown) => {
+      console.error(
+        "Failed to close aborted OpenRouter MCP client:",
+        closeError
+      )
+    })
+
+    throw error
+  }
 
   return mcpClient
 }
@@ -1811,6 +1884,7 @@ async function collectOpenAiLlmStream({
   const client = new OpenAI({
     apiKey: config.apiKey,
   })
+  const signal = runtime.abortController.signal
 
   logLlmApiCallStarted({
     llmRunId,
@@ -1819,11 +1893,13 @@ async function collectOpenAiLlmStream({
     provider: config.provider,
   })
 
+  throwIfRuntimeAborted(signal)
+
   const stream = await client.responses.create(requestPayload, {
-    signal: runtime.abortController.signal,
+    signal,
   })
 
-  for await (const event of stream) {
+  await forEachRuntimeAbortableAsync(stream, signal, (event) => {
     const eventRecord = asRecord(event)
     const eventType = getStringProperty(eventRecord, "type")
     const normalizedEvent = normalizeOpenAiStreamEvent(event)
@@ -1845,7 +1921,7 @@ async function collectOpenAiLlmStream({
         event
       )
     }
-  }
+  })
 
   if (providerTerminalEventError) {
     throw providerTerminalEventError
@@ -1882,7 +1958,7 @@ async function collectOpenRouterLlmStream({
   runtime,
 }: {
   config: OpenRouterRunConfig
-  createTools: (mcpClient: Client) => Tool[]
+  createTools: (mcpClient: Client, signal: AbortSignal) => Tool[]
   llmRunId: string
   mcpPath: string
   phase: LlmRunPhase
@@ -1898,7 +1974,17 @@ async function collectOpenRouterLlmStream({
   const openrouter = new OpenRouter({
     apiKey: config.apiKey,
   })
-  const mcpClient = await createOpenRouterMcpClient(mcpPath)
+  const signal = runtime.abortController.signal
+  const mcpClient = await createOpenRouterMcpClient(mcpPath, signal)
+  let mcpClientClosePromise: Promise<void> | null = null
+
+  const closeMcpClient = () => {
+    mcpClientClosePromise ??= mcpClient.close().catch((error: unknown) => {
+      console.error("Failed to close OpenRouter MCP client:", error)
+    })
+
+    return mcpClientClosePromise
+  }
 
   try {
     logLlmApiCallStarted({
@@ -1917,14 +2003,20 @@ async function collectOpenRouterLlmStream({
         parallelToolCalls: requestPayload.parallelToolCalls,
         provider: requestPayload.provider,
         stopWhen: stepCountIs(requestPayload.stopWhenStepCount),
-        tools: createTools(mcpClient),
+        tools: createTools(mcpClient, signal),
       },
       {
-        signal: runtime.abortController.signal,
+        signal,
       }
     )
+    const removeAbortHandler = registerRuntimeAbortHandler(signal, () => {
+      void result.cancel().catch(() => {})
+      void closeMcpClient()
+    })
 
     try {
+      // Drain the OpenRouter agent generator so its internal tool-execution
+      // promise is observed after result.cancel() closes the stream.
       for await (const event of result.getFullResponsesStream()) {
         const eventRecord = asRecord(event)
         const eventType = getStringProperty(eventRecord, "type")
@@ -1953,17 +2045,20 @@ async function collectOpenRouterLlmStream({
         }
       }
     } catch (error) {
-      if (runtime.abortController.signal.aborted) {
+      if (signal.aborted) {
         await result.cancel().catch(() => {})
+        throw createRuntimeAbortError()
       }
 
       throw error
+    } finally {
+      removeAbortHandler()
     }
   } finally {
-    await mcpClient.close().catch((error: unknown) => {
-      console.error("Failed to close OpenRouter MCP client:", error)
-    })
+    await closeMcpClient()
   }
+
+  throwIfRuntimeAborted(signal)
 
   if (providerTerminalEventError) {
     throw providerTerminalEventError
@@ -2065,7 +2160,15 @@ async function runOpeningHandLlmRun({
   publishRuntimeStarted(runtime)
 
   try {
-    await markLlmRunStreaming(llmRunId)
+    throwIfRuntimeAborted(runtime.abortController.signal)
+
+    if (!(await markLlmRunStreaming(llmRunId))) {
+      throw createRuntimeAbortError(
+        "Opening-hand LLM run was cancelled before it started streaming."
+      )
+    }
+
+    throwIfRuntimeAborted(runtime.abortController.signal)
 
     const streamResult =
       config.provider === "openai"
@@ -2086,11 +2189,15 @@ async function runOpeningHandLlmRun({
             runtime,
           })
 
+    throwIfRuntimeAborted(runtime.abortController.signal)
     await forceFlushRuntimeChunks(runtime)
+    throwIfRuntimeAborted(runtime.abortController.signal)
 
     const parsedOpeningHand = parseOpeningHandFromResponseText(
       streamResult.outputText
     )
+
+    throwIfRuntimeAborted(runtime.abortController.signal)
 
     const completion = await completeOpeningHandLlmRun({
       llmRunId,
@@ -2231,7 +2338,15 @@ async function runTurnLlmRun({
   publishRuntimeStarted(runtime)
 
   try {
-    await markLlmRunStreaming(llmRunId)
+    throwIfRuntimeAborted(runtime.abortController.signal)
+
+    if (!(await markLlmRunStreaming(llmRunId))) {
+      throw createRuntimeAbortError(
+        "Turn LLM run was cancelled before it started streaming."
+      )
+    }
+
+    throwIfRuntimeAborted(runtime.abortController.signal)
 
     const streamResult =
       config.provider === "openai"
@@ -2252,11 +2367,15 @@ async function runTurnLlmRun({
             runtime,
           })
 
+    throwIfRuntimeAborted(runtime.abortController.signal)
     await forceFlushRuntimeChunks(runtime)
+    throwIfRuntimeAborted(runtime.abortController.signal)
 
     const parsedTurn = parseTurnSimulationFromResponseText(
       streamResult.outputText
     )
+
+    throwIfRuntimeAborted(runtime.abortController.signal)
 
     const completion = await completeTurnLlmRun({
       llmRunId,

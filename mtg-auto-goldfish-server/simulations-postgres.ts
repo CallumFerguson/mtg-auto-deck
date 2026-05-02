@@ -22,6 +22,10 @@ export type LlmRunStatus =
 
 export type LlmRunPhase = "opening_hand" | "turn" | "other"
 
+export function canApplyLateLlmRunTerminalUpdate(status: LlmRunStatus) {
+  return status === "pending" || status === "streaming"
+}
+
 export const LLM_CHUNK_KINDS = [
   "raw_event",
   "message_delta",
@@ -1967,7 +1971,7 @@ function buildAppendLlmRunChunksQuery(
 }
 
 export async function markLlmRunStreaming(llmRunId: string) {
-  await queryDatabase(
+  const result = await queryDatabase(
     `
       UPDATE llm_runs
       SET status = 'streaming',
@@ -1975,9 +1979,12 @@ export async function markLlmRunStreaming(llmRunId: string) {
           updated_at = now()
       WHERE id = $1
         AND status = 'pending'
+      RETURNING id
     `,
     [llmRunId]
   )
+
+  return (result.rowCount ?? 0) > 0
 }
 
 export async function completeOpeningHandLlmRun({
@@ -1995,6 +2002,7 @@ export async function completeOpeningHandLlmRun({
     const snapshotResult = await client.query<{
       simulation_id: string
       deck_id: string
+      llm_run_status: LlmRunStatus
       library: unknown
       random_state: string
       mulligan_count: number
@@ -2006,6 +2014,7 @@ export async function completeOpeningHandLlmRun({
         SELECT
           simulation.id AS simulation_id,
           simulation.deck_id,
+          llm_run.status AS llm_run_status,
           simulation.library,
           simulation.random_state,
           simulation.mulligan_count,
@@ -2013,6 +2022,8 @@ export async function completeOpeningHandLlmRun({
           simulation.auto_simulate_next_step,
           COALESCE(deck_counts.library_card_count, 0)::integer AS deck_library_card_count
         FROM simulation_opening_hand_llm_runs opening_run
+        JOIN llm_runs llm_run
+          ON llm_run.id = opening_run.llm_run_id
         JOIN simulations simulation
           ON simulation.id = opening_run.simulation_id
         LEFT JOIN (
@@ -2023,6 +2034,7 @@ export async function completeOpeningHandLlmRun({
         ) deck_counts
           ON deck_counts.deck_id = simulation.deck_id
         WHERE opening_run.llm_run_id = $1
+        FOR UPDATE OF llm_run
       `,
       [llmRunId]
     )
@@ -2032,6 +2044,11 @@ export async function completeOpeningHandLlmRun({
     }
 
     const snapshot = snapshotResult.rows[0]
+
+    if (!canApplyLateLlmRunTerminalUpdate(snapshot.llm_run_status)) {
+      throw new SimulationValidationError("LLM run is no longer active.")
+    }
+
     const librarySnapshot = parseStringArray(snapshot.library)
     const openingHandIsValid = isValidCompletedOpeningHand({
       deckLibraryCardCount: Number(snapshot.deck_library_card_count),
@@ -2067,6 +2084,7 @@ export async function completeOpeningHandLlmRun({
             completed_at = now(),
             updated_at = now()
         WHERE id = $1
+          AND status IN ('pending', 'streaming')
       `,
       [llmRunId, JSON.stringify(responseMetadata), JSON.stringify(usage)]
     )
@@ -2106,6 +2124,7 @@ export async function completeTurnLlmRun({
     const snapshotResult = await client.query<{
       simulation_id: string
       deck_id: string
+      llm_run_status: LlmRunStatus
       turn_number: number
       library: unknown
       random_state: string
@@ -2116,15 +2135,19 @@ export async function completeTurnLlmRun({
         SELECT
           simulation.id AS simulation_id,
           simulation.deck_id,
+          llm_run.status AS llm_run_status,
           turn_run.turn_number,
           simulation.library,
           simulation.random_state,
           simulation.turns_to_simulate,
           simulation.auto_simulate_next_step
         FROM simulation_turn_llm_runs turn_run
+        JOIN llm_runs llm_run
+          ON llm_run.id = turn_run.llm_run_id
         JOIN simulations simulation
           ON simulation.id = turn_run.simulation_id
         WHERE turn_run.llm_run_id = $1
+        FOR UPDATE OF llm_run
       `,
       [llmRunId]
     )
@@ -2134,6 +2157,11 @@ export async function completeTurnLlmRun({
     }
 
     const snapshot = snapshotResult.rows[0]
+
+    if (!canApplyLateLlmRunTerminalUpdate(snapshot.llm_run_status)) {
+      throw new SimulationValidationError("LLM run is no longer active.")
+    }
+
     const librarySnapshot = parseStringArray(snapshot.library)
 
     await client.query(
@@ -2161,6 +2189,7 @@ export async function completeTurnLlmRun({
             completed_at = now(),
             updated_at = now()
         WHERE id = $1
+          AND status IN ('pending', 'streaming')
       `,
       [llmRunId, JSON.stringify(responseMetadata), JSON.stringify(usage)]
     )
@@ -2195,7 +2224,7 @@ export async function failLlmRun(llmRunId: string, failureMessage: string) {
             failure_message = $2,
             updated_at = now()
         WHERE id = $1
-          AND status <> 'completed'
+          AND status IN ('pending', 'streaming')
       `,
       [llmRunId, failureMessage]
     )
@@ -2217,6 +2246,12 @@ export async function failLlmRun(llmRunId: string, failureMessage: string) {
           FROM simulation_turn_llm_runs turn_run
           WHERE turn_run.llm_run_id = $1
         )
+          AND EXISTS (
+            SELECT 1
+            FROM llm_runs llm_run
+            WHERE llm_run.id = $1
+              AND llm_run.status = 'failed'
+          )
           AND status NOT IN ('completed', 'cancelled')
       `,
       [llmRunId, failureMessage]
@@ -2234,7 +2269,7 @@ export async function cancelLlmRun(llmRunId: string, failureMessage?: string) {
             failure_message = COALESCE($2, failure_message),
             updated_at = now()
         WHERE id = $1
-          AND status <> 'completed'
+          AND status IN ('pending', 'streaming', 'cancel_requested')
       `,
       [llmRunId, failureMessage ?? null]
     )

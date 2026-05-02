@@ -4,6 +4,7 @@ import {
   ProviderTerminalEventError,
   createCancellationChunk,
   getCompletedResponseOutputText,
+  isAbortError,
   normalizeOpenAiStreamEvent,
   normalizeOpenRouterStreamEvent,
   parseOpeningHandFromResponseText,
@@ -14,6 +15,7 @@ import {
   SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
   STALE_IN_FLIGHT_LLM_RUN_CANCELLATION_MESSAGE,
   STALE_RUNNING_SIMULATION_CANCELLATION_MESSAGE,
+  canApplyLateLlmRunTerminalUpdate,
   getOpeningHandCompletionDecision,
   getSimulationCreationDecision,
   getTurnCompletionDecision,
@@ -23,6 +25,12 @@ import {
   SimulationStopTimeoutError,
   waitForSimulationStopCompletions,
 } from "./simulation-stop.js"
+import {
+  callWithRuntimeAbortSignal,
+  forEachRuntimeAbortableAsync,
+  registerRuntimeAbortHandler,
+  throwIfRuntimeAborted,
+} from "./llm-runtime-cancellation.js"
 import {
   estimateLlmTokenPriceCents,
   estimateOpenAiTokenPriceCents,
@@ -239,6 +247,72 @@ test("creates a first-class cancellation chunk", () => {
   assert.deepEqual(chunk.payload, {
     message: "Stopped by user.",
   })
+})
+
+test("runtime abort helper throws a recognized abort error", () => {
+  const abortController = new AbortController()
+  abortController.abort()
+
+  assert.throws(
+    () => throwIfRuntimeAborted(abortController.signal),
+    (error: unknown) => isAbortError(error)
+  )
+})
+
+test("runtime abort handler runs once when cancellation is requested", () => {
+  const abortController = new AbortController()
+  let abortCallCount = 0
+  const cleanup = registerRuntimeAbortHandler(abortController.signal, () => {
+    abortCallCount += 1
+  })
+
+  abortController.abort()
+  abortController.abort()
+  cleanup()
+
+  assert.equal(abortCallCount, 1)
+})
+
+test("runtime abortable stream treats silent abort completion as cancellation", async () => {
+  const abortController = new AbortController()
+
+  async function* createSilentlyClosedStream() {
+    abortController.abort()
+  }
+
+  await assert.rejects(
+    forEachRuntimeAbortableAsync(
+      createSilentlyClosedStream(),
+      abortController.signal,
+      () => {}
+    ),
+    (error: unknown) => isAbortError(error)
+  )
+})
+
+test("runtime abort call helper forwards the abort signal", async () => {
+  const abortController = new AbortController()
+  let receivedSignal: AbortSignal | null = null
+
+  await assert.rejects(
+    callWithRuntimeAbortSignal(abortController.signal, async ({ signal }) => {
+      receivedSignal = signal
+      abortController.abort()
+      return "late result"
+    }),
+    (error: unknown) => isAbortError(error)
+  )
+
+  assert.equal(receivedSignal, abortController.signal)
+})
+
+test("late LLM terminal updates do not apply after cancellation starts", () => {
+  assert.equal(canApplyLateLlmRunTerminalUpdate("pending"), true)
+  assert.equal(canApplyLateLlmRunTerminalUpdate("streaming"), true)
+  assert.equal(canApplyLateLlmRunTerminalUpdate("cancel_requested"), false)
+  assert.equal(canApplyLateLlmRunTerminalUpdate("cancelled"), false)
+  assert.equal(canApplyLateLlmRunTerminalUpdate("completed"), false)
+  assert.equal(canApplyLateLlmRunTerminalUpdate("failed"), false)
 })
 
 test("recognizes provider terminal events as error chunks", () => {
