@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { parseSimulationFinalOutput } from "../src/lib/simulation-final-output.js"
+import { formatDebugChunkBlocks } from "../src/lib/simulation-debug-chunks.js"
 import { applySimulationResultsStreamEvent } from "../src/lib/simulation-results-stream.js"
 import type {
   SimulationDebugLlmRun,
@@ -202,6 +203,66 @@ test("does not parse final output before completion", () => {
   assert.equal(parsedOutput, null)
 })
 
+test("omits whitespace-only formatted reasoning and output blocks", () => {
+  const blocks = formatDebugChunkBlocks(
+    [
+      createChunk({
+        id: 1,
+        kind: "reasoning_delta",
+        reasoningDelta: " \n\t",
+        sequence: 1,
+      }),
+      createChunk({
+        id: 2,
+        outputDelta: "\n ",
+        sequence: 2,
+      }),
+      createChunk({
+        id: 3,
+        kind: "mcp_call_start",
+        sequence: 3,
+      }),
+      createChunk({
+        id: 4,
+        kind: "reasoning_delta",
+        reasoningDelta: "Keep a two-land hand.",
+        sequence: 4,
+      }),
+    ],
+    { omitWhitespaceOnlyDeltaBlocks: true }
+  )
+
+  assert.deepEqual(
+    blocks.map((block) => block.type),
+    ["event", "reasoning"]
+  )
+  assert.equal(
+    blocks[1]?.type === "reasoning" ? blocks[1].text : "",
+    "Keep a two-land hand."
+  )
+})
+
+test("keeps whitespace-only formatted blocks by default for debug views", () => {
+  const blocks = formatDebugChunkBlocks([
+    createChunk({
+      id: 1,
+      kind: "reasoning_delta",
+      reasoningDelta: " \n\t",
+      sequence: 1,
+    }),
+    createChunk({
+      id: 2,
+      outputDelta: "\n ",
+      sequence: 2,
+    }),
+  ])
+
+  assert.deepEqual(
+    blocks.map((block) => block.type),
+    ["reasoning", "output"]
+  )
+})
+
 function createResults({
   openingHandLlmRuns = [],
   turnLlmRuns = [],
@@ -243,17 +304,19 @@ function createRun(overrides: {
 
 function createChunk(overrides: {
   id: number | null
-  outputDelta: string
+  kind?: string
+  outputDelta?: string
+  reasoningDelta?: string
   sequence: number
 }): SimulationDebugLlmRunChunk {
   return {
     id: overrides.id,
     sequence: overrides.sequence,
-    kind: "message_delta",
+    kind: overrides.kind ?? "message_delta",
     mcpFunctionName: null,
     mcpFunctionOutput: null,
-    reasoningDelta: null,
-    outputDelta: overrides.outputDelta,
+    reasoningDelta: overrides.reasoningDelta ?? null,
+    outputDelta: overrides.outputDelta ?? null,
     payload: {},
     receivedAt: "2026-01-01T00:00:00.000Z",
   }
