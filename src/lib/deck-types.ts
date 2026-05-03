@@ -127,6 +127,8 @@ export type SimulationDebugResponse = {
 
 export type OpenRouterGenerationDetailsResponse = {
   generation: OpenRouterGeneration
+  providerName: string | null
+  providerSlug: string | null
   result: unknown
 }
 

@@ -180,6 +180,7 @@ const STREAM_RECENT_CHUNK_LIMIT = 500
 const SSE_KEEPALIVE_INTERVAL_MS = 15000
 const OPENROUTER_GENERATION_ENDPOINT =
   "https://openrouter.ai/api/v1/generation"
+const OPENROUTER_PROVIDERS_ENDPOINT = "https://openrouter.ai/api/v1/providers"
 const DEFAULT_ALLOWED_ORIGINS = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
@@ -3505,11 +3506,19 @@ async function main() {
           return
         }
 
+        const result = await queryOpenRouterGenerationEndpoint(
+          generation.generationId
+        )
+        const providerName = getOpenRouterGenerationProviderName(result)
+        const providerSlug = providerName
+          ? await queryOpenRouterProviderSlug(providerName)
+          : null
+
         res.status(200).json({
           generation,
-          result: await queryOpenRouterGenerationEndpoint(
-            generation.generationId
-          ),
+          providerName,
+          providerSlug,
+          result,
         })
       } catch (error) {
         if (error instanceof SimulationValidationError) {
@@ -4125,6 +4134,77 @@ async function queryOpenRouterGenerationEndpoint(generationId: string) {
   return result
 }
 
+async function queryOpenRouterProviderSlug(providerName: string) {
+  const providersResult = await queryOpenRouterProvidersEndpoint()
+
+  return getOpenRouterProviderSlugByName(providersResult, providerName)
+}
+
+async function queryOpenRouterProvidersEndpoint() {
+  let response: globalThis.Response
+
+  try {
+    response = await fetch(OPENROUTER_PROVIDERS_ENDPOINT, {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${getOpenRouterApiKey()}`,
+      },
+    })
+  } catch (error) {
+    throw new OpenRouterGenerationLookupError(
+      `OpenRouter providers endpoint could not be reached: ${getErrorMessage(error)}`
+    )
+  }
+
+  const result = await readOpenRouterResponseBody(response)
+
+  if (!response.ok) {
+    throw new OpenRouterGenerationLookupError(
+      getOpenRouterProvidersLookupFailureMessage(response, result),
+      response.status
+    )
+  }
+
+  return result
+}
+
+function getOpenRouterGenerationProviderName(result: unknown) {
+  return getNonEmptyStringProperty(
+    asRecord(asRecord(result).data),
+    "provider_name"
+  )
+}
+
+function getOpenRouterProviderSlugByName(
+  providersResult: unknown,
+  providerName: string
+) {
+  const providers = asRecord(providersResult).data
+  const normalizedProviderName = normalizeOpenRouterProviderName(providerName)
+
+  if (!Array.isArray(providers)) {
+    return null
+  }
+
+  for (const provider of providers) {
+    const providerRecord = asRecord(provider)
+    const name = getNonEmptyStringProperty(providerRecord, "name")
+
+    if (
+      name &&
+      normalizeOpenRouterProviderName(name) === normalizedProviderName
+    ) {
+      return getNonEmptyStringProperty(providerRecord, "slug")
+    }
+  }
+
+  return null
+}
+
+function normalizeOpenRouterProviderName(providerName: string) {
+  return providerName.trim().toLowerCase()
+}
+
 async function readOpenRouterResponseBody(response: globalThis.Response) {
   const bodyText = await response.text()
 
@@ -4154,6 +4234,32 @@ function getOpenRouterGenerationLookupFailureMessage(
   return message
     ? `OpenRouter generation lookup failed (${response.status}): ${message}`
     : `OpenRouter generation lookup failed with status ${response.status}.`
+}
+
+function getOpenRouterProvidersLookupFailureMessage(
+  response: globalThis.Response,
+  result: unknown
+) {
+  const resultRecord = asRecord(result)
+  const errorRecord = asRecord(resultRecord.error)
+  const message =
+    getStringProperty(errorRecord, "message") ??
+    getStringProperty(resultRecord, "error") ??
+    getStringProperty(resultRecord, "message") ??
+    response.statusText
+
+  return message
+    ? `OpenRouter providers lookup failed (${response.status}): ${message}`
+    : `OpenRouter providers lookup failed with status ${response.status}.`
+}
+
+function getNonEmptyStringProperty(
+  record: Record<string, unknown>,
+  property: string
+) {
+  const value = getStringProperty(record, property)?.trim()
+
+  return value ? value : null
 }
 
 function applyCors(

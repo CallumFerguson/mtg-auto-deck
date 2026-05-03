@@ -2532,6 +2532,8 @@ type OpenRouterGenerationLookupState =
     }
   | {
       status: "loaded"
+      providerName: string | null
+      providerSlug: string | null
       result: unknown
     }
   | {
@@ -2586,6 +2588,8 @@ function OpenRouterGenerationsTable({
           ...currentLookups,
           [generationId]: {
             status: "loaded",
+            providerName: data.providerName ?? null,
+            providerSlug: data.providerSlug ?? null,
             result: data.result,
           },
         }))
@@ -2715,10 +2719,45 @@ function OpenRouterGenerationLookupResult({
       <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-sky-200 transition-colors hover:text-sky-100">
         Generation endpoint result
       </summary>
+      <OpenRouterGenerationProviderMetadata
+        providerName={lookup.providerName}
+        providerSlug={lookup.providerSlug}
+      />
       <pre className="debug-scrollbar-neutral max-h-96 max-w-full min-w-0 overflow-y-auto border-t border-sky-500/20 p-3 text-xs leading-5 break-words whitespace-pre-wrap text-sky-50/80">
         {JSON.stringify(lookup.result, null, 2)}
       </pre>
     </details>
+  )
+}
+
+function OpenRouterGenerationProviderMetadata({
+  providerName,
+  providerSlug,
+}: {
+  providerName: string | null
+  providerSlug: string | null
+}) {
+  return (
+    <dl className="grid gap-3 border-t border-sky-500/20 px-3 py-2 text-xs sm:grid-cols-2">
+      <div className="min-w-0">
+        <dt className="text-sky-100/70">Provider name</dt>
+        <dd className="mt-1 break-all text-sky-50/90">
+          {providerName ?? "Not reported"}
+        </dd>
+      </div>
+      <div className="min-w-0">
+        <dt className="text-sky-100/70">Provider slug</dt>
+        <dd
+          className={
+            providerSlug
+              ? "mt-1 font-mono break-all text-sky-50/90"
+              : "mt-1 text-muted-foreground"
+          }
+        >
+          {providerSlug ?? "No matching provider slug"}
+        </dd>
+      </div>
+    </dl>
   )
 }
 
