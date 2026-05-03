@@ -98,6 +98,13 @@ export type LlmRunChunkInput = {
   payload: unknown
 }
 
+export type RecordOpenRouterLlmRunGenerationInput = {
+  llmRunId: string
+  openrouterTurnIndex: number
+  generationId: string
+  responseMetadata: unknown
+}
+
 export type ActiveSimulationLlmRun = {
   simulationId: string
   llmRunId: string
@@ -118,6 +125,12 @@ export type SimulationDebugLlmRunChunk = {
   receivedAt: string
 }
 
+export type OpenRouterGeneration = {
+  openrouterTurnIndex: number
+  generationId: string
+  createdAt: string
+}
+
 export type SimulationDebugLlmRun = {
   llmRunId: string
   phase: LlmRunPhase
@@ -132,6 +145,7 @@ export type SimulationDebugLlmRun = {
   gameState?: string
   outdated?: boolean
   openingHandIsValid?: boolean
+  openrouterGenerations: OpenRouterGeneration[]
   chunks: SimulationDebugLlmRunChunk[]
 }
 
@@ -589,6 +603,22 @@ export async function ensureSimulationsSchema() {
     DROP COLUMN IF EXISTS provider_request_id
   `)
   await queryDatabase(`
+    CREATE TABLE IF NOT EXISTS llm_run_openrouter_generations (
+      id bigserial PRIMARY KEY,
+
+      llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
+      openrouter_turn_index integer NOT NULL CHECK (openrouter_turn_index >= 0),
+      generation_id text NOT NULL CHECK (btrim(generation_id) <> ''),
+      response_metadata jsonb NOT NULL DEFAULT '{}',
+
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+
+      UNIQUE (llm_run_id, openrouter_turn_index),
+      UNIQUE (generation_id)
+    )
+  `)
+  await queryDatabase(`
     CREATE TABLE IF NOT EXISTS llm_run_chunks (
       id bigserial PRIMARY KEY,
 
@@ -698,6 +728,10 @@ export async function ensureSimulationsSchema() {
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS llm_runs_provider_model_idx
       ON llm_runs (provider, model)
+  `)
+  await queryDatabase(`
+    CREATE INDEX IF NOT EXISTS llm_run_openrouter_generations_llm_run_id_turn_idx
+      ON llm_run_openrouter_generations (llm_run_id, openrouter_turn_index)
   `)
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS llm_run_chunks_llm_run_id_sequence_idx
@@ -2302,6 +2336,73 @@ export async function completeTurnLlmRun({
   })
 }
 
+export async function recordOpenRouterLlmRunGeneration({
+  generationId,
+  llmRunId,
+  openrouterTurnIndex,
+  responseMetadata,
+}: RecordOpenRouterLlmRunGenerationInput): Promise<OpenRouterGeneration | null> {
+  const trimmedGenerationId = generationId.trim()
+
+  if (!Number.isInteger(openrouterTurnIndex) || openrouterTurnIndex < 0) {
+    throw new SimulationValidationError(
+      "OpenRouter turn index must be a non-negative integer."
+    )
+  }
+
+  if (!trimmedGenerationId) {
+    throw new SimulationValidationError(
+      "OpenRouter generation ID must not be empty."
+    )
+  }
+
+  const result = await queryDatabase<{
+    openrouter_turn_index: number
+    generation_id: string
+    created_at: Date
+  }>(
+    `
+      INSERT INTO llm_run_openrouter_generations (
+        llm_run_id,
+        openrouter_turn_index,
+        generation_id,
+        response_metadata
+      )
+      SELECT
+        llm_run.id,
+        $2,
+        $3,
+        $4::jsonb
+      FROM llm_runs llm_run
+      WHERE llm_run.id = $1
+        AND llm_run.provider = 'openrouter'
+      ON CONFLICT (llm_run_id, openrouter_turn_index)
+      DO UPDATE
+      SET generation_id = EXCLUDED.generation_id,
+          response_metadata = EXCLUDED.response_metadata,
+          updated_at = now()
+      RETURNING openrouter_turn_index, generation_id, created_at
+    `,
+    [
+      llmRunId,
+      openrouterTurnIndex,
+      trimmedGenerationId,
+      JSON.stringify(responseMetadata ?? {}),
+    ]
+  )
+  const generation = result.rows[0]
+
+  if (!generation) {
+    return null
+  }
+
+  return {
+    openrouterTurnIndex: generation.openrouter_turn_index,
+    generationId: generation.generation_id,
+    createdAt: generation.created_at.toISOString(),
+  }
+}
+
 export async function failLlmRun(llmRunId: string, failureMessage: string) {
   await withDatabaseTransaction(async (client) => {
     await client.query(
@@ -3100,6 +3201,13 @@ type SimulationDebugLlmRunRow = {
   received_at: Date | null
 }
 
+type OpenRouterGenerationRow = {
+  llm_run_id: string
+  openrouter_turn_index: number
+  generation_id: string
+  created_at: Date
+}
+
 async function getSimulationDebugLlmRuns({
   additionalWhereSql,
   excludeChunkKinds = [],
@@ -3172,6 +3280,7 @@ async function getSimulationDebugLlmRuns({
         status: row.status,
         runtimeStreamKey: row.runtime_stream_key,
         attemptNumber: row.attempt_number,
+        openrouterGenerations: [],
         chunks: [],
       }
 
@@ -3209,7 +3318,57 @@ async function getSimulationDebugLlmRuns({
     }
   }
 
-  return Array.from(runsById.values())
+  const runs = Array.from(runsById.values())
+  const openRouterGenerationsByRunId =
+    await getOpenRouterGenerationsByLlmRunIds(
+      runs
+        .filter((run) => run.provider === "openrouter")
+        .map((run) => run.llmRunId)
+    )
+
+  for (const run of runs) {
+    run.openrouterGenerations =
+      openRouterGenerationsByRunId.get(run.llmRunId) ?? []
+  }
+
+  return runs
+}
+
+async function getOpenRouterGenerationsByLlmRunIds(
+  llmRunIds: readonly string[]
+) {
+  const generationsByRunId = new Map<string, OpenRouterGeneration[]>()
+
+  if (llmRunIds.length === 0) {
+    return generationsByRunId
+  }
+
+  const result = await queryDatabase<OpenRouterGenerationRow>(
+    `
+      SELECT
+        llm_run_id,
+        openrouter_turn_index,
+        generation_id,
+        created_at
+      FROM llm_run_openrouter_generations
+      WHERE llm_run_id = ANY($1::uuid[])
+      ORDER BY llm_run_id ASC, openrouter_turn_index ASC
+    `,
+    [llmRunIds]
+  )
+
+  for (const row of result.rows) {
+    const generations = generationsByRunId.get(row.llm_run_id) ?? []
+
+    generations.push({
+      openrouterTurnIndex: row.openrouter_turn_index,
+      generationId: row.generation_id,
+      createdAt: row.created_at.toISOString(),
+    })
+    generationsByRunId.set(row.llm_run_id, generations)
+  }
+
+  return generationsByRunId
 }
 
 type PromptCardRow = {

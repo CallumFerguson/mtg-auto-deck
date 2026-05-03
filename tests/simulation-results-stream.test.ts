@@ -82,6 +82,51 @@ test("replaces synthetic chunks when a persisted run update arrives", () => {
   assert.equal(updatedResults?.turnLlmRuns[0].status, "completed")
 })
 
+test("merges OpenRouter generations from persisted run updates", () => {
+  const results = createResults({
+    turnLlmRuns: [
+      createRun({
+        llmRunId: "turn-run",
+        phase: "turn",
+        provider: "openrouter",
+        turnNumber: 1,
+        openrouterGenerations: [
+          {
+            openrouterTurnIndex: 0,
+            generationId: "gen-initial",
+            createdAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      }),
+    ],
+  })
+
+  const updatedResults = applySimulationResultsStreamEvent(results, {
+    type: "llm_run_updated",
+    run: createRun({
+      llmRunId: "turn-run",
+      phase: "turn",
+      provider: "openrouter",
+      status: "completed",
+      turnNumber: 1,
+      openrouterGenerations: [
+        {
+          openrouterTurnIndex: 1,
+          generationId: "gen-follow-up",
+          createdAt: "2026-01-01T00:01:00.000Z",
+        },
+      ],
+    }),
+  })
+
+  assert.deepEqual(
+    updatedResults?.turnLlmRuns[0].openrouterGenerations.map(
+      (generation) => generation.generationId
+    ),
+    ["gen-initial", "gen-follow-up"]
+  )
+})
+
 test("adds auto-advanced turn runs", () => {
   const results = createResults()
 
@@ -284,13 +329,15 @@ function createRun(overrides: {
   phase: string
   attemptNumber?: number
   chunks?: ReturnType<typeof createChunk>[]
+  openrouterGenerations?: SimulationDebugLlmRun["openrouterGenerations"]
+  provider?: string
   status?: string
   turnNumber?: number
 }): SimulationDebugLlmRun {
   return {
     llmRunId: overrides.llmRunId,
     phase: overrides.phase,
-    provider: "openai",
+    provider: overrides.provider ?? "openai",
     model: "gpt-test",
     estimatedPriceCents: null,
     reasoningEffort: "low",
@@ -298,6 +345,7 @@ function createRun(overrides: {
     runtimeStreamKey: null,
     attemptNumber: overrides.attemptNumber ?? 1,
     turnNumber: overrides.turnNumber,
+    openrouterGenerations: overrides.openrouterGenerations ?? [],
     chunks: overrides.chunks ?? [],
   }
 }

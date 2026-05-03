@@ -8,6 +8,7 @@ import {
   createLlamaCppToolCallCompleteChunk,
   createLlamaCppToolCallStartChunk,
   getCompletedResponseOutputText,
+  getOpenRouterGenerationIdFromCompletedEvent,
   isAbortError,
   normalizeOpenAiStreamEvent,
   normalizeOpenRouterStreamEvent,
@@ -550,6 +551,7 @@ test("normalizes OpenRouter completed and failure events", () => {
   const completedEvent = {
     type: "response.completed",
     response: {
+      id: "gen-openrouter-test",
       outputText: '{"keptHand":["Sol Ring"]}',
     },
   }
@@ -570,6 +572,10 @@ test("normalizes OpenRouter completed and failure events", () => {
   assert.equal(
     getCompletedResponseOutputText(completedEvent.response),
     '{"keptHand":["Sol Ring"]}'
+  )
+  assert.equal(
+    getOpenRouterGenerationIdFromCompletedEvent(completedEvent),
+    "gen-openrouter-test"
   )
   assert.equal(failureChunk.kind, "error")
   assert.equal(

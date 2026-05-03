@@ -2456,6 +2456,13 @@ function SimulationDebugRunGroup({
               </p>
             </div>
 
+            {run.provider === "openrouter" &&
+            (run.openrouterGenerations?.length ?? 0) > 0 ? (
+              <OpenRouterGenerationsTable
+                generations={run.openrouterGenerations ?? []}
+              />
+            ) : null}
+
             {run.gameState ? (
               <details className="rounded-md border border-emerald-500/35 bg-emerald-950/20 shadow-sm shadow-emerald-950/20">
                 <summary className="cursor-pointer border-b border-emerald-500/20 px-3 py-2 text-sm font-medium text-emerald-200 transition-colors hover:text-emerald-100">
@@ -2492,6 +2499,46 @@ function SimulationDebugRunGroup({
           No runs yet.
         </p>
       )}
+    </section>
+  )
+}
+
+function OpenRouterGenerationsTable({
+  generations,
+}: {
+  generations: SimulationDebugInfo["openingHandLlmRuns"][number]["openrouterGenerations"]
+}) {
+  return (
+    <section className="min-w-0 rounded-md border border-sky-500/35 bg-sky-950/20 shadow-sm shadow-sky-950/20">
+      <h6 className="border-b border-sky-500/20 px-3 py-2 text-sm font-medium text-sky-200">
+        OpenRouter generations
+      </h6>
+      <div className="debug-scrollbar-neutral max-w-full overflow-x-auto">
+        <table className="w-full min-w-[28rem] border-collapse text-left text-xs">
+          <thead className="text-sky-100/80">
+            <tr>
+              <th className="w-36 border-b border-sky-500/20 px-3 py-2 font-medium">
+                Turn
+              </th>
+              <th className="border-b border-sky-500/20 px-3 py-2 font-medium">
+                Generation ID
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {generations.map((generation) => (
+              <tr key={generation.openrouterTurnIndex}>
+                <td className="border-t border-sky-500/10 px-3 py-2 text-muted-foreground">
+                  OpenRouter turn {generation.openrouterTurnIndex + 1}
+                </td>
+                <td className="select-all border-t border-sky-500/10 px-3 py-2 break-all text-foreground">
+                  {generation.generationId}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </section>
   )
 }

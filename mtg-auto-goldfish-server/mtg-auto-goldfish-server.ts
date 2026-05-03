@@ -56,6 +56,7 @@ import {
   markSimulationFailed,
   mulliganSimulation,
   requestCancelSimulationLlmRuns,
+  recordOpenRouterLlmRunGeneration,
   resetSimulationForOpeningHandLlmRun,
   returnCardToSimulationLibrary,
   returnCardsToSimulationLibrary,
@@ -72,6 +73,7 @@ import type {
   LlmRunChunkInput,
   LlmRunPhase,
   LlmRunStatus,
+  OpenRouterGeneration,
   SimulationDebugLlmRun,
   SimulationLlmCompletionResult,
   SimulationPromptCard,
@@ -99,6 +101,7 @@ import {
   createServerErrorChunk,
   getCompletedResponseOutputText,
   getErrorMessage,
+  getOpenRouterGenerationIdFromCompletedEvent,
   getStringProperty,
   isAbortError,
   isProviderTerminalEvent,
@@ -256,6 +259,7 @@ type ActiveLlmRunRuntime = {
   llmRunId: string
   model: string
   nextSequence: number
+  openrouterGenerations: OpenRouterGeneration[]
   phase: LlmRunPhase
   provider: string
   reasoningEffort: string | null
@@ -320,6 +324,29 @@ function rememberRuntimeStreamChunk(
   }
 }
 
+function rememberRuntimeOpenRouterGeneration(
+  runtime: ActiveLlmRunRuntime,
+  generation: OpenRouterGeneration
+) {
+  const existingGenerationIndex = runtime.openrouterGenerations.findIndex(
+    (existingGeneration) =>
+      existingGeneration.openrouterTurnIndex ===
+      generation.openrouterTurnIndex
+  )
+
+  if (existingGenerationIndex === -1) {
+    runtime.openrouterGenerations.push(generation)
+  } else {
+    runtime.openrouterGenerations[existingGenerationIndex] = generation
+  }
+
+  runtime.openrouterGenerations.sort(
+    (firstGeneration, secondGeneration) =>
+      firstGeneration.openrouterTurnIndex -
+      secondGeneration.openrouterTurnIndex
+  )
+}
+
 function createStreamRunFromRuntime(
   runtime: ActiveLlmRunRuntime,
   chunks = runtime.recentChunks
@@ -335,6 +362,7 @@ function createStreamRunFromRuntime(
     runtimeStreamKey: runtime.runtimeStreamKey,
     attemptNumber: runtime.attemptNumber,
     turnNumber: runtime.turnNumber,
+    openrouterGenerations: runtime.openrouterGenerations,
     chunks,
   }
 }
@@ -427,6 +455,10 @@ function upsertStreamRunInList(
       ...runs,
       {
         ...incomingRun,
+        openrouterGenerations: mergeOpenRouterGenerations(
+          [],
+          incomingRun.openrouterGenerations ?? []
+        ),
         chunks: [...incomingRun.chunks].sort(compareStreamChunks),
       },
     ]
@@ -436,6 +468,10 @@ function upsertStreamRunInList(
     ...incomingRun,
     ...existingRun,
     status: incomingRun.status,
+    openrouterGenerations: mergeOpenRouterGenerations(
+      existingRun.openrouterGenerations ?? [],
+      incomingRun.openrouterGenerations ?? []
+    ),
     chunks: mergeStreamChunks(existingRun.chunks, incomingRun.chunks),
   }
 
@@ -463,6 +499,27 @@ function mergeStreamChunks(
   }
 
   return Array.from(chunksBySequence.values()).sort(compareStreamChunks)
+}
+
+function mergeOpenRouterGenerations(
+  existingGenerations: readonly OpenRouterGeneration[] = [],
+  incomingGenerations: readonly OpenRouterGeneration[] = []
+) {
+  const generationsByTurn = new Map<number, OpenRouterGeneration>()
+
+  for (const generation of existingGenerations) {
+    generationsByTurn.set(generation.openrouterTurnIndex, generation)
+  }
+
+  for (const generation of incomingGenerations) {
+    generationsByTurn.set(generation.openrouterTurnIndex, generation)
+  }
+
+  return Array.from(generationsByTurn.values()).sort(
+    (firstGeneration, secondGeneration) =>
+      firstGeneration.openrouterTurnIndex -
+      secondGeneration.openrouterTurnIndex
+  )
 }
 
 function compareStreamChunks(
@@ -2330,6 +2387,7 @@ async function collectOpenRouterLlmStream({
   let usage: unknown = {}
   let didReceiveCompletedResponse = false
   let providerTerminalEventError: ProviderTerminalEventError | null = null
+  let currentOpenRouterTurnIndex = 0
   const completedResponseUsageValues: unknown[] = []
   const toolCallNamesById: OpenRouterToolCallNameMap = new Map()
   const openrouter = new OpenRouter({
@@ -2389,15 +2447,39 @@ async function collectOpenRouterLlmStream({
           event,
           toolCallNamesById
         )
+        const eventTurnNumber = getNumberProperty(eventRecord, "turnNumber")
+
+        if (
+          eventType === "turn.start" &&
+          eventTurnNumber !== null &&
+          Number.isInteger(eventTurnNumber) &&
+          eventTurnNumber >= 0
+        ) {
+          currentOpenRouterTurnIndex = eventTurnNumber
+        }
 
         if (eventType === "response.completed") {
           const response = eventRecord.response
           const responseRecord = asRecord(response)
+          const generationId = getOpenRouterGenerationIdFromCompletedEvent(event)
           didReceiveCompletedResponse = true
           outputText = getCompletedResponseOutputText(response)
           responseMetadata = response ?? {}
           completedResponseUsageValues.push(responseRecord.usage ?? {})
           usage = aggregateOpenRouterUsage(completedResponseUsageValues)
+
+          if (generationId) {
+            const generation = await recordOpenRouterLlmRunGeneration({
+              llmRunId,
+              openrouterTurnIndex: currentOpenRouterTurnIndex,
+              generationId,
+              responseMetadata,
+            })
+
+            if (generation) {
+              rememberRuntimeOpenRouterGeneration(runtime, generation)
+            }
+          }
         }
 
         appendRuntimeChunk(runtime, normalizedEvent)
@@ -2602,6 +2684,7 @@ async function runOpeningHandLlmRun({
     llmRunId,
     model: config.model,
     nextSequence: 1,
+    openrouterGenerations: [],
     phase: "opening_hand",
     provider: config.provider,
     reasoningEffort: config.reasoningEffort,
@@ -2789,6 +2872,7 @@ async function runTurnLlmRun({
     llmRunId,
     model: config.model,
     nextSequence: 1,
+    openrouterGenerations: [],
     phase: "turn",
     provider: config.provider,
     reasoningEffort: config.reasoningEffort,

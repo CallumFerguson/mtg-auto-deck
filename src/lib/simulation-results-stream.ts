@@ -5,6 +5,9 @@ import type {
   SimulationResultsStreamEvent,
 } from "./deck-types"
 
+type SimulationOpenRouterGeneration =
+  SimulationDebugLlmRun["openrouterGenerations"][number]
+
 export function applySimulationResultsStreamEvent(
   currentResults: SimulationResultsInfo | null,
   streamEvent: SimulationResultsStreamEvent
@@ -118,6 +121,10 @@ function upsertRun(
   const mergedRun = {
     ...existingRun,
     ...incomingRun,
+    openrouterGenerations: mergeOpenRouterGenerations(
+      existingRun.openrouterGenerations ?? [],
+      incomingRun.openrouterGenerations ?? []
+    ),
     chunks: mergeChunks(existingRun.chunks, incomingRun.chunks),
   }
 
@@ -168,6 +175,27 @@ function mergeChunks(
   return Array.from(chunksBySequence.values()).sort(compareChunks)
 }
 
+function mergeOpenRouterGenerations(
+  currentGenerations: readonly SimulationOpenRouterGeneration[] = [],
+  incomingGenerations: readonly SimulationOpenRouterGeneration[] = []
+) {
+  const generationsByTurn = new Map<number, SimulationOpenRouterGeneration>()
+
+  for (const generation of currentGenerations) {
+    generationsByTurn.set(generation.openrouterTurnIndex, generation)
+  }
+
+  for (const generation of incomingGenerations) {
+    generationsByTurn.set(generation.openrouterTurnIndex, generation)
+  }
+
+  return Array.from(generationsByTurn.values()).sort(
+    (firstGeneration, secondGeneration) =>
+      firstGeneration.openrouterTurnIndex -
+      secondGeneration.openrouterTurnIndex
+  )
+}
+
 function shouldReplaceChunk(
   existingChunk: SimulationDebugLlmRunChunk,
   incomingChunk: SimulationDebugLlmRunChunk
@@ -178,6 +206,10 @@ function shouldReplaceChunk(
 function sortRunChunks(run: SimulationDebugLlmRun) {
   return {
     ...run,
+    openrouterGenerations: mergeOpenRouterGenerations(
+      [],
+      run.openrouterGenerations ?? []
+    ),
     chunks: [...run.chunks].sort(compareChunks),
   }
 }

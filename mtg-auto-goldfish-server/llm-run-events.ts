@@ -180,6 +180,18 @@ export function normalizeOpenRouterStreamEvent(
   })
 }
 
+export function getOpenRouterGenerationIdFromCompletedEvent(event: unknown) {
+  const eventRecord = asRecord(event)
+
+  if (getStringProperty(eventRecord, "type") !== "response.completed") {
+    return null
+  }
+
+  const generationId = getStringProperty(asRecord(eventRecord.response), "id")
+
+  return generationId?.trim() || null
+}
+
 export function createServerErrorChunk(
   error: unknown
 ): Omit<LlmRunChunkInput, "sequence"> {

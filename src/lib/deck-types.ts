@@ -89,6 +89,12 @@ export type SimulationDebugLlmRunChunk = {
   receivedAt: string
 }
 
+export type OpenRouterGeneration = {
+  openrouterTurnIndex: number
+  generationId: string
+  createdAt: string
+}
+
 export type SimulationDebugLlmRun = {
   llmRunId: string
   phase: string
@@ -103,6 +109,7 @@ export type SimulationDebugLlmRun = {
   gameState?: string
   outdated?: boolean
   openingHandIsValid?: boolean
+  openrouterGenerations: OpenRouterGeneration[]
   chunks: SimulationDebugLlmRunChunk[]
 }
 
