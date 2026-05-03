@@ -48,6 +48,7 @@ export type CreateOpeningHandLlmRunInput = {
   simulationId: string
   provider: string
   model: string
+  openrouterModelProvider: string | null
   reasoningEffort: string | null
   runtimeStreamKey: string
   fullPrompt: string
@@ -59,6 +60,7 @@ export type CreateTurnLlmRunInput = {
   turnNumber: number
   provider: string
   model: string
+  openrouterModelProvider: string | null
   reasoningEffort: string | null
   runtimeStreamKey: string
   requireAutoSimulateNextStep?: boolean
@@ -515,6 +517,7 @@ export async function ensureSimulationsSchema() {
       phase llm_run_phase NOT NULL,
       provider text NOT NULL,
       model text NOT NULL,
+      openrouter_model_provider text,
       reasoning_effort text,
 
       status llm_run_status NOT NULL DEFAULT 'pending',
@@ -535,6 +538,35 @@ export async function ensureSimulationsSchema() {
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now()
     )
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_runs
+    ADD COLUMN IF NOT EXISTS openrouter_model_provider text
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_runs
+    ALTER COLUMN openrouter_model_provider DROP NOT NULL
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_runs
+    ALTER COLUMN openrouter_model_provider DROP DEFAULT
+  `)
+  await queryDatabase(`
+    UPDATE llm_runs
+    SET openrouter_model_provider = NULL
+    WHERE provider <> 'openrouter'
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_runs
+    DROP CONSTRAINT IF EXISTS llm_runs_openrouter_model_provider_requires_openrouter_check
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_runs
+    ADD CONSTRAINT llm_runs_openrouter_model_provider_requires_openrouter_check
+      CHECK (
+        openrouter_model_provider IS NULL
+        OR provider = 'openrouter'
+      )
   `)
   await queryDatabase(`
     ALTER TABLE llm_runs
@@ -1587,6 +1619,7 @@ export async function createOpeningHandLlmRun(
       [input.simulationId]
     )
     const attemptNumber = Number(attemptResult.rows[0].attempt_number)
+    const openrouterModelProvider = getPersistableOpenRouterModelProvider(input)
     const llmRunResult = await client.query<{
       id: string
       status: LlmRunStatus
@@ -1597,6 +1630,7 @@ export async function createOpeningHandLlmRun(
           phase,
           provider,
           model,
+          openrouter_model_provider,
           reasoning_effort,
           runtime_stream_key,
           full_prompt,
@@ -1609,13 +1643,15 @@ export async function createOpeningHandLlmRun(
           $3,
           $4,
           $5,
-          $6::jsonb
+          $6,
+          $7::jsonb
         )
         RETURNING id, status, runtime_stream_key
       `,
       [
         input.provider,
         input.model,
+        openrouterModelProvider,
         input.reasoningEffort,
         input.runtimeStreamKey,
         input.fullPrompt,
@@ -1844,6 +1880,7 @@ export async function createTurnLlmRun(
       [input.simulationId, input.turnNumber]
     )
     const attemptNumber = Number(attemptResult.rows[0].attempt_number)
+    const openrouterModelProvider = getPersistableOpenRouterModelProvider(input)
     const llmRunResult = await client.query<{
       id: string
       status: LlmRunStatus
@@ -1854,6 +1891,7 @@ export async function createTurnLlmRun(
           phase,
           provider,
           model,
+          openrouter_model_provider,
           reasoning_effort,
           runtime_stream_key
         )
@@ -1862,13 +1900,15 @@ export async function createTurnLlmRun(
           $1,
           $2,
           $3,
-          $4
+          $4,
+          $5
         )
         RETURNING id, status, runtime_stream_key
       `,
       [
         input.provider,
         input.model,
+        openrouterModelProvider,
         input.reasoningEffort,
         input.runtimeStreamKey,
       ]
@@ -3736,6 +3776,17 @@ function parseStringArray(value: unknown) {
   }
 
   return value.filter((item): item is string => typeof item === "string")
+}
+
+function getPersistableOpenRouterModelProvider(input: {
+  provider: string
+  openrouterModelProvider: string | null
+}) {
+  if (input.provider !== "openrouter") {
+    return null
+  }
+
+  return input.openrouterModelProvider?.trim() || null
 }
 
 export function isValidCompletedOpeningHand({

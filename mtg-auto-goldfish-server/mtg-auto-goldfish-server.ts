@@ -1799,6 +1799,12 @@ function getOpenRouterProviderPreferences(modelProvider: string | null) {
   }
 }
 
+function getLlmRunOpenRouterModelProvider(
+  config: ResolvedOpeningHandLlmRunConfig | ResolvedTurnSimulationLlmRunConfig
+) {
+  return config.provider === "openrouter" ? config.modelProvider : null
+}
+
 function buildOpeningHandLlmRequestPayload(
   config: ResolvedOpeningHandLlmRunConfig,
   fullPrompt: string,
@@ -1956,6 +1962,7 @@ async function prepareAndStartOpeningHandLlmRun({
       simulationId,
       provider: llmConfig.provider,
       model: llmConfig.model,
+      openrouterModelProvider: getLlmRunOpenRouterModelProvider(llmConfig),
       reasoningEffort: llmConfig.reasoningEffort,
       runtimeStreamKey: randomUUID(),
       fullPrompt: "",
@@ -2027,6 +2034,7 @@ async function prepareAndStartTurnLlmRun({
       turnNumber,
       provider: llmConfig.provider,
       model: llmConfig.model,
+      openrouterModelProvider: getLlmRunOpenRouterModelProvider(llmConfig),
       reasoningEffort: llmConfig.reasoningEffort,
       runtimeStreamKey: randomUUID(),
       requireAutoSimulateNextStep,
