@@ -876,6 +876,7 @@ function registerCreateSimulationTool(server: McpServer) {
         seed: randomUUID(),
         turnsToSimulate: 0,
         startingHandId: null,
+        createdVia: "external_mcp",
       })
 
       return {
@@ -2848,7 +2849,10 @@ async function main() {
       }
 
       try {
-        const simulation = await createSimulation(deckId, parsedSimulation.data)
+        const simulation = await createSimulation(deckId, {
+          ...parsedSimulation.data,
+          createdVia: "app",
+        })
         createdSimulationId = simulation.id
 
         await startCreatedSimulationInitialStep(deckId, simulation)

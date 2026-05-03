@@ -12,6 +12,8 @@ export type SimulationStatus =
   | "failed"
   | "cancelled"
 
+export type SimulationCreatedVia = "app" | "external_mcp"
+
 export type LlmRunStatus =
   | "pending"
   | "streaming"
@@ -186,6 +188,7 @@ export type SimulationLlmCompletionResult = SimulationCompletionDecision & {
 export type SimulationSummary = {
   id: string
   deckId: string
+  createdVia: SimulationCreatedVia
   startingHandId: string | null
   seed: string
   library: string[]
@@ -264,6 +267,7 @@ export type CreateSimulationInput = {
   seed: string
   turnsToSimulate: number
   startingHandId: string | null
+  createdVia?: SimulationCreatedVia
 }
 
 export function getSimulationCreationDecision({
@@ -446,6 +450,7 @@ export async function ensureSimulationsSchema() {
     "failed",
     "cancelled",
   ])
+  await createEnumType("simulation_created_via", ["app", "external_mcp"])
   await createEnumType("llm_run_status", [
     "pending",
     "streaming",
@@ -462,6 +467,7 @@ export async function ensureSimulationsSchema() {
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 
       deck_id uuid NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
+      created_via simulation_created_via NOT NULL DEFAULT 'app',
 
       seed text NOT NULL,
       random_state bigint NOT NULL,
@@ -486,6 +492,10 @@ export async function ensureSimulationsSchema() {
   await queryDatabase(`
     ALTER TABLE simulations
     ADD COLUMN IF NOT EXISTS auto_simulate_next_step boolean NOT NULL DEFAULT true
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulations
+    ADD COLUMN IF NOT EXISTS created_via simulation_created_via NOT NULL DEFAULT 'app'
   `)
   await queryDatabase(`
     CREATE TABLE IF NOT EXISTS llm_runs (
@@ -662,6 +672,7 @@ export async function listSimulationsForDeck(
   const result = await queryDatabase<{
     id: string
     deck_id: string
+    created_via: SimulationCreatedVia
     starting_hand_id: string | null
     seed: string
     library: unknown
@@ -676,6 +687,7 @@ export async function listSimulationsForDeck(
       SELECT
         id,
         deck_id,
+        created_via,
         starting_hand_id,
         seed,
         library,
@@ -737,6 +749,7 @@ export async function listSimulationsForDeck(
         updated_at
       FROM simulations
       WHERE deck_id = $1
+        AND created_via = 'app'
       ORDER BY created_at DESC
     `,
     [deckId]
@@ -745,6 +758,7 @@ export async function listSimulationsForDeck(
   return result.rows.map((simulation) => ({
     id: simulation.id,
     deckId: simulation.deck_id,
+    createdVia: simulation.created_via,
     startingHandId: simulation.starting_hand_id,
     seed: simulation.seed,
     library: parseStringArray(simulation.library),
@@ -762,9 +776,14 @@ export async function createSimulation(
   input: CreateSimulationInput
 ): Promise<SimulationSummary> {
   const seed = input.seed.trim()
+  const createdVia = input.createdVia ?? "app"
 
   if (!seed) {
     throw new SimulationValidationError("Simulation seed is required.")
+  }
+
+  if (createdVia !== "app" && createdVia !== "external_mcp") {
+    throw new SimulationValidationError("Simulation creation source is invalid.")
   }
 
   if (!Number.isInteger(input.turnsToSimulate) || input.turnsToSimulate < 0) {
@@ -808,6 +827,7 @@ export async function createSimulation(
   const result = await queryDatabase<{
     id: string
     deck_id: string
+    created_via: SimulationCreatedVia
     starting_hand_id: string | null
     seed: string
     library: unknown
@@ -821,6 +841,7 @@ export async function createSimulation(
     `
       INSERT INTO simulations (
         deck_id,
+        created_via,
         seed,
         random_state,
         turns_to_simulate,
@@ -828,10 +849,11 @@ export async function createSimulation(
         library,
         has_drawn_starting_hand
       )
-      VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+      VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
       RETURNING
         id,
         deck_id,
+        created_via,
         starting_hand_id,
         seed,
         library,
@@ -844,6 +866,7 @@ export async function createSimulation(
     `,
     [
       deckId,
+      createdVia,
       seed,
       shuffledLibrary.randomState,
       input.turnsToSimulate,
@@ -857,6 +880,7 @@ export async function createSimulation(
   return {
     id: simulation.id,
     deckId: simulation.deck_id,
+    createdVia: simulation.created_via,
     startingHandId: simulation.starting_hand_id,
     seed: simulation.seed,
     library: parseStringArray(simulation.library),
@@ -876,6 +900,7 @@ export async function getSimulationSummary(
   const result = await queryDatabase<{
     id: string
     deck_id: string
+    created_via: SimulationCreatedVia
     starting_hand_id: string | null
     seed: string
     library: unknown
@@ -890,6 +915,7 @@ export async function getSimulationSummary(
       SELECT
         id,
         deck_id,
+        created_via,
         starting_hand_id,
         seed,
         library,
@@ -964,6 +990,7 @@ export async function getSimulationSummary(
   return {
     id: simulation.id,
     deckId: simulation.deck_id,
+    createdVia: simulation.created_via,
     startingHandId: simulation.starting_hand_id,
     seed: simulation.seed,
     library: parseStringArray(simulation.library),

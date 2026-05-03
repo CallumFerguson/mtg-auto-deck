@@ -34,9 +34,12 @@ export type SimulationStatus =
   | "failed"
   | "cancelled"
 
+export type SimulationCreatedVia = "app" | "external_mcp"
+
 export type Simulation = {
   id: string
   deckId: string
+  createdVia: SimulationCreatedVia
   startingHandId: string | null
   seed: string
   library: string[]
