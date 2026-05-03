@@ -125,6 +125,11 @@ export type SimulationDebugResponse = {
   debug: SimulationDebugInfo
 }
 
+export type OpenRouterGenerationDetailsResponse = {
+  generation: OpenRouterGeneration
+  result: unknown
+}
+
 export type SimulationResultsInfo = SimulationDebugInfo
 
 export type SimulationResultsResponse = {

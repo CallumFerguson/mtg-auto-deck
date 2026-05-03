@@ -2403,6 +2403,63 @@ export async function recordOpenRouterLlmRunGeneration({
   }
 }
 
+export async function getOpenRouterGenerationForSimulation(
+  deckId: string,
+  simulationId: string,
+  generationId: string
+): Promise<OpenRouterGeneration | null> {
+  const trimmedGenerationId = generationId.trim()
+
+  if (!trimmedGenerationId) {
+    throw new SimulationValidationError(
+      "OpenRouter generation ID must not be empty."
+    )
+  }
+
+  const result = await queryDatabase<{
+    openrouter_turn_index: number
+    generation_id: string
+    created_at: Date
+  }>(
+    `
+      SELECT
+        generation.openrouter_turn_index,
+        generation.generation_id,
+        generation.created_at
+      FROM llm_run_openrouter_generations generation
+      JOIN llm_runs llm_run
+        ON llm_run.id = generation.llm_run_id
+      JOIN (
+        SELECT simulation_id, llm_run_id
+        FROM simulation_opening_hand_llm_runs
+        UNION ALL
+        SELECT simulation_id, llm_run_id
+        FROM simulation_turn_llm_runs
+      ) simulation_run
+        ON simulation_run.llm_run_id = generation.llm_run_id
+      JOIN simulations simulation
+        ON simulation.id = simulation_run.simulation_id
+      WHERE simulation.id = $1
+        AND simulation.deck_id = $2
+        AND llm_run.provider = 'openrouter'
+        AND generation.generation_id = $3
+      LIMIT 1
+    `,
+    [simulationId, deckId, trimmedGenerationId]
+  )
+  const generation = result.rows[0]
+
+  if (!generation) {
+    return null
+  }
+
+  return {
+    openrouterTurnIndex: generation.openrouter_turn_index,
+    generationId: generation.generation_id,
+    createdAt: generation.created_at.toISOString(),
+  }
+}
+
 export async function failLlmRun(llmRunId: string, failureMessage: string) {
   await withDatabaseTransaction(async (client) => {
     await client.query(

@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -16,6 +17,7 @@ import {
   Plus,
   RefreshCw,
   Save,
+  Search,
   Sparkles,
   Trash2,
   X,
@@ -31,6 +33,7 @@ import type {
   CreateStartingHandResponse,
   CreateTurnLlmRunResponse,
   DeckCard,
+  OpenRouterGenerationDetailsResponse,
   SavedSeed,
   SavedSeedsResponse,
   Simulation,
@@ -1125,6 +1128,7 @@ function SimulationDetails({
   const resultsInfoRef = useRef<SimulationResultsInfo | null>(null)
   const resultsEventSourceRef = useRef<EventSource | null>(null)
   const resultsStreamErrorTimeoutRef = useRef<number | null>(null)
+  const simulationRef = useRef(simulation)
   const resultsPanelRef = useRef<HTMLElement | null>(null)
   const keepResultsScrolledDownRef = useRef(true)
   const isProgrammaticResultsScrollRef = useRef(false)
@@ -1132,6 +1136,10 @@ function SimulationDetails({
   const simulationPanelRef = useRef<HTMLElement | null>(null)
   const [resultsStreamRestartKey, setResultsStreamRestartKey] = useState(0)
   const shouldSimulateOpeningHand = simulation.startingHandId === null
+
+  useEffect(() => {
+    simulationRef.current = simulation
+  }, [simulation])
 
   const scrollResultsToBottom = useCallback(() => {
     const resultsPanel = resultsPanelRef.current
@@ -1473,7 +1481,7 @@ function SimulationDetails({
           onSimulationUpdated(streamEvent.simulation)
         } else if (updatedResultsInfo) {
           onSimulationUpdated({
-            ...simulation,
+            ...simulationRef.current,
             activeLlmRunCount:
               getActiveLlmRunCountFromResults(updatedResultsInfo),
             completedLlmRunCount:
@@ -1792,6 +1800,7 @@ function SimulationDetails({
 
       {isDebugModalOpen ? (
         <SimulationDebugModal
+          deckId={deckId}
           debugInfo={debugInfo}
           error={debugInfoError}
           isLoading={isLoadingDebugInfo}
@@ -1805,6 +1814,7 @@ function SimulationDetails({
 }
 
 function SimulationDebugModal({
+  deckId,
   debugInfo,
   error,
   isLoading,
@@ -1812,6 +1822,7 @@ function SimulationDebugModal({
   onRefresh,
   simulationId,
 }: {
+  deckId: string
   debugInfo: SimulationDebugInfo | null
   error: string | null
   isLoading: boolean
@@ -1882,7 +1893,7 @@ function SimulationDebugModal({
             ) : null}
 
             {debugInfo ? (
-              <SimulationDebugPanel debugInfo={debugInfo} />
+              <SimulationDebugPanel deckId={deckId} debugInfo={debugInfo} />
             ) : !isLoading && !error ? (
               <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
                 Debug info has not been loaded yet.
@@ -2349,8 +2360,10 @@ function getPayloadMessage(payload: unknown) {
 }
 
 function SimulationDebugPanel({
+  deckId,
   debugInfo,
 }: {
+  deckId: string
   debugInfo: SimulationDebugInfo
 }) {
   return (
@@ -2371,23 +2384,31 @@ function SimulationDebugPanel({
       </dl>
 
       <SimulationDebugRunGroup
+        deckId={deckId}
         heading="Opening hand runs"
         runs={debugInfo.openingHandLlmRuns}
+        simulationId={debugInfo.simulationId}
       />
       <SimulationDebugRunGroup
+        deckId={deckId}
         heading="Turn runs"
         runs={debugInfo.turnLlmRuns}
+        simulationId={debugInfo.simulationId}
       />
     </div>
   )
 }
 
 function SimulationDebugRunGroup({
+  deckId,
   heading,
   runs,
+  simulationId,
 }: {
+  deckId: string
   heading: string
   runs: SimulationDebugInfo["openingHandLlmRuns"]
+  simulationId: string
 }) {
   return (
     <section className="grid gap-3">
@@ -2459,7 +2480,9 @@ function SimulationDebugRunGroup({
             {run.provider === "openrouter" &&
             (run.openrouterGenerations?.length ?? 0) > 0 ? (
               <OpenRouterGenerationsTable
+                deckId={deckId}
                 generations={run.openrouterGenerations ?? []}
+                simulationId={simulationId}
               />
             ) : null}
 
@@ -2503,18 +2526,89 @@ function SimulationDebugRunGroup({
   )
 }
 
+type OpenRouterGenerationLookupState =
+  | {
+      status: "loading"
+    }
+  | {
+      status: "loaded"
+      result: unknown
+    }
+  | {
+      status: "error"
+      error: string
+    }
+
 function OpenRouterGenerationsTable({
+  deckId,
   generations,
+  simulationId,
 }: {
+  deckId: string
   generations: SimulationDebugInfo["openingHandLlmRuns"][number]["openrouterGenerations"]
+  simulationId: string
 }) {
+  const [generationLookups, setGenerationLookups] = useState<
+    Record<string, OpenRouterGenerationLookupState>
+  >({})
+
+  const handleQueryGeneration = useCallback(
+    async (generationId: string) => {
+      setGenerationLookups((currentLookups) => ({
+        ...currentLookups,
+        [generationId]: { status: "loading" },
+      }))
+
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/decks/${encodeURIComponent(deckId)}/simulations/${encodeURIComponent(simulationId)}/openrouter-generations/${encodeURIComponent(generationId)}`
+        )
+
+        if (!response.ok) {
+          const errorMessage = await readApiError(
+            response,
+            "OpenRouter generation could not be queried."
+          )
+
+          setGenerationLookups((currentLookups) => ({
+            ...currentLookups,
+            [generationId]: {
+              status: "error",
+              error: errorMessage,
+            },
+          }))
+          return
+        }
+
+        const data =
+          (await response.json()) as OpenRouterGenerationDetailsResponse
+        setGenerationLookups((currentLookups) => ({
+          ...currentLookups,
+          [generationId]: {
+            status: "loaded",
+            result: data.result,
+          },
+        }))
+      } catch {
+        setGenerationLookups((currentLookups) => ({
+          ...currentLookups,
+          [generationId]: {
+            status: "error",
+            error: "OpenRouter generation could not be queried.",
+          },
+        }))
+      }
+    },
+    [deckId, simulationId]
+  )
+
   return (
     <section className="min-w-0 rounded-md border border-sky-500/35 bg-sky-950/20 shadow-sm shadow-sky-950/20">
       <h6 className="border-b border-sky-500/20 px-3 py-2 text-sm font-medium text-sky-200">
         OpenRouter generations
       </h6>
       <div className="debug-scrollbar-neutral max-w-full overflow-x-auto">
-        <table className="w-full min-w-[28rem] border-collapse text-left text-xs">
+        <table className="w-full min-w-[40rem] border-collapse text-left text-xs">
           <thead className="text-sky-100/80">
             <tr>
               <th className="w-36 border-b border-sky-500/20 px-3 py-2 font-medium">
@@ -2523,23 +2617,108 @@ function OpenRouterGenerationsTable({
               <th className="border-b border-sky-500/20 px-3 py-2 font-medium">
                 Generation ID
               </th>
+              <th className="w-32 border-b border-sky-500/20 px-3 py-2 font-medium">
+                Details
+              </th>
             </tr>
           </thead>
           <tbody>
-            {generations.map((generation) => (
-              <tr key={generation.openrouterTurnIndex}>
-                <td className="border-t border-sky-500/10 px-3 py-2 text-muted-foreground">
-                  OpenRouter turn {generation.openrouterTurnIndex + 1}
-                </td>
-                <td className="select-all border-t border-sky-500/10 px-3 py-2 break-all text-foreground">
-                  {generation.generationId}
-                </td>
-              </tr>
-            ))}
+            {generations.map((generation) => {
+              const lookup = generationLookups[generation.generationId]
+
+              return (
+                <Fragment key={generation.openrouterTurnIndex}>
+                  <tr>
+                    <td className="border-t border-sky-500/10 px-3 py-2 text-muted-foreground">
+                      OpenRouter turn {generation.openrouterTurnIndex + 1}
+                    </td>
+                    <td className="select-all border-t border-sky-500/10 px-3 py-2 break-all text-foreground">
+                      {generation.generationId}
+                    </td>
+                    <td className="border-t border-sky-500/10 px-3 py-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="xs"
+                        disabled={lookup?.status === "loading"}
+                        aria-expanded={lookup?.status === "loaded"}
+                        title="Query OpenRouter generation endpoint"
+                        onClick={() =>
+                          void handleQueryGeneration(generation.generationId)
+                        }
+                      >
+                        {lookup?.status === "loading" ? (
+                          <RefreshCw
+                            className="animate-spin"
+                            data-icon="inline-start"
+                          />
+                        ) : (
+                          <Search data-icon="inline-start" />
+                        )}
+                        {lookup?.status === "loading"
+                          ? "Querying..."
+                          : lookup?.status === "loaded"
+                            ? "Refresh"
+                            : "Query"}
+                      </Button>
+                    </td>
+                  </tr>
+                  {lookup ? (
+                    <tr>
+                      <td
+                        className="border-t border-sky-500/10 px-3 py-2"
+                        colSpan={3}
+                      >
+                        <OpenRouterGenerationLookupResult lookup={lookup} />
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
+              )
+            })}
           </tbody>
         </table>
       </div>
     </section>
+  )
+}
+
+function OpenRouterGenerationLookupResult({
+  lookup,
+}: {
+  lookup: OpenRouterGenerationLookupState
+}) {
+  if (lookup.status === "loading") {
+    return (
+      <p className="rounded-md border border-sky-500/20 bg-black/20 px-3 py-2 text-xs text-muted-foreground">
+        Querying OpenRouter generation endpoint...
+      </p>
+    )
+  }
+
+  if (lookup.status === "error") {
+    return (
+      <p
+        className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+        role="alert"
+      >
+        {lookup.error}
+      </p>
+    )
+  }
+
+  return (
+    <details
+      className="min-w-0 rounded-md border border-sky-500/25 bg-black/20"
+      open
+    >
+      <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-sky-200 transition-colors hover:text-sky-100">
+        Generation endpoint result
+      </summary>
+      <pre className="debug-scrollbar-neutral max-h-96 max-w-full min-w-0 overflow-y-auto border-t border-sky-500/20 p-3 text-xs leading-5 break-words whitespace-pre-wrap text-sky-50/80">
+        {JSON.stringify(lookup.result, null, 2)}
+      </pre>
+    </details>
   )
 }
 

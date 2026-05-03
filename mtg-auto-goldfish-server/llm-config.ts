@@ -121,6 +121,10 @@ export function getTurnSimulationLlmRunConfig(
   return config
 }
 
+export function getOpenRouterApiKey(environment: Environment = process.env) {
+  return getRequiredEnvironmentVariable(environment, "OPENROUTER_API_KEY")
+}
+
 function getLlmRunConfig(
   environment: Environment
 ): OpenAiRunConfig | OpenRouterRunConfig | LlamaCppRunConfig {

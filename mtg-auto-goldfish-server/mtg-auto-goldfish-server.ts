@@ -41,6 +41,7 @@ import {
   ensureSimulationsSchema,
   failLlmRun,
   getDeckCardReferenceData,
+  getOpenRouterGenerationForSimulation,
   getSimulationCreationDecision,
   getSimulationDebugInfo,
   getSimulationResultsInfo,
@@ -127,6 +128,7 @@ import {
 } from "./llm-runtime-cancellation.js"
 import {
   LlmConfigurationError,
+  getOpenRouterApiKey,
   getOpeningHandLlmRunConfig,
   getTurnSimulationLlmRunConfig,
   type OpenAiRunConfig,
@@ -176,6 +178,8 @@ const TURN_SIMULATION_MCP_SERVER_LABEL = "turn_simulation"
 const STREAM_FLUSH_INTERVAL_MS = 1000
 const STREAM_RECENT_CHUNK_LIMIT = 500
 const SSE_KEEPALIVE_INTERVAL_MS = 15000
+const OPENROUTER_GENERATION_ENDPOINT =
+  "https://openrouter.ai/api/v1/generation"
 const DEFAULT_ALLOWED_ORIGINS = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
@@ -3481,6 +3485,63 @@ async function main() {
   )
 
   app.get(
+    "/decks/:deckId/simulations/:simulationId/openrouter-generations/:generationId",
+    async (req: Request, res: Response) => {
+      const deckId = String(req.params.deckId)
+      const simulationId = String(req.params.simulationId)
+      const generationId = String(req.params.generationId)
+
+      try {
+        const generation = await getOpenRouterGenerationForSimulation(
+          deckId,
+          simulationId,
+          generationId
+        )
+
+        if (!generation) {
+          res.status(404).json({
+            error: "OpenRouter generation not found for this simulation.",
+          })
+          return
+        }
+
+        res.status(200).json({
+          generation,
+          result: await queryOpenRouterGenerationEndpoint(
+            generation.generationId
+          ),
+        })
+      } catch (error) {
+        if (error instanceof SimulationValidationError) {
+          res.status(400).json({
+            error: error.message,
+          })
+          return
+        }
+
+        if (error instanceof LlmConfigurationError) {
+          res.status(500).json({
+            error: error.message,
+          })
+          return
+        }
+
+        if (error instanceof OpenRouterGenerationLookupError) {
+          res.status(error.statusCode).json({
+            error: error.message,
+          })
+          return
+        }
+
+        console.error("Failed to query OpenRouter generation:", error)
+        res.status(500).json({
+          error: "Failed to query OpenRouter generation.",
+        })
+      }
+    }
+  )
+
+  app.get(
     "/decks/:deckId/simulations/:simulationId/results",
     async (req: Request, res: Response) => {
       const deckId = String(req.params.deckId)
@@ -4021,6 +4082,78 @@ function registerShutdownHandlers() {
 
   process.once("SIGINT", shutdown)
   process.once("SIGTERM", shutdown)
+}
+
+class OpenRouterGenerationLookupError extends Error {
+  readonly statusCode: number
+
+  constructor(message: string, statusCode = 502) {
+    super(message)
+    this.name = "OpenRouterGenerationLookupError"
+    this.statusCode = statusCode
+  }
+}
+
+async function queryOpenRouterGenerationEndpoint(generationId: string) {
+  const url = new URL(OPENROUTER_GENERATION_ENDPOINT)
+  url.searchParams.set("id", generationId)
+
+  let response: globalThis.Response
+
+  try {
+    response = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${getOpenRouterApiKey()}`,
+      },
+    })
+  } catch (error) {
+    throw new OpenRouterGenerationLookupError(
+      `OpenRouter generation endpoint could not be reached: ${getErrorMessage(error)}`
+    )
+  }
+
+  const result = await readOpenRouterResponseBody(response)
+
+  if (!response.ok) {
+    throw new OpenRouterGenerationLookupError(
+      getOpenRouterGenerationLookupFailureMessage(response, result),
+      response.status
+    )
+  }
+
+  return result
+}
+
+async function readOpenRouterResponseBody(response: globalThis.Response) {
+  const bodyText = await response.text()
+
+  if (!bodyText.trim()) {
+    return null
+  }
+
+  try {
+    return JSON.parse(bodyText) as unknown
+  } catch {
+    return bodyText
+  }
+}
+
+function getOpenRouterGenerationLookupFailureMessage(
+  response: globalThis.Response,
+  result: unknown
+) {
+  const resultRecord = asRecord(result)
+  const errorRecord = asRecord(resultRecord.error)
+  const message =
+    getStringProperty(errorRecord, "message") ??
+    getStringProperty(resultRecord, "error") ??
+    getStringProperty(resultRecord, "message") ??
+    response.statusText
+
+  return message
+    ? `OpenRouter generation lookup failed (${response.status}): ${message}`
+    : `OpenRouter generation lookup failed with status ${response.status}.`
 }
 
 function applyCors(
