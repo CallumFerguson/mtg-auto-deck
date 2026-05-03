@@ -2444,7 +2444,9 @@ function SimulationDebugRunGroup({
               ) : null}
               <p className="text-muted-foreground">
                 Reasoning effort:{" "}
-                <span className="text-foreground">{run.reasoningEffort}</span>
+                <span className="text-foreground">
+                  {run.reasoningEffort || "N/A"}
+                </span>
               </p>
               <p className="break-all text-muted-foreground">
                 Runtime key:{" "}

@@ -30,7 +30,6 @@ export type LlamaCppChatCompletionRequestPayload = {
   messages: ChatCompletionMessageParam[]
   metadata: Record<string, string>
   parallel_tool_calls: false
-  reasoning_effort: ReasoningEffort
   tools: ChatCompletionTool[]
   stopWhenStepCount: number
 }
@@ -52,8 +51,6 @@ export type LlamaCppChatCompletionResult = {
   responseMetadata: unknown
   usage: unknown
 }
-
-type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
 
 type LlamaCppChatCompletionStepResult = {
   finishReason: string | null
@@ -308,10 +305,6 @@ function createChatCompletionApiPayload(
     stream_options: {
       include_usage: true,
     },
-  }
-
-  if (requestPayload.reasoning_effort !== "none") {
-    payload.reasoning_effort = requestPayload.reasoning_effort
   }
 
   return payload

@@ -405,7 +405,6 @@ function createRequestPayload(
       simulationId: "simulation_1",
     },
     parallel_tool_calls: false,
-    reasoning_effort: "medium",
     tools: createLlamaCppChatCompletionTools(toolDefinitions),
     stopWhenStepCount: 5,
   }

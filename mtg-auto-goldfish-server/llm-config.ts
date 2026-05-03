@@ -18,10 +18,13 @@ type Environment = Record<string, string | undefined>
 type BaseLlmRunConfig = {
   apiKey: string
   provider: LlmProvider
+}
+
+type ReasoningEffortLlmRunConfig = BaseLlmRunConfig & {
   reasoningEffort: ReasoningEffort
 }
 
-type ConfiguredModelLlmRunConfig = BaseLlmRunConfig & {
+type ConfiguredModelLlmRunConfig = ReasoningEffortLlmRunConfig & {
   model: string
 }
 
@@ -39,6 +42,7 @@ export type LlamaCppRunConfig = BaseLlmRunConfig & {
   provider: "llamacpp"
   baseUrl: string
   model: string | null
+  reasoningEffort: null
   stopWhenStepCount: number
 }
 
@@ -142,10 +146,7 @@ function getLlmRunConfig(
       baseUrl: getRequiredEnvironmentVariable(environment, "LLAMACPP_BASE_URL"),
       model: null,
       provider,
-      reasoningEffort: getRequiredReasoningEffort(
-        environment,
-        "LLAMACPP_REASONING_EFFORT"
-      ),
+      reasoningEffort: null,
       stopWhenStepCount: getRequiredPositiveIntegerEnvironmentVariable(
         environment,
         "LLAMACPP_STOP_WHEN_STEP_COUNT"

@@ -48,7 +48,7 @@ export type CreateOpeningHandLlmRunInput = {
   simulationId: string
   provider: string
   model: string
-  reasoningEffort: string
+  reasoningEffort: string | null
   runtimeStreamKey: string
   fullPrompt: string
   requestPayload: unknown
@@ -59,7 +59,7 @@ export type CreateTurnLlmRunInput = {
   turnNumber: number
   provider: string
   model: string
-  reasoningEffort: string
+  reasoningEffort: string | null
   runtimeStreamKey: string
   requireAutoSimulateNextStep?: boolean
 }
@@ -122,7 +122,7 @@ export type SimulationDebugLlmRun = {
   provider: string
   model: string
   estimatedPriceCents: string | null
-  reasoningEffort: string
+  reasoningEffort: string | null
   status: LlmRunStatus
   runtimeStreamKey: string | null
   attemptNumber: number
@@ -504,7 +504,7 @@ export async function ensureSimulationsSchema() {
       phase llm_run_phase NOT NULL,
       provider text NOT NULL,
       model text NOT NULL,
-      reasoning_effort text NOT NULL DEFAULT '',
+      reasoning_effort text,
 
       status llm_run_status NOT NULL DEFAULT 'pending',
       runtime_stream_key text UNIQUE,
@@ -527,7 +527,15 @@ export async function ensureSimulationsSchema() {
   `)
   await queryDatabase(`
     ALTER TABLE llm_runs
-    ADD COLUMN IF NOT EXISTS reasoning_effort text NOT NULL DEFAULT ''
+    ADD COLUMN IF NOT EXISTS reasoning_effort text
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_runs
+    ALTER COLUMN reasoning_effort DROP NOT NULL
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_runs
+    ALTER COLUMN reasoning_effort DROP DEFAULT
   `)
   await queryDatabase(`
     ALTER TABLE llm_runs
@@ -2959,7 +2967,7 @@ type SimulationDebugLlmRunRow = {
   provider: string
   model: string
   usage: unknown
-  reasoning_effort: string
+  reasoning_effort: string | null
   status: LlmRunStatus
   runtime_stream_key: string | null
   attempt_number: number
@@ -3046,7 +3054,7 @@ async function getSimulationDebugLlmRuns({
             provider: row.provider,
             usage: row.usage,
           })?.formattedCents ?? null,
-        reasoningEffort: row.reasoning_effort,
+        reasoningEffort: row.reasoning_effort || null,
         status: row.status,
         runtimeStreamKey: row.runtime_stream_key,
         attemptNumber: row.attempt_number,

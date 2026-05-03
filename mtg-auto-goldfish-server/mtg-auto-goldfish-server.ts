@@ -253,7 +253,7 @@ type ActiveLlmRunRuntime = {
   nextSequence: number
   phase: LlmRunPhase
   provider: string
-  reasoningEffort: string
+  reasoningEffort: string | null
   recentChunks: SimulationResultsStreamChunk[]
   resolveCompletion: () => void
   runtimeStreamKey: string
@@ -1655,7 +1655,6 @@ function buildOpeningHandLlamaCppRequestPayload(
       phase: "opening_hand",
     },
     parallel_tool_calls: false,
-    reasoning_effort: config.reasoningEffort,
     tools: createLlamaCppChatCompletionTools(openingHandLlmToolDefinitions),
     stopWhenStepCount: config.stopWhenStepCount,
   }
@@ -1707,7 +1706,6 @@ function buildTurnSimulationLlamaCppRequestPayload(
       turnNumber: String(turnNumber),
     },
     parallel_tool_calls: false,
-    reasoning_effort: config.reasoningEffort,
     tools: createLlamaCppChatCompletionTools(turnSimulationLlmToolDefinitions),
     stopWhenStepCount: config.stopWhenStepCount,
   }

@@ -95,7 +95,7 @@ export type SimulationDebugLlmRun = {
   provider: string
   model: string
   estimatedPriceCents: string | null
-  reasoningEffort: string
+  reasoningEffort: string | null
   status: string
   runtimeStreamKey: string | null
   attemptNumber: number

@@ -287,7 +287,6 @@ test("validates llama.cpp LLM config requirements", () => {
       getOpeningHandLlmRunConfig({
         LLM_PROVIDER: "llamacpp",
         LLAMACPP_BASE_URL: "http://127.0.0.1:8080/v1",
-        LLAMACPP_REASONING_EFFORT: "none",
         LLAMACPP_STOP_WHEN_STEP_COUNT: "0",
       }),
     /LLAMACPP_STOP_WHEN_STEP_COUNT must be a positive integer\./
@@ -296,7 +295,6 @@ test("validates llama.cpp LLM config requirements", () => {
     () =>
       getOpeningHandLlmRunConfig({
         LLM_PROVIDER: "llamacpp",
-        LLAMACPP_REASONING_EFFORT: "none",
         LLAMACPP_STOP_WHEN_STEP_COUNT: "7",
       }),
     /LLAMACPP_BASE_URL/
@@ -305,7 +303,6 @@ test("validates llama.cpp LLM config requirements", () => {
   const config = getTurnSimulationLlmRunConfig({
     LLM_PROVIDER: "llamacpp",
     LLAMACPP_BASE_URL: "http://127.0.0.1:8080/v1",
-    LLAMACPP_REASONING_EFFORT: "none",
     LLAMACPP_STOP_WHEN_STEP_COUNT: "7",
   })
 
@@ -313,7 +310,7 @@ test("validates llama.cpp LLM config requirements", () => {
   assert.equal(config.apiKey, "not-needed")
   assert.equal(config.baseUrl, "http://127.0.0.1:8080/v1")
   assert.equal(config.model, null)
-  assert.equal(config.reasoningEffort, "none")
+  assert.equal(config.reasoningEffort, null)
   assert.equal(config.stopWhenStepCount, 7)
 })
 
@@ -322,7 +319,6 @@ test("reads optional llama.cpp API key config", () => {
     LLM_PROVIDER: "llamacpp",
     LLAMACPP_API_KEY: "local-secret",
     LLAMACPP_BASE_URL: "http://127.0.0.1:8080/v1",
-    LLAMACPP_REASONING_EFFORT: "none",
     LLAMACPP_STOP_WHEN_STEP_COUNT: "7",
   })
 
