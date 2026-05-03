@@ -161,12 +161,12 @@ export const SIMULATION_AUTO_ADVANCE_NOT_RUNNING_MESSAGE =
 
 export type SimulationNextStep =
   | {
-      type: "opening_hand"
-    }
+    type: "opening_hand"
+  }
   | {
-      type: "turn"
-      turnNumber: number
-    }
+    type: "turn"
+    turnNumber: number
+  }
 
 export type SimulationCreationDecision = {
   simulationStatus: SimulationStatus
@@ -416,6 +416,17 @@ export type SimulationPromptCard = {
 export type StartingHandSimulationPromptData = {
   simulationId: string
   deckId: string
+  commanders: SimulationPromptCard[]
+  library: SimulationPromptCard[]
+}
+
+export type DeckCardReferenceData = {
+  deckId: string
+  name: string
+  description: string | null
+  format: string
+  createdAt: string
+  updatedAt: string
   commanders: SimulationPromptCard[]
   library: SimulationPromptCard[]
 }
@@ -791,7 +802,9 @@ export async function createSimulation(
   }
 
   if (createdVia !== "app" && createdVia !== "external_mcp") {
-    throw new SimulationValidationError("Simulation creation source is invalid.")
+    throw new SimulationValidationError(
+      "Simulation creation source is invalid."
+    )
   }
 
   if (!Number.isInteger(input.turnsToSimulate) || input.turnsToSimulate < 0) {
@@ -1243,7 +1256,7 @@ export async function mulliganSimulation(
       cardsToBottomIfKept,
       reminder:
         cardsToBottomIfKept > 0
-          ? `If you keep this hand, put ${cardsToBottomIfKept} card(s) on the bottom before producing the final JSON response.`
+          ? `If you keep this hand, put ${cardsToBottomIfKept} card(s) on the bottom.`
           : "This mulligan is free; no cards need to be bottomed if you keep this hand.",
       replacesPreviousOpeningHand: true,
       alreadyDrewReplacementHand: true,
@@ -2887,6 +2900,67 @@ export async function getStartingHandSimulationPromptData(
   }
 }
 
+export async function getDeckCardReferenceData(
+  deckId: string
+): Promise<DeckCardReferenceData | null> {
+  const result = await queryDatabase<DeckCardReferenceRow>(
+    `
+      SELECT
+        deck.id AS deck_id,
+        deck.name AS deck_name,
+        deck.description AS deck_description,
+        deck.format AS deck_format,
+        deck.created_at AS deck_created_at,
+        deck.updated_at AS deck_updated_at,
+        deck_card.id AS deck_card_id,
+        deck_card.oracle_id,
+        deck_card.quantity,
+        deck_card.zone,
+        card.name,
+        card.mana_cost,
+        card.cmc,
+        card.type_line,
+        card.oracle_text,
+        card.power,
+        card.toughness,
+        card.loyalty,
+        card.card_faces
+      FROM decks deck
+      JOIN deck_cards deck_card
+        ON deck_card.deck_id = deck.id
+      JOIN scryfall_oracle_cards card
+        ON card.oracle_id = deck_card.oracle_id
+      WHERE deck.id = $1
+      ORDER BY
+        CASE deck_card.zone
+          WHEN 'commander' THEN 0
+          ELSE 1
+        END,
+        card.name ASC
+    `,
+    [deckId]
+  )
+
+  const firstRow = result.rows[0]
+
+  if (!firstRow) {
+    return null
+  }
+
+  const cards = result.rows.map(mapSimulationPromptCard)
+
+  return {
+    deckId: firstRow.deck_id,
+    name: firstRow.deck_name,
+    description: firstRow.deck_description,
+    format: firstRow.deck_format,
+    createdAt: firstRow.deck_created_at.toISOString(),
+    updatedAt: firstRow.deck_updated_at.toISOString(),
+    commanders: cards.filter((card) => card.zone === "commander"),
+    library: cards.filter((card) => card.zone === "library"),
+  }
+}
+
 export async function getTurnSimulationPromptData(
   simulationId: string
 ): Promise<TurnSimulationPromptData | null> {
@@ -3098,9 +3172,7 @@ async function getSimulationDebugLlmRuns({
   return Array.from(runsById.values())
 }
 
-type SimulationPromptCardRow = {
-  simulation_id: string
-  deck_id: string
+type PromptCardRow = {
   deck_card_id: number
   oracle_id: string
   quantity: number
@@ -3114,6 +3186,20 @@ type SimulationPromptCardRow = {
   toughness: string | null
   loyalty: string | null
   card_faces: unknown
+}
+
+type SimulationPromptCardRow = PromptCardRow & {
+  simulation_id: string
+  deck_id: string
+}
+
+type DeckCardReferenceRow = PromptCardRow & {
+  deck_id: string
+  deck_name: string
+  deck_description: string | null
+  deck_format: string
+  deck_created_at: Date
+  deck_updated_at: Date
 }
 
 type LibrarySimulationRow = {
@@ -3589,9 +3675,7 @@ async function getTurnSimulationStartingHand({
   return openingHand
 }
 
-function mapSimulationPromptCard(
-  row: SimulationPromptCardRow
-): SimulationPromptCard {
+function mapSimulationPromptCard(row: PromptCardRow): SimulationPromptCard {
   return {
     deckCardId: Number(row.deck_card_id),
     oracleId: row.oracle_id,
@@ -4074,8 +4158,8 @@ async function createEnumType(name: string, values: readonly string[]) {
     DO $$
     BEGIN
       CREATE TYPE ${sqlIdentifier} AS ENUM (${values
-        .map(quoteSqlLiteral)
-        .join(", ")});
+      .map(quoteSqlLiteral)
+      .join(", ")});
     EXCEPTION
       WHEN duplicate_object THEN null;
     END

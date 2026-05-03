@@ -40,6 +40,7 @@ import {
   drawStartingHand,
   ensureSimulationsSchema,
   failLlmRun,
+  getDeckCardReferenceData,
   getSimulationCreationDecision,
   getSimulationDebugInfo,
   getSimulationResultsInfo,
@@ -193,6 +194,10 @@ const llmRunIdSchema = z
 const llmRunIdentifierSchema = {
   llmRunId: llmRunIdSchema,
 }
+const deckIdSchema = z.string().trim().min(1).describe("The deck ID.")
+const deckIdentifierSchema = {
+  deckId: deckIdSchema,
+}
 const simulationIdSchema = z
   .string()
   .trim()
@@ -266,7 +271,7 @@ const activeLlmRunRuntimes = new Map<string, ActiveLlmRunRuntime>()
 const simulationResultsBroadcaster = new SimulationResultsBroadcaster()
 
 function createRuntimeCompletion() {
-  let resolveCompletion: () => void = () => {}
+  let resolveCompletion: () => void = () => { }
   const completionPromise = new Promise<void>((resolve) => {
     resolveCompletion = resolve
   })
@@ -666,17 +671,17 @@ function getLlmTokenUsageSummary(usage: unknown) {
   )
   const inputDetails = asRecord(
     usageRecord.input_tokens_details ??
-      usageRecord.inputTokensDetails ??
-      usageRecord.prompt_tokens_details ??
-      usageRecord.promptTokensDetails
+    usageRecord.inputTokensDetails ??
+    usageRecord.prompt_tokens_details ??
+    usageRecord.promptTokensDetails
   )
   const cachedInputTokens =
     inputTokens === null
       ? null
       : Math.min(
-          getNumberProperty(inputDetails, "cached_tokens", "cachedTokens") ?? 0,
-          inputTokens
-        )
+        getNumberProperty(inputDetails, "cached_tokens", "cachedTokens") ?? 0,
+        inputTokens
+      )
   const outputTokens = getNumberProperty(
     usageRecord,
     "output_tokens",
@@ -686,9 +691,9 @@ function getLlmTokenUsageSummary(usage: unknown) {
   )
   const outputDetails = asRecord(
     usageRecord.output_tokens_details ??
-      usageRecord.outputTokensDetails ??
-      usageRecord.completion_tokens_details ??
-      usageRecord.completionTokensDetails
+    usageRecord.outputTokensDetails ??
+    usageRecord.completion_tokens_details ??
+    usageRecord.completionTokensDetails
   )
   const reasoningTokens =
     getNumberProperty(outputDetails, "reasoning_tokens", "reasoningTokens") ?? 0
@@ -813,6 +818,9 @@ type LlmRunIdentifier = {
   llmRunId: string
 }
 
+type McpDeckIdentifierInput = {
+  deckId: string
+}
 type McpSimulationIdentifierInput = {
   llmRunId?: string
   simulationId?: string
@@ -877,6 +885,8 @@ function createTurnSimulationServer() {
 
 function createSimulationServer() {
   return createServer(SIMULATION_SERVER_NAME, (server) => {
+    registerListDecksTool(server)
+    registerGetDeckCardReferenceTool(server)
     registerCreateSimulationTool(server)
     registerDrawStartingHandTool(server, simulationMcpIdentifier)
     registerMulliganTool(server, simulationMcpIdentifier)
@@ -889,6 +899,75 @@ function createSimulationServer() {
   })
 }
 
+function registerListDecksTool(server: McpServer) {
+  server.registerTool(
+    "list_decks",
+    {
+      title: "List Decks",
+      description:
+        "List all saved decks and their IDs. Use this before create_simulation when you do not know which deck ID to use.",
+      inputSchema: {},
+    },
+    async () => {
+      const decks = await listDecks()
+
+      return {
+        content: createToolResultContent(
+          `Found ${decks.length} saved deck(s).`,
+          {
+            decks,
+          }
+        ),
+      }
+    }
+  )
+}
+
+function registerGetDeckCardReferenceTool(server: McpServer) {
+  server.registerTool(
+    "get_deck_card_reference",
+    {
+      title: "Get Deck Card Reference",
+      description:
+        "Return the decklist and card oracle text reference for a saved deck.",
+      inputSchema: {
+        ...deckIdentifierSchema,
+      },
+    },
+    async ({ deckId }: McpDeckIdentifierInput) => {
+      const deck = await getDeckCardReferenceData(deckId)
+
+      if (!deck) {
+        throw new Error("Deck not found.")
+      }
+
+      const uniqueCards = dedupeCardsByNameAndText([
+        ...deck.commanders,
+        ...deck.library,
+      ])
+
+      return {
+        content: createToolResultContent(
+          `Loaded card reference for ${deck.name}.`,
+          {
+            deck: {
+              id: deck.deckId,
+              name: deck.name,
+              description: deck.description,
+              format: deck.format,
+              createdAt: deck.createdAt,
+              updatedAt: deck.updatedAt,
+            },
+            commanders: expandCardNames(deck.commanders),
+            cards: expandCardNames(deck.library),
+            cardReference: formatCardReference(uniqueCards),
+          }
+        ),
+      }
+    }
+  )
+}
+
 function registerCreateSimulationTool(server: McpServer) {
   server.registerTool(
     "create_simulation",
@@ -897,11 +976,9 @@ function registerCreateSimulationTool(server: McpServer) {
       description:
         "Create a new simulation for a deck and return the simulation ID for future tool calls.",
       inputSchema: {
-        deckId: z
-          .string()
-          .trim()
-          .min(1)
-          .describe("The deck ID to create a simulation for."),
+        deckId: deckIdSchema.describe(
+          "The deck ID to create a simulation for."
+        ),
       },
     },
     async ({ deckId }) => {
@@ -1287,7 +1364,9 @@ const openingHandLlmToolDefinitions: LlamaCppToolDefinition[] = [
         .describe("Which end of the library to return the cards to."),
       randomizeOrder: z
         .boolean()
-        .describe("Whether to shuffle the returned cards before putting them back."),
+        .describe(
+          "Whether to shuffle the returned cards before putting them back."
+        ),
     }),
   },
 ]
@@ -1382,7 +1461,9 @@ const turnSimulationLlmToolDefinitions: LlamaCppToolDefinition[] = [
         .describe("Which end of the library to return the cards to."),
       randomizeOrder: z
         .boolean()
-        .describe("Whether to shuffle the returned cards before putting them back."),
+        .describe(
+          "Whether to shuffle the returned cards before putting them back."
+        ),
     }),
   },
   {
@@ -1396,11 +1477,7 @@ function createOpeningHandOpenRouterTools(
   mcpClient: Client,
   signal: AbortSignal
 ): Tool[] {
-  return createOpenRouterTools(
-    openingHandLlmToolDefinitions,
-    mcpClient,
-    signal
-  )
+  return createOpenRouterTools(openingHandLlmToolDefinitions, mcpClient, signal)
 }
 
 function createTurnSimulationOpenRouterTools(
@@ -1960,9 +2037,9 @@ async function prepareAndStartTurnLlmRun({
       turnNumber === 1
         ? await buildTurnSimulationPrompt({ llmRunId: turnRun.llmRunId })
         : await buildTurnSimulationPrompt(
-            { llmRunId: turnRun.llmRunId },
-            turnRun.previousGameState ?? undefined
-          )
+          { llmRunId: turnRun.llmRunId },
+          turnRun.previousGameState ?? undefined
+        )
     const requestPayload = buildTurnSimulationLlmRequestPayload(
       llmConfig,
       fullPrompt,
@@ -2290,7 +2367,7 @@ async function collectOpenRouterLlmStream({
       }
     )
     const removeAbortHandler = registerRuntimeAbortHandler(signal, () => {
-      void result.cancel().catch(() => {})
+      void result.cancel().catch(() => { })
       void closeMcpClient()
     })
 
@@ -2327,7 +2404,7 @@ async function collectOpenRouterLlmStream({
       }
     } catch (error) {
       if (signal.aborted) {
-        await result.cancel().catch(() => {})
+        await result.cancel().catch(() => { })
         throw createRuntimeAbortError()
       }
 
@@ -2544,31 +2621,31 @@ async function runOpeningHandLlmRun({
     const streamResult =
       config.provider === "openai"
         ? await collectOpenAiLlmStream({
-            config,
-            llmRunId,
-            phase: "opening_hand",
-            requestPayload: requireOpenAiRequestPayload(requestPayload),
-            runtime,
-          })
+          config,
+          llmRunId,
+          phase: "opening_hand",
+          requestPayload: requireOpenAiRequestPayload(requestPayload),
+          runtime,
+        })
         : config.provider === "openrouter"
           ? await collectOpenRouterLlmStream({
-              config,
-              createTools: createOpeningHandOpenRouterTools,
-              llmRunId,
-              mcpPath: OPENING_HAND_MCP_PATH,
-              phase: "opening_hand",
-              requestPayload: requireOpenRouterRequestPayload(requestPayload),
-              runtime,
-            })
+            config,
+            createTools: createOpeningHandOpenRouterTools,
+            llmRunId,
+            mcpPath: OPENING_HAND_MCP_PATH,
+            phase: "opening_hand",
+            requestPayload: requireOpenRouterRequestPayload(requestPayload),
+            runtime,
+          })
           : await collectLlamaCppLlmStream({
-              config,
-              llmRunId,
-              mcpPath: OPENING_HAND_MCP_PATH,
-              phase: "opening_hand",
-              requestPayload: requireLlamaCppRequestPayload(requestPayload),
-              runtime,
-              toolDefinitions: openingHandLlmToolDefinitions,
-            })
+            config,
+            llmRunId,
+            mcpPath: OPENING_HAND_MCP_PATH,
+            phase: "opening_hand",
+            requestPayload: requireLlamaCppRequestPayload(requestPayload),
+            runtime,
+            toolDefinitions: openingHandLlmToolDefinitions,
+          })
 
     throwIfRuntimeAborted(runtime.abortController.signal)
     await forceFlushRuntimeChunks(runtime)
@@ -2732,31 +2809,31 @@ async function runTurnLlmRun({
     const streamResult =
       config.provider === "openai"
         ? await collectOpenAiLlmStream({
-            config,
-            llmRunId,
-            phase: "turn",
-            requestPayload: requireOpenAiRequestPayload(requestPayload),
-            runtime,
-          })
+          config,
+          llmRunId,
+          phase: "turn",
+          requestPayload: requireOpenAiRequestPayload(requestPayload),
+          runtime,
+        })
         : config.provider === "openrouter"
           ? await collectOpenRouterLlmStream({
-              config,
-              createTools: createTurnSimulationOpenRouterTools,
-              llmRunId,
-              mcpPath: TURN_SIMULATION_MCP_PATH,
-              phase: "turn",
-              requestPayload: requireOpenRouterRequestPayload(requestPayload),
-              runtime,
-            })
+            config,
+            createTools: createTurnSimulationOpenRouterTools,
+            llmRunId,
+            mcpPath: TURN_SIMULATION_MCP_PATH,
+            phase: "turn",
+            requestPayload: requireOpenRouterRequestPayload(requestPayload),
+            runtime,
+          })
           : await collectLlamaCppLlmStream({
-              config,
-              llmRunId,
-              mcpPath: TURN_SIMULATION_MCP_PATH,
-              phase: "turn",
-              requestPayload: requireLlamaCppRequestPayload(requestPayload),
-              runtime,
-              toolDefinitions: turnSimulationLlmToolDefinitions,
-            })
+            config,
+            llmRunId,
+            mcpPath: TURN_SIMULATION_MCP_PATH,
+            phase: "turn",
+            requestPayload: requireLlamaCppRequestPayload(requestPayload),
+            runtime,
+            toolDefinitions: turnSimulationLlmToolDefinitions,
+          })
 
     throwIfRuntimeAborted(runtime.abortController.signal)
     await forceFlushRuntimeChunks(runtime)
@@ -3370,7 +3447,7 @@ async function main() {
         let hasSentSnapshot = false
         let shouldEndAfterSnapshot = false
         let isStreamOpen = true
-        let unsubscribe = () => {}
+        let unsubscribe = () => { }
         const keepaliveIntervalId = setInterval(() => {
           if (isStreamOpen) {
             res.write(formatSseComment("keepalive"))
@@ -4041,6 +4118,7 @@ function buildStartingHandSimulationPromptFromData(
   const commanderNames = expandCardNames(commanders)
   const cardNames = expandCardNames(library)
   const uniqueCards = dedupeCardsByNameAndText([...commanders, ...library])
+  const cardReference = formatCardReference(uniqueCards)
 
   return `${DRAW_STARTING_HAND_PROMPT}
 
@@ -4051,7 +4129,7 @@ Decklist:
 ${cardNames.join("\n")}
 
 Card reference:
-${uniqueCards.map((card) => `${card.name}\n${formatCardText(card)}\n`).join("\n")}
+${cardReference}
 
 LLM Run ID: ${llmRunId}
 `.trim()
@@ -4075,6 +4153,12 @@ function dedupeCardsByNameAndText(cards: readonly SimulationPromptCard[]) {
   }
 
   return Array.from(cardsByNameAndText.values())
+}
+
+function formatCardReference(cards: readonly SimulationPromptCard[]) {
+  return cards
+    .map((card) => `${card.name}\n${formatCardText(card)}\n`)
+    .join("\n")
 }
 
 function formatCardText(card: SimulationPromptCard) {
@@ -4147,19 +4231,20 @@ function buildTurnSimulationPromptFromData(
     left.localeCompare(right)
   )
   const uniqueCards = dedupeCardsByNameAndText([...commanders, ...libraryCards])
+  const cardReference = formatCardReference(uniqueCards)
   const resolvedGameState = gameState?.trim()
     ? gameState.trim()
     : buildInitialTurnGameState({
-        commanderNames,
-        startingHand,
-      })
+      commanderNames,
+      startingHand,
+    })
 
   return `${SIMULATE_TURN_PROMPT}
 
 ${GENERIC_GAME_RULES_REFERENCE}
 
 Card reference:
-${uniqueCards.map((card) => `${card.name}\n${formatCardText(card)}\n`).join("\n")}
+${cardReference}
 
 Cards in library. Not actual order of library. Use tools to interact with library:
 ${cardNames.join("\n")}
