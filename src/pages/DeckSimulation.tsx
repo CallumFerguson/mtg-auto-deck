@@ -1963,11 +1963,11 @@ function SimulationResultsPanel({
           </div>
 
           {run.gameState && !getSimulationFinalParsedOutput(run) ? (
-            <details className="rounded-md border border-emerald-500/30 bg-emerald-950/20">
-              <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-emerald-100 transition-colors hover:text-emerald-50">
+            <details className={simulationResultChunkSurfaceClassName}>
+              <summary className={simulationResultChunkSummaryClassName}>
                 Game state
               </summary>
-              <p className="border-t border-emerald-500/20 p-3 text-sm leading-6 whitespace-pre-wrap text-emerald-50/90">
+              <p className={simulationResultChunkTextClassName}>
                 {run.gameState}
               </p>
             </details>
@@ -1985,6 +1985,15 @@ function SimulationResultsPanel({
     </div>
   )
 }
+
+const simulationResultChunkSurfaceClassName =
+  "rounded-md border border-border bg-black/20"
+const simulationResultChunkSummaryClassName =
+  "cursor-pointer px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+const simulationResultChunkTextClassName =
+  "border-t border-border p-3 text-sm leading-6 whitespace-pre-wrap text-muted-foreground"
+const simulationResultChunkPreClassName =
+  "debug-scrollbar-neutral max-h-64 max-w-full overflow-y-auto border-t border-border p-3 text-xs leading-5 break-words whitespace-pre-wrap text-muted-foreground"
 
 function SimulationResultChunkCards({
   run,
@@ -2004,12 +2013,12 @@ function SimulationResultChunkCards({
           return (
             <details
               key={block.id}
-              className="rounded-md border border-border bg-black/20"
+              className={simulationResultChunkSurfaceClassName}
             >
-              <summary className="cursor-pointer px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground">
+              <summary className={simulationResultChunkSummaryClassName}>
                 Reasoning summary
               </summary>
-              <p className="border-t border-border p-3 text-sm leading-6 whitespace-pre-wrap text-muted-foreground">
+              <p className={simulationResultChunkTextClassName}>
                 {block.text}
               </p>
             </details>
@@ -2020,12 +2029,12 @@ function SimulationResultChunkCards({
           return (
             <details
               key={block.id}
-              className="rounded-md border border-border bg-black/20"
+              className={simulationResultChunkSurfaceClassName}
             >
-              <summary className="cursor-pointer px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground">
+              <summary className={simulationResultChunkSummaryClassName}>
                 Output
               </summary>
-              <p className="border-t border-border p-3 text-sm leading-6 whitespace-pre-wrap text-muted-foreground">
+              <p className={simulationResultChunkTextClassName}>
                 {block.text}
               </p>
             </details>
@@ -2064,21 +2073,21 @@ function SimulationFinalOutputBlock({
   finalOutput: ParsedSimulationFinalOutput
 }) {
   return (
-    <div className="grid gap-3 rounded-md border border-sky-500/30 bg-sky-950/20 p-3">
-      <p className="text-sm leading-6 text-sky-50/90">
+    <div className={`grid gap-3 p-3 ${simulationResultChunkSurfaceClassName}`}>
+      <p className="text-sm leading-6 text-muted-foreground">
         {finalOutput.summary}
       </p>
 
       {finalOutput.type === "opening_hand" ? (
         <div>
-          <p className="text-xs font-medium tracking-wide text-sky-200/80 uppercase">
+          <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
             Kept hand
           </p>
-          <ul className="mt-2 grid gap-1 text-sm text-sky-50/90 sm:grid-cols-2">
+          <ul className="mt-2 grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
             {finalOutput.keptHand.map((cardName, index) => (
               <li
                 key={`${cardName}-${index}`}
-                className="rounded border border-sky-500/20 bg-black/20 px-2 py-1"
+                className="rounded border border-border bg-black/20 px-2 py-1"
               >
                 {cardName}
               </li>
@@ -2086,11 +2095,11 @@ function SimulationFinalOutputBlock({
           </ul>
         </div>
       ) : (
-        <details className="rounded-md border border-sky-500/20 bg-black/20">
-          <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-sky-100 transition-colors hover:text-sky-50">
+        <details className={simulationResultChunkSurfaceClassName}>
+          <summary className={simulationResultChunkSummaryClassName}>
             Game state
           </summary>
-          <p className="border-t border-sky-500/20 p-3 text-sm leading-6 whitespace-pre-wrap text-sky-50/90">
+          <p className={simulationResultChunkTextClassName}>
             {finalOutput.gameState}
           </p>
         </details>
@@ -2105,58 +2114,25 @@ function SimulationResultEvent({
   chunk: SimulationDebugLlmRunChunk
 }) {
   if (chunk.kind === "mcp_call_start") {
-    if (isLogTurnActionToolCall(chunk)) {
-      return (
-        <div className="rounded-md border border-border bg-black/20 px-3 py-2 text-sm text-muted-foreground">
-          Tool started: {chunk.mcpFunctionName ?? "unknown tool"}
-        </div>
-      )
-    }
-
     return (
-      <div className="rounded-md border border-amber-500/25 bg-amber-950/15 px-3 py-2 text-sm text-amber-100/85">
+      <div
+        className={`${simulationResultChunkSurfaceClassName} px-3 py-2 text-sm text-muted-foreground`}
+      >
         Tool started: {chunk.mcpFunctionName ?? "unknown tool"}
       </div>
     )
   }
 
   if (chunk.kind === "mcp_call_complete") {
-    const isToolFailure = isMcpCallFailure(chunk)
-    const isNeutralToolCall = !isToolFailure && isLogTurnActionToolCall(chunk)
-
     return (
-      <details
-        className={
-          isToolFailure
-            ? "rounded-md border border-destructive/35 bg-destructive/10"
-            : isNeutralToolCall
-              ? "rounded-md border border-border bg-black/20"
-              : "rounded-md border border-emerald-500/25 bg-emerald-950/15"
-        }
-      >
-        <summary
-          className={
-            isToolFailure
-              ? "cursor-pointer px-3 py-2 text-sm text-destructive transition-colors hover:text-destructive/90"
-              : isNeutralToolCall
-                ? "cursor-pointer px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
-                : "cursor-pointer px-3 py-2 text-sm text-emerald-100/85 transition-colors hover:text-emerald-50"
-          }
-        >
+      <details className={simulationResultChunkSurfaceClassName}>
+        <summary className={simulationResultChunkSummaryClassName}>
           {getMcpCallCompleteTitle(chunk)}
         </summary>
         {chunk.cardMentions.length > 0 ? (
           <SimulationResultCardMentions mentions={chunk.cardMentions} />
         ) : null}
-        <pre
-          className={
-            isToolFailure
-              ? "debug-scrollbar-neutral max-h-64 max-w-full overflow-y-auto border-t border-destructive/20 p-3 text-xs leading-5 break-words whitespace-pre-wrap text-destructive"
-              : isNeutralToolCall
-                ? "debug-scrollbar-neutral max-h-64 max-w-full overflow-y-auto border-t border-border p-3 text-xs leading-5 break-words whitespace-pre-wrap text-muted-foreground"
-                : "debug-scrollbar-neutral max-h-64 max-w-full overflow-y-auto border-t border-emerald-500/20 p-3 text-xs leading-5 break-words whitespace-pre-wrap text-emerald-50/80"
-          }
-        >
+        <pre className={simulationResultChunkPreClassName}>
           {formatResultEventPayload(getMcpCallResultPayload(chunk))}
         </pre>
       </details>
@@ -2165,11 +2141,11 @@ function SimulationResultEvent({
 
   if (chunk.kind === "error") {
     return (
-      <details className="rounded-md border border-destructive/35 bg-destructive/10">
-        <summary className="cursor-pointer px-3 py-2 text-sm text-destructive transition-colors hover:text-destructive/90">
+      <details className={simulationResultChunkSurfaceClassName}>
+        <summary className={simulationResultChunkSummaryClassName}>
           Simulation event failed
         </summary>
-        <pre className="debug-scrollbar-neutral max-h-64 max-w-full overflow-y-auto border-t border-destructive/20 p-3 text-xs leading-5 break-words whitespace-pre-wrap text-destructive">
+        <pre className={simulationResultChunkPreClassName}>
           {formatResultEventPayload(chunk.payload)}
         </pre>
       </details>
@@ -2178,18 +2154,20 @@ function SimulationResultEvent({
 
   if (chunk.kind === "cancelled") {
     return (
-      <div className="rounded-md border border-slate-500/25 bg-slate-900/25 px-3 py-2 text-sm text-slate-200/85">
+      <div
+        className={`${simulationResultChunkSurfaceClassName} px-3 py-2 text-sm text-muted-foreground`}
+      >
         Simulation cancelled: {getPayloadMessage(chunk.payload)}
       </div>
     )
   }
 
   return (
-    <details className="rounded-md border border-border bg-black/20">
-      <summary className="cursor-pointer px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground">
+    <details className={simulationResultChunkSurfaceClassName}>
+      <summary className={simulationResultChunkSummaryClassName}>
         {getDebugChunkEventLabel(chunk)}
       </summary>
-      <pre className="debug-scrollbar-neutral max-h-64 max-w-full overflow-y-auto border-t border-border p-3 text-xs leading-5 break-words whitespace-pre-wrap text-muted-foreground">
+      <pre className={simulationResultChunkPreClassName}>
         {JSON.stringify(chunk, null, 2)}
       </pre>
     </details>
@@ -2202,11 +2180,11 @@ function SimulationResultCardMentions({
   mentions: SimulationDebugLlmRunChunk["cardMentions"]
 }) {
   return (
-    <div className="grid gap-2 border-t border-emerald-500/20 p-3 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="grid gap-2 border-t border-border p-3 sm:grid-cols-2 lg:grid-cols-3">
       {mentions.map((mention, index) => (
         <div
           key={`${mention.requestedName}-${index}`}
-          className="flex min-w-0 items-center gap-2 rounded-md border border-emerald-500/20 bg-black/20 p-2"
+          className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-black/20 p-2"
         >
           {mention.defaultImageUrl ? (
             <img
@@ -2217,12 +2195,12 @@ function SimulationResultCardMentions({
             />
           ) : null}
           <div className="min-w-0 text-xs leading-5">
-            <p className="truncate font-medium text-emerald-50">
+            <p className="truncate font-medium text-foreground">
               {mention.requestedName}
             </p>
             {mention.resolvedName &&
             mention.resolvedName !== mention.requestedName ? (
-              <p className="truncate text-emerald-100/70">
+              <p className="truncate text-muted-foreground">
                 {mention.resolvedName}
               </p>
             ) : null}
@@ -2242,10 +2220,6 @@ function formatResultEventPayload(payload: unknown) {
   }
 
   return JSON.stringify(payload, null, 2)
-}
-
-function isLogTurnActionToolCall(chunk: SimulationDebugLlmRunChunk) {
-  return chunk.mcpFunctionName === "log_turn_action"
 }
 
 function getMcpCallCompleteTitle(chunk: SimulationDebugLlmRunChunk) {
