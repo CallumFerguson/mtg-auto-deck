@@ -2200,6 +2200,7 @@ function SimulationResultCompletedCardToolEvent({
   const cardImageMentions = chunk.cardMentions.filter(
     (mention) => mention.defaultImageUrl
   )
+  const shouldFitSevenCardImages = cardImageMentions.length >= 7
 
   return (
     <div className={simulationResultChunkSurfaceClassName}>
@@ -2237,11 +2238,15 @@ function SimulationResultCompletedCardToolEvent({
         </div>
 
         {showCardImages ? (
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-wrap justify-start gap-3">
             {cardImageMentions.map((mention, index) => (
               <a
                 key={`${mention.requestedName}-image-${index}`}
-                className="block w-28 overflow-hidden rounded-sm bg-black/40 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none sm:w-32"
+                className={
+                  shouldFitSevenCardImages
+                    ? "block w-[min(8rem,calc((100%-4.5rem)/7))] min-w-0 overflow-hidden rounded-sm bg-black/40 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
+                    : "block w-28 overflow-hidden rounded-sm bg-black/40 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none sm:w-32"
+                }
                 href={getCardMentionScryfallUrl(mention)}
                 target="_blank"
                 rel="noreferrer"
