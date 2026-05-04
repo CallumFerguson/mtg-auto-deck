@@ -109,6 +109,7 @@ export type SimulationDebugLlmRunChunkCardMention = {
   requestedName: string
   resolutionStatus: LlmRunChunkCardMentionResolutionStatus
   resolvedName: string | null
+  scryfallUri: string | null
   defaultImageUrl: string | null
 }
 
@@ -2219,6 +2220,7 @@ type LlmRunChunkCardMentionInsert = LlmRunChunkCardMentionRequest & {
   oracleId: string | null
   resolutionStatus: LlmRunChunkCardMentionResolutionStatus
   resolvedName: string | null
+  scryfallUri: string | null
   defaultImageUrl: string | null
 }
 
@@ -2226,6 +2228,7 @@ type ResolvedCardMentionRow = {
   normalized_name: string
   oracle_id: string
   resolved_name: string
+  scryfall_uri: string
   default_image_url: string | null
   resolution_status: LlmRunChunkCardMentionResolutionStatus
 }
@@ -2307,6 +2310,7 @@ async function insertLlmRunChunkCardMentions(
       requestedName: mention.requestedName,
       resolutionStatus: mention.resolutionStatus,
       resolvedName: mention.resolvedName,
+      scryfallUri: mention.scryfallUri,
       defaultImageUrl: mention.defaultImageUrl,
     })
   }
@@ -2335,6 +2339,7 @@ async function resolveLlmRunChunkCardMentions(
       oracleId: resolvedCard?.oracle_id ?? null,
       resolutionStatus: resolvedCard?.resolution_status ?? "missing",
       resolvedName: resolvedCard?.resolved_name ?? null,
+      scryfallUri: resolvedCard?.scryfall_uri ?? null,
       defaultImageUrl: resolvedCard?.default_image_url ?? null,
     }
   })
@@ -2360,6 +2365,7 @@ async function getResolvedCardsByNormalizedName(
           requested.normalized_name,
           card.oracle_id,
           card.name AS resolved_name,
+          card.scryfall_uri,
           card.default_image_url,
           'exact'::llm_run_chunk_card_mention_resolution_status AS resolution_status,
           0 AS match_priority,
@@ -2385,6 +2391,7 @@ async function getResolvedCardsByNormalizedName(
           requested.normalized_name,
           card.oracle_id,
           card.name AS resolved_name,
+          card.scryfall_uri,
           COALESCE(face.default_image_url, card.default_image_url) AS default_image_url,
           'face_exact'::llm_run_chunk_card_mention_resolution_status AS resolution_status,
           1 AS match_priority,
@@ -2410,6 +2417,7 @@ async function getResolvedCardsByNormalizedName(
         normalized_name,
         oracle_id,
         resolved_name,
+        scryfall_uri,
         default_image_url,
         resolution_status
       FROM matches
@@ -3895,18 +3903,22 @@ async function getCardMentionsByLlmRunChunkIds(chunkIds: readonly number[]) {
     requested_name: string
     resolution_status: LlmRunChunkCardMentionResolutionStatus
     resolved_name: string | null
+    scryfall_uri: string | null
     default_image_url: string | null
   }>(
     `
       SELECT
-        llm_run_chunk_id,
-        requested_name,
-        resolution_status,
-        resolved_name,
-        default_image_url
-      FROM llm_run_chunk_card_mentions
-      WHERE llm_run_chunk_id = ANY($1::bigint[])
-      ORDER BY llm_run_chunk_id ASC, source_path ASC, position ASC, id ASC
+        mention.llm_run_chunk_id,
+        mention.requested_name,
+        mention.resolution_status,
+        mention.resolved_name,
+        card.scryfall_uri,
+        mention.default_image_url
+      FROM llm_run_chunk_card_mentions mention
+      LEFT JOIN scryfall_oracle_cards card
+        ON card.oracle_id = mention.oracle_id
+      WHERE mention.llm_run_chunk_id = ANY($1::bigint[])
+      ORDER BY mention.llm_run_chunk_id ASC, mention.source_path ASC, mention.position ASC, mention.id ASC
     `,
     [chunkIds]
   )
@@ -3919,6 +3931,7 @@ async function getCardMentionsByLlmRunChunkIds(chunkIds: readonly number[]) {
       requestedName: row.requested_name,
       resolutionStatus: row.resolution_status,
       resolvedName: row.resolved_name,
+      scryfallUri: row.scryfall_uri,
       defaultImageUrl: row.default_image_url,
     })
     cardMentionsByChunkId.set(chunkId, cardMentions)

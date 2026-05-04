@@ -81,6 +81,7 @@ export type SimulationDebugLlmRunChunkCardMention = {
   requestedName: string
   resolutionStatus: "exact" | "face_exact" | "missing"
   resolvedName: string | null
+  scryfallUri: string | null
   defaultImageUrl: string | null
 }
 

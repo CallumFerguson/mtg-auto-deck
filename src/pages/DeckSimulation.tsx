@@ -13,6 +13,8 @@ import {
 import {
   Bug,
   Dices,
+  Eye,
+  EyeOff,
   MoreVertical,
   Plus,
   RefreshCw,
@@ -2135,6 +2137,10 @@ function SimulationResultEvent({
   }
 
   if (chunk.kind === "mcp_call_complete") {
+    if (chunk.cardMentions.length > 0 && !isMcpCallFailure(chunk)) {
+      return <SimulationResultCompletedCardToolEvent chunk={chunk} />
+    }
+
     return (
       <details className={simulationResultChunkSurfaceClassName}>
         <summary className={simulationResultChunkSummaryClassName}>
@@ -2185,6 +2191,77 @@ function SimulationResultEvent({
   )
 }
 
+function SimulationResultCompletedCardToolEvent({
+  chunk,
+}: {
+  chunk: SimulationDebugLlmRunChunk
+}) {
+  const [showCardImages, setShowCardImages] = useState(false)
+  const cardImageMentions = chunk.cardMentions.filter(
+    (mention) => mention.defaultImageUrl
+  )
+
+  return (
+    <div className={simulationResultChunkSurfaceClassName}>
+      <p className="px-3 py-2 text-sm text-muted-foreground">
+        {getMcpCallCompleteTitle(chunk)}
+      </p>
+      <div className="grid gap-3 border-t border-border p-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <Button
+            className="border-emerald-500/30 bg-emerald-950/20 text-emerald-100 hover:bg-emerald-900/35 hover:text-emerald-50"
+            size="xs"
+            type="button"
+            variant="outline"
+            onClick={() => setShowCardImages((currentValue) => !currentValue)}
+          >
+            {showCardImages ? <EyeOff /> : <Eye />}
+            {showCardImages ? "Hide cards" : "Show cards"}
+          </Button>
+          {!showCardImages
+            ? chunk.cardMentions.map((mention, index) => (
+                <a
+                  key={`${mention.requestedName}-${index}`}
+                  className="max-w-full rounded-full border border-sky-500/30 bg-sky-950/30 px-2.5 py-1 text-xs font-medium text-sky-100 transition-colors hover:border-sky-300/60 hover:bg-sky-900/40 hover:text-sky-50 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
+                  href={getCardMentionScryfallUrl(mention)}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={getCardMentionDisplayName(mention)}
+                >
+                  <span className="block truncate">
+                    {getCardMentionDisplayName(mention)}
+                  </span>
+                </a>
+              ))
+            : null}
+        </div>
+
+        {showCardImages ? (
+          <div className="flex flex-wrap gap-3">
+            {cardImageMentions.map((mention, index) => (
+              <a
+                key={`${mention.requestedName}-image-${index}`}
+                className="block w-28 overflow-hidden rounded-sm border border-border/80 bg-black/40 transition-colors hover:border-sky-300/60 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none sm:w-32"
+                href={getCardMentionScryfallUrl(mention)}
+                target="_blank"
+                rel="noreferrer"
+                title={getCardMentionDisplayName(mention)}
+              >
+                <img
+                  className="aspect-[488/680] w-full object-cover"
+                  src={mention.defaultImageUrl ?? ""}
+                  alt={getCardMentionDisplayName(mention)}
+                  loading="lazy"
+                />
+              </a>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 function SimulationResultCardMentions({
   mentions,
 }: {
@@ -2223,6 +2300,24 @@ function SimulationResultCardMentions({
       ))}
     </div>
   )
+}
+
+function getCardMentionDisplayName(
+  mention: SimulationDebugLlmRunChunk["cardMentions"][number]
+) {
+  return mention.requestedName
+}
+
+function getCardMentionScryfallUrl(
+  mention: SimulationDebugLlmRunChunk["cardMentions"][number]
+) {
+  if (mention.scryfallUri) {
+    return mention.scryfallUri
+  }
+
+  return `https://scryfall.com/search?q=${encodeURIComponent(
+    mention.resolvedName ?? mention.requestedName
+  )}`
 }
 
 function formatResultEventPayload(payload: unknown) {
