@@ -83,6 +83,62 @@ test("replaces synthetic chunks when a persisted run update arrives", () => {
   assert.equal(updatedResults?.turnLlmRuns[0].status, "completed")
 })
 
+test("keeps card mentions from first streamed persisted chunks", () => {
+  const results = createResults({
+    openingHandLlmRuns: [
+      createRun({
+        llmRunId: "opening-run",
+        phase: "opening_hand",
+      }),
+    ],
+  })
+
+  const updatedResults = applySimulationResultsStreamEvent(results, {
+    type: "chunk",
+    llmRunId: "opening-run",
+    chunk: createChunk({
+      id: 20,
+      kind: "mcp_call_complete",
+      mcpFunctionName: "draw_starting_hand",
+      mcpFunctionOutput: {
+        data: {
+          cards: ["Sol Ring", "Mega Fake Lotus"],
+        },
+      },
+      sequence: 1,
+      cardMentions: [
+        {
+          requestedName: "Sol Ring",
+          resolutionStatus: "exact",
+          resolvedName: "Sol Ring",
+          defaultImageUrl: "https://cards.example/sol-ring.jpg",
+        },
+        {
+          requestedName: "Mega Fake Lotus",
+          resolutionStatus: "missing",
+          resolvedName: null,
+          defaultImageUrl: null,
+        },
+      ],
+    }),
+  })
+
+  assert.deepEqual(updatedResults?.openingHandLlmRuns[0].chunks[0].cardMentions, [
+    {
+      requestedName: "Sol Ring",
+      resolutionStatus: "exact",
+      resolvedName: "Sol Ring",
+      defaultImageUrl: "https://cards.example/sol-ring.jpg",
+    },
+    {
+      requestedName: "Mega Fake Lotus",
+      resolutionStatus: "missing",
+      resolvedName: null,
+      defaultImageUrl: null,
+    },
+  ])
+})
+
 test("merges OpenRouter generations from persisted run updates", () => {
   const results = createResults({
     turnLlmRuns: [
@@ -395,6 +451,7 @@ function createRun(overrides: {
 }
 
 function createChunk(overrides: {
+  cardMentions?: SimulationDebugLlmRunChunk["cardMentions"]
   id: number | null
   kind?: string
   mcpFunctionName?: string | null
@@ -413,6 +470,7 @@ function createChunk(overrides: {
     reasoningDelta: overrides.reasoningDelta ?? null,
     outputDelta: overrides.outputDelta ?? null,
     payload: overrides.payload ?? {},
+    cardMentions: overrides.cardMentions ?? [],
     receivedAt: "2026-01-01T00:00:00.000Z",
   }
 }

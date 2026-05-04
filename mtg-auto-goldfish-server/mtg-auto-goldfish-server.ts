@@ -26,6 +26,7 @@ import {
 import { ensureFreshScryfallOracleCards } from "./scryfall-cache.js"
 import {
   appendLlmRunChunkAtNextSequence,
+  appendLlmRunChunkWithResolvedCardMentions,
   appendLlmRunChunks,
   cancelLlmRun,
   cancelStaleInFlightLlmRuns,
@@ -75,6 +76,7 @@ import type {
   LlmRunPhase,
   LlmRunStatus,
   OpenRouterGeneration,
+  SimulationDebugLlmRunChunk,
   SimulationDebugLlmRun,
   SimulationLlmCompletionResult,
   SimulationPromptCard,
@@ -311,6 +313,7 @@ function createRuntimeStreamChunk(
     reasoningDelta: chunk.reasoningDelta,
     outputDelta: chunk.outputDelta,
     payload: chunk.payload,
+    cardMentions: [],
     receivedAt: new Date().toISOString(),
   }
 }
@@ -599,6 +602,13 @@ function publishRuntimeChunk(
 
   const streamChunk = createRuntimeStreamChunk(chunk)
 
+  publishRuntimeStreamChunk(runtime, streamChunk)
+}
+
+function publishRuntimeStreamChunk(
+  runtime: ActiveLlmRunRuntime,
+  streamChunk: SimulationResultsStreamChunk
+) {
   rememberRuntimeStreamChunk(runtime, streamChunk)
   simulationResultsBroadcaster.publish(runtime.simulationId, {
     type: "chunk",
@@ -2321,7 +2331,7 @@ async function collectOpenAiLlmStream({
     signal,
   })
 
-  await forEachRuntimeAbortableAsync(stream, signal, (event) => {
+  await forEachRuntimeAbortableAsync(stream, signal, async (event) => {
     const eventRecord = asRecord(event)
     const eventType = getStringProperty(eventRecord, "type")
     const normalizedEvent = normalizeOpenAiStreamEvent(event)
@@ -2335,7 +2345,7 @@ async function collectOpenAiLlmStream({
       usage = responseRecord.usage ?? {}
     }
 
-    appendRuntimeChunk(runtime, normalizedEvent)
+    await appendRuntimeChunk(runtime, normalizedEvent)
 
     if (isProviderTerminalEvent(eventType)) {
       providerTerminalEventError = new ProviderTerminalEventError(
@@ -2487,7 +2497,7 @@ async function collectOpenRouterLlmStream({
           }
         }
 
-        appendRuntimeChunk(runtime, normalizedEvent)
+        await appendRuntimeChunk(runtime, normalizedEvent)
 
         if (isProviderTerminalEvent(eventType)) {
           providerTerminalEventError = new ProviderTerminalEventError(
@@ -2773,7 +2783,7 @@ async function runOpeningHandLlmRun({
         phase: "opening_hand",
         provider: config.provider,
       })
-      appendRuntimeChunk(runtime, createCancellationChunk())
+      await appendRuntimeChunk(runtime, createCancellationChunk())
       await tryForceFlushRuntimeChunks(runtime, "cancelled opening-hand run")
       await cancelLlmRun(llmRunId, "Opening-hand LLM run was cancelled.")
       runtime.status = "cancelled"
@@ -2786,7 +2796,7 @@ async function runOpeningHandLlmRun({
     }
 
     if (!(error instanceof ProviderTerminalEventError)) {
-      appendRuntimeChunk(runtime, createServerErrorChunk(error))
+      await appendRuntimeChunk(runtime, createServerErrorChunk(error))
     }
 
     await tryForceFlushRuntimeChunks(runtime, "failed opening-hand run")
@@ -2962,7 +2972,7 @@ async function runTurnLlmRun({
         phase: "turn",
         provider: config.provider,
       })
-      appendRuntimeChunk(
+      await appendRuntimeChunk(
         runtime,
         createCancellationChunk("Turn LLM run was cancelled.")
       )
@@ -2978,7 +2988,7 @@ async function runTurnLlmRun({
     }
 
     if (!(error instanceof ProviderTerminalEventError)) {
-      appendRuntimeChunk(runtime, createServerErrorChunk(error))
+      await appendRuntimeChunk(runtime, createServerErrorChunk(error))
     }
 
     await tryForceFlushRuntimeChunks(runtime, "failed turn run")
@@ -3055,7 +3065,7 @@ async function stopActiveSimulationLlmRuns(
   }
 }
 
-function appendRuntimeChunk(
+async function appendRuntimeChunk(
   runtime: ActiveLlmRunRuntime,
   chunk: Omit<LlmRunChunkInput, "sequence">
 ) {
@@ -3064,10 +3074,41 @@ function appendRuntimeChunk(
     sequence: runtime.nextSequence,
   }
 
-  runtime.chunkBuffer.push(sequencedChunk)
   runtime.nextSequence += 1
+
+  if (shouldPersistRuntimeChunkBeforeStreaming(sequencedChunk)) {
+    await forceFlushRuntimeChunks(runtime)
+
+    const persistedChunk = await appendLlmRunChunkWithResolvedCardMentions(
+      runtime.llmRunId,
+      sequencedChunk
+    )
+
+    if (persistedChunk) {
+      publishRuntimeStreamChunk(
+        runtime,
+        createStreamChunkFromPersistedChunk(persistedChunk)
+      )
+      return
+    }
+  }
+
+  runtime.chunkBuffer.push(sequencedChunk)
   publishRuntimeChunk(runtime, sequencedChunk)
   scheduleRuntimeFlush(runtime)
+}
+
+function shouldPersistRuntimeChunkBeforeStreaming(chunk: LlmRunChunkInput) {
+  return chunk.kind === "mcp_call_complete"
+}
+
+function createStreamChunkFromPersistedChunk(
+  chunk: SimulationDebugLlmRunChunk
+): SimulationResultsStreamChunk {
+  return {
+    ...chunk,
+    id: chunk.id,
+  }
 }
 
 function scheduleRuntimeFlush(runtime: ActiveLlmRunRuntime) {

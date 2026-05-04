@@ -108,7 +108,9 @@ export async function collectLlamaCppChatCompletion({
   signal,
   toolDefinitions,
 }: {
-  appendChunk: (chunk: Omit<LlmRunChunkInput, "sequence">) => void
+  appendChunk: (
+    chunk: Omit<LlmRunChunkInput, "sequence">
+  ) => void | Promise<void>
   callTool: (
     name: string,
     args: Record<string, unknown>,
@@ -148,7 +150,9 @@ export async function collectLlamaCppChatCompletion({
         )
       }
 
-      appendChunk(createLlamaCppCompletedChunk(stepResult.responseMetadata))
+      await appendChunk(
+        createLlamaCppCompletedChunk(stepResult.responseMetadata)
+      )
 
       return {
         outputText,
@@ -166,14 +170,14 @@ export async function collectLlamaCppChatCompletion({
         throw new Error(`llama.cpp requested unknown tool: ${toolCall.name}.`)
       }
 
-      appendChunk(
+      await appendChunk(
         createLlamaCppToolCallStartChunk(toolCall.name, toolCall.rawToolCall)
       )
 
       const toolInput = parseAndValidateToolArguments(toolCall, toolDefinition)
       const toolOutput = await callTool(toolCall.name, toolInput, signal)
 
-      appendChunk(
+      await appendChunk(
         createLlamaCppToolCallCompleteChunk(toolCall.name, toolOutput, {
           result: toolOutput,
           toolCall: toolCall.rawToolCall,
@@ -213,7 +217,9 @@ async function collectLlamaCppChatCompletionStep({
   stepNumber,
   stream,
 }: {
-  appendChunk: (chunk: Omit<LlmRunChunkInput, "sequence">) => void
+  appendChunk: (
+    chunk: Omit<LlmRunChunkInput, "sequence">
+  ) => void | Promise<void>
   signal: AbortSignal
   stepNumber: number
   stream: AsyncIterable<ChatCompletionChunk>
@@ -243,12 +249,14 @@ async function collectLlamaCppChatCompletionStep({
       const outputDelta = getStringProperty(deltaRecord, "content")
 
       if (reasoningDelta) {
-        appendChunk(createLlamaCppReasoningDeltaChunk(reasoningDelta, chunk))
+        await appendChunk(
+          createLlamaCppReasoningDeltaChunk(reasoningDelta, chunk)
+        )
       }
 
       if (outputDelta) {
         outputText += outputDelta
-        appendChunk(createLlamaCppMessageDeltaChunk(outputDelta, chunk))
+        await appendChunk(createLlamaCppMessageDeltaChunk(outputDelta, chunk))
       }
 
       rememberLlamaCppStreamingToolCallDeltas(

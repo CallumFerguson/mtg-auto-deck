@@ -2135,6 +2135,9 @@ function SimulationResultEvent({
         >
           {getMcpCallCompleteTitle(chunk)}
         </summary>
+        {chunk.cardMentions.length > 0 ? (
+          <SimulationResultCardMentions mentions={chunk.cardMentions} />
+        ) : null}
         <pre
           className={
             isToolFailure
@@ -2180,6 +2183,46 @@ function SimulationResultEvent({
         {JSON.stringify(chunk, null, 2)}
       </pre>
     </details>
+  )
+}
+
+function SimulationResultCardMentions({
+  mentions,
+}: {
+  mentions: SimulationDebugLlmRunChunk["cardMentions"]
+}) {
+  return (
+    <div className="grid gap-2 border-t border-emerald-500/20 p-3 sm:grid-cols-2 lg:grid-cols-3">
+      {mentions.map((mention, index) => (
+        <div
+          key={`${mention.requestedName}-${index}`}
+          className="flex min-w-0 items-center gap-2 rounded-md border border-emerald-500/20 bg-black/20 p-2"
+        >
+          {mention.defaultImageUrl ? (
+            <img
+              className="h-16 w-12 shrink-0 rounded-sm object-cover"
+              src={mention.defaultImageUrl}
+              alt=""
+              loading="lazy"
+            />
+          ) : null}
+          <div className="min-w-0 text-xs leading-5">
+            <p className="truncate font-medium text-emerald-50">
+              {mention.requestedName}
+            </p>
+            {mention.resolvedName &&
+            mention.resolvedName !== mention.requestedName ? (
+              <p className="truncate text-emerald-100/70">
+                {mention.resolvedName}
+              </p>
+            ) : null}
+            {mention.resolutionStatus === "missing" ? (
+              <p className="text-muted-foreground">No Scryfall match</p>
+            ) : null}
+          </div>
+        </div>
+      ))}
+    </div>
   )
 }
 

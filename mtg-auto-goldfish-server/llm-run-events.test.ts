@@ -21,6 +21,7 @@ import {
   STALE_IN_FLIGHT_LLM_RUN_CANCELLATION_MESSAGE,
   STALE_RUNNING_SIMULATION_CANCELLATION_MESSAGE,
   canApplyLateLlmRunTerminalUpdate,
+  extractLlmRunChunkCardMentionRequests,
   getOpeningHandCompletionDecision,
   getSimulationCreationDecision,
   getTurnCompletionDecision,
@@ -76,6 +77,83 @@ test("keeps malformed MCP output as raw text instead of throwing", () => {
 
   assert.equal(chunk.kind, "mcp_call_complete")
   assert.equal(chunk.mcpFunctionOutput, '{"cards":')
+})
+
+test("extracts card mentions from draw tool output data", () => {
+  assert.deepEqual(
+    extractLlmRunChunkCardMentionRequests({
+      kind: "mcp_call_complete",
+      mcpFunctionName: "draw_starting_hand",
+      mcpFunctionOutput: {
+        data: {
+          cards: ["Sol Ring", "Mega Fake Lotus", "Sol Ring"],
+        },
+      },
+    }),
+    [
+      {
+        sourcePath: "data.cards",
+        position: 0,
+        requestedName: "Sol Ring",
+      },
+      {
+        sourcePath: "data.cards",
+        position: 1,
+        requestedName: "Mega Fake Lotus",
+      },
+      {
+        sourcePath: "data.cards",
+        position: 2,
+        requestedName: "Sol Ring",
+      },
+    ]
+  )
+})
+
+test("extracts requested and found card mentions from library search output", () => {
+  assert.deepEqual(
+    extractLlmRunChunkCardMentionRequests({
+      kind: "mcp_call_complete",
+      mcpFunctionName: "take_cards_from_library",
+      mcpFunctionOutput: {
+        data: {
+          foundCards: ["Sol Ring"],
+          matches: [
+            {
+              requestedCard: "Sool Ring",
+              foundCard: "Sol Ring",
+            },
+            {
+              requestedCard: "Imaginary Tutor",
+              foundCard: null,
+            },
+          ],
+        },
+      },
+    }),
+    [
+      {
+        sourcePath: "data.foundCards",
+        position: 0,
+        requestedName: "Sol Ring",
+      },
+      {
+        sourcePath: "data.matches[*].requestedCard",
+        position: 0,
+        requestedName: "Sool Ring",
+      },
+      {
+        sourcePath: "data.matches[*].foundCard",
+        position: 0,
+        requestedName: "Sol Ring",
+      },
+      {
+        sourcePath: "data.matches[*].requestedCard",
+        position: 1,
+        requestedName: "Imaginary Tutor",
+      },
+    ]
+  )
 })
 
 test("estimates supported OpenAI model price in cents", () => {

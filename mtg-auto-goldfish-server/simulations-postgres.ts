@@ -1,5 +1,6 @@
 import { queryDatabase, withDatabaseTransaction } from "./db.js"
 import { estimateLlmTokenPriceCents } from "./openai-pricing.js"
+import { normalizeScryfallCardNameForExactMatch } from "./scryfall-postgres.js"
 
 type DatabaseTransactionClient = Parameters<
   Parameters<typeof withDatabaseTransaction>[0]
@@ -98,6 +99,18 @@ export type LlmRunChunkInput = {
   payload: unknown
 }
 
+export type LlmRunChunkCardMentionResolutionStatus =
+  | "exact"
+  | "face_exact"
+  | "missing"
+
+export type SimulationDebugLlmRunChunkCardMention = {
+  requestedName: string
+  resolutionStatus: LlmRunChunkCardMentionResolutionStatus
+  resolvedName: string | null
+  defaultImageUrl: string | null
+}
+
 export type RecordOpenRouterLlmRunGenerationInput = {
   llmRunId: string
   openrouterTurnIndex: number
@@ -122,6 +135,7 @@ export type SimulationDebugLlmRunChunk = {
   reasoningDelta: string | null
   outputDelta: string | null
   payload: unknown
+  cardMentions: SimulationDebugLlmRunChunkCardMention[]
   receivedAt: string
 }
 
@@ -489,6 +503,11 @@ export async function ensureSimulationsSchema() {
   ])
   await createEnumType("llm_run_phase", ["opening_hand", "turn", "other"])
   await createEnumType("llm_chunk_kind", LLM_CHUNK_KINDS)
+  await createEnumType("llm_run_chunk_card_mention_resolution_status", [
+    "exact",
+    "face_exact",
+    "missing",
+  ])
 
   await queryDatabase(`
     CREATE TABLE IF NOT EXISTS simulations (
@@ -650,6 +669,25 @@ export async function ensureSimulationsSchema() {
     )
   `)
   await queryDatabase(`
+    CREATE TABLE IF NOT EXISTS llm_run_chunk_card_mentions (
+      id bigserial PRIMARY KEY,
+
+      llm_run_chunk_id bigint NOT NULL REFERENCES llm_run_chunks(id) ON DELETE CASCADE,
+      source_path text NOT NULL,
+      position integer NOT NULL CHECK (position >= 0),
+      requested_name text NOT NULL CHECK (btrim(requested_name) <> ''),
+      normalized_name text NOT NULL,
+      oracle_id uuid REFERENCES scryfall_oracle_cards(oracle_id) ON DELETE SET NULL,
+      resolution_status llm_run_chunk_card_mention_resolution_status NOT NULL,
+      resolved_name text,
+      default_image_url text,
+
+      created_at timestamptz NOT NULL DEFAULT now(),
+
+      UNIQUE (llm_run_chunk_id, source_path, position, requested_name)
+    )
+  `)
+  await queryDatabase(`
     ALTER TABLE llm_run_chunks
     DROP COLUMN IF EXISTS provider_event_type
   `)
@@ -737,6 +775,14 @@ export async function ensureSimulationsSchema() {
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS llm_run_chunks_llm_run_id_sequence_idx
       ON llm_run_chunks (llm_run_id, sequence)
+  `)
+  await queryDatabase(`
+    CREATE INDEX IF NOT EXISTS llm_run_chunk_card_mentions_chunk_id_idx
+      ON llm_run_chunk_card_mentions (llm_run_chunk_id, position)
+  `)
+  await queryDatabase(`
+    CREATE INDEX IF NOT EXISTS llm_run_chunk_card_mentions_oracle_id_idx
+      ON llm_run_chunk_card_mentions (oracle_id)
   `)
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS simulation_opening_hand_llm_runs_simulation_id_idx
@@ -2007,9 +2053,30 @@ export async function appendLlmRunChunks(
     return
   }
 
-  const query = buildAppendLlmRunChunksQuery(llmRunId, chunks)
+  await withDatabaseTransaction(async (client) => {
+    await appendLlmRunChunksWithClient(client, llmRunId, chunks)
+  })
+}
 
-  await queryDatabase(query.text, query.values)
+export async function appendLlmRunChunkWithResolvedCardMentions(
+  llmRunId: string,
+  chunk: LlmRunChunkInput
+): Promise<SimulationDebugLlmRunChunk | null> {
+  return withDatabaseTransaction(async (client) => {
+    const insertedChunks = await appendLlmRunChunksWithClient(client, llmRunId, [
+      chunk,
+    ])
+    const insertedChunk = insertedChunks[0]
+
+    if (!insertedChunk) {
+      return null
+    }
+
+    return mapInsertedLlmRunChunkRow(
+      insertedChunk,
+      insertedChunk.cardMentions
+    )
+  })
 }
 
 export async function appendLlmRunChunkAtNextSequence(
@@ -2040,15 +2107,33 @@ export async function appendLlmRunChunkAtNextSequence(
       [llmRunId]
     )
     const sequence = Number(sequenceResult.rows[0].sequence)
-    const query = buildAppendLlmRunChunksQuery(llmRunId, [
+    await appendLlmRunChunksWithClient(client, llmRunId, [
       {
         ...chunk,
         sequence,
       },
     ])
-
-    await client.query(query.text, query.values)
   })
+}
+
+async function appendLlmRunChunksWithClient(
+  client: DatabaseTransactionClient,
+  llmRunId: string,
+  chunks: readonly LlmRunChunkInput[]
+) {
+  const query = buildAppendLlmRunChunksQuery(llmRunId, chunks)
+  const result = await client.query<InsertedLlmRunChunkRow>(
+    query.text,
+    query.values
+  )
+  const insertedChunks = result.rows.map((row) => ({
+    ...row,
+    cardMentions: [] as SimulationDebugLlmRunChunkCardMention[],
+  }))
+
+  await insertLlmRunChunkCardMentions(client, insertedChunks)
+
+  return insertedChunks
 }
 
 function buildAppendLlmRunChunksQuery(
@@ -2089,9 +2174,387 @@ function buildAppendLlmRunChunksQuery(
       )
       VALUES ${valuePlaceholders.join(", ")}
       ON CONFLICT (llm_run_id, sequence) DO NOTHING
+      RETURNING
+        id,
+        sequence,
+        kind,
+        mcp_function_name,
+        mcp_function_output,
+        reasoning_delta,
+        output_delta,
+        payload,
+        received_at
     `,
     values,
   }
+}
+
+type InsertedLlmRunChunkRow = {
+  id: string | number
+  sequence: number
+  kind: LlmChunkKind
+  mcp_function_name: string | null
+  mcp_function_output: unknown | null
+  reasoning_delta: string | null
+  output_delta: string | null
+  payload: unknown
+  received_at: Date
+}
+
+type InsertedLlmRunChunkWithMentions = InsertedLlmRunChunkRow & {
+  cardMentions: SimulationDebugLlmRunChunkCardMention[]
+}
+
+export type LlmRunChunkCardMentionRequest = {
+  sourcePath: string
+  position: number
+  requestedName: string
+}
+
+type LlmRunChunkCardMentionInsert = LlmRunChunkCardMentionRequest & {
+  llmRunChunkId: number
+  normalizedName: string
+  oracleId: string | null
+  resolutionStatus: LlmRunChunkCardMentionResolutionStatus
+  resolvedName: string | null
+  defaultImageUrl: string | null
+}
+
+type ResolvedCardMentionRow = {
+  normalized_name: string
+  oracle_id: string
+  resolved_name: string
+  default_image_url: string | null
+  resolution_status: LlmRunChunkCardMentionResolutionStatus
+}
+
+async function insertLlmRunChunkCardMentions(
+  client: DatabaseTransactionClient,
+  chunks: InsertedLlmRunChunkWithMentions[]
+) {
+  const mentionRequests = chunks.flatMap((chunk) =>
+    extractLlmRunChunkCardMentionRequests({
+      kind: chunk.kind,
+      mcpFunctionName: chunk.mcp_function_name,
+      mcpFunctionOutput: chunk.mcp_function_output,
+    }).map((mention) => ({
+      ...mention,
+      llmRunChunkId: Number(chunk.id),
+      normalizedName: normalizeScryfallCardNameForExactMatch(
+        mention.requestedName
+      ),
+    }))
+  )
+
+  if (mentionRequests.length === 0) {
+    return
+  }
+
+  const mentionInserts = await resolveLlmRunChunkCardMentions(
+    client,
+    mentionRequests
+  )
+
+  if (mentionInserts.length === 0) {
+    return
+  }
+
+  const values: unknown[] = []
+  const valuePlaceholders = mentionInserts.map((mention, index) => {
+    const offset = index * 9
+
+    values.push(
+      mention.llmRunChunkId,
+      mention.sourcePath,
+      mention.position,
+      mention.requestedName,
+      mention.normalizedName,
+      mention.oracleId,
+      mention.resolutionStatus,
+      mention.resolvedName,
+      mention.defaultImageUrl
+    )
+
+    return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}::llm_run_chunk_card_mention_resolution_status, $${offset + 8}, $${offset + 9})`
+  })
+
+  await client.query(
+    `
+      INSERT INTO llm_run_chunk_card_mentions (
+        llm_run_chunk_id,
+        source_path,
+        position,
+        requested_name,
+        normalized_name,
+        oracle_id,
+        resolution_status,
+        resolved_name,
+        default_image_url
+      )
+      VALUES ${valuePlaceholders.join(", ")}
+      ON CONFLICT (llm_run_chunk_id, source_path, position, requested_name) DO NOTHING
+    `,
+    values
+  )
+
+  const chunksById = new Map(chunks.map((chunk) => [Number(chunk.id), chunk]))
+
+  for (const mention of mentionInserts) {
+    chunksById.get(mention.llmRunChunkId)?.cardMentions.push({
+      requestedName: mention.requestedName,
+      resolutionStatus: mention.resolutionStatus,
+      resolvedName: mention.resolvedName,
+      defaultImageUrl: mention.defaultImageUrl,
+    })
+  }
+}
+
+async function resolveLlmRunChunkCardMentions(
+  client: DatabaseTransactionClient,
+  requests: readonly (LlmRunChunkCardMentionRequest & {
+    llmRunChunkId: number
+    normalizedName: string
+  })[]
+): Promise<LlmRunChunkCardMentionInsert[]> {
+  const normalizedNames = Array.from(
+    new Set(requests.map((request) => request.normalizedName))
+  ).filter(Boolean)
+  const resolvedCardsByNormalizedName =
+    await getResolvedCardsByNormalizedName(client, normalizedNames)
+
+  return requests.map((request) => {
+    const resolvedCard = resolvedCardsByNormalizedName.get(
+      request.normalizedName
+    )
+
+    return {
+      ...request,
+      oracleId: resolvedCard?.oracle_id ?? null,
+      resolutionStatus: resolvedCard?.resolution_status ?? "missing",
+      resolvedName: resolvedCard?.resolved_name ?? null,
+      defaultImageUrl: resolvedCard?.default_image_url ?? null,
+    }
+  })
+}
+
+async function getResolvedCardsByNormalizedName(
+  client: DatabaseTransactionClient,
+  normalizedNames: readonly string[]
+) {
+  const resolvedCardsByNormalizedName = new Map<string, ResolvedCardMentionRow>()
+
+  if (normalizedNames.length === 0) {
+    return resolvedCardsByNormalizedName
+  }
+
+  const result = await client.query<ResolvedCardMentionRow>(
+    `
+      WITH requested AS (
+        SELECT DISTINCT unnest($1::text[]) AS normalized_name
+      ),
+      matches AS (
+        SELECT
+          requested.normalized_name,
+          card.oracle_id,
+          card.name AS resolved_name,
+          card.default_image_url,
+          'exact'::llm_run_chunk_card_mention_resolution_status AS resolution_status,
+          0 AS match_priority,
+          CASE
+            WHEN card.layout NOT IN ('art_series', 'emblem', 'token')
+              AND COALESCE(card.type_line, '') NOT ILIKE 'Token%'
+              AND card.games && ARRAY['arena', 'mtgo', 'paper']::text[]
+              AND card.legalities->>'commander' IN ('banned', 'legal')
+              THEN 0
+            WHEN card.layout NOT IN ('art_series', 'emblem', 'token')
+              AND COALESCE(card.type_line, '') NOT ILIKE 'Token%'
+              AND card.games && ARRAY['arena', 'mtgo', 'paper']::text[]
+              THEN 1
+            ELSE 2
+          END AS card_priority
+        FROM requested
+        JOIN scryfall_oracle_cards card
+          ON card.normalized_name = requested.normalized_name
+
+        UNION ALL
+
+        SELECT
+          requested.normalized_name,
+          card.oracle_id,
+          card.name AS resolved_name,
+          COALESCE(face.default_image_url, card.default_image_url) AS default_image_url,
+          'face_exact'::llm_run_chunk_card_mention_resolution_status AS resolution_status,
+          1 AS match_priority,
+          CASE
+            WHEN card.layout NOT IN ('art_series', 'emblem', 'token')
+              AND COALESCE(card.type_line, '') NOT ILIKE 'Token%'
+              AND card.games && ARRAY['arena', 'mtgo', 'paper']::text[]
+              AND card.legalities->>'commander' IN ('banned', 'legal')
+              THEN 0
+            WHEN card.layout NOT IN ('art_series', 'emblem', 'token')
+              AND COALESCE(card.type_line, '') NOT ILIKE 'Token%'
+              AND card.games && ARRAY['arena', 'mtgo', 'paper']::text[]
+              THEN 1
+            ELSE 2
+          END AS card_priority
+        FROM requested
+        JOIN scryfall_card_faces face
+          ON face.normalized_name = requested.normalized_name
+        JOIN scryfall_oracle_cards card
+          ON card.oracle_id = face.oracle_id
+      )
+      SELECT DISTINCT ON (normalized_name)
+        normalized_name,
+        oracle_id,
+        resolved_name,
+        default_image_url,
+        resolution_status
+      FROM matches
+      ORDER BY normalized_name, card_priority ASC, match_priority ASC, resolved_name ASC
+    `,
+    [normalizedNames]
+  )
+
+  for (const row of result.rows) {
+    resolvedCardsByNormalizedName.set(row.normalized_name, row)
+  }
+
+  return resolvedCardsByNormalizedName
+}
+
+export function extractLlmRunChunkCardMentionRequests(
+  chunk: Pick<LlmRunChunkInput, "kind" | "mcpFunctionName" | "mcpFunctionOutput">
+): LlmRunChunkCardMentionRequest[] {
+  if (chunk.kind !== "mcp_call_complete") {
+    return []
+  }
+
+  const toolOutputData = getToolOutputDataRecord(chunk.mcpFunctionOutput)
+
+  switch (chunk.mcpFunctionName) {
+    case "draw_starting_hand":
+    case "mulligan":
+    case "draw_card_from_top":
+    case "draw_card_from_bottom":
+      return getArrayCardMentions(toolOutputData.cards, "data.cards")
+    case "return_card_to_library":
+      return getSingleCardMention(toolOutputData.card, "data.card")
+    case "return_cards_to_library":
+      return getArrayCardMentions(toolOutputData.cards, "data.cards")
+    case "take_cards_from_library":
+      return [
+        ...getArrayCardMentions(toolOutputData.foundCards, "data.foundCards"),
+        ...getTakeCardsMatchMentions(toolOutputData.matches),
+      ]
+    default:
+      return []
+  }
+}
+
+function getToolOutputDataRecord(output: unknown) {
+  const outputRecord = asUnknownRecord(output)
+  const dataRecord = asUnknownRecord(outputRecord.data)
+
+  if (Object.hasOwn(outputRecord, "data") && dataRecord !== EMPTY_RECORD) {
+    return dataRecord
+  }
+
+  return outputRecord
+}
+
+function getArrayCardMentions(
+  value: unknown,
+  sourcePath: string
+): LlmRunChunkCardMentionRequest[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.flatMap((cardName, index) =>
+    getMentionFromCardName(cardName, sourcePath, index)
+  )
+}
+
+function getSingleCardMention(
+  value: unknown,
+  sourcePath: string
+): LlmRunChunkCardMentionRequest[] {
+  return getMentionFromCardName(value, sourcePath, 0)
+}
+
+function getTakeCardsMatchMentions(
+  value: unknown
+): LlmRunChunkCardMentionRequest[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.flatMap((match, index) => {
+    const matchRecord = asUnknownRecord(match)
+
+    return [
+      ...getMentionFromCardName(
+        matchRecord.requestedCard,
+        "data.matches[*].requestedCard",
+        index
+      ),
+      ...getMentionFromCardName(
+        matchRecord.foundCard,
+        "data.matches[*].foundCard",
+        index
+      ),
+    ]
+  })
+}
+
+function getMentionFromCardName(
+  value: unknown,
+  sourcePath: string,
+  position: number
+): LlmRunChunkCardMentionRequest[] {
+  if (typeof value !== "string") {
+    return []
+  }
+
+  const requestedName = value.trim()
+
+  if (!requestedName) {
+    return []
+  }
+
+  return [
+    {
+      sourcePath,
+      position,
+      requestedName,
+    },
+  ]
+}
+
+function mapInsertedLlmRunChunkRow(
+  row: InsertedLlmRunChunkRow,
+  cardMentions: SimulationDebugLlmRunChunkCardMention[] = []
+): SimulationDebugLlmRunChunk {
+  return {
+    id: Number(row.id),
+    sequence: row.sequence,
+    kind: row.kind,
+    mcpFunctionName: row.mcp_function_name,
+    mcpFunctionOutput: row.mcp_function_output,
+    reasoningDelta: row.reasoning_delta,
+    outputDelta: row.output_delta,
+    payload: row.payload,
+    cardMentions,
+    receivedAt: row.received_at.toISOString(),
+  }
+}
+
+const EMPTY_RECORD: Record<string, unknown> = {}
+
+function asUnknownRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : EMPTY_RECORD
 }
 
 export async function markLlmRunStreaming(llmRunId: string) {
@@ -3372,12 +3835,23 @@ async function getSimulationDebugLlmRuns({
         reasoningDelta: row.reasoning_delta,
         outputDelta: row.output_delta,
         payload: row.payload,
+        cardMentions: [],
         receivedAt: row.received_at?.toISOString() ?? "",
       })
     }
   }
 
   const runs = Array.from(runsById.values())
+  const cardMentionsByChunkId = await getCardMentionsByLlmRunChunkIds(
+    runs.flatMap((run) => run.chunks.map((chunk) => chunk.id))
+  )
+
+  for (const run of runs) {
+    for (const chunk of run.chunks) {
+      chunk.cardMentions = cardMentionsByChunkId.get(chunk.id) ?? []
+    }
+  }
+
   const openRouterGenerationsByRunId =
     await getOpenRouterGenerationsByLlmRunIds(
       runs
@@ -3391,6 +3865,53 @@ async function getSimulationDebugLlmRuns({
   }
 
   return runs
+}
+
+async function getCardMentionsByLlmRunChunkIds(chunkIds: readonly number[]) {
+  const cardMentionsByChunkId = new Map<
+    number,
+    SimulationDebugLlmRunChunkCardMention[]
+  >()
+
+  if (chunkIds.length === 0) {
+    return cardMentionsByChunkId
+  }
+
+  const result = await queryDatabase<{
+    llm_run_chunk_id: string
+    requested_name: string
+    resolution_status: LlmRunChunkCardMentionResolutionStatus
+    resolved_name: string | null
+    default_image_url: string | null
+  }>(
+    `
+      SELECT
+        llm_run_chunk_id,
+        requested_name,
+        resolution_status,
+        resolved_name,
+        default_image_url
+      FROM llm_run_chunk_card_mentions
+      WHERE llm_run_chunk_id = ANY($1::bigint[])
+      ORDER BY llm_run_chunk_id ASC, source_path ASC, position ASC, id ASC
+    `,
+    [chunkIds]
+  )
+
+  for (const row of result.rows) {
+    const chunkId = Number(row.llm_run_chunk_id)
+    const cardMentions = cardMentionsByChunkId.get(chunkId) ?? []
+
+    cardMentions.push({
+      requestedName: row.requested_name,
+      resolutionStatus: row.resolution_status,
+      resolvedName: row.resolved_name,
+      defaultImageUrl: row.default_image_url,
+    })
+    cardMentionsByChunkId.set(chunkId, cardMentions)
+  }
+
+  return cardMentionsByChunkId
 }
 
 async function getOpenRouterGenerationsByLlmRunIds(

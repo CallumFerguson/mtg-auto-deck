@@ -78,7 +78,9 @@ test("collects a llama.cpp opening-hand tool loop", async () => {
   ]
 
   const result = await collectLlamaCppChatCompletion({
-    appendChunk: (chunk) => chunks.push(chunk),
+    appendChunk: (chunk) => {
+      chunks.push(chunk)
+    },
     callTool: async (name, args) => {
       toolCalls.push({ name, args })
       return { cards: ["Sol Ring"] }
@@ -148,7 +150,9 @@ test("collects a llama.cpp turn tool loop with shorthand tool calls", async () =
   ]
 
   const result = await collectLlamaCppChatCompletion({
-    appendChunk: (chunk) => chunks.push(chunk),
+    appendChunk: (chunk) => {
+      chunks.push(chunk)
+    },
     callTool: async () => ({ cards: ["Sol Ring"] }),
     createChatCompletion: async () => {
       const response = responses.shift()
@@ -171,7 +175,9 @@ test("collects a llama.cpp turn tool loop with shorthand tool calls", async () =
 test("streams llama.cpp reasoning deltas separately from output", async () => {
   const chunks: Array<Omit<LlmRunChunkInput, "sequence">> = []
   const result = await collectLlamaCppChatCompletion({
-    appendChunk: (chunk) => chunks.push(chunk),
+    appendChunk: (chunk) => {
+      chunks.push(chunk)
+    },
     callTool: async () => ({ cards: ["Sol Ring"] }),
     createChatCompletion: async () =>
       createChatCompletionStream([
