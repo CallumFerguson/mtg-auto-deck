@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { parseSimulationFinalOutput } from "../src/lib/simulation-final-output.js"
+import { getSimulationFinalParsedOutput } from "../src/lib/simulation-final-output.js"
 import { formatDebugChunkBlocks } from "../src/lib/simulation-debug-chunks.js"
 import { getSimulationResultChunks } from "../src/lib/simulation-result-chunks.js"
 import { applySimulationResultsStreamEvent } from "../src/lib/simulation-results-stream.js"
@@ -200,22 +200,20 @@ test("adds auto-advanced turn runs", () => {
   assert.equal(updatedResults?.turnLlmRuns[0].llmRunId, "turn-run")
 })
 
-test("parses completed opening hand final output", () => {
-  const parsedOutput = parseSimulationFinalOutput(
+test("reads opening hand final output from final parsed output chunks", () => {
+  const parsedOutput = getSimulationFinalParsedOutput(
     createRun({
       llmRunId: "opening-run",
       phase: "opening_hand",
-      status: "completed",
       chunks: [
         createChunk({
           id: 1,
           sequence: 1,
-          outputDelta: '{"keptHand":["Forest",',
-        }),
-        createChunk({
-          id: 2,
-          sequence: 2,
-          outputDelta: '"Sol Ring"],"summary":"Kept a stable opener."}',
+          kind: "final_parsed_output",
+          payload: {
+            keptHand: ["Forest", "Sol Ring"],
+            summary: "Kept a stable opener.",
+          },
         }),
       ],
     })
@@ -228,8 +226,8 @@ test("parses completed opening hand final output", () => {
   })
 })
 
-test("parses completed final output after leading LLM text", () => {
-  const parsedOutput = parseSimulationFinalOutput(
+test("does not parse raw output deltas as final output", () => {
+  const parsedOutput = getSimulationFinalParsedOutput(
     createRun({
       llmRunId: "opening-run",
       phase: "opening_hand",
@@ -250,30 +248,24 @@ test("parses completed final output after leading LLM text", () => {
     })
   )
 
-  assert.deepEqual(parsedOutput, {
-    type: "opening_hand",
-    keptHand: ["Forest", "Sol Ring"],
-    summary: "Kept a stable opener.",
-  })
+  assert.equal(parsedOutput, null)
 })
 
-test("parses completed turn final output", () => {
-  const parsedOutput = parseSimulationFinalOutput(
+test("reads turn final output from final parsed output chunks", () => {
+  const parsedOutput = getSimulationFinalParsedOutput(
     createRun({
       llmRunId: "turn-run",
       phase: "turn",
-      status: "completed",
       turnNumber: 1,
       chunks: [
         createChunk({
           id: 1,
           sequence: 1,
-          outputDelta: '{"gameState":"Hand: Forest\\nBattlefield: Island",',
-        }),
-        createChunk({
-          id: 2,
-          sequence: 2,
-          outputDelta: '"summary":"Played Island and passed."}',
+          kind: "final_parsed_output",
+          payload: {
+            gameState: "Hand: Forest\nBattlefield: Island",
+            summary: "Played Island and passed.",
+          },
         }),
       ],
     })
@@ -286,17 +278,19 @@ test("parses completed turn final output", () => {
   })
 })
 
-test("does not parse final output before completion", () => {
-  const parsedOutput = parseSimulationFinalOutput(
+test("ignores invalid final parsed output payloads", () => {
+  const parsedOutput = getSimulationFinalParsedOutput(
     createRun({
       llmRunId: "opening-run",
       phase: "opening_hand",
-      status: "streaming",
       chunks: [
         createChunk({
           id: null,
           sequence: 1,
-          outputDelta: '{"keptHand":["Forest"],"summary":"Still streaming."}',
+          kind: "final_parsed_output",
+          payload: {
+            keptHand: ["Forest"],
+          },
         }),
       ],
     })

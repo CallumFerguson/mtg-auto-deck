@@ -48,7 +48,11 @@ import type {
   StopSimulationResponse,
 } from "@/lib/deck-types"
 import { getDeckSimulationPath, navigateTo } from "@/lib/navigation"
-import { parseSimulationFinalOutput } from "@/lib/simulation-final-output"
+import {
+  getSimulationFinalParsedOutput,
+  getSimulationFinalParsedOutputFromPayload,
+  type ParsedSimulationFinalOutput,
+} from "@/lib/simulation-final-output"
 import {
   formatDebugChunkBlocks,
   getDebugChunkBlockId,
@@ -1958,7 +1962,7 @@ function SimulationResultsPanel({
             </p>
           </div>
 
-          {run.gameState && !parseSimulationFinalOutput(run) ? (
+          {run.gameState && !getSimulationFinalParsedOutput(run) ? (
             <details className="rounded-md border border-emerald-500/30 bg-emerald-950/20">
               <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-emerald-100 transition-colors hover:text-emerald-50">
                 Game state
@@ -1992,10 +1996,6 @@ function SimulationResultChunkCards({
   const blocks = formatDebugChunkBlocks(chunks, {
     omitWhitespaceOnlyDeltaBlocks: true,
   })
-  const finalOutput = parseSimulationFinalOutput(run)
-  const finalOutputBlock = finalOutput
-    ? [...blocks].reverse().find((block) => block.type === "output")
-    : undefined
 
   return (
     <div className="grid gap-2">
@@ -2017,28 +2017,38 @@ function SimulationResultChunkCards({
         }
 
         if (block.type === "output") {
-          if (block.id === finalOutputBlock?.id && finalOutput) {
-            return (
-              <SimulationFinalOutputBlock
-                key={block.id}
-                finalOutput={finalOutput}
-              />
-            )
-          }
-
           return (
-            <div
+            <details
               key={block.id}
-              className="rounded-md border border-sky-500/30 bg-sky-950/20 p-3"
+              className="rounded-md border border-border bg-black/20"
             >
-              <p className="text-sm leading-6 whitespace-pre-wrap text-sky-50/90">
+              <summary className="cursor-pointer px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground">
+                Output
+              </summary>
+              <p className="border-t border-border p-3 text-sm leading-6 whitespace-pre-wrap text-muted-foreground">
                 {block.text}
               </p>
-            </div>
+            </details>
           )
         }
 
         if (block.type === "event") {
+          if (block.chunk.kind === "final_parsed_output") {
+            const finalOutput = getSimulationFinalParsedOutputFromPayload(
+              run.phase,
+              block.chunk.payload
+            )
+
+            if (finalOutput) {
+              return (
+                <SimulationFinalOutputBlock
+                  key={block.id}
+                  finalOutput={finalOutput}
+                />
+              )
+            }
+          }
+
           return <SimulationResultEvent key={block.id} chunk={block.chunk} />
         }
 
@@ -2051,7 +2061,7 @@ function SimulationResultChunkCards({
 function SimulationFinalOutputBlock({
   finalOutput,
 }: {
-  finalOutput: NonNullable<ReturnType<typeof parseSimulationFinalOutput>>
+  finalOutput: ParsedSimulationFinalOutput
 }) {
   return (
     <div className="grid gap-3 rounded-md border border-sky-500/30 bg-sky-950/20 p-3">
