@@ -101,6 +101,7 @@ import {
   ProviderTerminalEventError,
   asRecord,
   createCancellationChunk,
+  createFinalParsedOutputChunk,
   createServerErrorChunk,
   getCompletedResponseOutputText,
   getErrorMessage,
@@ -110,8 +111,8 @@ import {
   isProviderTerminalEvent,
   normalizeOpenAiStreamEvent,
   normalizeOpenRouterStreamEvent,
-  parseOpeningHandFromResponseText,
-  parseTurnSimulationFromResponseText,
+  parseOpeningHandCompletionFromResponseText,
+  parseTurnSimulationCompletionFromResponseText,
   type OpenRouterToolCallNameMap,
 } from "./llm-run-events.js"
 import {
@@ -2757,10 +2758,16 @@ async function runOpeningHandLlmRun({
     await forceFlushRuntimeChunks(runtime)
     throwIfRuntimeAborted(runtime.abortController.signal)
 
-    const parsedOpeningHand = parseOpeningHandFromResponseText(
+    const parsedOpeningHand = parseOpeningHandCompletionFromResponseText(
       streamResult.outputText
     )
 
+    throwIfRuntimeAborted(runtime.abortController.signal)
+    await appendRuntimeChunk(
+      runtime,
+      createFinalParsedOutputChunk(parsedOpeningHand.parsedOutput)
+    )
+    await forceFlushRuntimeChunks(runtime)
     throwIfRuntimeAborted(runtime.abortController.signal)
 
     const completion = await completeOpeningHandLlmRun({
@@ -2946,10 +2953,16 @@ async function runTurnLlmRun({
     await forceFlushRuntimeChunks(runtime)
     throwIfRuntimeAborted(runtime.abortController.signal)
 
-    const parsedTurn = parseTurnSimulationFromResponseText(
+    const parsedTurn = parseTurnSimulationCompletionFromResponseText(
       streamResult.outputText
     )
 
+    throwIfRuntimeAborted(runtime.abortController.signal)
+    await appendRuntimeChunk(
+      runtime,
+      createFinalParsedOutputChunk(parsedTurn.parsedOutput)
+    )
+    await forceFlushRuntimeChunks(runtime)
     throwIfRuntimeAborted(runtime.abortController.signal)
 
     const completion = await completeTurnLlmRun({

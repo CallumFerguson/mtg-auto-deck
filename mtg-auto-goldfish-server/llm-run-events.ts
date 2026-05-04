@@ -241,6 +241,14 @@ export function createLlamaCppCompletedChunk(
   })
 }
 
+export function createFinalParsedOutputChunk(
+  parsedOutput: unknown
+): Omit<LlmRunChunkInput, "sequence"> {
+  return createChunk("final_parsed_output", {
+    payload: parsedOutput,
+  })
+}
+
 export function createLlamaCppToolCallStartChunk(
   mcpFunctionName: string | null,
   payload: unknown
@@ -264,6 +272,17 @@ export function createLlamaCppToolCallCompleteChunk(
 }
 
 export function parseOpeningHandFromResponseText(responseText: string) {
+  const parsedCompletion =
+    parseOpeningHandCompletionFromResponseText(responseText)
+
+  return {
+    keptHand: parsedCompletion.keptHand,
+  }
+}
+
+export function parseOpeningHandCompletionFromResponseText(
+  responseText: string
+) {
   if (!responseText.trim()) {
     throw new Error("Opening-hand LLM completed response was empty.")
   }
@@ -290,10 +309,22 @@ export function parseOpeningHandFromResponseText(responseText: string) {
 
   return {
     keptHand,
+    parsedOutput: responseRecord,
   }
 }
 
 export function parseTurnSimulationFromResponseText(responseText: string) {
+  const parsedCompletion =
+    parseTurnSimulationCompletionFromResponseText(responseText)
+
+  return {
+    gameState: parsedCompletion.gameState,
+  }
+}
+
+export function parseTurnSimulationCompletionFromResponseText(
+  responseText: string
+) {
   if (!responseText.trim()) {
     throw new Error("Turn LLM completed response was empty.")
   }
@@ -317,6 +348,7 @@ export function parseTurnSimulationFromResponseText(responseText: string) {
 
   return {
     gameState,
+    parsedOutput: responseRecord,
   }
 }
 

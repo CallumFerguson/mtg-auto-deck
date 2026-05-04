@@ -3,6 +3,7 @@ import test from "node:test"
 import {
   ProviderTerminalEventError,
   createCancellationChunk,
+  createFinalParsedOutputChunk,
   createLlamaCppCompletedChunk,
   createLlamaCppMessageDeltaChunk,
   createLlamaCppToolCallCompleteChunk,
@@ -12,11 +13,14 @@ import {
   isAbortError,
   normalizeOpenAiStreamEvent,
   normalizeOpenRouterStreamEvent,
+  parseOpeningHandCompletionFromResponseText,
   parseOpeningHandFromResponseText,
+  parseTurnSimulationCompletionFromResponseText,
   parseTurnSimulationFromResponseText,
 } from "./llm-run-events.js"
 import {
   INVALID_OPENING_HAND_SIMULATION_FAILURE_MESSAGE,
+  LLM_CHUNK_KINDS,
   SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
   STALE_IN_FLIGHT_LLM_RUN_CANCELLATION_MESSAGE,
   STALE_RUNNING_SIMULATION_CANCELLATION_MESSAGE,
@@ -686,6 +690,22 @@ test("parses opening-hand JSON after leading LLM text", () => {
   )
 })
 
+test("keeps parsed opening-hand JSON for final parsed output chunks", () => {
+  const parsedCompletion = parseOpeningHandCompletionFromResponseText(
+    JSON.stringify({
+      keptHand: ["Sol Ring", "Command Tower"],
+      summary: "Kept a fast mana hand.",
+    })
+  )
+  const chunk = createFinalParsedOutputChunk(parsedCompletion.parsedOutput)
+
+  assert.equal(chunk.kind, "final_parsed_output")
+  assert.deepEqual(chunk.payload, {
+    keptHand: ["Sol Ring", "Command Tower"],
+    summary: "Kept a fast mana hand.",
+  })
+})
+
 test("parses completed turn game state JSON", () => {
   assert.deepEqual(
     parseTurnSimulationFromResponseText(
@@ -698,6 +718,22 @@ test("parses completed turn game state JSON", () => {
       gameState: "Hand:\nSol Ring\n\nBattlefield:\nCommand Tower",
     }
   )
+})
+
+test("keeps parsed turn JSON for final parsed output chunks", () => {
+  const parsedCompletion = parseTurnSimulationCompletionFromResponseText(
+    JSON.stringify({
+      gameState: "Hand:\nSol Ring\n\nBattlefield:\nCommand Tower",
+      summary: "Played Command Tower.",
+    })
+  )
+  const chunk = createFinalParsedOutputChunk(parsedCompletion.parsedOutput)
+
+  assert.equal(chunk.kind, "final_parsed_output")
+  assert.deepEqual(chunk.payload, {
+    gameState: "Hand:\nSol Ring\n\nBattlefield:\nCommand Tower",
+    summary: "Played Command Tower.",
+  })
 })
 
 test("parses the last valid turn JSON object from noisy output", () => {
@@ -756,6 +792,7 @@ test("reports invalid completed turn JSON with an explicit message", () => {
 })
 
 test("normal results exclude only raw and completed chunks", () => {
+  assert.equal(LLM_CHUNK_KINDS.includes("final_parsed_output"), true)
   assert.deepEqual(SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS, [
     "raw_event",
     "completed",
