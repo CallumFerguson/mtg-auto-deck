@@ -2088,24 +2088,14 @@ function SimulationFinalOutputBlock({
           <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
             Kept hand
           </p>
-          <ul className="mt-2 grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
-            {finalOutput.keptHand.map((cardName, index) => (
-              <li
-                key={`${cardName}-${index}`}
-                className="flex min-w-0 items-center gap-2 rounded border border-border bg-black/20 px-2 py-1"
-              >
-                {cardMentions[index]?.defaultImageUrl ? (
-                  <img
-                    className="h-12 w-9 shrink-0 rounded-sm object-cover"
-                    src={cardMentions[index].defaultImageUrl}
-                    alt=""
-                    loading="lazy"
-                  />
-                ) : null}
-                <span className="min-w-0 truncate">{cardName}</span>
-              </li>
-            ))}
-          </ul>
+          <div className="mt-2">
+            <SimulationResultCardImageLinks
+              mentions={getOpeningHandFinalOutputCardMentions(
+                finalOutput.keptHand,
+                cardMentions
+              )}
+            />
+          </div>
         </div>
       ) : (
         <details className={simulationResultChunkSurfaceClassName}>
@@ -2197,10 +2187,6 @@ function SimulationResultCompletedCardToolEvent({
   chunk: SimulationDebugLlmRunChunk
 }) {
   const [showCardImages, setShowCardImages] = useState(false)
-  const cardImageMentions = chunk.cardMentions.filter(
-    (mention) => mention.defaultImageUrl
-  )
-  const shouldFitSevenCardImages = cardImageMentions.length >= 7
 
   return (
     <div className={simulationResultChunkSurfaceClassName}>
@@ -2238,33 +2224,55 @@ function SimulationResultCompletedCardToolEvent({
         </div>
 
         {showCardImages ? (
-          <div className="flex flex-wrap justify-start gap-3">
-            {cardImageMentions.map((mention, index) => (
-              <a
-                key={`${mention.requestedName}-image-${index}`}
-                className={
-                  shouldFitSevenCardImages
-                    ? "block w-[min(8rem,calc((100%-4.5rem)/7))] min-w-0 overflow-hidden rounded-sm bg-black/40 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
-                    : "block w-28 overflow-hidden rounded-sm bg-black/40 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none sm:w-32"
-                }
-                href={getCardMentionScryfallUrl(mention)}
-                target="_blank"
-                rel="noreferrer"
-                title={getCardMentionDisplayName(mention)}
-              >
-                <img
-                  className="aspect-[488/680] w-full object-cover"
-                  src={mention.defaultImageUrl ?? ""}
-                  alt={getCardMentionDisplayName(mention)}
-                  loading="lazy"
-                />
-              </a>
-            ))}
-          </div>
+          <SimulationResultCardImageLinks mentions={chunk.cardMentions} />
         ) : null}
       </div>
     </div>
   )
+}
+
+type SimulationResultCardMention =
+  SimulationDebugLlmRunChunk["cardMentions"][number]
+
+function SimulationResultCardImageLinks({
+  mentions,
+}: {
+  mentions: SimulationResultCardMention[]
+}) {
+  const cardImageMentions = mentions.filter(hasCardMentionImage)
+  const shouldFitSevenCardImages = cardImageMentions.length >= 7
+
+  return (
+    <div className="flex flex-wrap justify-start gap-3">
+      {cardImageMentions.map((mention, index) => (
+        <a
+          key={`${mention.requestedName}-image-${index}`}
+          className={
+            shouldFitSevenCardImages
+              ? "block w-[min(8rem,calc((100%-4.5rem)/7))] min-w-0 overflow-hidden rounded-sm bg-black/40 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
+              : "block w-28 overflow-hidden rounded-sm bg-black/40 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none sm:w-32"
+          }
+          href={getCardMentionScryfallUrl(mention)}
+          target="_blank"
+          rel="noreferrer"
+          title={getCardMentionDisplayName(mention)}
+        >
+          <img
+            className="aspect-[488/680] w-full object-cover"
+            src={mention.defaultImageUrl}
+            alt={getCardMentionDisplayName(mention)}
+            loading="lazy"
+          />
+        </a>
+      ))}
+    </div>
+  )
+}
+
+function hasCardMentionImage(
+  mention: SimulationResultCardMention
+): mention is SimulationResultCardMention & { defaultImageUrl: string } {
+  return typeof mention.defaultImageUrl === "string"
 }
 
 function SimulationResultCardMentions({
@@ -2307,14 +2315,30 @@ function SimulationResultCardMentions({
   )
 }
 
+function getOpeningHandFinalOutputCardMentions(
+  keptHand: readonly string[],
+  cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
+) {
+  return keptHand.map(
+    (cardName, index): SimulationResultCardMention =>
+      cardMentions[index] ?? {
+        requestedName: cardName,
+        resolutionStatus: "missing",
+        resolvedName: null,
+        scryfallUri: null,
+        defaultImageUrl: null,
+      }
+  )
+}
+
 function getCardMentionDisplayName(
-  mention: SimulationDebugLlmRunChunk["cardMentions"][number]
+  mention: SimulationResultCardMention
 ) {
   return mention.requestedName
 }
 
 function getCardMentionScryfallUrl(
-  mention: SimulationDebugLlmRunChunk["cardMentions"][number]
+  mention: SimulationResultCardMention
 ) {
   if (mention.scryfallUri) {
     return mention.scryfallUri
