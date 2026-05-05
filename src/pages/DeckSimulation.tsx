@@ -2022,7 +2022,7 @@ function SimulationResultsPanel({
   const runs = [
     ...resultsInfo.openingHandLlmRuns.map((run) => ({
       ...run,
-      canRerun: canStartOpeningHandRun && !isSimulationActionBlocked,
+      canRerun: canStartOpeningHandRun && !isOpeningHandRunning,
       isActive: isActiveLlmRunStatus(run.status),
       resultKind: "opening_hand" as const,
       resultLabel: `Opening hand attempt ${run.attemptNumber}`,
@@ -2037,8 +2037,7 @@ function SimulationResultsPanel({
       ...run,
       canRerun:
         typeof run.turnNumber === "number" &&
-        !activeTurnNumbers.has(run.turnNumber) &&
-        !isSimulationActionBlocked,
+        !activeTurnNumbers.has(run.turnNumber),
       isActive: isActiveLlmRunStatus(run.status),
       resultKind: "turn" as const,
       resultLabel: `Turn ${run.turnNumber ?? "?"} attempt ${run.attemptNumber}`,
