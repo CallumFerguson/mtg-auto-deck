@@ -2068,59 +2068,33 @@ function SimulationResultsPanel({
     latestTurnRunNumber,
   ])
   const [renderedSimulationAction, setRenderedSimulationAction] =
-    useState<SimulationResultsAction | null>(null)
-  const [
-    isRenderedSimulationActionVisible,
-    setIsRenderedSimulationActionVisible,
-  ] = useState(false)
+    useState<SimulationResultsAction | null>(() => simulationAction)
 
   useEffect(() => {
-    const transitionFrameId = window.requestAnimationFrame(() => {
-      setIsRenderedSimulationActionVisible(false)
-    })
-    let revealFrameId: number | null = null
-
     if (!simulationAction) {
       const hideTimeoutId = window.setTimeout(() => {
         setRenderedSimulationAction(null)
-      }, 150)
+      }, 0)
 
       return () => {
-        window.cancelAnimationFrame(transitionFrameId)
         window.clearTimeout(hideTimeoutId)
       }
     }
 
     const showTimeoutId = window.setTimeout(() => {
       setRenderedSimulationAction(simulationAction)
-
-      revealFrameId = window.requestAnimationFrame(() => {
-        setIsRenderedSimulationActionVisible(true)
-      })
-    }, 250)
+    }, 200)
 
     return () => {
-      window.cancelAnimationFrame(transitionFrameId)
       window.clearTimeout(showTimeoutId)
-
-      if (revealFrameId !== null) {
-        window.cancelAnimationFrame(revealFrameId)
-      }
     }
   }, [simulationAction])
 
   useLayoutEffect(() => {
-    if (
-      renderedSimulationAction?.kind === "turn" &&
-      isRenderedSimulationActionVisible
-    ) {
+    if (renderedSimulationAction?.kind === "turn") {
       onScrollResultsToBottomIfKept()
     }
-  }, [
-    isRenderedSimulationActionVisible,
-    onScrollResultsToBottomIfKept,
-    renderedSimulationAction,
-  ])
+  }, [onScrollResultsToBottomIfKept, renderedSimulationAction])
 
   const actionError = openingHandRunError ?? turnRunError
   const runs = [
@@ -2265,40 +2239,31 @@ function SimulationResultsPanel({
         </p>
       ) : null}
 
-      {renderedSimulationAction ? (
-        <div
-          className={`flex justify-center transition-all duration-150 ease-out ${
-            isRenderedSimulationActionVisible
-              ? "translate-y-0 opacity-100"
-              : "pointer-events-none -translate-y-1 opacity-0"
-          }`}
-        >
-          <Button
-            className="w-fit bg-background/35 text-foreground hover:bg-muted/45"
-            disabled={!isRenderedSimulationActionVisible}
-            variant="outline"
-            type="button"
-            onClick={() => {
-              if (!isRenderedSimulationActionVisible) {
-                return
-              }
+      <div className="flex min-h-8 justify-center">
+        {renderedSimulationAction ? (
+          <div>
+            <Button
+              className="w-fit bg-background/35 text-foreground hover:bg-muted/45"
+              variant="outline"
+              type="button"
+              onClick={() => {
+                if (renderedSimulationAction.kind === "opening_hand") {
+                  onStartOpeningHandRun()
+                  return
+                }
 
-              if (renderedSimulationAction.kind === "opening_hand") {
-                onStartOpeningHandRun()
-                return
-              }
-
-              onKeepResultsScrolledToBottom()
-              onStartTurnRun(renderedSimulationAction.turnNumber)
-            }}
-          >
-            <Sparkles data-icon="inline-start" />
-            {renderedSimulationAction.kind === "opening_hand"
-              ? "Simulate opening hand"
-              : "Simulate next turn"}
-          </Button>
-        </div>
-      ) : null}
+                onKeepResultsScrolledToBottom()
+                onStartTurnRun(renderedSimulationAction.turnNumber)
+              }}
+            >
+              <Sparkles data-icon="inline-start" />
+              {renderedSimulationAction.kind === "opening_hand"
+                ? "Simulate opening hand"
+                : "Simulate next turn"}
+            </Button>
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }
