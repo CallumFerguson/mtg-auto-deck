@@ -1966,10 +1966,6 @@ function SimulationResultsPanel({
                 {run.outdated ? " / outdated" : ""}
               </p>
             </div>
-            <p className="text-xs text-muted-foreground">
-              {run.resultChunks.length} chunk
-              {run.resultChunks.length === 1 ? "" : "s"}
-            </p>
           </div>
 
           {run.gameState && !getSimulationFinalParsedOutput(run) ? (
