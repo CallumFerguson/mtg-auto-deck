@@ -1788,7 +1788,7 @@ function SimulationDetails({
       className="simulation-scrollbar h-full min-h-0 min-w-0 overflow-y-auto px-5 py-6"
       onScroll={handleResultsScroll}
     >
-      <section className="grid gap-4">
+      <section className="mx-auto grid w-full max-w-5xl gap-4">
         {resultsError ? (
           <p
             className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
