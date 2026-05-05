@@ -199,7 +199,9 @@ function isSuccessfulOpeningHandRun(
   return run.status === "completed" && run.openingHandIsValid === true
 }
 
-function isSuccessfulTurnRun(run: SimulationResultsInfo["turnLlmRuns"][number]) {
+function isSuccessfulTurnRun(
+  run: SimulationResultsInfo["turnLlmRuns"][number]
+) {
   return (
     run.status === "completed" &&
     run.outdated !== true &&
@@ -286,6 +288,9 @@ export function DeckSimulation({
   const [openSimulationMenuId, setOpenSimulationMenuId] = useState<
     string | null
   >(null)
+  const [detailsSimulationId, setDetailsSimulationId] = useState<string | null>(
+    null
+  )
   const [deletingSimulationId, setDeletingSimulationId] = useState<
     string | null
   >(null)
@@ -311,12 +316,18 @@ export function DeckSimulation({
       ) ?? null,
     [selectedSimulationId, simulations]
   )
-  const selectedSimulationStartingHand = useMemo(
+  const detailsSimulation = useMemo(
+    () =>
+      simulations.find((simulation) => simulation.id === detailsSimulationId) ??
+      null,
+    [detailsSimulationId, simulations]
+  )
+  const detailsSimulationStartingHand = useMemo(
     () =>
       startingHands.find(
-        (hand) => hand.id === selectedSimulation?.startingHandId
+        (hand) => hand.id === detailsSimulation?.startingHandId
       ) ?? null,
-    [selectedSimulation?.startingHandId, startingHands]
+    [detailsSimulation?.startingHandId, startingHands]
   )
   const canStartSimulation =
     (seedMode === "random" || Boolean(selectedSavedSeed)) &&
@@ -627,6 +638,9 @@ export function DeckSimulation({
         )
       )
       setOpenSimulationMenuId(null)
+      setDetailsSimulationId((currentSimulationId) =>
+        currentSimulationId === simulationId ? null : currentSimulationId
+      )
 
       if (!isNewSimulationSelected && selectedSimulationId === simulationId) {
         setSelectedSimulationId("")
@@ -642,7 +656,7 @@ export function DeckSimulation({
 
   return (
     <>
-      <div className="grid h-full min-h-0 min-w-[78rem] grid-cols-[18rem_minmax(0,1fr)] overflow-hidden">
+      <div className="grid h-full min-h-0 min-w-[56rem] grid-cols-[18rem_minmax(0,1fr)] overflow-hidden">
         <aside className="simulation-sidebar-surface min-h-0 min-w-0 border-r border-border">
           <nav
             className="simulation-scrollbar h-full overflow-y-auto"
@@ -787,6 +801,15 @@ export function DeckSimulation({
                               onClick={() => setOpenSimulationMenuId(null)}
                             />
                             <div className="absolute top-9 right-0 z-20 w-48 overflow-hidden rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-2xl shadow-black/40">
+                              <SimulationMenuButton
+                                onClick={() => {
+                                  setOpenSimulationMenuId(null)
+                                  setDetailsSimulationId(simulation.id)
+                                }}
+                              >
+                                <Eye data-icon="inline-start" />
+                                View details
+                              </SimulationMenuButton>
                               <SimulationMenuButton
                                 className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                                 onClick={() =>
@@ -1126,7 +1149,6 @@ export function DeckSimulation({
               deckId={deckId}
               onSimulationUpdated={updateSimulation}
               simulation={selectedSimulation}
-              startingHand={selectedSimulationStartingHand}
             />
           ) : (
             <EmptySimulationSelection />
@@ -1148,6 +1170,15 @@ export function DeckSimulation({
           deckId={deckId}
           onClose={() => setIsCreateSeedModalOpen(false)}
           onSaved={selectCreatedSavedSeed}
+        />
+      ) : null}
+
+      {detailsSimulation ? (
+        <SimulationDetailsModal
+          deckId={deckId}
+          onClose={() => setDetailsSimulationId(null)}
+          simulation={detailsSimulation}
+          startingHand={detailsSimulationStartingHand}
         />
       ) : null}
     </>
@@ -1174,16 +1205,215 @@ function SimulationMenuButton({
   )
 }
 
-function SimulationDetails({
+function SimulationDetailsModal({
   deckId,
-  onSimulationUpdated,
+  onClose,
   simulation,
   startingHand,
 }: {
   deckId: string
-  onSimulationUpdated: (simulation: Simulation) => void
+  onClose: () => void
   simulation: Simulation
   startingHand: StartingHand | null
+}) {
+  const [isLoadingDebugInfo, setIsLoadingDebugInfo] = useState(false)
+  const [debugInfoError, setDebugInfoError] = useState<string | null>(null)
+  const [debugInfo, setDebugInfo] = useState<SimulationDebugInfo | null>(null)
+  const [isDebugModalOpen, setIsDebugModalOpen] = useState(false)
+  const isLoadingDebugInfoRef = useRef(false)
+  const shouldSimulateOpeningHand = simulation.startingHandId === null
+
+  const handleRefreshDebugInfo = useCallback(async () => {
+    if (isLoadingDebugInfoRef.current) {
+      return
+    }
+
+    isLoadingDebugInfoRef.current = true
+    setIsLoadingDebugInfo(true)
+    setDebugInfoError(null)
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/debug`
+      )
+
+      if (!response.ok) {
+        setDebugInfoError(
+          await readApiError(
+            response,
+            "Simulation debug info could not be loaded."
+          )
+        )
+        return
+      }
+
+      const data = (await response.json()) as SimulationDebugResponse
+      setDebugInfo(data.debug)
+    } catch {
+      setDebugInfoError("Simulation debug info could not be loaded.")
+    } finally {
+      isLoadingDebugInfoRef.current = false
+      setIsLoadingDebugInfo(false)
+    }
+  }, [deckId, simulation.id])
+
+  useEffect(() => {
+    setDebugInfo(null)
+    setDebugInfoError(null)
+    setIsLoadingDebugInfo(false)
+    isLoadingDebugInfoRef.current = false
+  }, [simulation.id])
+
+  useEffect(() => {
+    if (!isDebugModalOpen) {
+      return
+    }
+
+    void handleRefreshDebugInfo()
+  }, [handleRefreshDebugInfo, isDebugModalOpen])
+
+  return (
+    <>
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 py-6 backdrop-blur-sm"
+        role="presentation"
+        onMouseDown={onClose}
+      >
+        <section
+          aria-labelledby="simulation-details-title"
+          className="flex max-h-[calc(100svh-3rem)] w-full max-w-2xl flex-col rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+            <div className="min-w-0 space-y-2">
+              <div className="flex flex-wrap items-center gap-3">
+                <h2
+                  id="simulation-details-title"
+                  className="text-xl font-semibold"
+                >
+                  Simulation details
+                </h2>
+                <span className="shrink-0 rounded-md border border-border bg-background/45 px-3 py-1 text-sm text-muted-foreground">
+                  {simulation.status}
+                </span>
+              </div>
+              <p className="text-sm font-medium break-all text-foreground">
+                {simulation.id}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label="Close"
+              title="Close"
+              onClick={onClose}
+            >
+              <X />
+            </Button>
+          </header>
+
+          <div className="simulation-scrollbar min-h-0 flex-1 overflow-y-auto px-5 py-5">
+            <section className="grid gap-3">
+              <h3 className="text-sm font-semibold text-foreground">Setup</h3>
+              <dl className="grid gap-3 text-sm sm:grid-cols-2">
+                <div className="rounded-md border border-border bg-background/35 p-3 sm:col-span-2">
+                  <dt className="text-muted-foreground">Seed</dt>
+                  <dd className="mt-1 font-medium break-all text-foreground">
+                    {simulation.seed}
+                  </dd>
+                </div>
+                <div className="rounded-md border border-border bg-background/35 p-3">
+                  <dt className="text-muted-foreground">Turns to simulate</dt>
+                  <dd className="mt-1 font-medium text-foreground">
+                    {simulation.turnsToSimulate}
+                  </dd>
+                </div>
+                <div className="rounded-md border border-border bg-background/35 p-3">
+                  <dt className="text-muted-foreground">
+                    Simulate opening hand
+                  </dt>
+                  <dd className="mt-1 font-medium text-foreground">
+                    {shouldSimulateOpeningHand ? "Yes" : "No"}
+                  </dd>
+                </div>
+              </dl>
+
+              {!shouldSimulateOpeningHand ? (
+                <div className="grid gap-2 rounded-md border border-border bg-background/35 p-3">
+                  <p className="text-sm font-medium text-foreground">
+                    Provided opening hand
+                    {startingHand ? (
+                      <span className="ml-2 text-muted-foreground">
+                        {startingHand.name}
+                      </span>
+                    ) : null}
+                  </p>
+                  {startingHand ? (
+                    <ul className="grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
+                      {startingHand.cards.map((card) => (
+                        <li
+                          key={card.deckCardId}
+                          className="rounded-md bg-muted/30 px-3 py-2"
+                        >
+                          {card.quantity > 1 ? (
+                            <span className="mr-2 text-sky-300">
+                              {card.quantity}x
+                            </span>
+                          ) : null}
+                          {card.name}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      Opening hand details are loading.
+                    </p>
+                  )}
+                </div>
+              ) : null}
+            </section>
+          </div>
+
+          <footer className="flex justify-end border-t border-border px-5 py-4">
+            <Button
+              className="w-fit"
+              type="button"
+              variant="outline"
+              onClick={() => setIsDebugModalOpen(true)}
+            >
+              <Bug data-icon="inline-start" />
+              View debug info
+            </Button>
+          </footer>
+        </section>
+      </div>
+
+      {isDebugModalOpen ? (
+        <SimulationDebugModal
+          deckId={deckId}
+          debugInfo={debugInfo}
+          error={debugInfoError}
+          isLoading={isLoadingDebugInfo}
+          onClose={() => setIsDebugModalOpen(false)}
+          onRefresh={() => void handleRefreshDebugInfo()}
+          simulationId={simulation.id}
+        />
+      ) : null}
+    </>
+  )
+}
+
+function SimulationDetails({
+  deckId,
+  onSimulationUpdated,
+  simulation,
+}: {
+  deckId: string
+  onSimulationUpdated: (simulation: Simulation) => void
+  simulation: Simulation
 }) {
   const [isStartingOpeningHandRun, setIsStartingOpeningHandRun] =
     useState(false)
@@ -1196,11 +1426,6 @@ function SimulationDetails({
   const [stopSimulationError, setStopSimulationError] = useState<string | null>(
     null
   )
-  const [isLoadingDebugInfo, setIsLoadingDebugInfo] = useState(false)
-  const [debugInfoError, setDebugInfoError] = useState<string | null>(null)
-  const [debugInfo, setDebugInfo] = useState<SimulationDebugInfo | null>(null)
-  const [isDebugModalOpen, setIsDebugModalOpen] = useState(false)
-  const isLoadingDebugInfoRef = useRef(false)
   const [isLoadingResults, setIsLoadingResults] = useState(false)
   const [resultsError, setResultsError] = useState<string | null>(null)
   const [resultsInfo, setResultsInfo] = useState<SimulationResultsInfo | null>(
@@ -1214,7 +1439,6 @@ function SimulationDetails({
   const keepResultsScrolledDownRef = useRef(true)
   const isProgrammaticResultsScrollRef = useRef(false)
   const previousResultsScrollTopRef = useRef(0)
-  const simulationPanelRef = useRef<HTMLElement | null>(null)
   const [resultsStreamRestartKey, setResultsStreamRestartKey] = useState(0)
   const shouldSimulateOpeningHand = simulation.startingHandId === null
 
@@ -1244,7 +1468,6 @@ function SimulationDetails({
   }, [scrollResultsToBottom])
 
   useEffect(() => {
-    simulationPanelRef.current?.scrollTo({ top: 0 })
     keepResultsScrolledDownRef.current = true
     previousResultsScrollTopRef.current = 0
     scrollResultsToBottom()
@@ -1254,11 +1477,6 @@ function SimulationDetails({
     setTurnRunError(null)
     setIsStoppingSimulation(false)
     setStopSimulationError(null)
-    isLoadingDebugInfoRef.current = false
-    setIsLoadingDebugInfo(false)
-    setDebugInfoError(null)
-    setDebugInfo(null)
-    setIsDebugModalOpen(false)
     resultsEventSourceRef.current?.close()
     resultsEventSourceRef.current = null
 
@@ -1450,40 +1668,6 @@ function SimulationDetails({
     await stopSimulation()
   }
 
-  const handleRefreshDebugInfo = useCallback(async () => {
-    if (isLoadingDebugInfoRef.current) {
-      return
-    }
-
-    isLoadingDebugInfoRef.current = true
-    setIsLoadingDebugInfo(true)
-    setDebugInfoError(null)
-
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/debug`
-      )
-
-      if (!response.ok) {
-        setDebugInfoError(
-          await readApiError(
-            response,
-            "Simulation debug info could not be loaded."
-          )
-        )
-        return
-      }
-
-      const data = (await response.json()) as SimulationDebugResponse
-      setDebugInfo(data.debug)
-    } catch {
-      setDebugInfoError("Simulation debug info could not be loaded.")
-    } finally {
-      isLoadingDebugInfoRef.current = false
-      setIsLoadingDebugInfo(false)
-    }
-  }, [deckId, simulation.id])
-
   useEffect(() => {
     const eventSource = new EventSource(
       `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/results/stream`
@@ -1598,161 +1782,50 @@ function SimulationDetails({
     }
   }, [deckId, onSimulationUpdated, resultsStreamRestartKey, simulation.id])
 
-  useEffect(() => {
-    if (!isDebugModalOpen) {
-      return
-    }
-
-    void handleRefreshDebugInfo()
-  }, [handleRefreshDebugInfo, isDebugModalOpen])
-
   return (
-    <div className="grid h-full min-h-0 grid-cols-[minmax(36rem,1fr)_24rem] overflow-hidden">
-      <main
-        ref={resultsPanelRef}
-        className="simulation-scrollbar min-h-0 min-w-0 overflow-y-auto px-5 py-6"
-        onScroll={handleResultsScroll}
-      >
-        <section className="grid gap-4">
-          {resultsError ? (
-            <p
-              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-              role="alert"
-            >
-              {resultsError}
-            </p>
-          ) : null}
-
-          {isLoadingResults && !resultsInfo ? (
-            <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
-              Loading simulation results...
-            </p>
-          ) : null}
-
-          {resultsInfo ? (
-            <SimulationResultsPanel
-              isStartingOpeningHandRun={isStartingOpeningHandRun}
-              isStartingTurnRun={isStartingTurnRun}
-              isStoppingSimulation={isStoppingSimulation}
-              onStartOpeningHandRun={() => void handleStartOpeningHandRun()}
-              onKeepResultsScrolledToBottom={keepResultsScrolledToBottom}
-              onStartTurnRun={(turnNumber) =>
-                void handleStartTurnRun(turnNumber)
-              }
-              onStopSimulation={() => void handleStopSimulation()}
-              openingHandRunError={openingHandRunError}
-              resultsInfo={resultsInfo}
-              simulation={simulation}
-              stopSimulationError={stopSimulationError}
-              turnRunError={turnRunError}
-            />
-          ) : !isLoadingResults && !resultsError ? (
-            <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
-              Waiting for simulation results.
-            </p>
-          ) : null}
-        </section>
-      </main>
-
-      <aside
-        ref={simulationPanelRef}
-        className="simulation-scrollbar simulation-sidebar-surface flex min-h-0 flex-col gap-5 overflow-y-auto border-l border-border px-5 py-6"
-      >
-        <header className="grid gap-2">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-sm text-sky-300">Simulation</p>
-            <span className="shrink-0 rounded-md border border-border bg-background/45 px-3 py-1 text-sm text-muted-foreground">
-              {simulation.status}
-            </span>
-          </div>
-          <p className="text-sm font-medium break-all text-foreground">
-            {simulation.id}
-          </p>
-        </header>
-
-        <section className="grid gap-3">
-          <h4 className="text-sm font-semibold text-foreground">Setup</h4>
-          <dl className="grid gap-3 text-sm">
-            <div className="rounded-md border border-border bg-background/35 p-3">
-              <dt className="text-muted-foreground">Seed</dt>
-              <dd className="mt-1 font-medium break-all text-foreground">
-                {simulation.seed}
-              </dd>
-            </div>
-            <div className="rounded-md border border-border bg-background/35 p-3">
-              <dt className="text-muted-foreground">Turns to simulate</dt>
-              <dd className="mt-1 font-medium text-foreground">
-                {simulation.turnsToSimulate}
-              </dd>
-            </div>
-            <div className="rounded-md border border-border bg-background/35 p-3">
-              <dt className="text-muted-foreground">Simulate opening hand</dt>
-              <dd className="mt-1 font-medium text-foreground">
-                {shouldSimulateOpeningHand ? "Yes" : "No"}
-              </dd>
-            </div>
-          </dl>
-
-          {!shouldSimulateOpeningHand ? (
-            <div className="grid gap-2 rounded-md border border-border bg-background/35 p-3">
-              <p className="text-sm font-medium text-foreground">
-                Provided opening hand
-                {startingHand ? (
-                  <span className="ml-2 text-muted-foreground">
-                    {startingHand.name}
-                  </span>
-                ) : null}
-              </p>
-              {startingHand ? (
-                <ul className="grid gap-1 text-sm text-muted-foreground">
-                  {startingHand.cards.map((card) => (
-                    <li
-                      key={card.deckCardId}
-                      className="rounded-md bg-muted/30 px-3 py-2"
-                    >
-                      {card.quantity > 1 ? (
-                        <span className="mr-2 text-sky-300">
-                          {card.quantity}x
-                        </span>
-                      ) : null}
-                      {card.name}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  Opening hand details are loading.
-                </p>
-              )}
-            </div>
-          ) : null}
-        </section>
-
-        <footer className="mt-auto border-t border-border pt-5">
-          <Button
-            className="w-fit"
-            type="button"
-            variant="outline"
-            onClick={() => setIsDebugModalOpen(true)}
+    <main
+      ref={resultsPanelRef}
+      className="simulation-scrollbar h-full min-h-0 min-w-0 overflow-y-auto px-5 py-6"
+      onScroll={handleResultsScroll}
+    >
+      <section className="grid gap-4">
+        {resultsError ? (
+          <p
+            className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            role="alert"
           >
-            <Bug data-icon="inline-start" />
-            View debug info
-          </Button>
-        </footer>
-      </aside>
+            {resultsError}
+          </p>
+        ) : null}
 
-      {isDebugModalOpen ? (
-        <SimulationDebugModal
-          deckId={deckId}
-          debugInfo={debugInfo}
-          error={debugInfoError}
-          isLoading={isLoadingDebugInfo}
-          onClose={() => setIsDebugModalOpen(false)}
-          onRefresh={() => void handleRefreshDebugInfo()}
-          simulationId={simulation.id}
-        />
-      ) : null}
-    </div>
+        {isLoadingResults && !resultsInfo ? (
+          <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+            Loading simulation results...
+          </p>
+        ) : null}
+
+        {resultsInfo ? (
+          <SimulationResultsPanel
+            isStartingOpeningHandRun={isStartingOpeningHandRun}
+            isStartingTurnRun={isStartingTurnRun}
+            isStoppingSimulation={isStoppingSimulation}
+            onStartOpeningHandRun={() => void handleStartOpeningHandRun()}
+            onKeepResultsScrolledToBottom={keepResultsScrolledToBottom}
+            onStartTurnRun={(turnNumber) => void handleStartTurnRun(turnNumber)}
+            onStopSimulation={() => void handleStopSimulation()}
+            openingHandRunError={openingHandRunError}
+            resultsInfo={resultsInfo}
+            simulation={simulation}
+            stopSimulationError={stopSimulationError}
+            turnRunError={turnRunError}
+          />
+        ) : !isLoadingResults && !resultsError ? (
+          <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+            Waiting for simulation results.
+          </p>
+        ) : null}
+      </section>
+    </main>
   )
 }
 
@@ -1887,8 +1960,7 @@ function SimulationResultsPanel({
     resultsInfo.turnLlmRuns
       .filter(
         (run) =>
-          typeof run.turnNumber === "number" &&
-          isActiveLlmRunStatus(run.status)
+          typeof run.turnNumber === "number" && isActiveLlmRunStatus(run.status)
       )
       .map((run) => run.turnNumber as number)
   )
@@ -1899,37 +1971,35 @@ function SimulationResultsPanel({
     isOpeningHandRunning ||
     isTurnRunning ||
     simulation.activeLlmRunCount > 0
-  const latestOpeningHandRun =
-    resultsInfo.openingHandLlmRuns.reduce<
-      SimulationResultsInfo["openingHandLlmRuns"][number] | null
-    >((latestRun, run) => {
-      if (!latestRun || run.attemptNumber > latestRun.attemptNumber) {
-        return run
-      }
+  const latestOpeningHandRun = resultsInfo.openingHandLlmRuns.reduce<
+    SimulationResultsInfo["openingHandLlmRuns"][number] | null
+  >((latestRun, run) => {
+    if (!latestRun || run.attemptNumber > latestRun.attemptNumber) {
+      return run
+    }
 
-      return latestRun
-    }, null)
-  const latestTurnRun =
-    resultsInfo.turnLlmRuns.reduce<
-      SimulationResultsInfo["turnLlmRuns"][number] | null
-    >((latestRun, run) => {
-      if (!latestRun) {
-        return run
-      }
+    return latestRun
+  }, null)
+  const latestTurnRun = resultsInfo.turnLlmRuns.reduce<
+    SimulationResultsInfo["turnLlmRuns"][number] | null
+  >((latestRun, run) => {
+    if (!latestRun) {
+      return run
+    }
 
-      const runTurnNumber = run.turnNumber ?? 0
-      const latestRunTurnNumber = latestRun.turnNumber ?? 0
+    const runTurnNumber = run.turnNumber ?? 0
+    const latestRunTurnNumber = latestRun.turnNumber ?? 0
 
-      if (
-        runTurnNumber > latestRunTurnNumber ||
-        (runTurnNumber === latestRunTurnNumber &&
-          run.attemptNumber > latestRun.attemptNumber)
-      ) {
-        return run
-      }
+    if (
+      runTurnNumber > latestRunTurnNumber ||
+      (runTurnNumber === latestRunTurnNumber &&
+        run.attemptNumber > latestRun.attemptNumber)
+    ) {
+      return run
+    }
 
-      return latestRun
-    }, null)
+    return latestRun
+  }, null)
   const hasLatestOpeningHandRun = latestOpeningHandRun !== null
   const hasLatestTurnRun = latestTurnRun !== null
   const isLatestOpeningHandRunSuccessful = latestOpeningHandRun
@@ -1996,27 +2066,38 @@ function SimulationResultsPanel({
   ] = useState(false)
 
   useEffect(() => {
-    if (!simulationAction) {
+    const transitionFrameId = window.requestAnimationFrame(() => {
       setIsRenderedSimulationActionVisible(false)
+    })
+    let revealFrameId: number | null = null
 
+    if (!simulationAction) {
       const hideTimeoutId = window.setTimeout(() => {
         setRenderedSimulationAction(null)
       }, 150)
 
-      return () => window.clearTimeout(hideTimeoutId)
+      return () => {
+        window.cancelAnimationFrame(transitionFrameId)
+        window.clearTimeout(hideTimeoutId)
+      }
     }
-
-    setIsRenderedSimulationActionVisible(false)
 
     const showTimeoutId = window.setTimeout(() => {
       setRenderedSimulationAction(simulationAction)
 
-      window.requestAnimationFrame(() => {
+      revealFrameId = window.requestAnimationFrame(() => {
         setIsRenderedSimulationActionVisible(true)
       })
     }, 250)
 
-    return () => window.clearTimeout(showTimeoutId)
+    return () => {
+      window.cancelAnimationFrame(transitionFrameId)
+      window.clearTimeout(showTimeoutId)
+
+      if (revealFrameId !== null) {
+        window.cancelAnimationFrame(revealFrameId)
+      }
+    }
   }, [simulationAction])
   const actionError = openingHandRunError ?? turnRunError
   const runs = [
@@ -2063,9 +2144,7 @@ function SimulationResultsPanel({
         const runMetadata = [
           run.status,
           run.model,
-          run.estimatedPriceCents
-            ? `${run.estimatedPriceCents} cents`
-            : null,
+          run.estimatedPriceCents ? `${run.estimatedPriceCents} cents` : null,
           finishedDurationText ? `took ${finishedDurationText}` : null,
           run.outdated ? "outdated" : null,
         ].filter(Boolean)
@@ -2296,9 +2375,7 @@ function SimulationResultThinkingPreview({
       )
     }
 
-    const animationFrameId = window.requestAnimationFrame(
-      updatePreviewOverflow
-    )
+    const animationFrameId = window.requestAnimationFrame(updatePreviewOverflow)
 
     const resizeObserver = new ResizeObserver(updatePreviewOverflow)
     resizeObserver.observe(measuredPreviewTextElement)
@@ -2359,7 +2436,7 @@ function SimulationResultThinkingPreview({
           </div>
           {elapsedText ? (
             <span
-              className={`ml-auto shrink-0 font-normal tabular-nums text-sky-100/65 ${
+              className={`ml-auto shrink-0 font-normal text-sky-100/65 tabular-nums ${
                 hasPreviewText ? "text-xs" : "text-sm"
               }`}
             >
@@ -2728,15 +2805,11 @@ function getOpeningHandFinalOutputCardMentions(
   )
 }
 
-function getCardMentionDisplayName(
-  mention: SimulationResultCardMention
-) {
+function getCardMentionDisplayName(mention: SimulationResultCardMention) {
   return mention.requestedName
 }
 
-function getCardMentionScryfallUrl(
-  mention: SimulationResultCardMention
-) {
+function getCardMentionScryfallUrl(mention: SimulationResultCardMention) {
   if (mention.scryfallUri) {
     return mention.scryfallUri
   }
@@ -3149,7 +3222,7 @@ function OpenRouterGenerationsTable({
                     <td className="border-t border-sky-500/10 px-3 py-2 text-muted-foreground">
                       OpenRouter turn {generation.openrouterTurnIndex + 1}
                     </td>
-                    <td className="select-all border-t border-sky-500/10 px-3 py-2 break-all text-foreground">
+                    <td className="border-t border-sky-500/10 px-3 py-2 break-all text-foreground select-all">
                       {generation.generationId}
                     </td>
                     <td className="border-t border-sky-500/10 px-3 py-2">
