@@ -2789,18 +2789,13 @@ function SimulationResultCardImageLinks({
   mentions: SimulationResultCardMention[]
 }) {
   const cardImageMentions = mentions.filter(hasCardMentionImage)
-  const shouldFitSevenCardImages = cardImageMentions.length >= 7
 
   return (
-    <div className="flex flex-wrap justify-start gap-3">
+    <div className="grid grid-cols-7 gap-2 sm:gap-3">
       {cardImageMentions.map((mention, index) => (
         <a
           key={`${mention.requestedName}-image-${index}`}
-          className={
-            shouldFitSevenCardImages
-              ? "block w-[min(8rem,calc((100%-4.5rem)/7))] min-w-0 overflow-hidden rounded-sm bg-black/40 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
-              : "block w-28 overflow-hidden rounded-sm bg-black/40 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none sm:w-32"
-          }
+          className="block min-w-0 overflow-hidden rounded-sm bg-black/40 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
           href={getCardMentionScryfallUrl(mention)}
           target="_blank"
           rel="noreferrer"
