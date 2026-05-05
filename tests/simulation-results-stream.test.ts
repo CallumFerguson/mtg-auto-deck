@@ -3,6 +3,7 @@ import test from "node:test"
 import { getSimulationFinalParsedOutput } from "../src/lib/simulation-final-output.js"
 import { formatDebugChunkBlocks } from "../src/lib/simulation-debug-chunks.js"
 import {
+  getSimulationRunActiveToolCallName,
   getSimulationResultEntries,
   getSimulationResultChunks,
   getSimulationRunThinkingPreview,
@@ -472,6 +473,66 @@ test("hides completed tool starts across intervening chunks", () => {
     resultChunks.map((chunk) => chunk.sequence),
     [4]
   )
+})
+
+test("hides the latest active tool start from result chunks", () => {
+  const resultChunks = getSimulationResultChunks([
+    createChunk({
+      id: 1,
+      kind: "mcp_call_complete",
+      mcpFunctionName: "draw_starting_hand",
+      sequence: 1,
+    }),
+    createChunk({
+      id: 2,
+      kind: "mcp_call_start",
+      mcpFunctionName: "mulligan",
+      sequence: 2,
+    }),
+  ])
+
+  assert.deepEqual(
+    resultChunks.map((chunk) => chunk.sequence),
+    [1]
+  )
+})
+
+test("reads active tool call name from the latest tool start chunk", () => {
+  const activeToolCallName = getSimulationRunActiveToolCallName([
+    createChunk({
+      id: 2,
+      kind: "mcp_call_start",
+      mcpFunctionName: "draw_starting_hand",
+      sequence: 2,
+    }),
+    createChunk({
+      id: 1,
+      kind: "reasoning_delta",
+      reasoningDelta: "Need a hand.",
+      sequence: 1,
+    }),
+  ])
+
+  assert.equal(activeToolCallName, "draw_starting_hand")
+})
+
+test("clears active tool call name once a newer chunk arrives", () => {
+  const activeToolCallName = getSimulationRunActiveToolCallName([
+    createChunk({
+      id: 1,
+      kind: "mcp_call_start",
+      mcpFunctionName: "draw_starting_hand",
+      sequence: 1,
+    }),
+    createChunk({
+      id: 2,
+      kind: "mcp_call_complete",
+      mcpFunctionName: "draw_starting_hand",
+      sequence: 2,
+    }),
+  ])
+
+  assert.equal(activeToolCallName, null)
 })
 
 test("combines adjacent completed turn action log entries after hiding tool starts", () => {

@@ -65,6 +65,7 @@ import {
 import { applySimulationResultsStreamEvent } from "@/lib/simulation-results-stream"
 import {
   getLoggedTurnAction,
+  getSimulationRunActiveToolCallName,
   getSimulationResultEntries,
   getSimulationRunThinkingPreview,
   type SimulationResultEntry,
@@ -1931,6 +1932,7 @@ function SimulationResultsPanel({
       isActive: isActiveLlmRunStatus(run.status),
       resultLabel: `Opening hand attempt ${run.attemptNumber}`,
       resultEntries: getSimulationResultEntries(run.chunks),
+      activeToolCallName: getSimulationRunActiveToolCallName(run.chunks),
       thinkingPreview: getSimulationRunThinkingPreview(run.chunks),
     })),
     ...resultsInfo.turnLlmRuns.map((run) => ({
@@ -1938,6 +1940,7 @@ function SimulationResultsPanel({
       isActive: isActiveLlmRunStatus(run.status),
       resultLabel: `Turn ${run.turnNumber ?? "?"} attempt ${run.attemptNumber}`,
       resultEntries: getSimulationResultEntries(run.chunks),
+      activeToolCallName: getSimulationRunActiveToolCallName(run.chunks),
       thinkingPreview: getSimulationRunThinkingPreview(run.chunks),
     })),
   ]
@@ -1988,6 +1991,7 @@ function SimulationResultsPanel({
 
           {run.isActive ? (
             <SimulationResultThinkingPreview
+              activeToolCallName={run.activeToolCallName}
               previewText={run.thinkingPreview}
             />
           ) : run.resultEntries.length === 0 && !run.gameState ? (
@@ -2056,8 +2060,10 @@ function SimulationResultChunkCards({
 }
 
 function SimulationResultThinkingPreview({
+  activeToolCallName,
   previewText,
 }: {
+  activeToolCallName: string | null
   previewText: string | null
 }) {
   const previewTextRef = useRef<HTMLParagraphElement | null>(null)
@@ -2067,7 +2073,6 @@ function SimulationResultThinkingPreview({
     const previewTextElement = previewTextRef.current
 
     if (!previewTextElement || !previewText) {
-      setIsPreviewOverflowing(false)
       return
     }
 
@@ -2080,12 +2085,15 @@ function SimulationResultThinkingPreview({
       )
     }
 
-    updatePreviewOverflow()
+    const animationFrameId = window.requestAnimationFrame(
+      updatePreviewOverflow
+    )
 
     const resizeObserver = new ResizeObserver(updatePreviewOverflow)
     resizeObserver.observe(measuredPreviewTextElement)
 
     return () => {
+      window.cancelAnimationFrame(animationFrameId)
       resizeObserver.disconnect()
     }
   }, [previewText])
@@ -2096,7 +2104,11 @@ function SimulationResultThinkingPreview({
     >
       <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-sky-100">
         <LoaderCircle className="size-4 shrink-0 animate-spin text-sky-300" />
-        <span>Thinking</span>
+        <span>
+          {activeToolCallName
+            ? `Calling tool: ${activeToolCallName}`
+            : "Thinking"}
+        </span>
       </div>
       {previewText ? (
         <p

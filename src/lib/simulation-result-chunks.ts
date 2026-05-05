@@ -20,9 +20,13 @@ export function getSimulationResultChunks(
     (chunk, index) => !isRedundantMcpCallFailedEvent(chunk, chunks[index + 1])
   )
   const hiddenToolStartChunks = getCompletedToolStartChunks(visibleChunks)
+  const activeToolStartChunk = getActiveToolStartChunk(visibleChunks)
 
   return visibleChunks.filter(
-    (chunk) => !hiddenToolStartChunks.has(chunk) && !isDeltaChunk(chunk)
+    (chunk) =>
+      !hiddenToolStartChunks.has(chunk) &&
+      chunk !== activeToolStartChunk &&
+      !isDeltaChunk(chunk)
   )
 }
 
@@ -84,6 +88,12 @@ export function getSimulationRunThinkingPreview(
     .trim()
 
   return previewText.length > 0 ? previewText : null
+}
+
+export function getSimulationRunActiveToolCallName(
+  chunks: readonly SimulationDebugLlmRunChunk[]
+) {
+  return getActiveToolStartChunk(chunks)?.mcpFunctionName ?? null
 }
 
 export function getLoggedTurnAction(chunk: SimulationDebugLlmRunChunk) {
@@ -167,6 +177,20 @@ function getCompletedToolStartChunks(
   }
 
   return completedToolStartChunks
+}
+
+function getActiveToolStartChunk(
+  chunks: readonly SimulationDebugLlmRunChunk[]
+) {
+  const latestChunk = chunks.reduce<SimulationDebugLlmRunChunk | null>(
+    (latestChunk, chunk) =>
+      latestChunk === null || chunk.sequence > latestChunk.sequence
+        ? chunk
+        : latestChunk,
+    null
+  )
+
+  return latestChunk?.kind === "mcp_call_start" ? latestChunk : null
 }
 
 function findMatchingToolStartChunkIndex(
