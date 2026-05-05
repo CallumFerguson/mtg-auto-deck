@@ -80,6 +80,15 @@ type OpeningHandCardOption = {
   name: string
 }
 
+type SimulationResultsAction =
+  | {
+      kind: "opening_hand"
+    }
+  | {
+      kind: "turn"
+      turnNumber: number
+    }
+
 function getSimulationLabel(simulation: Simulation) {
   return `${simulation.id.slice(0, 8)} - ${simulation.completedLlmRunCount} runs`
 }
@@ -1912,27 +1921,36 @@ function SimulationResultsPanel({
 
       return latestRun
     }, null)
-  const simulationAction = (() => {
+  const hasLatestOpeningHandRun = latestOpeningHandRun !== null
+  const hasLatestTurnRun = latestTurnRun !== null
+  const isLatestOpeningHandRunSuccessful = latestOpeningHandRun
+    ? isSuccessfulOpeningHandRun(latestOpeningHandRun)
+    : false
+  const latestTurnRunNumber = latestTurnRun?.turnNumber
+  const isLatestTurnRunSuccessful = latestTurnRun
+    ? isSuccessfulTurnRun(latestTurnRun)
+    : false
+  const simulationAction = useMemo<SimulationResultsAction | null>(() => {
     if (isSimulationActionBlocked) {
       return null
     }
 
-    if (latestTurnRun) {
+    if (hasLatestTurnRun) {
       if (
-        isSuccessfulTurnRun(latestTurnRun) &&
-        typeof latestTurnRun.turnNumber === "number"
+        isLatestTurnRunSuccessful &&
+        typeof latestTurnRunNumber === "number"
       ) {
         return {
           kind: "turn",
-          turnNumber: latestTurnRun.turnNumber + 1,
+          turnNumber: latestTurnRunNumber + 1,
         } as const
       }
 
       return null
     }
 
-    if (latestOpeningHandRun) {
-      if (isSuccessfulOpeningHandRun(latestOpeningHandRun)) {
+    if (hasLatestOpeningHandRun) {
+      if (isLatestOpeningHandRunSuccessful) {
         return {
           kind: "turn",
           turnNumber: 1,
@@ -1952,7 +1970,45 @@ function SimulationResultsPanel({
       kind: "turn",
       turnNumber: 1,
     } as const
-  })()
+  }, [
+    canStartOpeningHandRun,
+    hasLatestOpeningHandRun,
+    hasLatestTurnRun,
+    isSimulationActionBlocked,
+    isLatestOpeningHandRunSuccessful,
+    isLatestTurnRunSuccessful,
+    latestTurnRunNumber,
+  ])
+  const [renderedSimulationAction, setRenderedSimulationAction] =
+    useState<SimulationResultsAction | null>(null)
+  const [
+    isRenderedSimulationActionVisible,
+    setIsRenderedSimulationActionVisible,
+  ] = useState(false)
+
+  useEffect(() => {
+    if (!simulationAction) {
+      setIsRenderedSimulationActionVisible(false)
+
+      const hideTimeoutId = window.setTimeout(() => {
+        setRenderedSimulationAction(null)
+      }, 150)
+
+      return () => window.clearTimeout(hideTimeoutId)
+    }
+
+    setIsRenderedSimulationActionVisible(false)
+
+    const showTimeoutId = window.setTimeout(() => {
+      setRenderedSimulationAction(simulationAction)
+
+      window.requestAnimationFrame(() => {
+        setIsRenderedSimulationActionVisible(true)
+      })
+    }, 250)
+
+    return () => window.clearTimeout(showTimeoutId)
+  }, [simulationAction])
   const actionError = openingHandRunError ?? turnRunError
   const runs = [
     ...resultsInfo.openingHandLlmRuns.map((run) => ({
@@ -2093,23 +2149,34 @@ function SimulationResultsPanel({
         </p>
       ) : null}
 
-      {simulationAction ? (
-        <div className="flex justify-center">
+      {renderedSimulationAction ? (
+        <div
+          className={`flex justify-center transition-all duration-150 ease-out ${
+            isRenderedSimulationActionVisible
+              ? "translate-y-0 opacity-100"
+              : "pointer-events-none -translate-y-1 opacity-0"
+          }`}
+        >
           <Button
             className="w-fit bg-background/35 text-foreground hover:bg-muted/45"
+            disabled={!isRenderedSimulationActionVisible}
             variant="outline"
             type="button"
             onClick={() => {
-              if (simulationAction.kind === "opening_hand") {
+              if (!isRenderedSimulationActionVisible) {
+                return
+              }
+
+              if (renderedSimulationAction.kind === "opening_hand") {
                 onStartOpeningHandRun()
                 return
               }
 
-              onStartTurnRun(simulationAction.turnNumber)
+              onStartTurnRun(renderedSimulationAction.turnNumber)
             }}
           >
             <Sparkles data-icon="inline-start" />
-            {simulationAction.kind === "opening_hand"
+            {renderedSimulationAction.kind === "opening_hand"
               ? "Simulate opening hand"
               : "Simulate next turn"}
           </Button>
