@@ -31,11 +31,9 @@ import { Button } from "@/components/ui/button"
 import { API_BASE_URL } from "@/lib/api"
 import { readApiError } from "@/lib/api-error"
 import type {
-  CreateOpeningHandLlmRunResponse,
   CreateSavedSeedResponse,
   CreateSimulationResponse,
   CreateStartingHandResponse,
-  CreateTurnLlmRunResponse,
   DeckCard,
   OpenRouterGenerationDetailsResponse,
   SavedSeed,
@@ -182,6 +180,20 @@ function isCountedTurnRun(run: SimulationResultsInfo["turnLlmRuns"][number]) {
       run.status === "failed" ||
       run.status === "cancelled" ||
       (run.status === "completed" && Boolean(run.gameState?.trim())))
+  )
+}
+
+function isSuccessfulOpeningHandRun(
+  run: SimulationResultsInfo["openingHandLlmRuns"][number]
+) {
+  return run.status === "completed" && run.openingHandIsValid === true
+}
+
+function isSuccessfulTurnRun(run: SimulationResultsInfo["turnLlmRuns"][number]) {
+  return (
+    run.status === "completed" &&
+    run.outdated !== true &&
+    Boolean(run.gameState?.trim())
   )
 }
 
@@ -1168,12 +1180,8 @@ function SimulationDetails({
   const [openingHandRunError, setOpeningHandRunError] = useState<string | null>(
     null
   )
-  const [openingHandRun, setOpeningHandRun] =
-    useState<CreateOpeningHandLlmRunResponse | null>(null)
-  const [selectedTurnNumber, setSelectedTurnNumber] = useState("1")
   const [isStartingTurnRun, setIsStartingTurnRun] = useState(false)
   const [turnRunError, setTurnRunError] = useState<string | null>(null)
-  const [turnRun, setTurnRun] = useState<CreateTurnLlmRunResponse | null>(null)
   const [isStoppingSimulation, setIsStoppingSimulation] = useState(false)
   const [stopSimulationError, setStopSimulationError] = useState<string | null>(
     null
@@ -1227,11 +1235,8 @@ function SimulationDetails({
     scrollResultsToBottom()
     setIsStartingOpeningHandRun(false)
     setOpeningHandRunError(null)
-    setOpeningHandRun(null)
-    setSelectedTurnNumber("1")
     setIsStartingTurnRun(false)
     setTurnRunError(null)
-    setTurnRun(null)
     setIsStoppingSimulation(false)
     setStopSimulationError(null)
     isLoadingDebugInfoRef.current = false
@@ -1311,6 +1316,7 @@ function SimulationDetails({
 
     setIsStartingOpeningHandRun(true)
     setOpeningHandRunError(null)
+    setTurnRunError(null)
 
     try {
       const stopResult = await stopSimulation()
@@ -1333,8 +1339,6 @@ function SimulationDetails({
         return
       }
 
-      const data = (await response.json()) as CreateOpeningHandLlmRunResponse
-      setOpeningHandRun(data)
       setResultsStreamRestartKey((currentKey) => currentKey + 1)
     } catch {
       setOpeningHandRunError(
@@ -1345,25 +1349,19 @@ function SimulationDetails({
     }
   }
 
-  async function handleStartTurnRun(turnNumberOverride?: number) {
+  async function handleStartTurnRun(turnNumber: number) {
     if (isStartingTurnRun || isStartingOpeningHandRun || isStoppingSimulation) {
       return
     }
-
-    const turnNumber = turnNumberOverride ?? Number(selectedTurnNumber)
 
     if (!Number.isInteger(turnNumber) || turnNumber < 1) {
       setTurnRunError("Turn number must be a positive integer.")
       return
     }
 
-    if (turnNumberOverride !== undefined) {
-      setSelectedTurnNumber(String(turnNumber))
-    }
-
     setIsStartingTurnRun(true)
     setTurnRunError(null)
-    setTurnRun(null)
+    setOpeningHandRunError(null)
 
     try {
       const stopResult = await stopSimulation()
@@ -1392,8 +1390,6 @@ function SimulationDetails({
         return
       }
 
-      const data = (await response.json()) as CreateTurnLlmRunResponse
-      setTurnRun(data)
       setResultsStreamRestartKey((currentKey) => currentKey + 1)
     } catch {
       setTurnRunError("Turn run could not be sent to the server.")
@@ -1422,8 +1418,6 @@ function SimulationDetails({
       }
 
       const data = (await response.json()) as StopSimulationResponse
-      setOpeningHandRun(null)
-      setTurnRun(null)
       return data
     } catch {
       setStopSimulationError("Simulation stop could not be sent to the server.")
@@ -1622,7 +1616,6 @@ function SimulationDetails({
 
           {resultsInfo ? (
             <SimulationResultsPanel
-              canStartOpeningHandRun={shouldSimulateOpeningHand}
               isStartingOpeningHandRun={isStartingOpeningHandRun}
               isStartingTurnRun={isStartingTurnRun}
               isStoppingSimulation={isStoppingSimulation}
@@ -1631,8 +1624,11 @@ function SimulationDetails({
                 void handleStartTurnRun(turnNumber)
               }
               onStopSimulation={() => void handleStopSimulation()}
+              openingHandRunError={openingHandRunError}
               resultsInfo={resultsInfo}
+              simulation={simulation}
               stopSimulationError={stopSimulationError}
+              turnRunError={turnRunError}
             />
           ) : !isLoadingResults && !resultsError ? (
             <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
@@ -1657,116 +1653,6 @@ function SimulationDetails({
             {simulation.id}
           </p>
         </header>
-
-        <section className="grid gap-3">
-          <div className="grid gap-3 rounded-md border border-border bg-background/35 p-3">
-            <h4 className="text-sm font-semibold text-foreground">
-              LLM simulations
-            </h4>
-
-            {shouldSimulateOpeningHand ? (
-              <div className="grid gap-3 border-t border-border pt-3">
-                <div>
-                  <p className="text-sm font-medium text-foreground">
-                    Opening hand simulation
-                  </p>
-                  {openingHandRun ? (
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Run {openingHandRun.llmRunId.slice(0, 8)} started.
-                    </p>
-                  ) : null}
-                </div>
-                <Button
-                  className="w-fit"
-                  type="button"
-                  disabled={
-                    isStartingOpeningHandRun ||
-                    isStartingTurnRun ||
-                    isStoppingSimulation
-                  }
-                  onClick={() => void handleStartOpeningHandRun()}
-                >
-                  <Sparkles data-icon="inline-start" />
-                  {isStartingOpeningHandRun
-                    ? "Starting..."
-                    : "Start opening hand run"}
-                </Button>
-              </div>
-            ) : null}
-
-            <div className="grid gap-3 border-t border-border pt-3">
-              <label
-                className="grid gap-2 text-sm font-medium text-foreground"
-                htmlFor="turn-run-number"
-              >
-                <span>Turn simulation</span>
-                <select
-                  id="turn-run-number"
-                  className="h-9 w-28 rounded-md border border-input bg-background px-3 text-sm text-foreground transition-colors outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
-                  value={selectedTurnNumber}
-                  disabled={
-                    isStartingTurnRun ||
-                    isStartingOpeningHandRun ||
-                    isStoppingSimulation
-                  }
-                  onChange={(event) => {
-                    setSelectedTurnNumber(event.target.value)
-                    setTurnRunError(null)
-                  }}
-                >
-                  {Array.from({ length: 10 }, (_, turnIndex) => {
-                    const turnNumber = turnIndex + 1
-
-                    return (
-                      <option key={turnNumber} value={turnNumber}>
-                        Turn {turnNumber}
-                      </option>
-                    )
-                  })}
-                </select>
-              </label>
-
-              <Button
-                className="w-fit"
-                type="button"
-                disabled={
-                  isStartingTurnRun ||
-                  isStartingOpeningHandRun ||
-                  isStoppingSimulation
-                }
-                onClick={() => void handleStartTurnRun()}
-              >
-                <Dices data-icon="inline-start" />
-                {isStartingTurnRun ? "Starting..." : "Start turn run"}
-              </Button>
-            </div>
-
-            {turnRun ? (
-              <p className="text-sm text-muted-foreground">
-                Turn {turnRun.turnNumber} run {turnRun.llmRunId.slice(0, 8)}{" "}
-                started.
-              </p>
-            ) : null}
-
-            {turnRunError ? (
-              <p
-                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-                role="alert"
-              >
-                {turnRunError}
-              </p>
-            ) : null}
-
-            {openingHandRunError ? (
-              <p
-                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-                role="alert"
-              >
-                {openingHandRunError}
-              </p>
-            ) : null}
-          </div>
-        </section>
 
         <section className="grid gap-3">
           <h4 className="text-sm font-semibold text-foreground">Setup</h4>
@@ -1948,27 +1834,35 @@ function SimulationDebugModal({
 }
 
 function SimulationResultsPanel({
-  canStartOpeningHandRun,
   isStartingOpeningHandRun,
   isStartingTurnRun,
   isStoppingSimulation,
   onStartOpeningHandRun,
   onStartTurnRun,
   onStopSimulation,
+  openingHandRunError,
   resultsInfo,
+  simulation,
   stopSimulationError,
+  turnRunError,
 }: {
-  canStartOpeningHandRun: boolean
   isStartingOpeningHandRun: boolean
   isStartingTurnRun: boolean
   isStoppingSimulation: boolean
   onStartOpeningHandRun: () => void
   onStartTurnRun: (turnNumber: number) => void
   onStopSimulation: () => void
+  openingHandRunError: string | null
   resultsInfo: SimulationResultsInfo
+  simulation: Simulation
   stopSimulationError: string | null
+  turnRunError: string | null
 }) {
+  const canStartOpeningHandRun = simulation.startingHandId === null
   const isOpeningHandRunning = resultsInfo.openingHandLlmRuns.some((run) =>
+    isActiveLlmRunStatus(run.status)
+  )
+  const isTurnRunning = resultsInfo.turnLlmRuns.some((run) =>
     isActiveLlmRunStatus(run.status)
   )
   const activeTurnNumbers = new Set(
@@ -1982,10 +1876,88 @@ function SimulationResultsPanel({
   )
   const isStartingSimulationRun =
     isStartingOpeningHandRun || isStartingTurnRun || isStoppingSimulation
+  const isSimulationActionBlocked =
+    isStartingSimulationRun ||
+    isOpeningHandRunning ||
+    isTurnRunning ||
+    simulation.activeLlmRunCount > 0
+  const latestOpeningHandRun =
+    resultsInfo.openingHandLlmRuns.reduce<
+      SimulationResultsInfo["openingHandLlmRuns"][number] | null
+    >((latestRun, run) => {
+      if (!latestRun || run.attemptNumber > latestRun.attemptNumber) {
+        return run
+      }
+
+      return latestRun
+    }, null)
+  const latestTurnRun =
+    resultsInfo.turnLlmRuns.reduce<
+      SimulationResultsInfo["turnLlmRuns"][number] | null
+    >((latestRun, run) => {
+      if (!latestRun) {
+        return run
+      }
+
+      const runTurnNumber = run.turnNumber ?? 0
+      const latestRunTurnNumber = latestRun.turnNumber ?? 0
+
+      if (
+        runTurnNumber > latestRunTurnNumber ||
+        (runTurnNumber === latestRunTurnNumber &&
+          run.attemptNumber > latestRun.attemptNumber)
+      ) {
+        return run
+      }
+
+      return latestRun
+    }, null)
+  const simulationAction = (() => {
+    if (isSimulationActionBlocked) {
+      return null
+    }
+
+    if (latestTurnRun) {
+      if (
+        isSuccessfulTurnRun(latestTurnRun) &&
+        typeof latestTurnRun.turnNumber === "number"
+      ) {
+        return {
+          kind: "turn",
+          turnNumber: latestTurnRun.turnNumber + 1,
+        } as const
+      }
+
+      return null
+    }
+
+    if (latestOpeningHandRun) {
+      if (isSuccessfulOpeningHandRun(latestOpeningHandRun)) {
+        return {
+          kind: "turn",
+          turnNumber: 1,
+        } as const
+      }
+
+      return null
+    }
+
+    if (canStartOpeningHandRun) {
+      return {
+        kind: "opening_hand",
+      } as const
+    }
+
+    return {
+      kind: "turn",
+      turnNumber: 1,
+    } as const
+  })()
+  const actionError = openingHandRunError ?? turnRunError
   const runs = [
     ...resultsInfo.openingHandLlmRuns.map((run) => ({
       ...run,
-      canRerun: canStartOpeningHandRun && !isOpeningHandRunning,
+      canRerun: canStartOpeningHandRun && !isSimulationActionBlocked,
       isActive: isActiveLlmRunStatus(run.status),
       resultKind: "opening_hand" as const,
       resultLabel: `Opening hand attempt ${run.attemptNumber}`,
@@ -1997,7 +1969,8 @@ function SimulationResultsPanel({
       ...run,
       canRerun:
         typeof run.turnNumber === "number" &&
-        !activeTurnNumbers.has(run.turnNumber),
+        !activeTurnNumbers.has(run.turnNumber) &&
+        !isSimulationActionBlocked,
       isActive: isActiveLlmRunStatus(run.status),
       resultKind: "turn" as const,
       resultLabel: `Turn ${run.turnNumber ?? "?"} attempt ${run.attemptNumber}`,
@@ -2007,16 +1980,14 @@ function SimulationResultsPanel({
     })),
   ]
 
-  if (runs.length === 0) {
-    return (
-      <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
-        No opening hand or turn runs have been saved for this simulation yet.
-      </p>
-    )
-  }
-
   return (
     <div className="grid gap-3">
+      {runs.length === 0 ? (
+        <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+          No opening hand or turn runs have been saved for this simulation yet.
+        </p>
+      ) : null}
+
       {runs.map((run) => {
         const finishedDurationText = getSimulationRunFinishedDurationText(run)
         const runMetadata = [
@@ -2112,6 +2083,44 @@ function SimulationResultsPanel({
           </section>
         )
       })}
+
+      {actionError ? (
+        <p
+          className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          role="alert"
+        >
+          {actionError}
+        </p>
+      ) : null}
+
+      {simulationAction ? (
+        <div className="flex justify-start">
+          <Button
+            className="w-fit"
+            type="button"
+            onClick={() => {
+              if (simulationAction.kind === "opening_hand") {
+                onStartOpeningHandRun()
+                return
+              }
+
+              onStartTurnRun(simulationAction.turnNumber)
+            }}
+          >
+            {simulationAction.kind === "opening_hand" ? (
+              <>
+                <Sparkles data-icon="inline-start" />
+                Simulate opening hand
+              </>
+            ) : (
+              <>
+                <Dices data-icon="inline-start" />
+                Simulate next turn
+              </>
+            )}
+          </Button>
+        </div>
+      ) : null}
     </div>
   )
 }
