@@ -7,6 +7,7 @@ import {
   getSimulationResultEntries,
   getSimulationResultChunks,
   getSimulationRunThinkingPreview,
+  hasSimulationRunFinalParsedOutputChunk,
 } from "../src/lib/simulation-result-chunks.js"
 import {
   getKnownSimulationResultToolLabel,
@@ -742,6 +743,41 @@ test("returns null for empty thinking previews", () => {
       }),
     ]),
     null
+  )
+})
+
+test("detects final parsed output chunks for active-run thinking visibility", () => {
+  assert.equal(
+    hasSimulationRunFinalParsedOutputChunk([
+      createChunk({
+        id: 1,
+        kind: "reasoning_delta",
+        reasoningDelta: "Evaluating hand.",
+        sequence: 1,
+      }),
+      createChunk({
+        id: 2,
+        kind: "final_parsed_output",
+        payload: {
+          keptHand: ["Sol Ring", "Forest"],
+          summary: "Kept a stable opener.",
+        },
+        sequence: 2,
+      }),
+    ]),
+    true
+  )
+
+  assert.equal(
+    hasSimulationRunFinalParsedOutputChunk([
+      createChunk({
+        id: 1,
+        kind: "reasoning_delta",
+        reasoningDelta: "Evaluating hand.",
+        sequence: 1,
+      }),
+    ]),
+    false
   )
 })
 

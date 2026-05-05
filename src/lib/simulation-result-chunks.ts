@@ -90,6 +90,12 @@ export function getSimulationRunThinkingPreview(
   return previewText.length > 0 ? previewText : null
 }
 
+export function hasSimulationRunFinalParsedOutputChunk(
+  chunks: readonly SimulationDebugLlmRunChunk[]
+) {
+  return chunks.some((chunk) => chunk.kind === "final_parsed_output")
+}
+
 export function getSimulationRunActiveToolCallName(
   chunks: readonly SimulationDebugLlmRunChunk[]
 ) {

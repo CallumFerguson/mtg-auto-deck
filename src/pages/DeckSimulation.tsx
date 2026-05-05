@@ -67,6 +67,7 @@ import {
   getSimulationRunActiveToolCallName,
   getSimulationResultEntries,
   getSimulationRunThinkingPreview,
+  hasSimulationRunFinalParsedOutputChunk,
   type SimulationResultEntry,
 } from "@/lib/simulation-result-chunks"
 import {
@@ -2020,6 +2021,9 @@ function SimulationResultsPanel({
       resultEntries: getSimulationResultEntries(run.chunks),
       activeToolCallName: getSimulationRunActiveToolCallName(run.chunks),
       thinkingPreview: getSimulationRunThinkingPreview(run.chunks),
+      hasFinalParsedOutputChunk: hasSimulationRunFinalParsedOutputChunk(
+        run.chunks
+      ),
     })),
     ...resultsInfo.turnLlmRuns.map((run) => ({
       ...run,
@@ -2033,6 +2037,9 @@ function SimulationResultsPanel({
       resultEntries: getSimulationResultEntries(run.chunks),
       activeToolCallName: getSimulationRunActiveToolCallName(run.chunks),
       thinkingPreview: getSimulationRunThinkingPreview(run.chunks),
+      hasFinalParsedOutputChunk: hasSimulationRunFinalParsedOutputChunk(
+        run.chunks
+      ),
     })),
   ]
 
@@ -2121,7 +2128,7 @@ function SimulationResultsPanel({
               />
             ) : null}
 
-            {run.isActive ? (
+            {run.isActive && !run.hasFinalParsedOutputChunk ? (
               <SimulationResultThinkingPreview
                 activeToolCallName={run.activeToolCallName}
                 canStopSimulation={run.status !== "cancel_requested"}
