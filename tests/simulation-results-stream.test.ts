@@ -8,6 +8,10 @@ import {
   getSimulationResultChunks,
   getSimulationRunThinkingPreview,
 } from "../src/lib/simulation-result-chunks.js"
+import {
+  getKnownSimulationResultToolLabel,
+  getKnownSimulationResultToolLabelForChunk,
+} from "../src/lib/simulation-result-tool-labels.js"
 import { applySimulationResultsStreamEvent } from "../src/lib/simulation-results-stream.js"
 import type {
   SimulationDebugLlmRun,
@@ -737,6 +741,161 @@ test("returns null for empty thinking previews", () => {
         sequence: 2,
       }),
     ]),
+    null
+  )
+})
+
+test("formats known active and started tool events as deck actions", () => {
+  assert.equal(
+    getKnownSimulationResultToolLabel({
+      mcpFunctionName: "draw_card_from_top",
+      state: "active",
+    }),
+    "Drawing card from top of deck"
+  )
+  assert.equal(
+    getKnownSimulationResultToolLabelForChunk({
+      chunk: createChunk({
+        id: 1,
+        kind: "mcp_call_start",
+        mcpFunctionName: "shuffle_library",
+        sequence: 1,
+      }),
+      state: "started",
+    }),
+    "Shuffling deck"
+  )
+})
+
+test("formats known completed draw and return events with result details", () => {
+  assert.equal(
+    getKnownSimulationResultToolLabelForChunk({
+      chunk: createChunk({
+        id: 1,
+        kind: "mcp_call_complete",
+        mcpFunctionName: "draw_card_from_bottom",
+        mcpFunctionOutput: {
+          data: {
+            cards: ["Forest", "Island"],
+          },
+        },
+        sequence: 1,
+      }),
+      state: "completed",
+    }),
+    "Drew 2 cards from bottom of deck"
+  )
+  assert.equal(
+    getKnownSimulationResultToolLabelForChunk({
+      chunk: createChunk({
+        id: 2,
+        kind: "mcp_call_complete",
+        mcpFunctionName: "return_cards_to_library",
+        mcpFunctionOutput: {
+          data: {
+            cards: ["Forest", "Island"],
+            randomizeOrder: false,
+            side: "bottom",
+          },
+        },
+        sequence: 2,
+      }),
+      state: "completed",
+    }),
+    "Returned 2 cards to bottom of deck"
+  )
+})
+
+test("formats known completed single return, search, mulligan, and shuffle events", () => {
+  assert.equal(
+    getKnownSimulationResultToolLabelForChunk({
+      chunk: createChunk({
+        id: 1,
+        kind: "mcp_call_complete",
+        mcpFunctionName: "return_card_to_library",
+        mcpFunctionOutput: {
+          data: {
+            card: "Sol Ring",
+            position: 2,
+            side: "top",
+          },
+        },
+        sequence: 1,
+      }),
+      state: "completed",
+    }),
+    "Returned Sol Ring to deck with 2 cards above it"
+  )
+  assert.equal(
+    getKnownSimulationResultToolLabelForChunk({
+      chunk: createChunk({
+        id: 2,
+        kind: "mcp_call_complete",
+        mcpFunctionName: "take_cards_from_library",
+        mcpFunctionOutput: {
+          data: {
+            foundCards: ["Sol Ring"],
+            requestedCards: ["Sol Ring", "Mana Crypt"],
+          },
+        },
+        sequence: 2,
+      }),
+      state: "completed",
+    }),
+    "Found 1 of 2 requested cards in deck"
+  )
+  assert.equal(
+    getKnownSimulationResultToolLabelForChunk({
+      chunk: createChunk({
+        id: 3,
+        kind: "mcp_call_complete",
+        mcpFunctionName: "mulligan",
+        mcpFunctionOutput: {
+          data: {
+            mulliganCount: 2,
+          },
+        },
+        sequence: 3,
+      }),
+      state: "completed",
+    }),
+    "Took mulligan 2 and drew a replacement hand"
+  )
+  assert.equal(
+    getKnownSimulationResultToolLabelForChunk({
+      chunk: createChunk({
+        id: 4,
+        kind: "mcp_call_complete",
+        mcpFunctionName: "shuffle_library",
+        sequence: 4,
+      }),
+      state: "completed",
+    }),
+    "Shuffled deck"
+  )
+})
+
+test("formats known failed tool events without raw tool names", () => {
+  assert.equal(
+    getKnownSimulationResultToolLabelForChunk({
+      chunk: createChunk({
+        id: 1,
+        kind: "mcp_call_complete",
+        mcpFunctionName: "draw_card_from_top",
+        sequence: 1,
+      }),
+      state: "failed",
+    }),
+    "Could not draw card from top of deck"
+  )
+})
+
+test("keeps unknown tool events available for diagnostic fallback", () => {
+  assert.equal(
+    getKnownSimulationResultToolLabel({
+      mcpFunctionName: "unknown_tool",
+      state: "completed",
+    }),
     null
   )
 })

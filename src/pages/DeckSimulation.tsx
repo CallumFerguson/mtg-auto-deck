@@ -70,6 +70,10 @@ import {
   getSimulationRunThinkingPreview,
   type SimulationResultEntry,
 } from "@/lib/simulation-result-chunks"
+import {
+  getKnownSimulationResultToolLabel,
+  getKnownSimulationResultToolLabelForChunk,
+} from "@/lib/simulation-result-tool-labels"
 
 type OpeningHandCardOption = {
   id: string
@@ -2098,6 +2102,14 @@ function SimulationResultThinkingPreview({
     }
   }, [previewText])
 
+  const activeToolCallLabel =
+    activeToolCallName === null
+      ? null
+      : getKnownSimulationResultToolLabel({
+          mcpFunctionName: activeToolCallName,
+          state: "active",
+        })
+
   return (
     <div
       className={`grid gap-1 px-3 py-2 ${simulationResultChunkSurfaceClassName}`}
@@ -2106,7 +2118,7 @@ function SimulationResultThinkingPreview({
         <LoaderCircle className="size-4 shrink-0 animate-spin text-sky-300" />
         <span>
           {activeToolCallName
-            ? `Calling tool: ${activeToolCallName}`
+            ? (activeToolCallLabel ?? `Calling tool: ${activeToolCallName}`)
             : "Thinking"}
         </span>
       </div>
@@ -2212,11 +2224,17 @@ function SimulationResultEvent({
   chunk: SimulationDebugLlmRunChunk
 }) {
   if (chunk.kind === "mcp_call_start") {
+    const title =
+      getKnownSimulationResultToolLabelForChunk({
+        chunk,
+        state: "started",
+      }) ?? `Tool started: ${chunk.mcpFunctionName ?? "unknown tool"}`
+
     return (
       <div
         className={`${simulationResultChunkSurfaceClassName} px-3 py-2 text-sm text-muted-foreground`}
       >
-        Tool started: {chunk.mcpFunctionName ?? "unknown tool"}
+        {title}
       </div>
     )
   }
@@ -2465,6 +2483,14 @@ function formatResultEventPayload(payload: unknown) {
 
 function getMcpCallCompleteTitle(chunk: SimulationDebugLlmRunChunk) {
   const toolName = chunk.mcpFunctionName ?? "unknown tool"
+  const knownToolLabel = getKnownSimulationResultToolLabelForChunk({
+    chunk,
+    state: isMcpCallFailure(chunk) ? "failed" : "completed",
+  })
+
+  if (knownToolLabel !== null) {
+    return knownToolLabel
+  }
 
   if (isMcpCallFailure(chunk)) {
     return `Tool failed: ${toolName}`

@@ -16,6 +16,7 @@
     "src/lib/simulation-debug-chunks.ts",
     "src/lib/simulation-final-output.ts",
     "src/lib/simulation-result-chunks.ts",
+    "src/lib/simulation-result-tool-labels.ts",
     "src/lib/simulation-results-stream.ts",
     "tests/simulation-results-stream.test.ts"
   ]
