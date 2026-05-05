@@ -1238,6 +1238,11 @@ function SimulationDetails({
     })
   }, [])
 
+  const keepResultsScrolledToBottom = useCallback(() => {
+    keepResultsScrolledDownRef.current = true
+    scrollResultsToBottom()
+  }, [scrollResultsToBottom])
+
   useEffect(() => {
     simulationPanelRef.current?.scrollTo({ top: 0 })
     keepResultsScrolledDownRef.current = true
@@ -1630,6 +1635,7 @@ function SimulationDetails({
               isStartingTurnRun={isStartingTurnRun}
               isStoppingSimulation={isStoppingSimulation}
               onStartOpeningHandRun={() => void handleStartOpeningHandRun()}
+              onKeepResultsScrolledToBottom={keepResultsScrolledToBottom}
               onStartTurnRun={(turnNumber) =>
                 void handleStartTurnRun(turnNumber)
               }
@@ -1848,6 +1854,7 @@ function SimulationResultsPanel({
   isStartingTurnRun,
   isStoppingSimulation,
   onStartOpeningHandRun,
+  onKeepResultsScrolledToBottom,
   onStartTurnRun,
   onStopSimulation,
   openingHandRunError,
@@ -1860,6 +1867,7 @@ function SimulationResultsPanel({
   isStartingTurnRun: boolean
   isStoppingSimulation: boolean
   onStartOpeningHandRun: () => void
+  onKeepResultsScrolledToBottom: () => void
   onStartTurnRun: (turnNumber: number) => void
   onStopSimulation: () => void
   openingHandRunError: string | null
@@ -2179,6 +2187,7 @@ function SimulationResultsPanel({
                 return
               }
 
+              onKeepResultsScrolledToBottom()
               onStartTurnRun(renderedSimulationAction.turnNumber)
             }}
           >
