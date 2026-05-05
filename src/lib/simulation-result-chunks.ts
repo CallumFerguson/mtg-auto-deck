@@ -1,5 +1,18 @@
 import type { SimulationDebugLlmRunChunk } from "./deck-types"
 
+export type SimulationResultEntry =
+  | {
+      id: string
+      type: "chunk"
+      chunk: SimulationDebugLlmRunChunk
+    }
+  | {
+      id: string
+      type: "turn_action_log"
+      actions: string[]
+      chunks: SimulationDebugLlmRunChunk[]
+    }
+
 export function getSimulationResultChunks(
   chunks: readonly SimulationDebugLlmRunChunk[]
 ) {
@@ -11,6 +24,49 @@ export function getSimulationResultChunks(
   return visibleChunks.filter(
     (chunk) => !hiddenToolStartChunks.has(chunk) && !isDeltaChunk(chunk)
   )
+}
+
+export function getSimulationResultEntries(
+  chunks: readonly SimulationDebugLlmRunChunk[]
+): SimulationResultEntry[] {
+  const entries: SimulationResultEntry[] = []
+  let pendingTurnActionChunks: SimulationDebugLlmRunChunk[] = []
+
+  function flushPendingTurnActionChunks() {
+    if (pendingTurnActionChunks.length === 0) {
+      return
+    }
+
+    entries.push({
+      id: getTurnActionLogEntryId(pendingTurnActionChunks),
+      type: "turn_action_log",
+      actions: pendingTurnActionChunks.flatMap((chunk) => {
+        const action = getLoggedTurnAction(chunk)
+
+        return action === null ? [] : [action]
+      }),
+      chunks: pendingTurnActionChunks,
+    })
+    pendingTurnActionChunks = []
+  }
+
+  for (const chunk of getSimulationResultChunks(chunks)) {
+    if (isCompletedLogTurnActionChunk(chunk)) {
+      pendingTurnActionChunks.push(chunk)
+      continue
+    }
+
+    flushPendingTurnActionChunks()
+    entries.push({
+      id: `chunk-${getResultChunkId(chunk)}`,
+      type: "chunk",
+      chunk,
+    })
+  }
+
+  flushPendingTurnActionChunks()
+
+  return entries
 }
 
 export function getSimulationRunThinkingPreview(
@@ -28,6 +84,57 @@ export function getSimulationRunThinkingPreview(
     .trim()
 
   return previewText.length > 0 ? previewText : null
+}
+
+export function getLoggedTurnAction(chunk: SimulationDebugLlmRunChunk) {
+  if (!isCompletedLogTurnActionChunk(chunk)) {
+    return null
+  }
+
+  const resolvedPayload = parseJsonObjectPayload(chunk.mcpFunctionOutput)
+  const loggedActions = asPayloadRecord(resolvedPayload).data
+  const loggedActionsList = asPayloadRecord(loggedActions).loggedActions
+
+  if (Array.isArray(loggedActionsList)) {
+    const lastLoggedAction = loggedActionsList.at(-1)
+
+    if (typeof lastLoggedAction === "string" && lastLoggedAction.trim()) {
+      return lastLoggedAction
+    }
+  }
+
+  const message = getPayloadString(resolvedPayload, "message")
+  const messagePrefix = "Logged action:"
+
+  if (message?.startsWith(messagePrefix)) {
+    const messageAction = message.slice(messagePrefix.length).trim()
+
+    return messageAction.length > 0 ? messageAction : null
+  }
+
+  return null
+}
+
+function isCompletedLogTurnActionChunk(chunk: SimulationDebugLlmRunChunk) {
+  return (
+    chunk.kind === "mcp_call_complete" &&
+    chunk.mcpFunctionName === "log_turn_action"
+  )
+}
+
+function getTurnActionLogEntryId(
+  chunks: readonly SimulationDebugLlmRunChunk[]
+) {
+  const firstChunk = chunks[0]
+  const lastChunk = chunks[chunks.length - 1]
+
+  return `turn-action-log-${getResultChunkId(firstChunk)}-${getResultChunkId(
+    lastChunk
+  )}`
+}
+
+function getResultChunkId(chunk: SimulationDebugLlmRunChunk) {
+  return chunk.id === null ? `live-${chunk.sequence}` : String(chunk.id)
 }
 
 function getCompletedToolStartChunks(
@@ -144,6 +251,62 @@ function asPayloadRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null
     ? (value as Record<string, unknown>)
     : {}
+}
+
+function parseJsonObjectPayload(payload: unknown): unknown {
+  if (Array.isArray(payload)) {
+    for (const part of payload) {
+      const text = getPayloadString(part, "text")
+
+      if (text === null) {
+        continue
+      }
+
+      const parsedTextPayload = parseJsonObjectPayload(text)
+
+      if (typeof parsedTextPayload === "object" && parsedTextPayload !== null) {
+        return parsedTextPayload
+      }
+    }
+
+    return null
+  }
+
+  if (typeof payload === "object" && payload !== null) {
+    const content = asPayloadRecord(payload).content
+
+    if (Array.isArray(content)) {
+      for (const part of content) {
+        const text = getPayloadString(part, "text")
+
+        if (text === null) {
+          continue
+        }
+
+        const parsedTextPayload = parseJsonObjectPayload(text)
+
+        if (typeof parsedTextPayload === "object" && parsedTextPayload !== null) {
+          return parsedTextPayload
+        }
+      }
+    }
+
+    return payload
+  }
+
+  if (typeof payload !== "string") {
+    return null
+  }
+
+  try {
+    const parsedPayload = JSON.parse(payload) as unknown
+
+    return typeof parsedPayload === "object" && parsedPayload !== null
+      ? parsedPayload
+      : null
+  } catch {
+    return null
+  }
 }
 
 function getPayloadString(value: unknown, property: string) {

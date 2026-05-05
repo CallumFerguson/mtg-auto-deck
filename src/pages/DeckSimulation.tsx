@@ -41,6 +41,7 @@ import type {
   SavedSeedsResponse,
   Simulation,
   SimulationDebugInfo,
+  SimulationDebugLlmRun,
   SimulationDebugLlmRunChunk,
   SimulationResultsInfo,
   SimulationResultsStreamEvent,
@@ -63,8 +64,10 @@ import {
 } from "@/lib/simulation-debug-chunks"
 import { applySimulationResultsStreamEvent } from "@/lib/simulation-results-stream"
 import {
-  getSimulationResultChunks,
+  getLoggedTurnAction,
+  getSimulationResultEntries,
   getSimulationRunThinkingPreview,
+  type SimulationResultEntry,
 } from "@/lib/simulation-result-chunks"
 
 type OpeningHandCardOption = {
@@ -1927,14 +1930,14 @@ function SimulationResultsPanel({
       ...run,
       isActive: isActiveLlmRunStatus(run.status),
       resultLabel: `Opening hand attempt ${run.attemptNumber}`,
-      resultChunks: getSimulationResultChunks(run.chunks),
+      resultEntries: getSimulationResultEntries(run.chunks),
       thinkingPreview: getSimulationRunThinkingPreview(run.chunks),
     })),
     ...resultsInfo.turnLlmRuns.map((run) => ({
       ...run,
       isActive: isActiveLlmRunStatus(run.status),
       resultLabel: `Turn ${run.turnNumber ?? "?"} attempt ${run.attemptNumber}`,
-      resultChunks: getSimulationResultChunks(run.chunks),
+      resultEntries: getSimulationResultEntries(run.chunks),
       thinkingPreview: getSimulationRunThinkingPreview(run.chunks),
     })),
   ]
@@ -1979,15 +1982,15 @@ function SimulationResultsPanel({
             </details>
           ) : null}
 
-          {run.resultChunks.length > 0 ? (
-            <SimulationResultChunkCards run={run} chunks={run.resultChunks} />
+          {run.resultEntries.length > 0 ? (
+            <SimulationResultChunkCards run={run} entries={run.resultEntries} />
           ) : null}
 
           {run.isActive ? (
             <SimulationResultThinkingPreview
               previewText={run.thinkingPreview}
             />
-          ) : run.resultChunks.length === 0 && !run.gameState ? (
+          ) : run.resultEntries.length === 0 && !run.gameState ? (
             <p className="rounded-md border border-border bg-black/20 px-3 py-2 text-sm text-muted-foreground">
               No user-facing events have been saved for this run yet.
             </p>
@@ -2008,41 +2011,45 @@ const simulationResultChunkPreClassName =
   "debug-scrollbar-neutral max-h-64 max-w-full overflow-y-auto border-t border-border p-3 text-xs leading-5 break-words whitespace-pre-wrap text-muted-foreground"
 
 function SimulationResultChunkCards({
+  entries,
   run,
-  chunks,
 }: {
-  run: SimulationResultsInfo["openingHandLlmRuns"][number]
-  chunks: SimulationDebugLlmRunChunk[]
+  entries: SimulationResultEntry[]
+  run: SimulationDebugLlmRun
 }) {
-  const blocks = formatDebugChunkBlocks(chunks, {
-    omitWhitespaceOnlyDeltaBlocks: true,
-  })
-
   return (
     <div className="grid gap-2">
-      {blocks.map((block) => {
-        if (block.type === "event") {
-          if (block.chunk.kind === "final_parsed_output") {
-            const finalOutput = getSimulationFinalParsedOutputFromPayload(
-              run.phase,
-              block.chunk.payload
-            )
-
-            if (finalOutput) {
-              return (
-                <SimulationFinalOutputBlock
-                  key={block.id}
-                  finalOutput={finalOutput}
-                  cardMentions={block.chunk.cardMentions}
-                />
-              )
-            }
-          }
-
-          return <SimulationResultEvent key={block.id} chunk={block.chunk} />
+      {entries.map((entry) => {
+        if (entry.type === "turn_action_log") {
+          return (
+            <SimulationResultLoggedTurnActionEvent
+              key={entry.id}
+              actions={entry.actions}
+              chunks={entry.chunks}
+            />
+          )
         }
 
-        return null
+        const { chunk } = entry
+
+        if (chunk.kind === "final_parsed_output") {
+          const finalOutput = getSimulationFinalParsedOutputFromPayload(
+            run.phase,
+            chunk.payload
+          )
+
+          if (finalOutput) {
+            return (
+              <SimulationFinalOutputBlock
+                key={entry.id}
+                finalOutput={finalOutput}
+                cardMentions={chunk.cardMentions}
+              />
+            )
+          }
+        }
+
+        return <SimulationResultEvent key={entry.id} chunk={chunk} />
       })}
     </div>
   )
@@ -2152,6 +2159,41 @@ function SimulationFinalOutputBlock({
   )
 }
 
+function SimulationResultLoggedTurnActionEvent({
+  actions,
+  chunks,
+}: {
+  actions: string[]
+  chunks: SimulationDebugLlmRunChunk[]
+}) {
+  const hasFailure = chunks.some(isMcpCallFailure)
+  const hasMultipleActions = chunks.length > 1 || actions.length > 1
+  const title = hasFailure
+    ? "Turn action log failed"
+    : hasMultipleActions
+      ? "Turn actions logged"
+      : "Turn action logged"
+
+  return (
+    <div className={`grid gap-2 p-3 ${simulationResultChunkSurfaceClassName}`}>
+      <p className="text-sm font-medium text-muted-foreground">{title}</p>
+      {hasMultipleActions && actions.length > 0 ? (
+        <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-foreground/90">
+          {actions.map((action, index) => (
+            <li key={`${action}-${index}`}>{action}</li>
+          ))}
+        </ul>
+      ) : actions.length === 1 ? (
+        <p className="text-sm leading-6 text-foreground/90">{actions[0]}</p>
+      ) : (
+        <p className="text-sm leading-6 text-muted-foreground">
+          {getTurnActionLogFallbackText(chunks)}
+        </p>
+      )}
+    </div>
+  )
+}
+
 function SimulationResultEvent({
   chunk,
 }: {
@@ -2168,6 +2210,17 @@ function SimulationResultEvent({
   }
 
   if (chunk.kind === "mcp_call_complete") {
+    if (chunk.mcpFunctionName === "log_turn_action") {
+      const loggedAction = getLoggedTurnAction(chunk)
+
+      return (
+        <SimulationResultLoggedTurnActionEvent
+          actions={loggedAction === null ? [] : [loggedAction]}
+          chunks={[chunk]}
+        />
+      )
+    }
+
     if (chunk.cardMentions.length > 0 && !isMcpCallFailure(chunk)) {
       return <SimulationResultCompletedCardToolEvent chunk={chunk} />
     }
@@ -2406,7 +2459,7 @@ function getMcpCallCompleteTitle(chunk: SimulationDebugLlmRunChunk) {
   }
 
   if (chunk.mcpFunctionName === "log_turn_action") {
-    const lastLoggedAction = getLastLoggedTurnAction(chunk.mcpFunctionOutput)
+    const lastLoggedAction = getLoggedTurnAction(chunk)
 
     if (lastLoggedAction) {
       return `Tool completed: ${toolName} - ${lastLoggedAction}`
@@ -2422,6 +2475,27 @@ function getMcpCallResultPayload(chunk: SimulationDebugLlmRunChunk) {
   }
 
   return chunk.mcpFunctionOutput
+}
+
+function getTurnActionLogFallbackText(
+  chunks: readonly SimulationDebugLlmRunChunk[]
+) {
+  if (!chunks.some(isMcpCallFailure)) {
+    return "The action log was updated."
+  }
+
+  const failurePayload = chunks
+    .filter(isMcpCallFailure)
+    .map(getMcpCallResultPayload)
+    .find((payload) => payload !== null && payload !== undefined)
+
+  if (typeof failurePayload === "string" && failurePayload.trim()) {
+    return failurePayload
+  }
+
+  const failureMessage = getPayloadString(failurePayload, "message")
+
+  return failureMessage ?? "The action was not logged."
 }
 
 function isMcpCallFailure(chunk: SimulationDebugLlmRunChunk) {
@@ -2467,49 +2541,6 @@ function getPayloadString(value: unknown, property: string) {
   const propertyValue = asPayloadRecord(value)[property]
 
   return typeof propertyValue === "string" ? propertyValue : null
-}
-
-function getLastLoggedTurnAction(payload: unknown) {
-  const resolvedPayload = parseJsonObjectPayload(payload)
-  const loggedActions = resolvedPayload?.data?.loggedActions
-
-  if (!Array.isArray(loggedActions)) {
-    return null
-  }
-
-  const lastLoggedAction = loggedActions.at(-1)
-
-  return typeof lastLoggedAction === "string" && lastLoggedAction.trim()
-    ? lastLoggedAction
-    : null
-}
-
-function parseJsonObjectPayload(payload: unknown) {
-  if (typeof payload === "object" && payload !== null) {
-    return payload as {
-      data?: {
-        loggedActions?: unknown
-      }
-    }
-  }
-
-  if (typeof payload !== "string") {
-    return null
-  }
-
-  try {
-    const parsedPayload = JSON.parse(payload) as unknown
-
-    return typeof parsedPayload === "object" && parsedPayload !== null
-      ? (parsedPayload as {
-          data?: {
-            loggedActions?: unknown
-          }
-        })
-      : null
-  } catch {
-    return null
-  }
 }
 
 function getPayloadMessage(payload: unknown) {

@@ -3,6 +3,7 @@ import test from "node:test"
 import { getSimulationFinalParsedOutput } from "../src/lib/simulation-final-output.js"
 import { formatDebugChunkBlocks } from "../src/lib/simulation-debug-chunks.js"
 import {
+  getSimulationResultEntries,
   getSimulationResultChunks,
   getSimulationRunThinkingPreview,
 } from "../src/lib/simulation-result-chunks.js"
@@ -470,6 +471,105 @@ test("hides completed tool starts across intervening chunks", () => {
   assert.deepEqual(
     resultChunks.map((chunk) => chunk.sequence),
     [4]
+  )
+})
+
+test("combines adjacent completed turn action log entries after hiding tool starts", () => {
+  const resultEntries = getSimulationResultEntries([
+    createChunk({
+      id: 1,
+      kind: "mcp_call_start",
+      mcpFunctionName: "log_turn_action",
+      sequence: 1,
+    }),
+    createChunk({
+      id: 2,
+      kind: "mcp_call_complete",
+      mcpFunctionName: "log_turn_action",
+      mcpFunctionOutput: {
+        data: {
+          loggedActions: ["Move to precombat main phase."],
+        },
+      },
+      sequence: 2,
+    }),
+    createChunk({
+      id: 3,
+      kind: "mcp_call_start",
+      mcpFunctionName: "log_turn_action",
+      sequence: 3,
+    }),
+    createChunk({
+      id: 4,
+      kind: "mcp_call_complete",
+      mcpFunctionName: "log_turn_action",
+      mcpFunctionOutput: {
+        data: {
+          loggedActions: [
+            "Move to precombat main phase.",
+            "Cast Sol Ring.",
+          ],
+        },
+      },
+      sequence: 4,
+    }),
+  ])
+
+  assert.equal(resultEntries.length, 1)
+  assert.equal(resultEntries[0]?.type, "turn_action_log")
+  assert.deepEqual(
+    resultEntries[0]?.type === "turn_action_log"
+      ? resultEntries[0].actions
+      : [],
+    ["Move to precombat main phase.", "Cast Sol Ring."]
+  )
+  assert.deepEqual(
+    resultEntries[0]?.type === "turn_action_log"
+      ? resultEntries[0].chunks.map((chunk) => chunk.sequence)
+      : [],
+    [2, 4]
+  )
+})
+
+test("keeps turn action log groups separated by other visible events", () => {
+  const resultEntries = getSimulationResultEntries([
+    createChunk({
+      id: 1,
+      kind: "mcp_call_complete",
+      mcpFunctionName: "log_turn_action",
+      mcpFunctionOutput: {
+        message: "Logged action: Move to draw step.",
+      },
+      sequence: 1,
+    }),
+    createChunk({
+      id: 2,
+      kind: "mcp_call_complete",
+      mcpFunctionName: "draw_card_from_top",
+      sequence: 2,
+    }),
+    createChunk({
+      id: 3,
+      kind: "mcp_call_complete",
+      mcpFunctionName: "log_turn_action",
+      mcpFunctionOutput: JSON.stringify({
+        data: {
+          loggedActions: ["Move to draw step.", "Draw a card."],
+        },
+      }),
+      sequence: 3,
+    }),
+  ])
+
+  assert.deepEqual(
+    resultEntries.map((entry) => entry.type),
+    ["turn_action_log", "chunk", "turn_action_log"]
+  )
+  assert.deepEqual(
+    resultEntries.flatMap((entry) =>
+      entry.type === "turn_action_log" ? entry.actions : []
+    ),
+    ["Move to draw step.", "Draw a card."]
   )
 })
 
