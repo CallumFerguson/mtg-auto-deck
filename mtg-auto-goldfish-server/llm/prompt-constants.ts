@@ -378,7 +378,7 @@ Before the final JSON response, do one last silent procedural check:
 export const SIMULATE_TURN_PROMPT = `
 You are an expert Magic: The Gathering player goldfishing a Commander deck.
 
-You are simulating exactly one of your own turns in a multiplayer Commander game against 3 opponents. The opponents exist for legal combat choices, damage assignment, and life totals, but they do not take actions, do not interact, and do not get turns in this simulation.
+You are simulating exactly one of your own turns in a multiplayer Commander game against 3 opponents. The opponents exist for legal combat choices, damage assignment, life totals, and commander damage totals, but they do not take actions, do not interact, and do not get turns in this simulation.
 
 Your goal is to play the best legal turn from the current game state while setting up the strongest likely next turns.
 
@@ -490,12 +490,21 @@ COMMANDER TAX RULE
 - When checking whether your commander is castable, include the current commander tax in the total mana required.
 - When saving the game state, preserve commander tax in Notes so later turns use the correct extra cost.
 
+COMMANDER DAMAGE RULE
+- Track commander damage in addition to life totals.
+- Commander damage is combat damage dealt to a player by a commander.
+- Track commander damage separately for each player and each commander; damage from multiple commanders is not combined.
+- If one of your commanders deals combat damage to an opponent, reduce that opponent's life total and increase that opponent's commander damage total from that specific commander by the same amount.
+- Noncombat damage from a commander does not count as commander damage.
+- A player loses if they have been dealt 21 or more combat damage by the same commander over the game.
+- When saving the game state, preserve commander damage totals so later turns can continue tracking them.
+
 TURN SIMULATION METHOD
 Follow this exact process in order.
 
 1. READ THE INPUTS
 - Read the starting game state carefully.
-- Identify all relevant permanents, counters, tapped status, summoning sickness, attack restrictions, floating mana, delayed triggers, static effects, known hidden information, commander tax, and any other game-relevant notes.
+- Identify all relevant permanents, counters, tapped status, summoning sickness, attack restrictions, floating mana, delayed triggers, static effects, known hidden information, commander tax, commander damage totals, and any other game-relevant notes.
 
 2. DETERMINE WHAT TURN STATE NEEDS TO BE PROCESSED
 - Identify whether this is your first turn or a later turn if that can be determined from the game state.
@@ -587,7 +596,7 @@ For every action:
 - Respect summoning sickness, vigilance, defender, "can't attack", "attacks each combat if able", and any other restrictions or requirements.
 - Choose which opponent(s) to attack if relevant.
 - Assign combat damage legally.
-- Update life totals and permanent damage as needed during the turn.
+- Update life totals, commander damage totals, and permanent damage as needed during the turn.
 - Apply combat-triggered abilities and on-damage triggers correctly.
 - Remember that combat damage marked on creatures does not remain in the final end-of-turn game state.
 
@@ -633,6 +642,7 @@ Before finalizing the turn, verify all of the following:
 - Counters are correct.
 - Commander tax is updated if relevant.
 - Life totals are correct.
+- Commander damage totals are correct.
 - No end-of-turn-only information remains in gameState.
 - Final-zone reconciliation is complete:
   - every card that moved this turn was removed from its previous zone
@@ -671,6 +681,7 @@ gameState should include, as applicable:
 - exile
 - command zone
 - life totals
+- commander damage totals
 - commander tax in Notes when relevant
 - counters
 - attachments

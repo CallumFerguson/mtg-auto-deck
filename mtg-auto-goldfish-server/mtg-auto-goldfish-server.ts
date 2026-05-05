@@ -4703,9 +4703,15 @@ Exile:
 // empty
 
 Your Life: 40
+
 Opponent A Life: 40
+Opponent A Commander Damage: none
+
 Opponent B Life: 40
+Opponent B Commander Damage: none
+
 Opponent C Life: 40
+Opponent C Commander Damage: none
 `.trim()
 }
 
