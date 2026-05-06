@@ -3,6 +3,7 @@ import test from "node:test"
 import { getSimulationFinalParsedOutput } from "../src/lib/simulation-final-output.js"
 import { formatDebugChunkBlocks } from "../src/lib/simulation-debug-chunks.js"
 import {
+  getSimulationRunActivityBlocks,
   getSimulationRunActiveToolCallName,
   getSimulationResultEntries,
   getSimulationResultChunks,
@@ -59,9 +60,7 @@ test("keeps streamed chunks ordered by sequence", () => {
   })
 
   assert.deepEqual(
-    updatedResults?.openingHandLlmRuns[0].chunks.map(
-      (chunk) => chunk.sequence
-    ),
+    updatedResults?.openingHandLlmRuns[0].chunks.map((chunk) => chunk.sequence),
     [2, 3]
   )
 })
@@ -571,10 +570,7 @@ test("combines adjacent completed turn action log entries after hiding tool star
       mcpFunctionName: "log_turn_action",
       mcpFunctionOutput: {
         data: {
-          loggedActions: [
-            "Move to precombat main phase.",
-            "Cast Sol Ring.",
-          ],
+          loggedActions: ["Move to precombat main phase.", "Cast Sol Ring."],
         },
       },
       sequence: 4,
@@ -783,6 +779,163 @@ test("returns null for empty thinking previews", () => {
       }),
     ]),
     null
+  )
+})
+
+test("formats activity blocks from reasoning and output lifecycles", () => {
+  const blocks = getSimulationRunActivityBlocks([
+    createChunk({
+      id: 1,
+      kind: "reasoning_start",
+      sequence: 1,
+    }),
+    createChunk({
+      id: 2,
+      kind: "reasoning_delta",
+      reasoningDelta: "**Keep** ",
+      sequence: 2,
+    }),
+    createChunk({
+      id: 3,
+      kind: "reasoning_delta",
+      reasoningDelta: "a two-land hand.",
+      sequence: 3,
+    }),
+    createChunk({
+      id: 4,
+      kind: "reasoning_done",
+      sequence: 4,
+    }),
+    createChunk({
+      id: 5,
+      kind: "output_start",
+      sequence: 5,
+    }),
+    createChunk({
+      id: 6,
+      outputDelta: "Keeping this opener.",
+      sequence: 6,
+    }),
+    createChunk({
+      id: 7,
+      kind: "output_done",
+      sequence: 7,
+    }),
+  ])
+
+  assert.deepEqual(
+    blocks.map((block) => block.type),
+    ["reasoning", "output"]
+  )
+  assert.equal(
+    blocks[0]?.type === "reasoning" ? blocks[0].text : "",
+    "**Keep** a two-land hand."
+  )
+  assert.equal(
+    blocks[1]?.type === "output" ? blocks[1].text : "",
+    "Keeping this opener."
+  )
+})
+
+test("formats activity delta blocks without lifecycle chunks", () => {
+  const blocks = getSimulationRunActivityBlocks([
+    createChunk({
+      id: 1,
+      kind: "reasoning_delta",
+      reasoningDelta: "First ",
+      sequence: 1,
+    }),
+    createChunk({
+      id: 2,
+      kind: "reasoning_delta",
+      reasoningDelta: "thought.",
+      sequence: 2,
+    }),
+    createChunk({
+      id: 3,
+      outputDelta: "Visible output.",
+      sequence: 3,
+    }),
+  ])
+
+  assert.deepEqual(
+    blocks.map((block) => block.type),
+    ["reasoning", "output"]
+  )
+  assert.equal(
+    blocks[0]?.type === "reasoning" ? blocks[0].text : "",
+    "First thought."
+  )
+  assert.equal(
+    blocks[1]?.type === "output" ? blocks[1].text : "",
+    "Visible output."
+  )
+})
+
+test("formats activity tool calls once with only tool names", () => {
+  const blocks = getSimulationRunActivityBlocks([
+    createChunk({
+      id: 1,
+      kind: "mcp_call_start",
+      mcpFunctionName: "draw_starting_hand",
+      payload: {
+        item: {
+          id: "call_1",
+        },
+      },
+      sequence: 1,
+    }),
+    createChunk({
+      id: 2,
+      kind: "reasoning_delta",
+      reasoningDelta: "Checking the hand.",
+      sequence: 2,
+    }),
+    createChunk({
+      id: 3,
+      kind: "mcp_call_complete",
+      mcpFunctionName: "draw_starting_hand",
+      payload: {
+        item: {
+          id: "call_1",
+        },
+      },
+      sequence: 3,
+    }),
+    createChunk({
+      id: 4,
+      kind: "mcp_call_start",
+      mcpFunctionName: "mulligan",
+      sequence: 4,
+    }),
+  ])
+
+  assert.deepEqual(
+    blocks.map((block) => block.type),
+    ["tool_call", "reasoning", "tool_call"]
+  )
+  assert.deepEqual(
+    blocks.flatMap((block) =>
+      block.type === "tool_call" ? [block.toolName] : []
+    ),
+    ["draw_starting_hand", "mulligan"]
+  )
+})
+
+test("formats unnamed activity tool calls as unknown tools", () => {
+  const blocks = getSimulationRunActivityBlocks([
+    createChunk({
+      id: 1,
+      kind: "mcp_call_complete",
+      mcpFunctionName: null,
+      sequence: 1,
+    }),
+  ])
+
+  assert.equal(blocks[0]?.type, "tool_call")
+  assert.equal(
+    blocks[0]?.type === "tool_call" ? blocks[0].toolName : "",
+    "Unknown tool"
   )
 })
 

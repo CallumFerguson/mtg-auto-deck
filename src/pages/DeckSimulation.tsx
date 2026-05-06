@@ -10,6 +10,7 @@ import {
   type ReactNode,
   type UIEvent,
 } from "react"
+import ReactMarkdown from "react-markdown"
 import {
   Bug,
   Check,
@@ -65,10 +66,12 @@ import {
 import { applySimulationResultsStreamEvent } from "@/lib/simulation-results-stream"
 import {
   getLoggedTurnAction,
+  getSimulationRunActivityBlocks,
   getSimulationRunActiveToolCallName,
   getSimulationResultEntries,
   getSimulationRunThinkingPreview,
   hasSimulationRunFinalParsedOutputChunk,
+  type SimulationRunActivityBlock,
   type SimulationResultEntry,
 } from "@/lib/simulation-result-chunks"
 import {
@@ -1462,11 +1465,35 @@ function SimulationDetails({
   const isProgrammaticResultsScrollRef = useRef(false)
   const previousResultsScrollTopRef = useRef(0)
   const [resultsStreamRestartKey, setResultsStreamRestartKey] = useState(0)
+  const [selectedActivityRunId, setSelectedActivityRunId] = useState<
+    string | null
+  >(null)
   const shouldSimulateOpeningHand = simulation.startingHandId === null
+  const selectedActivityRun = useMemo(() => {
+    if (!resultsInfo || selectedActivityRunId === null) {
+      return null
+    }
+
+    return (
+      [...resultsInfo.openingHandLlmRuns, ...resultsInfo.turnLlmRuns].find(
+        (run) => run.llmRunId === selectedActivityRunId
+      ) ?? null
+    )
+  }, [resultsInfo, selectedActivityRunId])
 
   useEffect(() => {
     simulationRef.current = simulation
   }, [simulation])
+
+  useEffect(() => {
+    if (
+      selectedActivityRunId !== null &&
+      resultsInfo !== null &&
+      selectedActivityRun === null
+    ) {
+      setSelectedActivityRunId(null)
+    }
+  }, [resultsInfo, selectedActivityRun, selectedActivityRunId])
 
   const scrollResultsToBottom = useCallback(() => {
     const resultsPanel = resultsPanelRef.current
@@ -1518,6 +1545,7 @@ function SimulationDetails({
     setResultsInfo(null)
     resultsInfoRef.current = null
     setResultsStreamRestartKey(0)
+    setSelectedActivityRunId(null)
   }, [scrollResultsToBottom, simulation.id])
 
   useLayoutEffect(() => {
@@ -1811,53 +1839,66 @@ function SimulationDetails({
   }, [deckId, onSimulationUpdated, resultsStreamRestartKey, simulation.id])
 
   return (
-    <main
-      ref={resultsPanelRef}
-      className="simulation-scrollbar h-full min-h-0 min-w-0 overflow-y-auto px-5 py-6"
-      onScroll={handleResultsScroll}
-    >
-      <section className="mx-auto grid w-full max-w-5xl gap-4">
-        {resultsError ? (
-          <p
-            className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-            role="alert"
-          >
-            {resultsError}
-          </p>
-        ) : null}
+    <div className="flex h-full min-h-0 min-w-0 overflow-hidden">
+      <main
+        ref={resultsPanelRef}
+        className="simulation-scrollbar h-full min-h-0 min-w-0 flex-1 overflow-y-auto px-5 py-6"
+        onScroll={handleResultsScroll}
+      >
+        <section className="mx-auto grid w-full max-w-5xl gap-4">
+          {resultsError ? (
+            <p
+              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              role="alert"
+            >
+              {resultsError}
+            </p>
+          ) : null}
 
-        {isLoadingResults && !resultsInfo ? (
-          <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
-            Loading simulation results...
-          </p>
-        ) : null}
+          {isLoadingResults && !resultsInfo ? (
+            <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+              Loading simulation results...
+            </p>
+          ) : null}
 
-        {resultsInfo ? (
-          <SimulationResultsPanel
-            isStartingOpeningHandRun={isStartingOpeningHandRun}
-            isStartingTurnRun={isStartingTurnRun}
-            isLoadingStartingHand={isLoadingStartingHand}
-            isStoppingSimulation={isStoppingSimulation}
-            onStartOpeningHandRun={() => void handleStartOpeningHandRun()}
-            onKeepResultsScrolledToBottom={keepResultsScrolledToBottom}
-            onScrollResultsToBottomIfKept={scrollResultsToBottomIfKept}
-            onStartTurnRun={(turnNumber) => void handleStartTurnRun(turnNumber)}
-            onStopSimulation={() => void handleStopSimulation()}
-            openingHandRunError={openingHandRunError}
-            resultsInfo={resultsInfo}
-            simulation={simulation}
-            startingHand={startingHand}
-            startingHandLoadError={startingHandLoadError}
-            stopSimulationError={stopSimulationError}
-            turnRunError={turnRunError}
-          />
-        ) : !isLoadingResults && !resultsError ? (
-          <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
-            Waiting for simulation results.
-          </p>
-        ) : null}
-      </section>
-    </main>
+          {resultsInfo ? (
+            <SimulationResultsPanel
+              isStartingOpeningHandRun={isStartingOpeningHandRun}
+              isStartingTurnRun={isStartingTurnRun}
+              isLoadingStartingHand={isLoadingStartingHand}
+              isStoppingSimulation={isStoppingSimulation}
+              onStartOpeningHandRun={() => void handleStartOpeningHandRun()}
+              onKeepResultsScrolledToBottom={keepResultsScrolledToBottom}
+              onScrollResultsToBottomIfKept={scrollResultsToBottomIfKept}
+              onSelectActivityRun={setSelectedActivityRunId}
+              onStartTurnRun={(turnNumber) =>
+                void handleStartTurnRun(turnNumber)
+              }
+              onStopSimulation={() => void handleStopSimulation()}
+              openingHandRunError={openingHandRunError}
+              resultsInfo={resultsInfo}
+              selectedActivityRunId={selectedActivityRunId}
+              simulation={simulation}
+              startingHand={startingHand}
+              startingHandLoadError={startingHandLoadError}
+              stopSimulationError={stopSimulationError}
+              turnRunError={turnRunError}
+            />
+          ) : !isLoadingResults && !resultsError ? (
+            <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+              Waiting for simulation results.
+            </p>
+          ) : null}
+        </section>
+      </main>
+
+      {selectedActivityRun ? (
+        <SimulationRunActivityPanel
+          run={selectedActivityRun}
+          onClose={() => setSelectedActivityRunId(null)}
+        />
+      ) : null}
+    </div>
   )
 }
 
@@ -1962,10 +2003,12 @@ function SimulationResultsPanel({
   onStartOpeningHandRun,
   onKeepResultsScrolledToBottom,
   onScrollResultsToBottomIfKept,
+  onSelectActivityRun,
   onStartTurnRun,
   onStopSimulation,
   openingHandRunError,
   resultsInfo,
+  selectedActivityRunId,
   simulation,
   startingHand,
   startingHandLoadError,
@@ -1979,10 +2022,12 @@ function SimulationResultsPanel({
   onStartOpeningHandRun: () => void
   onKeepResultsScrolledToBottom: () => void
   onScrollResultsToBottomIfKept: () => void
+  onSelectActivityRun: (llmRunId: string) => void
   onStartTurnRun: (turnNumber: number) => void
   onStopSimulation: () => void
   openingHandRunError: string | null
   resultsInfo: SimulationResultsInfo
+  selectedActivityRunId: string | null
   simulation: Simulation
   startingHand: StartingHand | null
   startingHandLoadError: string | null
@@ -2187,7 +2232,9 @@ function SimulationResultsPanel({
             finishedDurationText={finishedDurationText}
             isFinishedSuccessfully={run.status === "completed"}
             isFinished={true}
+            isActivitySelected={selectedActivityRunId === run.llmRunId}
             isStoppingSimulation={false}
+            onViewActivity={() => onSelectActivityRun(run.llmRunId)}
             onStopSimulation={onStopSimulation}
             previewText={run.thinkingPreview}
             runStartTimeMs={null}
@@ -2275,7 +2322,9 @@ function SimulationResultsPanel({
                 finishedDurationText={null}
                 isFinishedSuccessfully={false}
                 isFinished={false}
+                isActivitySelected={selectedActivityRunId === run.llmRunId}
                 isStoppingSimulation={isStoppingSimulation}
+                onViewActivity={() => onSelectActivityRun(run.llmRunId)}
                 onStopSimulation={onStopSimulation}
                 previewText={run.thinkingPreview}
                 runStartTimeMs={getSimulationRunStartTimeMs(run)}
@@ -2413,7 +2462,9 @@ function SimulationResultThinkingPreview({
   finishedDurationText,
   isFinished,
   isFinishedSuccessfully,
+  isActivitySelected,
   isStoppingSimulation,
+  onViewActivity,
   onStopSimulation,
   previewText,
   runStartTimeMs,
@@ -2424,7 +2475,9 @@ function SimulationResultThinkingPreview({
   finishedDurationText: string | null
   isFinished: boolean
   isFinishedSuccessfully: boolean
+  isActivitySelected: boolean
   isStoppingSimulation: boolean
+  onViewActivity: () => void
   onStopSimulation: () => void
   previewText: string | null
   runStartTimeMs: number | null
@@ -2502,19 +2555,22 @@ function SimulationResultThinkingPreview({
   const statusTextSizeClassName = shouldShowPreviewText
     ? "text-sm"
     : "text-base"
-  const statusIconSizeClassName =
-    shouldShowPreviewText ? "size-4" : "size-5"
-  const elapsedTextSizeClassName =
-    shouldShowPreviewText ? "text-xs" : "text-sm"
+  const statusIconSizeClassName = shouldShowPreviewText ? "size-4" : "size-5"
+  const elapsedTextSizeClassName = shouldShowPreviewText ? "text-xs" : "text-sm"
 
   return (
     <div
-      className={`flex min-h-[3.5rem] select-none items-stretch gap-2 px-3 py-2 ${simulationResultChunkSurfaceClassName}`}
+      className={`flex min-h-[3.5rem] items-stretch gap-2 transition-colors select-none ${simulationResultChunkSurfaceClassName} ${
+        isActivitySelected ? "border-sky-400/55 bg-sky-950/20" : ""
+      }`}
     >
-      <div
-        className={`min-w-0 flex-1 ${
+      <button
+        className={`min-w-0 flex-1 px-3 py-2 text-left transition-colors hover:bg-sky-950/20 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none ${
           shouldShowPreviewText ? "grid gap-1" : "flex items-center"
         }`}
+        type="button"
+        aria-pressed={isActivitySelected}
+        onClick={onViewActivity}
       >
         <div
           className={`flex min-w-0 flex-1 items-center gap-3 font-medium text-sky-100 ${statusTextSizeClassName}`}
@@ -2571,27 +2627,212 @@ function SimulationResultThinkingPreview({
             {stopSimulationError}
           </p>
         ) : null}
-      </div>
+      </button>
       {canStopSimulation ? (
-        <Button
-          className="aspect-square h-auto min-h-full rounded-full bg-background/40 p-0 text-muted-foreground hover:text-foreground"
-          type="button"
-          variant="outline"
-          disabled={isStoppingSimulation}
-          aria-label="Stop simulation"
-          title="Stop simulation"
-          onClick={onStopSimulation}
-        >
-          {isStoppingSimulation ? (
-            <LoaderCircle className="animate-spin" />
-          ) : (
-            <Square fill="currentColor" />
-          )}
-        </Button>
+        <div className="py-2 pr-3">
+          <Button
+            className="aspect-square h-full rounded-full bg-background/40 p-0 text-muted-foreground hover:text-foreground"
+            type="button"
+            variant="outline"
+            disabled={isStoppingSimulation}
+            aria-label="Stop simulation"
+            title="Stop simulation"
+            onClick={onStopSimulation}
+          >
+            {isStoppingSimulation ? (
+              <LoaderCircle className="animate-spin" />
+            ) : (
+              <Square fill="currentColor" />
+            )}
+          </Button>
+        </div>
       ) : null}
     </div>
   )
 }
+
+function SimulationRunActivityPanel({
+  onClose,
+  run,
+}: {
+  onClose: () => void
+  run: SimulationDebugLlmRun
+}) {
+  const activityScrollRef = useRef<HTMLDivElement | null>(null)
+  const keepActivityScrolledDownRef = useRef(true)
+  const isProgrammaticActivityScrollRef = useRef(false)
+  const previousActivityScrollTopRef = useRef(0)
+  const [currentTimeMs, setCurrentTimeMs] = useState(() => Date.now())
+  const activityBlocks = useMemo(
+    () => getSimulationRunActivityBlocks(run.chunks),
+    [run.chunks]
+  )
+  const runStartTimeMs = getSimulationRunStartTimeMs(run)
+  const runFinishedTimeMs = getSimulationRunFinishedTimeMs(run)
+  const durationText =
+    runStartTimeMs === null
+      ? null
+      : formatMinutesSeconds(
+          (runFinishedTimeMs ?? currentTimeMs) - runStartTimeMs
+        )
+
+  const scrollActivityToBottom = useCallback(() => {
+    const activityScrollElement = activityScrollRef.current
+
+    if (!activityScrollElement) {
+      return
+    }
+
+    isProgrammaticActivityScrollRef.current = true
+    activityScrollElement.scrollTo({
+      top: activityScrollElement.scrollHeight,
+    })
+
+    window.requestAnimationFrame(() => {
+      previousActivityScrollTopRef.current = activityScrollElement.scrollTop
+      isProgrammaticActivityScrollRef.current = false
+    })
+  }, [])
+
+  useEffect(() => {
+    keepActivityScrolledDownRef.current = true
+    previousActivityScrollTopRef.current = 0
+    scrollActivityToBottom()
+  }, [run.llmRunId, scrollActivityToBottom])
+
+  useEffect(() => {
+    if (runFinishedTimeMs !== null) {
+      return
+    }
+
+    const intervalId = window.setInterval(() => {
+      setCurrentTimeMs(Date.now())
+    }, 1000)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [run.llmRunId, runFinishedTimeMs])
+
+  useLayoutEffect(() => {
+    if (keepActivityScrolledDownRef.current) {
+      scrollActivityToBottom()
+    }
+  }, [activityBlocks, scrollActivityToBottom])
+
+  useEffect(() => {
+    const activityScrollElement = activityScrollRef.current
+
+    if (!activityScrollElement) {
+      return
+    }
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (keepActivityScrolledDownRef.current) {
+        scrollActivityToBottom()
+      }
+    })
+
+    resizeObserver.observe(activityScrollElement)
+
+    return () => {
+      resizeObserver.disconnect()
+    }
+  }, [scrollActivityToBottom])
+
+  function handleActivityScroll(event: UIEvent<HTMLDivElement>) {
+    const activityScrollElement = event.currentTarget
+    const distanceFromBottom =
+      activityScrollElement.scrollHeight -
+      activityScrollElement.clientHeight -
+      activityScrollElement.scrollTop
+
+    if (distanceFromBottom <= 4) {
+      keepActivityScrolledDownRef.current = true
+    } else if (
+      !isProgrammaticActivityScrollRef.current &&
+      activityScrollElement.scrollTop < previousActivityScrollTopRef.current
+    ) {
+      keepActivityScrolledDownRef.current = false
+    }
+
+    previousActivityScrollTopRef.current = activityScrollElement.scrollTop
+  }
+
+  return (
+    <aside
+      className="flex h-full min-h-0 w-[clamp(18rem,30vw,24rem)] shrink-0 flex-col border-l border-border bg-background/80"
+      aria-label="Simulation activity"
+    >
+      <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+        <h3 className="min-w-0 truncate text-sm font-semibold text-foreground">
+          {durationText ? `Activity • ${durationText}` : "Activity"}
+        </h3>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Close activity"
+          title="Close activity"
+          onClick={onClose}
+        >
+          <X />
+        </Button>
+      </header>
+
+      <div
+        ref={activityScrollRef}
+        className="simulation-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-4"
+        onScroll={handleActivityScroll}
+      >
+        <div className="grid gap-3">
+          {activityBlocks.length > 0 ? (
+            activityBlocks.map((block) => (
+              <SimulationRunActivityBlockView key={block.id} block={block} />
+            ))
+          ) : (
+            <p className="rounded-md border border-border bg-black/20 px-3 py-2 text-sm text-muted-foreground">
+              No activity recorded yet.
+            </p>
+          )}
+        </div>
+      </div>
+    </aside>
+  )
+}
+
+function SimulationRunActivityBlockView({
+  block,
+}: {
+  block: SimulationRunActivityBlock
+}) {
+  if (block.type === "tool_call") {
+    return (
+      <div className="flex min-w-0 items-start gap-2 rounded-md border border-border bg-black/20 px-3 py-2 text-sm leading-6 text-muted-foreground">
+        <span className="shrink-0 text-sky-300" aria-hidden="true">
+          •
+        </span>
+        <span className="min-w-0 font-medium break-words text-foreground/90">
+          {block.toolName}
+        </span>
+      </div>
+    )
+  }
+
+  return (
+    <section className="grid min-w-0 gap-2 rounded-md border border-border bg-black/20 p-3">
+      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        {block.type === "reasoning" ? "Reasoning" : "Output"}
+      </p>
+      <div className={simulationActivityMarkdownClassName}>
+        <ReactMarkdown>{block.text}</ReactMarkdown>
+      </div>
+    </section>
+  )
+}
+
+const simulationActivityMarkdownClassName =
+  "min-w-0 space-y-2 text-sm leading-6 break-words text-foreground/90 [&_a]:text-sky-300 [&_a]:underline [&_code]:rounded-sm [&_code]:bg-muted/45 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-sky-100 [&_ol]:list-decimal [&_ol]:pl-5 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-black/30 [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_strong]:text-foreground [&_ul]:list-disc [&_ul]:pl-5"
 
 type SimulationResultCardMention =
   SimulationDebugLlmRunChunk["cardMentions"][number]

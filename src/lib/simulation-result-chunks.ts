@@ -13,6 +13,20 @@ export type SimulationResultEntry =
       chunks: SimulationDebugLlmRunChunk[]
     }
 
+export type SimulationRunActivityBlock =
+  | {
+      id: string
+      type: "reasoning" | "output"
+      text: string
+      chunks: SimulationDebugLlmRunChunk[]
+    }
+  | {
+      id: string
+      type: "tool_call"
+      toolName: string
+      chunks: SimulationDebugLlmRunChunk[]
+    }
+
 export function getSimulationResultChunks(
   chunks: readonly SimulationDebugLlmRunChunk[]
 ) {
@@ -103,6 +117,157 @@ export function getSimulationRunActiveToolCallName(
   return getActiveToolStartChunk(chunks)?.mcpFunctionName ?? null
 }
 
+export function getSimulationRunActivityBlocks(
+  chunks: readonly SimulationDebugLlmRunChunk[]
+): SimulationRunActivityBlock[] {
+  const sortedChunks = [...chunks].sort(
+    (firstChunk, secondChunk) => firstChunk.sequence - secondChunk.sequence
+  )
+  const completedToolCallPairs = getCompletedToolCallPairs(sortedChunks)
+  const completedToolCallByStartChunk = new Map(
+    completedToolCallPairs.map((pair) => [pair.startChunk, pair.completeChunk])
+  )
+  const completedToolCallCompleteChunks = new Set(
+    completedToolCallPairs.map((pair) => pair.completeChunk)
+  )
+  const blocks: SimulationRunActivityBlock[] = []
+  let activeDeltaBlock: Extract<
+    SimulationRunActivityBlock,
+    { type: "reasoning" | "output" }
+  > | null = null
+
+  function closeActiveDeltaBlock() {
+    activeDeltaBlock = null
+  }
+
+  function startDeltaBlock(
+    type: "reasoning" | "output",
+    chunk: SimulationDebugLlmRunChunk
+  ) {
+    const block: Extract<
+      SimulationRunActivityBlock,
+      { type: "reasoning" | "output" }
+    > = {
+      id: `${type}-${getResultChunkId(chunk)}`,
+      type,
+      text: "",
+      chunks: [chunk],
+    }
+
+    blocks.push(block)
+    activeDeltaBlock = block
+
+    return block
+  }
+
+  function appendDeltaChunk(
+    type: "reasoning" | "output",
+    chunk: SimulationDebugLlmRunChunk
+  ) {
+    const deltaText = getDeltaText(chunk)
+    const block =
+      activeDeltaBlock?.type === type
+        ? activeDeltaBlock
+        : startDeltaBlock(type, chunk)
+
+    if (block.chunks[block.chunks.length - 1] !== chunk) {
+      block.chunks.push(chunk)
+    }
+
+    block.text += deltaText
+  }
+
+  function appendLifecycleChunk(
+    type: "reasoning" | "output",
+    chunk: SimulationDebugLlmRunChunk,
+    state: "start" | "done"
+  ) {
+    if (state === "start") {
+      startDeltaBlock(type, chunk)
+      return
+    }
+
+    if (activeDeltaBlock?.type !== type) {
+      return
+    }
+
+    activeDeltaBlock.chunks.push(chunk)
+    closeActiveDeltaBlock()
+  }
+
+  function appendToolCallBlock(chunks: SimulationDebugLlmRunChunk[]) {
+    closeActiveDeltaBlock()
+
+    const firstChunk = chunks[0]
+    const lastChunk = chunks[chunks.length - 1]
+
+    blocks.push({
+      id:
+        firstChunk === lastChunk
+          ? `tool-call-${getResultChunkId(firstChunk)}`
+          : `tool-call-${getResultChunkId(firstChunk)}-${getResultChunkId(
+              lastChunk
+            )}`,
+      type: "tool_call",
+      toolName: getToolCallActivityName(chunks),
+      chunks,
+    })
+  }
+
+  for (const chunk of sortedChunks) {
+    if (chunk.kind === "reasoning_start") {
+      appendLifecycleChunk("reasoning", chunk, "start")
+      continue
+    }
+
+    if (chunk.kind === "reasoning_done") {
+      appendLifecycleChunk("reasoning", chunk, "done")
+      continue
+    }
+
+    if (chunk.kind === "output_start") {
+      appendLifecycleChunk("output", chunk, "start")
+      continue
+    }
+
+    if (chunk.kind === "output_done") {
+      appendLifecycleChunk("output", chunk, "done")
+      continue
+    }
+
+    if (chunk.kind === "reasoning_delta") {
+      appendDeltaChunk("reasoning", chunk)
+      continue
+    }
+
+    if (chunk.kind === "message_delta") {
+      appendDeltaChunk("output", chunk)
+      continue
+    }
+
+    if (chunk.kind === "mcp_call_start") {
+      const completeChunk = completedToolCallByStartChunk.get(chunk)
+      appendToolCallBlock(completeChunk ? [chunk, completeChunk] : [chunk])
+      continue
+    }
+
+    if (chunk.kind === "mcp_call_complete") {
+      if (completedToolCallCompleteChunks.has(chunk)) {
+        continue
+      }
+
+      appendToolCallBlock([chunk])
+      continue
+    }
+
+    closeActiveDeltaBlock()
+  }
+
+  return blocks.filter(
+    (block) => block.type === "tool_call" || block.text.trim().length > 0
+  )
+}
+
 export function getLoggedTurnAction(chunk: SimulationDebugLlmRunChunk) {
   if (!isCompletedLogTurnActionChunk(chunk)) {
     return null
@@ -157,8 +322,19 @@ function getResultChunkId(chunk: SimulationDebugLlmRunChunk) {
 function getCompletedToolStartChunks(
   chunks: readonly SimulationDebugLlmRunChunk[]
 ) {
+  return new Set(
+    getCompletedToolCallPairs(chunks).map((pair) => pair.startChunk)
+  )
+}
+
+function getCompletedToolCallPairs(
+  chunks: readonly SimulationDebugLlmRunChunk[]
+) {
   const pendingToolStartChunks: SimulationDebugLlmRunChunk[] = []
-  const completedToolStartChunks = new Set<SimulationDebugLlmRunChunk>()
+  const completedToolCallPairs: {
+    startChunk: SimulationDebugLlmRunChunk
+    completeChunk: SimulationDebugLlmRunChunk
+  }[] = []
 
   for (const chunk of chunks) {
     if (chunk.kind === "mcp_call_start") {
@@ -180,10 +356,13 @@ function getCompletedToolStartChunks(
     }
 
     const [startChunk] = pendingToolStartChunks.splice(startChunkIndex, 1)
-    completedToolStartChunks.add(startChunk)
+    completedToolCallPairs.push({
+      startChunk,
+      completeChunk: chunk,
+    })
   }
 
-  return completedToolStartChunks
+  return completedToolCallPairs
 }
 
 function getActiveToolStartChunk(
@@ -207,7 +386,11 @@ function findMatchingToolStartChunkIndex(
   const completeCallKey = getMcpCallKey(completeChunk)
 
   if (completeCallKey !== null) {
-    for (let index = pendingToolStartChunks.length - 1; index >= 0; index -= 1) {
+    for (
+      let index = pendingToolStartChunks.length - 1;
+      index >= 0;
+      index -= 1
+    ) {
       if (getMcpCallKey(pendingToolStartChunks[index]) === completeCallKey) {
         return index
       }
@@ -265,6 +448,20 @@ function getDeltaText(chunk: SimulationDebugLlmRunChunk) {
   }
 
   return ""
+}
+
+function getToolCallActivityName(
+  chunks: readonly SimulationDebugLlmRunChunk[]
+) {
+  for (let index = chunks.length - 1; index >= 0; index -= 1) {
+    const toolName = chunks[index].mcpFunctionName?.trim()
+
+    if (toolName) {
+      return toolName
+    }
+  }
+
+  return "Unknown tool"
 }
 
 function getMcpCallItemId(chunk: SimulationDebugLlmRunChunk) {
@@ -325,7 +522,10 @@ function parseJsonObjectPayload(payload: unknown): unknown {
 
         const parsedTextPayload = parseJsonObjectPayload(text)
 
-        if (typeof parsedTextPayload === "object" && parsedTextPayload !== null) {
+        if (
+          typeof parsedTextPayload === "object" &&
+          parsedTextPayload !== null
+        ) {
           return parsedTextPayload
         }
       }
