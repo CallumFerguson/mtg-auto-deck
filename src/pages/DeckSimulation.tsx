@@ -2560,9 +2560,7 @@ function SimulationResultThinkingPreview({
 
   return (
     <div
-      className={`flex min-h-[3.5rem] items-stretch gap-2 transition-colors select-none ${simulationResultChunkSurfaceClassName} ${
-        isActivitySelected ? "border-sky-400/55 bg-sky-950/20" : ""
-      }`}
+      className={`flex min-h-[3.5rem] items-stretch gap-2 transition-colors select-none ${simulationResultChunkSurfaceClassName}`}
     >
       <button
         className={`min-w-0 flex-1 px-3 py-2 text-left transition-colors hover:bg-sky-950/20 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none ${
