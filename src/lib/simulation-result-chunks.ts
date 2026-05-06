@@ -16,7 +16,7 @@ export type SimulationResultEntry =
 export type SimulationRunActivityBlock =
   | {
       id: string
-      type: "reasoning" | "output"
+      type: "reasoning"
       text: string
       chunks: SimulationDebugLlmRunChunk[]
     }
@@ -133,23 +133,17 @@ export function getSimulationRunActivityBlocks(
   const blocks: SimulationRunActivityBlock[] = []
   let activeDeltaBlock: Extract<
     SimulationRunActivityBlock,
-    { type: "reasoning" | "output" }
+    { type: "reasoning" }
   > | null = null
 
   function closeActiveDeltaBlock() {
     activeDeltaBlock = null
   }
 
-  function startDeltaBlock(
-    type: "reasoning" | "output",
-    chunk: SimulationDebugLlmRunChunk
-  ) {
-    const block: Extract<
-      SimulationRunActivityBlock,
-      { type: "reasoning" | "output" }
-    > = {
-      id: `${type}-${getResultChunkId(chunk)}`,
-      type,
+  function startReasoningBlock(chunk: SimulationDebugLlmRunChunk) {
+    const block: Extract<SimulationRunActivityBlock, { type: "reasoning" }> = {
+      id: `reasoning-${getResultChunkId(chunk)}`,
+      type: "reasoning",
       text: "",
       chunks: [chunk],
     }
@@ -160,15 +154,9 @@ export function getSimulationRunActivityBlocks(
     return block
   }
 
-  function appendDeltaChunk(
-    type: "reasoning" | "output",
-    chunk: SimulationDebugLlmRunChunk
-  ) {
+  function appendReasoningDeltaChunk(chunk: SimulationDebugLlmRunChunk) {
     const deltaText = getDeltaText(chunk)
-    const block =
-      activeDeltaBlock?.type === type
-        ? activeDeltaBlock
-        : startDeltaBlock(type, chunk)
+    const block = activeDeltaBlock ?? startReasoningBlock(chunk)
 
     if (block.chunks[block.chunks.length - 1] !== chunk) {
       block.chunks.push(chunk)
@@ -177,17 +165,16 @@ export function getSimulationRunActivityBlocks(
     block.text += deltaText
   }
 
-  function appendLifecycleChunk(
-    type: "reasoning" | "output",
+  function appendReasoningLifecycleChunk(
     chunk: SimulationDebugLlmRunChunk,
     state: "start" | "done"
   ) {
     if (state === "start") {
-      startDeltaBlock(type, chunk)
+      startReasoningBlock(chunk)
       return
     }
 
-    if (activeDeltaBlock?.type !== type) {
+    if (activeDeltaBlock === null) {
       return
     }
 
@@ -216,32 +203,32 @@ export function getSimulationRunActivityBlocks(
 
   for (const chunk of sortedChunks) {
     if (chunk.kind === "reasoning_start") {
-      appendLifecycleChunk("reasoning", chunk, "start")
+      appendReasoningLifecycleChunk(chunk, "start")
       continue
     }
 
     if (chunk.kind === "reasoning_done") {
-      appendLifecycleChunk("reasoning", chunk, "done")
+      appendReasoningLifecycleChunk(chunk, "done")
       continue
     }
 
     if (chunk.kind === "output_start") {
-      appendLifecycleChunk("output", chunk, "start")
+      closeActiveDeltaBlock()
       continue
     }
 
     if (chunk.kind === "output_done") {
-      appendLifecycleChunk("output", chunk, "done")
+      closeActiveDeltaBlock()
       continue
     }
 
     if (chunk.kind === "reasoning_delta") {
-      appendDeltaChunk("reasoning", chunk)
+      appendReasoningDeltaChunk(chunk)
       continue
     }
 
     if (chunk.kind === "message_delta") {
-      appendDeltaChunk("output", chunk)
+      closeActiveDeltaBlock()
       continue
     }
 

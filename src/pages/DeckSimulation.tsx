@@ -2822,7 +2822,7 @@ function SimulationRunActivityBlockView({
   return (
     <section className="grid min-w-0 gap-2 rounded-md border border-border bg-black/20 p-3">
       <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        {block.type === "reasoning" ? "Reasoning" : "Output"}
+        Reasoning
       </p>
       <div className={simulationActivityMarkdownClassName}>
         <ReactMarkdown>{block.text}</ReactMarkdown>

@@ -782,7 +782,7 @@ test("returns null for empty thinking previews", () => {
   )
 })
 
-test("formats activity blocks from reasoning and output lifecycles", () => {
+test("omits output lifecycle text from activity blocks", () => {
   const blocks = getSimulationRunActivityBlocks([
     createChunk({
       id: 1,
@@ -825,19 +825,15 @@ test("formats activity blocks from reasoning and output lifecycles", () => {
 
   assert.deepEqual(
     blocks.map((block) => block.type),
-    ["reasoning", "output"]
+    ["reasoning"]
   )
   assert.equal(
     blocks[0]?.type === "reasoning" ? blocks[0].text : "",
     "**Keep** a two-land hand."
   )
-  assert.equal(
-    blocks[1]?.type === "output" ? blocks[1].text : "",
-    "Keeping this opener."
-  )
 })
 
-test("formats activity delta blocks without lifecycle chunks", () => {
+test("omits output deltas and keeps them as activity block boundaries", () => {
   const blocks = getSimulationRunActivityBlocks([
     createChunk({
       id: 1,
@@ -856,19 +852,25 @@ test("formats activity delta blocks without lifecycle chunks", () => {
       outputDelta: "Visible output.",
       sequence: 3,
     }),
+    createChunk({
+      id: 4,
+      kind: "reasoning_delta",
+      reasoningDelta: "Second thought.",
+      sequence: 4,
+    }),
   ])
 
   assert.deepEqual(
     blocks.map((block) => block.type),
-    ["reasoning", "output"]
+    ["reasoning", "reasoning"]
   )
   assert.equal(
     blocks[0]?.type === "reasoning" ? blocks[0].text : "",
     "First thought."
   )
   assert.equal(
-    blocks[1]?.type === "output" ? blocks[1].text : "",
-    "Visible output."
+    blocks[1]?.type === "reasoning" ? blocks[1].text : "",
+    "Second thought."
   )
 })
 
