@@ -2679,6 +2679,10 @@ function SimulationRunActivityPanel({
       : formatMinutesSeconds(
           (runFinishedTimeMs ?? currentTimeMs) - runStartTimeMs
         )
+  const terminalActivityStatus = useMemo(
+    () => getSimulationRunTerminalActivityStatus(run.status, durationText),
+    [durationText, run.status]
+  )
 
   const scrollActivityToBottom = useCallback(() => {
     const activityScrollElement = activityScrollRef.current
@@ -2722,7 +2726,7 @@ function SimulationRunActivityPanel({
     if (keepActivityScrolledDownRef.current) {
       scrollActivityToBottom()
     }
-  }, [activityTimelineItems, scrollActivityToBottom])
+  }, [activityTimelineItems, scrollActivityToBottom, terminalActivityStatus])
 
   useEffect(() => {
     const activityScrollElement = activityScrollRef.current
@@ -2800,16 +2804,90 @@ function SimulationRunActivityPanel({
                     item={item}
                   />
                 ))}
+                {terminalActivityStatus ? (
+                  <SimulationRunActivityTerminalStatus
+                    status={terminalActivityStatus}
+                  />
+                ) : null}
               </div>
             </>
           ) : (
-            <p className="text-sm text-muted-foreground">
-              No activity recorded yet.
-            </p>
+            <div className="grid gap-5">
+              <p className="text-sm text-muted-foreground">
+                No activity recorded yet.
+              </p>
+              {terminalActivityStatus ? (
+                <SimulationRunActivityTerminalStatus
+                  status={terminalActivityStatus}
+                />
+              ) : null}
+            </div>
           )}
         </div>
       </div>
     </aside>
+  )
+}
+
+type SimulationRunTerminalActivityStatus = {
+  detail: string
+  title: string
+  tone: "error" | "muted" | "success"
+}
+
+function getSimulationRunTerminalActivityStatus(
+  runStatus: string,
+  durationText: string | null
+): SimulationRunTerminalActivityStatus | null {
+  const title = durationText ? `Thought for ${durationText}` : "Thought"
+
+  if (runStatus === "completed") {
+    return {
+      detail: "Done",
+      title,
+      tone: "success",
+    }
+  }
+
+  if (runStatus === "failed") {
+    return {
+      detail: "Error",
+      title,
+      tone: "error",
+    }
+  }
+
+  if (runStatus === "cancelled") {
+    return {
+      detail: "Canceled",
+      title,
+      tone: "muted",
+    }
+  }
+
+  return null
+}
+
+function SimulationRunActivityTerminalStatus({
+  status,
+}: {
+  status: SimulationRunTerminalActivityStatus
+}) {
+  return (
+    <SimulationRunActivityTimelineRow marker={status.tone}>
+      <div className="grid gap-0.5 text-sm leading-6">
+        <p className="font-medium text-foreground/95">{status.title}</p>
+        <p
+          className={
+            status.tone === "error"
+              ? "text-destructive"
+              : "text-muted-foreground"
+          }
+        >
+          {status.detail}
+        </p>
+      </div>
+    </SimulationRunActivityTimelineRow>
   )
 }
 
@@ -2912,17 +2990,36 @@ function SimulationRunActivityTimelineRow({
   marker,
 }: {
   children: ReactNode
-  marker: "reasoning" | "tool"
+  marker: "error" | "muted" | "reasoning" | "success" | "tool"
 }) {
+  const markerClassName =
+    marker === "tool"
+      ? "bg-sky-300"
+      : marker === "success"
+        ? "border border-emerald-300 text-emerald-300"
+        : marker === "error"
+          ? "border border-destructive text-destructive"
+          : marker === "muted"
+            ? "border border-muted-foreground text-muted-foreground"
+            : "bg-muted-foreground"
+  const markerSizeClassName =
+    marker === "success" || marker === "error" || marker === "muted"
+      ? "size-3"
+      : "size-1.5"
+
   return (
     <div className="grid min-w-0 grid-cols-[1rem_minmax(0,1fr)] gap-2">
       <div className="relative flex justify-center">
         <span
-          className={`mt-2 size-1.5 rounded-full ${
-            marker === "tool" ? "bg-sky-300" : "bg-muted-foreground"
-          }`}
+          className={`mt-2 flex items-center justify-center rounded-full ${markerSizeClassName} ${markerClassName}`}
           aria-hidden="true"
-        />
+        >
+          {marker === "success" ? (
+            <Check className="size-2" strokeWidth={3} />
+          ) : marker === "error" ? (
+            <X className="size-2" strokeWidth={3} />
+          ) : null}
+        </span>
         <span
           className="absolute top-5 bottom-[-1.25rem] w-px bg-border"
           aria-hidden="true"
