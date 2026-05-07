@@ -161,7 +161,7 @@ test("extracts card mentions from draw tool output data", () => {
   )
 })
 
-test("extracts requested and found card mentions from library search output", () => {
+test("extracts one card mention per library search match", () => {
   assert.deepEqual(
     extractLlmRunChunkCardMentionRequests({
       kind: "mcp_call_complete",
@@ -185,16 +185,6 @@ test("extracts requested and found card mentions from library search output", ()
     }),
     [
       {
-        sourcePath: "data.foundCards",
-        position: 0,
-        requestedName: "Sol Ring",
-      },
-      {
-        sourcePath: "data.matches[*].requestedCard",
-        position: 0,
-        requestedName: "Sool Ring",
-      },
-      {
         sourcePath: "data.matches[*].foundCard",
         position: 0,
         requestedName: "Sol Ring",
@@ -203,6 +193,73 @@ test("extracts requested and found card mentions from library search output", ()
         sourcePath: "data.matches[*].requestedCard",
         position: 1,
         requestedName: "Imaginary Tutor",
+      },
+    ]
+  )
+})
+
+test("does not duplicate exact library search mentions across output fields", () => {
+  assert.deepEqual(
+    extractLlmRunChunkCardMentionRequests({
+      kind: "mcp_call_complete",
+      mcpFunctionName: "take_cards_from_library",
+      mcpFunctionOutput: {
+        data: {
+          foundCards: ["Forest"],
+          requestedCards: ["Forest"],
+          matches: [
+            {
+              requestedCard: "Forest",
+              foundCard: "Forest",
+            },
+          ],
+        },
+      },
+      payload: {},
+    }),
+    [
+      {
+        sourcePath: "data.matches[*].foundCard",
+        position: 0,
+        requestedName: "Forest",
+      },
+    ]
+  )
+})
+
+test("keeps repeated library search mentions when multiple copies are taken", () => {
+  assert.deepEqual(
+    extractLlmRunChunkCardMentionRequests({
+      kind: "mcp_call_complete",
+      mcpFunctionName: "take_cards_from_library",
+      mcpFunctionOutput: {
+        data: {
+          foundCards: ["Forest", "Forest"],
+          requestedCards: ["Forest", "Forest"],
+          matches: [
+            {
+              requestedCard: "Forest",
+              foundCard: "Forest",
+            },
+            {
+              requestedCard: "Forest",
+              foundCard: "Forest",
+            },
+          ],
+        },
+      },
+      payload: {},
+    }),
+    [
+      {
+        sourcePath: "data.matches[*].foundCard",
+        position: 0,
+        requestedName: "Forest",
+      },
+      {
+        sourcePath: "data.matches[*].foundCard",
+        position: 1,
+        requestedName: "Forest",
       },
     ]
   )

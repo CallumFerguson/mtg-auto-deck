@@ -2464,10 +2464,7 @@ export function extractLlmRunChunkCardMentionRequests(
       case "return_cards_to_library":
         return getArrayCardMentions(toolOutputData.cards, "data.cards")
       case "take_cards_from_library":
-        return [
-          ...getArrayCardMentions(toolOutputData.foundCards, "data.foundCards"),
-          ...getTakeCardsMatchMentions(toolOutputData.matches),
-        ]
+        return getTakeCardsMatchMentions(toolOutputData.matches)
       default:
         return []
     }
@@ -2516,19 +2513,21 @@ function getTakeCardsMatchMentions(
 
   return value.flatMap((match, index) => {
     const matchRecord = asUnknownRecord(match)
+    const foundCardMentions = getMentionFromCardName(
+      matchRecord.foundCard,
+      "data.matches[*].foundCard",
+      index
+    )
 
-    return [
-      ...getMentionFromCardName(
-        matchRecord.requestedCard,
-        "data.matches[*].requestedCard",
-        index
-      ),
-      ...getMentionFromCardName(
-        matchRecord.foundCard,
-        "data.matches[*].foundCard",
-        index
-      ),
-    ]
+    if (foundCardMentions.length > 0) {
+      return foundCardMentions
+    }
+
+    return getMentionFromCardName(
+      matchRecord.requestedCard,
+      "data.matches[*].requestedCard",
+      index
+    )
   })
 }
 
@@ -3967,7 +3966,7 @@ async function getCardMentionsByLlmRunChunkIds(chunkIds: readonly number[]) {
       LEFT JOIN scryfall_oracle_cards card
         ON card.oracle_id = mention.oracle_id
       WHERE mention.llm_run_chunk_id = ANY($1::bigint[])
-      ORDER BY mention.llm_run_chunk_id ASC, mention.source_path ASC, mention.position ASC, mention.id ASC
+      ORDER BY mention.llm_run_chunk_id ASC, mention.position ASC, mention.source_path ASC, mention.id ASC
     `,
     [chunkIds]
   )
