@@ -393,37 +393,6 @@ STRATEGIC HORIZON
 - If two legal lines are similar this turn, prefer the one that leaves the battlefield, hand, and mana base in the better position for the next turn cycle.
 - Do not make a weaker development play just to use all mana immediately if saving flexibility produces a stronger overall line.
 
-MANA COSTS AND MANA SYMBOLS
-Interpret mana costs exactly using normal MTG rules.
-
-- A number in braces means GENERIC mana, not colored mana.
-  - Example: {1} means one mana of any type.
-  - Example: {2} means two mana of any type.
-- Colored symbols require that exact color.
-  - {W} = one white mana
-  - {U} = one blue mana
-  - {B} = one black mana
-  - {R} = one red mana
-  - {G} = one green mana
-- {C} means one colorless mana specifically. It cannot be paid with colored mana unless a rule says otherwise.
-- Example conversions:
-  - {1}{G} = total cost 2 mana: 1 generic + 1 green
-  - {2}{R}{R} = total cost 4 mana: 2 generic + 2 red
-  - {3}{G}{W} = total cost 5 mana: 3 generic + 1 green + 1 white
-  - {X}{G} = X generic + 1 green, where X is chosen as the spell or ability is cast or activated
-- Generic mana can be paid with colored or colorless mana.
-- Colored requirements must still be satisfied exactly.
-  - To cast a spell costing {1}{G}, you need at least one green mana plus one other mana of any type.
-  - One green mana alone is NOT enough.
-- When checking whether something can be cast, count both:
-  1. the total amount of mana available
-  2. whether the available colors satisfy the colored symbols
-- Cost reduction changes the total cost, but cannot remove specific color requirements unless the rules explicitly allow that.
-- Lands and permanents produce only the mana their text allows.
-- Not every land has a mana ability. Before tapping any land or other permanent for mana, check the card reference and confirm it can legally produce that mana right now.
-- Do not confuse mana value with mana cost paid.
-- Do not confuse a card's color with the colors of mana required to cast it.
-
 LIBRARY AND TOOL RULES
 - The library is a hidden zone and must be manipulated only through tools.
 - Every tool call must identify this run with the provided llmRunId only.
@@ -774,4 +743,33 @@ COMMON ACTION WORDS
 - Fight: Two creatures deal damage equal to their power to each other.
 - Populate: Create a token that is a copy of a creature token you control.
 - Proliferate: Choose any number of permanents and/or players with counters and give each another counter of a kind already there.
+
+MANA COSTS AND MANA SYMBOLS
+- A number in braces means GENERIC mana, not colored mana.
+  - Example: {1} means one mana of any type.
+  - Example: {2} means two mana of any type.
+- Colored symbols require that exact color.
+  - {W} = one white mana
+  - {U} = one blue mana
+  - {B} = one black mana
+  - {R} = one red mana
+  - {G} = one green mana
+- {C} means one colorless mana specifically. It cannot be paid with colored mana unless a rule says otherwise.
+- Example conversions:
+  - {1}{G} = total cost 2 mana: 1 generic + 1 green
+  - {2}{R}{R} = total cost 4 mana: 2 generic + 2 red
+  - {3}{G}{W} = total cost 5 mana: 3 generic + 1 green + 1 white
+  - {X}{G} = X generic + 1 green, where X is chosen as the spell or ability is cast or activated
+- Generic mana can be paid with colored or colorless mana.
+- Colored requirements must still be satisfied exactly.
+  - To cast a spell costing {1}{G}, you need at least one green mana plus one other mana of any type.
+  - One green mana alone is NOT enough.
+- When checking whether something can be cast, count both:
+  1. the total amount of mana available
+  2. whether the available colors satisfy the colored symbols
+- Cost reduction changes the total cost, but cannot remove specific color requirements unless the rules explicitly allow that.
+- Lands and permanents produce only the mana their text allows.
+- Not every land has a mana ability. Before tapping any land or other permanent for mana, check the card reference and confirm it can legally produce that mana right now.
+- Do not confuse mana value with mana cost paid.
+- Do not confuse a card's color with the colors of mana required to cast it.
 `
