@@ -294,7 +294,7 @@ const activeLlmRunRuntimes = new Map<string, ActiveLlmRunRuntime>()
 const simulationResultsBroadcaster = new SimulationResultsBroadcaster()
 
 function createRuntimeCompletion() {
-  let resolveCompletion: () => void = () => {}
+  let resolveCompletion: () => void = () => { }
   const completionPromise = new Promise<void>((resolve) => {
     resolveCompletion = resolve
   })
@@ -782,17 +782,17 @@ function getLlmTokenUsageSummary(usage: unknown) {
   )
   const inputDetails = asRecord(
     usageRecord.input_tokens_details ??
-      usageRecord.inputTokensDetails ??
-      usageRecord.prompt_tokens_details ??
-      usageRecord.promptTokensDetails
+    usageRecord.inputTokensDetails ??
+    usageRecord.prompt_tokens_details ??
+    usageRecord.promptTokensDetails
   )
   const cachedInputTokens =
     inputTokens === null
       ? null
       : Math.min(
-          getNumberProperty(inputDetails, "cached_tokens", "cachedTokens") ?? 0,
-          inputTokens
-        )
+        getNumberProperty(inputDetails, "cached_tokens", "cachedTokens") ?? 0,
+        inputTokens
+      )
   const outputTokens = getNumberProperty(
     usageRecord,
     "output_tokens",
@@ -802,9 +802,9 @@ function getLlmTokenUsageSummary(usage: unknown) {
   )
   const outputDetails = asRecord(
     usageRecord.output_tokens_details ??
-      usageRecord.outputTokensDetails ??
-      usageRecord.completion_tokens_details ??
-      usageRecord.completionTokensDetails
+    usageRecord.outputTokensDetails ??
+    usageRecord.completion_tokens_details ??
+    usageRecord.completionTokensDetails
   )
   const reasoningTokens =
     getNumberProperty(outputDetails, "reasoning_tokens", "reasoningTokens") ?? 0
@@ -2250,9 +2250,9 @@ async function prepareAndStartTurnLlmRun({
       turnNumber === 1
         ? await buildTurnSimulationPrompt({ llmRunId: turnRun.llmRunId })
         : await buildTurnSimulationPrompt(
-            { llmRunId: turnRun.llmRunId },
-            turnRun.previousGameState ?? undefined
-          )
+          { llmRunId: turnRun.llmRunId },
+          turnRun.previousGameState ?? undefined
+        )
     const requestPayload = buildTurnSimulationLlmRequestPayload(
       llmConfig,
       fullPrompt,
@@ -2649,10 +2649,10 @@ async function collectOpenRouterLlmStream({
   const mcpClient =
     createTools && mcpPath
       ? await createProviderMcpClient({
-          clientName: "openrouter-agent",
-          path: mcpPath,
-          signal,
-        })
+        clientName: "openrouter-agent",
+        path: mcpPath,
+        signal,
+      })
       : null
   let mcpClientClosePromise: Promise<void> | null = null
 
@@ -2692,7 +2692,7 @@ async function collectOpenRouterLlmStream({
       }
     )
     const removeAbortHandler = registerRuntimeAbortHandler(signal, () => {
-      void result.cancel().catch(() => {})
+      void result.cancel().catch(() => { })
       void closeMcpClient()
     })
 
@@ -2754,7 +2754,7 @@ async function collectOpenRouterLlmStream({
       }
     } catch (error) {
       if (signal.aborted) {
-        await result.cancel().catch(() => {})
+        await result.cancel().catch(() => { })
         throw createRuntimeAbortError()
       }
 
@@ -2818,10 +2818,10 @@ async function collectLlamaCppLlmStream({
   const mcpClient =
     mcpPath && toolDefinitions.length > 0
       ? await createProviderMcpClient({
-          clientName: "llamacpp-agent",
-          path: mcpPath,
-          signal,
-        })
+        clientName: "llamacpp-agent",
+        path: mcpPath,
+        signal,
+      })
       : null
   let mcpClientClosePromise: Promise<void> | null = null
 
@@ -2855,12 +2855,12 @@ async function collectLlamaCppLlmStream({
         callTool: (name, args, toolSignal) =>
           mcpClient
             ? callMcpToolForProvider(
-                mcpClient,
-                name,
-                args,
-                toolSignal,
-                "llama.cpp"
-              )
+              mcpClient,
+              name,
+              args,
+              toolSignal,
+              "llama.cpp"
+            )
             : Promise.reject(new Error("No MCP tools are available.")),
         createChatCompletion: (body, options) =>
           client.chat.completions.create(body, options),
@@ -2991,31 +2991,31 @@ async function runOpeningHandLlmRun({
     const streamResult =
       config.provider === "openai"
         ? await collectOpenAiLlmStream({
-            config,
-            llmRunId,
-            phase: "opening_hand",
-            requestPayload: requireOpenAiRequestPayload(requestPayload),
-            runtime,
-          })
+          config,
+          llmRunId,
+          phase: "opening_hand",
+          requestPayload: requireOpenAiRequestPayload(requestPayload),
+          runtime,
+        })
         : config.provider === "openrouter"
           ? await collectOpenRouterLlmStream({
-              config,
-              createTools: createOpeningHandOpenRouterTools,
-              llmRunId,
-              mcpPath: OPENING_HAND_MCP_PATH,
-              phase: "opening_hand",
-              requestPayload: requireOpenRouterRequestPayload(requestPayload),
-              runtime,
-            })
+            config,
+            createTools: createOpeningHandOpenRouterTools,
+            llmRunId,
+            mcpPath: OPENING_HAND_MCP_PATH,
+            phase: "opening_hand",
+            requestPayload: requireOpenRouterRequestPayload(requestPayload),
+            runtime,
+          })
           : await collectLlamaCppLlmStream({
-              config,
-              llmRunId,
-              mcpPath: OPENING_HAND_MCP_PATH,
-              phase: "opening_hand",
-              requestPayload: requireLlamaCppRequestPayload(requestPayload),
-              runtime,
-              toolDefinitions: openingHandLlmToolDefinitions,
-            })
+            config,
+            llmRunId,
+            mcpPath: OPENING_HAND_MCP_PATH,
+            phase: "opening_hand",
+            requestPayload: requireLlamaCppRequestPayload(requestPayload),
+            runtime,
+            toolDefinitions: openingHandLlmToolDefinitions,
+          })
 
     throwIfRuntimeAborted(runtime.abortController.signal)
     await forceFlushRuntimeChunks(runtime)
@@ -3206,31 +3206,31 @@ async function runTurnLlmRun({
     const streamResult =
       config.provider === "openai"
         ? await collectOpenAiLlmStream({
-            config,
-            llmRunId,
-            phase: "turn",
-            requestPayload: requireOpenAiRequestPayload(requestPayload),
-            runtime,
-          })
+          config,
+          llmRunId,
+          phase: "turn",
+          requestPayload: requireOpenAiRequestPayload(requestPayload),
+          runtime,
+        })
         : config.provider === "openrouter"
           ? await collectOpenRouterLlmStream({
-              config,
-              createTools: createTurnSimulationOpenRouterTools,
-              llmRunId,
-              mcpPath: TURN_SIMULATION_MCP_PATH,
-              phase: "turn",
-              requestPayload: requireOpenRouterRequestPayload(requestPayload),
-              runtime,
-            })
+            config,
+            createTools: createTurnSimulationOpenRouterTools,
+            llmRunId,
+            mcpPath: TURN_SIMULATION_MCP_PATH,
+            phase: "turn",
+            requestPayload: requireOpenRouterRequestPayload(requestPayload),
+            runtime,
+          })
           : await collectLlamaCppLlmStream({
-              config,
-              llmRunId,
-              mcpPath: TURN_SIMULATION_MCP_PATH,
-              phase: "turn",
-              requestPayload: requireLlamaCppRequestPayload(requestPayload),
-              runtime,
-              toolDefinitions: turnSimulationLlmToolDefinitions,
-            })
+            config,
+            llmRunId,
+            mcpPath: TURN_SIMULATION_MCP_PATH,
+            phase: "turn",
+            requestPayload: requireLlamaCppRequestPayload(requestPayload),
+            runtime,
+            toolDefinitions: turnSimulationLlmToolDefinitions,
+          })
 
     throwIfRuntimeAborted(runtime.abortController.signal)
     await forceFlushRuntimeChunks(runtime)
@@ -3418,28 +3418,28 @@ async function runReportLlmRun({
     const streamResult =
       config.provider === "openai"
         ? await collectOpenAiLlmStream({
+          config,
+          llmRunId,
+          phase: "report",
+          requestPayload: requireOpenAiRequestPayload(requestPayload),
+          runtime,
+        })
+        : config.provider === "openrouter"
+          ? await collectOpenRouterLlmStream({
             config,
             llmRunId,
             phase: "report",
-            requestPayload: requireOpenAiRequestPayload(requestPayload),
+            requestPayload: requireOpenRouterRequestPayload(requestPayload),
             runtime,
           })
-        : config.provider === "openrouter"
-          ? await collectOpenRouterLlmStream({
-              config,
-              llmRunId,
-              phase: "report",
-              requestPayload: requireOpenRouterRequestPayload(requestPayload),
-              runtime,
-            })
           : await collectLlamaCppLlmStream({
-              config,
-              llmRunId,
-              phase: "report",
-              requestPayload: requireLlamaCppRequestPayload(requestPayload),
-              runtime,
-              toolDefinitions: [],
-            })
+            config,
+            llmRunId,
+            phase: "report",
+            requestPayload: requireLlamaCppRequestPayload(requestPayload),
+            runtime,
+            toolDefinitions: [],
+          })
 
     throwIfRuntimeAborted(runtime.abortController.signal)
     await forceFlushRuntimeChunks(runtime)
@@ -4240,7 +4240,7 @@ async function main() {
         let hasSentSnapshot = false
         let shouldEndAfterSnapshot = false
         let isStreamOpen = true
-        let unsubscribe = () => {}
+        let unsubscribe = () => { }
         const keepaliveIntervalId = setInterval(() => {
           if (isStreamOpen) {
             res.write(formatSseComment("keepalive"))
@@ -5207,9 +5207,9 @@ function buildTurnSimulationPromptFromData(
   const resolvedGameState = gameState?.trim()
     ? gameState.trim()
     : buildInitialTurnGameState({
-        commanderNames,
-        startingHand,
-      })
+      commanderNames,
+      startingHand,
+    })
 
   return `${SIMULATE_TURN_PROMPT}
 
@@ -5263,20 +5263,14 @@ function buildSimulationReportPromptFromData({
   return `
 You are analyzing a Magic: The Gathering Commander goldfish simulation.
 
-Generate a concise Markdown report for this simulation. Do not simulate new game actions, do not call tools, and do not invent hidden information. Base the report only on the opening hand and turn records below.
+Generate a concise Markdown report for this simulation.
 
-The report should help the deck pilot understand:
+The report should help the deck user understand:
 - how the opening hand performed
 - what each simulated turn accomplished
-- whether sequencing looked effective
-- notable mana, card-flow, board-development, or rules-risk observations
 - a short overall takeaway
 
-Use Markdown headings and bullets where helpful. Keep the report practical and focused.
-
-Simulation ID: ${simulationId}
-Seed: ${seed}
-Configured turns to simulate: ${turnsToSimulate}
+Keep the report practical and focused.
 
 === Opening Hand ===
 
