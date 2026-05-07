@@ -1485,6 +1485,12 @@ function SimulationDetails({
     }
   }, [resultsInfo, selectedActivityRun, selectedActivityRunId])
 
+  const toggleActivityRun = useCallback((llmRunId: string) => {
+    setSelectedActivityRunId((currentRunId) =>
+      currentRunId === llmRunId ? null : llmRunId
+    )
+  }, [])
+
   const scrollResultsToBottom = useCallback(() => {
     const resultsPanel = resultsPanelRef.current
 
@@ -1860,7 +1866,7 @@ function SimulationDetails({
               onStartOpeningHandRun={() => void handleStartOpeningHandRun()}
               onKeepResultsScrolledToBottom={keepResultsScrolledToBottom}
               onScrollResultsToBottomIfKept={scrollResultsToBottomIfKept}
-              onSelectActivityRun={setSelectedActivityRunId}
+              onSelectActivityRun={toggleActivityRun}
               onStartTurnRun={(turnNumber) =>
                 void handleStartTurnRun(turnNumber)
               }
@@ -2513,7 +2519,11 @@ function SimulationResultThinkingStatus({
           }`}
           type="button"
           aria-pressed={isActivitySelected}
-          title="View thinking activity"
+          title={
+            isActivitySelected
+              ? "Close thinking activity"
+              : "View thinking activity"
+          }
           onClick={onViewActivity}
         >
           {isFinished ? (
