@@ -280,6 +280,95 @@ function isSuccessfulTurnRun(
   )
 }
 
+function canGenerateReportFromVisibleResults(
+  simulation: Simulation,
+  resultsInfo: SimulationResultsInfo
+) {
+  if (simulation.startingHandId === null) {
+    const latestOpeningHandRun =
+      resultsInfo.openingHandLlmRuns.reduce<
+        SimulationResultsInfo["openingHandLlmRuns"][number] | null
+      >((latestRun, run) => {
+        if (!latestRun || run.attemptNumber > latestRun.attemptNumber) {
+          return run
+        }
+
+        return latestRun
+      }, null)
+
+    if (
+      !latestOpeningHandRun ||
+      latestOpeningHandRun.status !== "completed" ||
+      latestOpeningHandRun.openingHandIsValid !== true
+    ) {
+      return false
+    }
+
+    const openingHandFinalOutput =
+      getSimulationFinalParsedOutput(latestOpeningHandRun)
+
+    if (
+      openingHandFinalOutput?.type !== "opening_hand" ||
+      openingHandFinalOutput.keptHand.length === 0 ||
+      !openingHandFinalOutput.summary.trim()
+    ) {
+      return false
+    }
+  }
+
+  const sortedTurnRuns = [...resultsInfo.turnLlmRuns].sort(
+    (firstRun, secondRun) =>
+      (firstRun.turnNumber ?? 0) - (secondRun.turnNumber ?? 0) ||
+      firstRun.attemptNumber - secondRun.attemptNumber
+  )
+  const seenTurnNumbers = new Set<number>()
+
+  for (const run of sortedTurnRuns) {
+    if (
+      run.status !== "completed" ||
+      run.outdated === true ||
+      typeof run.turnNumber !== "number" ||
+      seenTurnNumbers.has(run.turnNumber)
+    ) {
+      return false
+    }
+
+    seenTurnNumbers.add(run.turnNumber)
+  }
+
+  for (
+    let turnNumber = 1;
+    turnNumber <= sortedTurnRuns.length;
+    turnNumber += 1
+  ) {
+    const run = sortedTurnRuns[turnNumber - 1]
+
+    if (run?.turnNumber !== turnNumber) {
+      return false
+    }
+
+    const turnFinalOutput = getSimulationFinalParsedOutput(run)
+
+    if (
+      turnFinalOutput?.type !== "turn" ||
+      !turnFinalOutput.summary.trim() ||
+      !turnFinalOutput.gameState.trim() ||
+      !run.gameState?.trim() ||
+      !hasLoggedTurnAction(run)
+    ) {
+      return false
+    }
+  }
+
+  return true
+}
+
+function hasLoggedTurnAction(run: SimulationResultsInfo["turnLlmRuns"][number]) {
+  return getSimulationResultEntries(run.chunks).some(
+    (entry) => entry.type === "turn_action_log" && entry.actions.length > 0
+  )
+}
+
 function getRandomDigit(maxExclusive: number) {
   const maxUnbiasedValue = 256 - (256 % maxExclusive)
   const randomBytes = new Uint8Array(1)
@@ -2326,7 +2415,9 @@ function SimulationResultsPanel({
     isReportRunning ||
     simulation.activeLlmRunCount > 0
   const canStartReportRun =
-    !isSimulationActionBlocked && resultsInfo.reportLlmRuns.length === 0
+    !isSimulationActionBlocked &&
+    resultsInfo.reportLlmRuns.length === 0 &&
+    canGenerateReportFromVisibleResults(simulation, resultsInfo)
   const latestOpeningHandRun = resultsInfo.openingHandLlmRuns.reduce<
     SimulationResultsInfo["openingHandLlmRuns"][number] | null
   >((latestRun, run) => {
@@ -2535,7 +2626,9 @@ function SimulationResultsPanel({
         return (
           <section
             key={run.llmRunId}
-            className="grid gap-3 rounded-md border border-border bg-background/35 p-3"
+            className={`grid gap-3 rounded-md border border-border bg-background/35 p-3 ${
+              run.resultKind === "report" ? "order-last" : ""
+            }`}
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="min-w-0">
