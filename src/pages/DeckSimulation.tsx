@@ -2617,11 +2617,7 @@ function SimulationResultThinkingStatus({
     <div className="grid gap-2 py-1 select-none">
       <div className="flex min-w-0 items-center justify-between gap-2">
         <button
-          className={`group inline-flex min-w-0 max-w-full flex-1 items-center gap-2 rounded-sm px-0.5 py-1 text-left text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none ${
-            isActivitySelected
-              ? "text-sky-100"
-              : "text-sky-200 hover:text-sky-100"
-          }`}
+          className="group inline-flex min-w-0 max-w-full flex-1 items-center gap-2 rounded-sm px-0.5 py-1 text-left text-sm font-medium text-sky-200 transition-colors hover:text-sky-100 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
           type="button"
           aria-pressed={isActivitySelected}
           title={
