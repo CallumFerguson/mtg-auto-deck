@@ -3255,12 +3255,22 @@ async function runTurnLlmRun({
       usage: streamResult.usage,
     })
     runtime.status = "completed"
-    await publishSimulationResultsState({
-      deckId,
-      llmRunId,
-      simulationId,
-    })
-    await handleSimulationCompletionNextStep(completion)
+
+    if (completion.nextStep?.type === "report") {
+      await handleSimulationCompletionNextStep(completion)
+      await publishSimulationResultsState({
+        deckId,
+        llmRunId,
+        simulationId,
+      })
+    } else {
+      await publishSimulationResultsState({
+        deckId,
+        llmRunId,
+        simulationId,
+      })
+      await handleSimulationCompletionNextStep(completion)
+    }
   } catch (error) {
     if (isAbortError(error) || runtime.abortController.signal.aborted) {
       logLlmApiCallCancelled({

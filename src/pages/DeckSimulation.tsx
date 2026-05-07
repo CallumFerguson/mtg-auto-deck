@@ -2526,6 +2526,10 @@ function SimulationResultsPanel({
           finishedDurationText ? `took ${finishedDurationText}` : null,
           run.outdated ? "outdated" : null,
         ].filter(Boolean)
+        const hasLiveReport =
+          run.resultKind === "report" &&
+          !run.hasFinalParsedOutputChunk &&
+          getReportTextFromChunks(run.chunks) !== null
 
         return (
           <section
@@ -2594,7 +2598,9 @@ function SimulationResultsPanel({
               </details>
             ) : null}
 
-            {run.resultEntries.length > 0 || finishedThinkingStatus ? (
+            {run.resultEntries.length > 0 ||
+            finishedThinkingStatus ||
+            hasLiveReport ? (
               <SimulationResultChunkCards
                 run={run}
                 entries={run.resultEntries}
