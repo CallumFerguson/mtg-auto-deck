@@ -224,7 +224,7 @@ function formatMinutesSeconds(durationMs: number) {
     return `${seconds}s`
   }
 
-  return `${minutes}m ${String(seconds).padStart(2, "0")}s`
+  return `${minutes}m ${seconds}s`
 }
 
 function getCurrentOpeningHandRunCount(resultsInfo: SimulationResultsInfo) {
