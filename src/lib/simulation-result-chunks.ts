@@ -88,23 +88,6 @@ export function getSimulationResultEntries(
   return entries
 }
 
-export function getSimulationRunThinkingPreview(
-  chunks: readonly SimulationDebugLlmRunChunk[]
-) {
-  const previewText = chunks
-    .filter(isDeltaChunk)
-    .sort(
-      (firstChunk, secondChunk) => firstChunk.sequence - secondChunk.sequence
-    )
-    .slice(-100)
-    .map(getDeltaText)
-    .join("")
-    .replace(/\r\n?|\n/g, " ")
-    .trim()
-
-  return previewText.length > 0 ? previewText : null
-}
-
 export function hasSimulationRunFinalParsedOutputChunk(
   chunks: readonly SimulationDebugLlmRunChunk[]
 ) {

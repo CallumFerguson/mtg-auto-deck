@@ -69,7 +69,6 @@ import {
   getSimulationRunActivityBlocks,
   getSimulationRunActiveToolCallName,
   getSimulationResultEntries,
-  getSimulationRunThinkingPreview,
   hasSimulationRunFinalParsedOutputChunk,
   type SimulationRunActivityBlock,
   type SimulationResultEntry,
@@ -87,15 +86,14 @@ type OpeningHandCardOption = {
 
 type SimulationResultsAction =
   | {
-      kind: "opening_hand"
-    }
+    kind: "opening_hand"
+  }
   | {
-      kind: "turn"
-      turnNumber: number
-    }
+    kind: "turn"
+    turnNumber: number
+  }
 
 const DEFAULT_TURNS_TO_SIMULATE = "1"
-const SHOW_SIMULATION_THINKING_PREVIEW = false
 
 function getSimulationLabel(simulation: Simulation) {
   return `${simulation.id.slice(0, 8)} - ${simulation.completedLlmRunCount} runs`
@@ -683,11 +681,10 @@ export function DeckSimulation({
           >
             <div className="simulation-sidebar-surface sticky top-0 z-10 px-2 pt-2 pb-1">
               <button
-                className={`flex h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm font-medium transition-colors ${
-                  isNewSimulationSelected
+                className={`flex h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm font-medium transition-colors ${isNewSimulationSelected
                     ? "bg-accent text-accent-foreground"
                     : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
-                }`}
+                  }`}
                 type="button"
                 aria-pressed={isNewSimulationSelected}
                 onClick={() => {
@@ -700,9 +697,8 @@ export function DeckSimulation({
                 New simulation
               </button>
               <div
-                className={`absolute right-0 bottom-0 left-0 border-b border-border transition-opacity ${
-                  isSimulationListScrolled ? "opacity-100" : "opacity-0"
-                }`}
+                className={`absolute right-0 bottom-0 left-0 border-b border-border transition-opacity ${isSimulationListScrolled ? "opacity-100" : "opacity-0"
+                  }`}
               />
             </div>
 
@@ -730,12 +726,11 @@ export function DeckSimulation({
                   {simulations.map((simulation) => (
                     <li key={simulation.id} className="group relative">
                       <button
-                        className={`h-11 w-full rounded-md pr-11 pl-3 text-left text-sm font-medium transition-colors ${
-                          !isNewSimulationSelected &&
-                          selectedSimulationId === simulation.id
+                        className={`h-11 w-full rounded-md pr-11 pl-3 text-left text-sm font-medium transition-colors ${!isNewSimulationSelected &&
+                            selectedSimulationId === simulation.id
                             ? "bg-accent text-accent-foreground"
                             : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
-                        }`}
+                          }`}
                         type="button"
                         aria-pressed={
                           !isNewSimulationSelected &&
@@ -752,14 +747,13 @@ export function DeckSimulation({
                         {getSimulationLabel(simulation)}
                       </button>
                       {simulation.activeLlmRunCount > 0 &&
-                      (isNewSimulationSelected ||
-                        selectedSimulationId !== simulation.id) ? (
+                        (isNewSimulationSelected ||
+                          selectedSimulationId !== simulation.id) ? (
                         <div
-                          className={`pointer-events-none absolute inset-y-0 right-1 flex items-center px-2 text-muted-foreground transition-opacity group-hover:opacity-0 ${
-                            openSimulationMenuId === simulation.id
+                          className={`pointer-events-none absolute inset-y-0 right-1 flex items-center px-2 text-muted-foreground transition-opacity group-hover:opacity-0 ${openSimulationMenuId === simulation.id
                               ? "opacity-0"
                               : "opacity-100"
-                          }`}
+                            }`}
                           aria-hidden="true"
                         >
                           <svg
@@ -781,11 +775,10 @@ export function DeckSimulation({
                         </div>
                       ) : null}
                       <div
-                        className={`absolute inset-y-0 right-1 flex items-center opacity-0 transition-opacity group-hover:opacity-100 ${
-                          openSimulationMenuId === simulation.id
+                        className={`absolute inset-y-0 right-1 flex items-center opacity-0 transition-opacity group-hover:opacity-100 ${openSimulationMenuId === simulation.id
                             ? "opacity-100"
                             : ""
-                        }`}
+                          }`}
                       >
                         <Button
                           type="button"
@@ -868,11 +861,10 @@ export function DeckSimulation({
                       </legend>
                       <div className="grid gap-2 sm:grid-cols-2">
                         <label
-                          className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
-                            seedMode === "random"
+                          className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${seedMode === "random"
                               ? "border-ring bg-accent text-accent-foreground"
                               : "border-border bg-background/35 text-muted-foreground"
-                          }`}
+                            }`}
                         >
                           <input
                             className="size-4 accent-sky-300"
@@ -884,11 +876,10 @@ export function DeckSimulation({
                           Random seed
                         </label>
                         <label
-                          className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
-                            seedMode === "set"
+                          className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${seedMode === "set"
                               ? "border-ring bg-accent text-accent-foreground"
                               : "border-border bg-background/35 text-muted-foreground"
-                          }`}
+                            }`}
                         >
                           <input
                             className="size-4 accent-sky-300"
@@ -1008,11 +999,10 @@ export function DeckSimulation({
                       </legend>
                       <div className="grid gap-2 sm:grid-cols-2">
                         <label
-                          className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
-                            openingHandMode === "simulate"
+                          className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${openingHandMode === "simulate"
                               ? "border-ring bg-accent text-accent-foreground"
                               : "border-border bg-background/35 text-muted-foreground"
-                          }`}
+                            }`}
                         >
                           <input
                             className="size-4 accent-sky-300"
@@ -1024,11 +1014,10 @@ export function DeckSimulation({
                           Simulate opening hand
                         </label>
                         <label
-                          className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
-                            openingHandMode === "provide"
+                          className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${openingHandMode === "provide"
                               ? "border-ring bg-accent text-accent-foreground"
                               : "border-border bg-background/35 text-muted-foreground"
-                          }`}
+                            }`}
                         >
                           <input
                             className="size-4 accent-sky-300"
@@ -2183,7 +2172,6 @@ function SimulationResultsPanel({
       resultLabel: `Opening hand attempt ${run.attemptNumber}`,
       resultEntries: getSimulationResultEntries(run.chunks),
       activeToolCallName: getSimulationRunActiveToolCallName(run.chunks),
-      thinkingPreview: getSimulationRunThinkingPreview(run.chunks),
       hasFinalParsedOutputChunk: hasSimulationRunFinalParsedOutputChunk(
         run.chunks
       ),
@@ -2198,7 +2186,6 @@ function SimulationResultsPanel({
       resultLabel: `Turn ${run.turnNumber ?? "?"} attempt ${run.attemptNumber}`,
       resultEntries: getSimulationResultEntries(run.chunks),
       activeToolCallName: getSimulationRunActiveToolCallName(run.chunks),
-      thinkingPreview: getSimulationRunThinkingPreview(run.chunks),
       hasFinalParsedOutputChunk: hasSimulationRunFinalParsedOutputChunk(
         run.chunks
       ),
@@ -2223,10 +2210,10 @@ function SimulationResultsPanel({
 
       {runs.map((run) => {
         const finishedDurationText = getSimulationRunFinishedDurationText(run)
-        const shouldShowFinishedThinkingPreview =
+        const shouldShowFinishedThinkingStatus =
           !run.isActive && getSimulationRunFinishedTimeMs(run) !== null
-        const finishedThinkingPreview = shouldShowFinishedThinkingPreview ? (
-          <SimulationResultThinkingPreview
+        const finishedThinkingStatus = shouldShowFinishedThinkingStatus ? (
+          <SimulationResultThinkingStatus
             activeToolCallName={null}
             canStopSimulation={false}
             finishedDurationText={finishedDurationText}
@@ -2236,7 +2223,6 @@ function SimulationResultsPanel({
             isStoppingSimulation={false}
             onViewActivity={() => onSelectActivityRun(run.llmRunId)}
             onStopSimulation={onStopSimulation}
-            previewText={run.thinkingPreview}
             runStartTimeMs={null}
             stopSimulationError={null}
           />
@@ -2307,16 +2293,16 @@ function SimulationResultsPanel({
               </details>
             ) : null}
 
-            {run.resultEntries.length > 0 || finishedThinkingPreview ? (
+            {run.resultEntries.length > 0 || finishedThinkingStatus ? (
               <SimulationResultChunkCards
                 run={run}
                 entries={run.resultEntries}
-                finishedThinkingPreview={finishedThinkingPreview}
+                finishedThinkingStatus={finishedThinkingStatus}
               />
             ) : null}
 
             {run.isActive && !run.hasFinalParsedOutputChunk ? (
-              <SimulationResultThinkingPreview
+              <SimulationResultThinkingStatus
                 activeToolCallName={run.activeToolCallName}
                 canStopSimulation={run.status !== "cancel_requested"}
                 finishedDurationText={null}
@@ -2326,7 +2312,6 @@ function SimulationResultsPanel({
                 isStoppingSimulation={isStoppingSimulation}
                 onViewActivity={() => onSelectActivityRun(run.llmRunId)}
                 onStopSimulation={onStopSimulation}
-                previewText={run.thinkingPreview}
                 runStartTimeMs={getSimulationRunStartTimeMs(run)}
                 stopSimulationError={stopSimulationError}
               />
@@ -2388,27 +2373,27 @@ const simulationResultChunkPreClassName =
 
 function SimulationResultChunkCards({
   entries,
-  finishedThinkingPreview,
+  finishedThinkingStatus,
   run,
 }: {
   entries: SimulationResultEntry[]
-  finishedThinkingPreview: ReactNode | null
+  finishedThinkingStatus: ReactNode | null
   run: SimulationDebugLlmRun
 }) {
   const finalParsedOutputEntryIndex = entries.findIndex(
     (entry) =>
       entry.type === "chunk" && entry.chunk.kind === "final_parsed_output"
   )
-  const finishedThinkingPreviewIndex =
-    finishedThinkingPreview === null
+  const finishedThinkingStatusIndex =
+    finishedThinkingStatus === null
       ? -1
       : finalParsedOutputEntryIndex === -1
         ? entries.length > 0
           ? entries.length - 1
           : -1
         : finalParsedOutputEntryIndex
-  const shouldAppendFinishedThinkingPreview =
-    finishedThinkingPreview !== null && finishedThinkingPreviewIndex === -1
+  const shouldAppendFinishedThinkingStatus =
+    finishedThinkingStatus !== null && finishedThinkingStatusIndex === -1
 
   function renderEntry(entry: SimulationResultEntry) {
     if (entry.type === "turn_action_log") {
@@ -2445,18 +2430,18 @@ function SimulationResultChunkCards({
     <div className="grid gap-2">
       {entries.map((entry, index) => (
         <Fragment key={entry.id}>
-          {index === finishedThinkingPreviewIndex
-            ? finishedThinkingPreview
+          {index === finishedThinkingStatusIndex
+            ? finishedThinkingStatus
             : null}
           {renderEntry(entry)}
         </Fragment>
       ))}
-      {shouldAppendFinishedThinkingPreview ? finishedThinkingPreview : null}
+      {shouldAppendFinishedThinkingStatus ? finishedThinkingStatus : null}
     </div>
   )
 }
 
-function SimulationResultThinkingPreview({
+function SimulationResultThinkingStatus({
   activeToolCallName,
   canStopSimulation,
   finishedDurationText,
@@ -2466,7 +2451,6 @@ function SimulationResultThinkingPreview({
   isStoppingSimulation,
   onViewActivity,
   onStopSimulation,
-  previewText,
   runStartTimeMs,
   stopSimulationError,
 }: {
@@ -2479,46 +2463,10 @@ function SimulationResultThinkingPreview({
   isStoppingSimulation: boolean
   onViewActivity: () => void
   onStopSimulation: () => void
-  previewText: string | null
   runStartTimeMs: number | null
   stopSimulationError: string | null
 }) {
-  const previewTextRef = useRef<HTMLParagraphElement | null>(null)
-  const [isPreviewOverflowing, setIsPreviewOverflowing] = useState(false)
   const [currentTimeMs, setCurrentTimeMs] = useState(() => Date.now())
-  const shouldShowPreviewText =
-    SHOW_SIMULATION_THINKING_PREVIEW && Boolean(previewText)
-
-  useLayoutEffect(() => {
-    if (!shouldShowPreviewText) {
-      return
-    }
-
-    const previewTextElement = previewTextRef.current
-
-    if (!previewTextElement) {
-      return
-    }
-
-    const measuredPreviewTextElement = previewTextElement
-
-    function updatePreviewOverflow() {
-      setIsPreviewOverflowing(
-        measuredPreviewTextElement.scrollWidth >
-          measuredPreviewTextElement.clientWidth + 1
-      )
-    }
-
-    const animationFrameId = window.requestAnimationFrame(updatePreviewOverflow)
-
-    const resizeObserver = new ResizeObserver(updatePreviewOverflow)
-    resizeObserver.observe(measuredPreviewTextElement)
-
-    return () => {
-      window.cancelAnimationFrame(animationFrameId)
-      resizeObserver.disconnect()
-    }
-  }, [shouldShowPreviewText, previewText])
 
   useEffect(() => {
     if (isFinished) {
@@ -2538,9 +2486,9 @@ function SimulationResultThinkingPreview({
     activeToolCallName === null
       ? null
       : getKnownSimulationResultToolLabel({
-          mcpFunctionName: activeToolCallName,
-          state: "active",
-        })
+        mcpFunctionName: activeToolCallName,
+        state: "active",
+      })
   const activeElapsedText =
     runStartTimeMs === null || isFinished
       ? null
@@ -2552,70 +2500,40 @@ function SimulationResultThinkingPreview({
     : activeToolCallName
       ? (activeToolCallLabel ?? `Calling tool: ${activeToolCallName}`)
       : "Thinking"
-  const statusTextSizeClassName = shouldShowPreviewText
-    ? "text-sm"
-    : "text-base"
-  const statusIconSizeClassName = shouldShowPreviewText ? "size-4" : "size-5"
-  const elapsedTextSizeClassName = shouldShowPreviewText ? "text-xs" : "text-sm"
 
   return (
     <div
       className={`flex min-h-[3.5rem] items-stretch gap-2 transition-colors select-none ${simulationResultChunkSurfaceClassName}`}
     >
       <button
-        className={`min-w-0 flex-1 px-3 py-2 text-left transition-colors hover:bg-sky-950/20 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none ${
-          shouldShowPreviewText ? "grid gap-1" : "flex items-center"
-        }`}
+        className="flex min-w-0 flex-1 items-center px-3 py-2 text-left transition-colors hover:bg-sky-950/20 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
         type="button"
         aria-pressed={isActivitySelected}
         onClick={onViewActivity}
       >
         <div
-          className={`flex min-w-0 flex-1 items-center gap-3 font-medium text-sky-100 ${statusTextSizeClassName}`}
+          className="flex min-w-0 flex-1 items-center gap-3 text-base font-medium text-sky-100"
         >
           <div className="flex min-w-0 items-center gap-2">
             {isFinished ? (
               isFinishedSuccessfully ? (
-                <Check
-                  className={`shrink-0 text-emerald-300 ${statusIconSizeClassName}`}
-                />
+                <Check className="size-5 shrink-0 text-emerald-300" />
               ) : (
-                <X
-                  className={`shrink-0 text-destructive ${statusIconSizeClassName}`}
-                />
+                <X className="size-5 shrink-0 text-destructive" />
               )
             ) : (
-              <LoaderCircle
-                className={`shrink-0 animate-spin text-sky-300 ${statusIconSizeClassName}`}
-              />
+              <LoaderCircle className="size-5 shrink-0 animate-spin text-sky-300" />
             )}
             <span className="min-w-0 truncate">{statusLabel}</span>
           </div>
           {activeElapsedText ? (
             <span
-              className={`ml-auto shrink-0 font-normal text-sky-100/65 tabular-nums ${elapsedTextSizeClassName}`}
+              className="ml-auto shrink-0 text-sm font-normal text-sky-100/65 tabular-nums"
             >
               {activeElapsedText}
             </span>
           ) : null}
         </div>
-
-        {shouldShowPreviewText ? (
-          <p
-            ref={previewTextRef}
-            className={`min-h-4 min-w-0 overflow-hidden text-xs whitespace-nowrap text-muted-foreground/65 ${
-              isPreviewOverflowing ? "text-right" : "text-left"
-            }`}
-            style={{
-              WebkitMaskImage:
-                "linear-gradient(to right, transparent, black 1.25rem, black calc(100% - 1.25rem), transparent)",
-              maskImage:
-                "linear-gradient(to right, transparent, black 1.25rem, black calc(100% - 1.25rem), transparent)",
-            }}
-          >
-            {previewText}
-          </p>
-        ) : null}
 
         {stopSimulationError ? (
           <p
@@ -2675,8 +2593,8 @@ function SimulationRunActivityPanel({
     runStartTimeMs === null
       ? null
       : formatMinutesSeconds(
-          (runFinishedTimeMs ?? currentTimeMs) - runStartTimeMs
-        )
+        (runFinishedTimeMs ?? currentTimeMs) - runStartTimeMs
+      )
   const terminalActivityStatus = useMemo(
     () => getSimulationRunTerminalActivityStatus(run.status, durationText),
     [durationText, run.status]
@@ -2891,15 +2809,15 @@ function SimulationRunActivityTerminalStatus({
 
 type SimulationRunActivityTimelineItem =
   | {
-      id: string
-      type: "reasoning"
-      block: Extract<SimulationRunActivityBlock, { type: "reasoning" }>
-    }
+    id: string
+    type: "reasoning"
+    block: Extract<SimulationRunActivityBlock, { type: "reasoning" }>
+  }
   | {
-      id: string
-      type: "tool_call_group"
-      blocks: Extract<SimulationRunActivityBlock, { type: "tool_call" }>[]
-    }
+    id: string
+    type: "tool_call_group"
+    blocks: Extract<SimulationRunActivityBlock, { type: "tool_call" }>[]
+  }
 
 function getSimulationRunActivityTimelineItems(
   blocks: readonly SimulationRunActivityBlock[]
@@ -3276,19 +3194,19 @@ function SimulationResultCompletedCardToolEvent({
           </Button>
           {!showCardImages
             ? chunk.cardMentions.map((mention, index) => (
-                <a
-                  key={`${mention.requestedName}-${index}`}
-                  className="max-w-full rounded-full border border-sky-500/30 bg-sky-950/30 px-2.5 py-1 text-xs font-medium text-sky-100 transition-colors hover:border-sky-300/60 hover:bg-sky-900/40 hover:text-sky-50 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
-                  href={getCardMentionScryfallUrl(mention)}
-                  target="_blank"
-                  rel="noreferrer"
-                  title={getCardMentionDisplayName(mention)}
-                >
-                  <span className="block truncate">
-                    {getCardMentionDisplayName(mention)}
-                  </span>
-                </a>
-              ))
+              <a
+                key={`${mention.requestedName}-${index}`}
+                className="max-w-full rounded-full border border-sky-500/30 bg-sky-950/30 px-2.5 py-1 text-xs font-medium text-sky-100 transition-colors hover:border-sky-300/60 hover:bg-sky-900/40 hover:text-sky-50 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
+                href={getCardMentionScryfallUrl(mention)}
+                target="_blank"
+                rel="noreferrer"
+                title={getCardMentionDisplayName(mention)}
+              >
+                <span className="block truncate">
+                  {getCardMentionDisplayName(mention)}
+                </span>
+              </a>
+            ))
             : null}
         </div>
 
@@ -3361,7 +3279,7 @@ function SimulationResultCardMentions({
               {mention.requestedName}
             </p>
             {mention.resolvedName &&
-            mention.resolvedName !== mention.requestedName ? (
+              mention.resolvedName !== mention.requestedName ? (
               <p className="truncate text-muted-foreground">
                 {mention.resolvedName}
               </p>
@@ -3491,7 +3409,7 @@ function isMcpCallFailure(chunk: SimulationDebugLlmRunChunk) {
 
   return (
     getPayloadString(asPayloadRecord(chunk.payload).item, "status") ===
-      "failed" || getMcpCallErrorPayload(chunk) !== null
+    "failed" || getMcpCallErrorPayload(chunk) !== null
   )
 }
 
@@ -3664,7 +3582,7 @@ function SimulationDebugRunGroup({
             </div>
 
             {run.provider === "openrouter" &&
-            (run.openrouterGenerations?.length ?? 0) > 0 ? (
+              (run.openrouterGenerations?.length ?? 0) > 0 ? (
               <OpenRouterGenerationsTable
                 deckId={deckId}
                 generations={run.openrouterGenerations ?? []}
@@ -3714,19 +3632,19 @@ function SimulationDebugRunGroup({
 
 type OpenRouterGenerationLookupState =
   | {
-      status: "loading"
-    }
+    status: "loading"
+  }
   | {
-      status: "loaded"
-      providerName: string | null
-      providerEntry: unknown | null
-      providerSlug: string | null
-      result: unknown
-    }
+    status: "loaded"
+    providerName: string | null
+    providerEntry: unknown | null
+    providerSlug: string | null
+    result: unknown
+  }
   | {
-      status: "error"
-      error: string
-    }
+    status: "error"
+    error: string
+  }
 
 function OpenRouterGenerationsTable({
   deckId,
@@ -4449,13 +4367,12 @@ function CreateStartingHandModal({
                     return (
                       <li key={card.id}>
                         <label
-                          className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
-                            isSelected
+                          className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${isSelected
                               ? "bg-accent text-accent-foreground"
                               : isDisabled
                                 ? "text-muted-foreground/55"
                                 : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
-                          }`}
+                            }`}
                         >
                           <input
                             className="size-4 accent-sky-300"
