@@ -28,6 +28,7 @@ import {
   RefreshCw,
   Save,
   Search,
+  Shuffle,
   Sparkles,
   Square,
   Trash2,
@@ -3461,17 +3462,10 @@ function SimulationResultEvent({
     }
 
     return (
-      <details className={simulationResultChunkSurfaceClassName}>
-        <summary className={simulationResultChunkSummaryClassName}>
-          {getMcpCallCompleteTitle(chunk)}
-        </summary>
-        {chunk.cardMentions.length > 0 ? (
-          <SimulationResultCardMentions mentions={chunk.cardMentions} />
-        ) : null}
-        <pre className={simulationResultChunkPreClassName}>
-          {formatResultEventPayload(getMcpCallResultPayload(chunk))}
-        </pre>
-      </details>
+      <SimulationResultToolLabelEvent
+        icon={getMcpCallCompleteIcon(chunk)}
+        title={getMcpCallCompleteTitle(chunk)}
+      />
     )
   }
 
@@ -3507,6 +3501,27 @@ function SimulationResultEvent({
         {JSON.stringify(chunk, null, 2)}
       </pre>
     </details>
+  )
+}
+
+function SimulationResultToolLabelEvent({
+  icon,
+  title,
+}: {
+  icon?: ReactNode
+  title: string
+}) {
+  return (
+    <div
+      className={`${simulationResultChunkSurfaceClassName} flex min-w-0 items-center gap-2 px-3 py-2 text-sm text-muted-foreground`}
+    >
+      {icon ? (
+        <span className="shrink-0 text-sky-300" aria-hidden="true">
+          {icon}
+        </span>
+      ) : null}
+      <span className="min-w-0 truncate">{title}</span>
+    </div>
   )
 }
 
@@ -3596,46 +3611,6 @@ function hasCardMentionImage(
   return typeof mention.defaultImageUrl === "string"
 }
 
-function SimulationResultCardMentions({
-  mentions,
-}: {
-  mentions: SimulationDebugLlmRunChunk["cardMentions"]
-}) {
-  return (
-    <div className="grid gap-2 border-t border-border p-3 sm:grid-cols-2 lg:grid-cols-3">
-      {mentions.map((mention, index) => (
-        <div
-          key={`${mention.requestedName}-${index}`}
-          className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-black/20 p-2"
-        >
-          {mention.defaultImageUrl ? (
-            <img
-              className="h-16 w-12 shrink-0 rounded-sm object-cover"
-              src={mention.defaultImageUrl}
-              alt=""
-              loading="lazy"
-            />
-          ) : null}
-          <div className="min-w-0 text-xs leading-5">
-            <p className="truncate font-medium text-foreground">
-              {mention.requestedName}
-            </p>
-            {mention.resolvedName &&
-              mention.resolvedName !== mention.requestedName ? (
-              <p className="truncate text-muted-foreground">
-                {mention.resolvedName}
-              </p>
-            ) : null}
-            {mention.resolutionStatus === "missing" ? (
-              <p className="text-muted-foreground">No Scryfall match</p>
-            ) : null}
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
 function getOpeningHandFinalOutputCardMentions(
   keptHand: readonly string[],
   cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
@@ -3713,6 +3688,14 @@ function getMcpCallCompleteTitle(chunk: SimulationDebugLlmRunChunk) {
   }
 
   return `Tool completed: ${toolName}`
+}
+
+function getMcpCallCompleteIcon(chunk: SimulationDebugLlmRunChunk) {
+  if (chunk.mcpFunctionName === "shuffle_library" && !isMcpCallFailure(chunk)) {
+    return <Shuffle className="size-4" />
+  }
+
+  return null
 }
 
 function getMcpCallResultPayload(chunk: SimulationDebugLlmRunChunk) {
