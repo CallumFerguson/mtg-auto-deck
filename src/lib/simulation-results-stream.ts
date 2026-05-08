@@ -144,6 +144,10 @@ function upsertRun(
       existingRun.openrouterGenerations ?? [],
       incomingRun.openrouterGenerations ?? []
     ),
+    openingHandEvaluation:
+      incomingRun.openingHandEvaluation ??
+      existingRun.openingHandEvaluation ??
+      null,
     turnEvaluation:
       incomingRun.turnEvaluation ?? existingRun.turnEvaluation ?? null,
     chunks: mergeChunks(existingRun.chunks, incomingRun.chunks),

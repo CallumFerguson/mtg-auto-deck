@@ -46,6 +46,7 @@ import {
   failLlmRun,
   failReportLlmRun,
   getDeckCardReferenceData,
+  getOpeningHandLlmRunEvaluationData,
   getOpenRouterGenerationForSimulation,
   getSimulationCreationDecision,
   getSimulationDebugInfo,
@@ -76,6 +77,7 @@ import {
   SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
   SimulationValidationError,
   takeCardsFromSimulationLibrary,
+  upsertOpeningHandEvaluation,
   upsertTurnEvaluation,
   updateLlmRunRequestData,
 } from "./simulations-postgres.js"
@@ -94,6 +96,7 @@ import type {
   TurnSimulationPromptData,
   SimulationReportPromptData,
   SimulationReportTurnPromptData,
+  OpeningHandEvaluationJson,
   TurnEvaluationJson,
 } from "./simulations-postgres.js"
 import {
@@ -176,9 +179,13 @@ import {
   estimateLlmTokenPriceCents,
 } from "./openai-pricing.js"
 import {
+  buildOpeningHandEvaluationInputText,
+  buildOpeningHandEvaluationPrompt,
   buildTurnEvaluationInputText,
   buildTurnEvaluationPrompt,
+  getOpeningHandEvaluationIneligibilityMessage,
   getTurnEvaluationIneligibilityMessage,
+  parseOpeningHandEvaluationResponseText,
   parseTurnEvaluationResponseText,
 } from "./turn-evaluations.js"
 import {
@@ -2914,21 +2921,19 @@ async function collectLlamaCppLlmStream({
   }
 }
 
-async function collectTurnEvaluationCompletion({
+async function collectRunEvaluationCompletion({
   config,
+  llmRunId,
+  metadata,
   prompt,
-  simulationId,
-  turnLlmRunId,
-  turnNumber,
 }: {
   config: ResolvedEvaluationLlmRunConfig
+  llmRunId: string
+  metadata: Record<string, string>
   prompt: string
-  simulationId: string
-  turnLlmRunId: string
-  turnNumber: number
 }) {
   logLlmApiCallStarted({
-    llmRunId: turnLlmRunId,
+    llmRunId,
     model: config.model,
     phase: "other",
     provider: config.provider,
@@ -2941,12 +2946,7 @@ async function collectTurnEvaluationCompletion({
     const response = await client.responses.create({
       model: config.model,
       input: prompt,
-      metadata: {
-        simulationId,
-        phase: "turn_evaluation",
-        turnLlmRunId,
-        turnNumber: String(turnNumber),
-      },
+      metadata,
       reasoning: {
         effort: config.reasoningEffort,
         summary: "auto" as const,
@@ -2960,7 +2960,7 @@ async function collectTurnEvaluationCompletion({
     const outputText = getCompletedResponseOutputText(response)
 
     logLlmApiCallFinished({
-      llmRunId: turnLlmRunId,
+      llmRunId,
       model: config.model,
       phase: "other",
       provider: config.provider,
@@ -2981,12 +2981,7 @@ async function collectTurnEvaluationCompletion({
             content: prompt,
           },
         ],
-        metadata: {
-          simulationId,
-          phase: "turn_evaluation",
-          turnLlmRunId,
-          turnNumber: String(turnNumber),
-        },
+        metadata,
         provider: getOpenRouterChatProviderPreferences(config.modelProvider),
         reasoning: {
           effort: config.reasoningEffort,
@@ -3001,7 +2996,7 @@ async function collectTurnEvaluationCompletion({
     const outputText = getChatCompletionOutputText(result)
 
     logLlmApiCallFinished({
-      llmRunId: turnLlmRunId,
+      llmRunId,
       model: config.model,
       phase: "other",
       provider: config.provider,
@@ -3028,7 +3023,7 @@ async function collectTurnEvaluationCompletion({
   const outputText = getChatCompletionOutputText(result)
 
   logLlmApiCallFinished({
-    llmRunId: turnLlmRunId,
+    llmRunId,
     model: config.model,
     phase: "other",
     provider: config.provider,
@@ -3135,10 +3130,30 @@ async function saveTurnEvaluation({
   })
 }
 
-function isTurnEvaluationOutputError(error: unknown) {
+async function saveOpeningHandEvaluation({
+  evaluationJson,
+  openingHandLlmRunId,
+  simulationId,
+}: {
+  evaluationJson: OpeningHandEvaluationJson
+  openingHandLlmRunId: string
+  simulationId: string
+}) {
+  return upsertOpeningHandEvaluation({
+    simulationId,
+    openingHandLlmRunId,
+    legalSimulationPass: evaluationJson.legalSimulationPass,
+    reasoningPass: evaluationJson.reasoningPass,
+    simulationQualityScore: evaluationJson.simulationQualityScore,
+    evaluationJson,
+  })
+}
+
+function isEvaluationOutputError(error: unknown) {
   return (
     error instanceof Error &&
-    error.message.startsWith("Turn evaluation response")
+    (error.message.startsWith("Turn evaluation response") ||
+      error.message.startsWith("Opening-hand evaluation response"))
   )
 }
 
@@ -4175,6 +4190,104 @@ async function main() {
   )
 
   app.post(
+    "/decks/:deckId/simulations/:simulationId/opening-hand-llm-runs/:llmRunId/evaluation",
+    async (req: Request, res: Response) => {
+      const deckId = String(req.params.deckId)
+      const simulationId = String(req.params.simulationId)
+      const llmRunId = String(req.params.llmRunId)
+
+      try {
+        const run = await getOpeningHandLlmRunEvaluationData(
+          deckId,
+          simulationId,
+          llmRunId
+        )
+
+        const ineligibilityMessage =
+          getOpeningHandEvaluationIneligibilityMessage(run)
+
+        if (ineligibilityMessage !== null) {
+          throw new SimulationValidationError(ineligibilityMessage)
+        }
+
+        const openingHandEvaluationInputText =
+          buildOpeningHandEvaluationInputText({
+            chunks: run.chunks,
+            fullPrompt: run.fullPrompt,
+          })
+
+        if (!openingHandEvaluationInputText.trim()) {
+          throw new SimulationValidationError(
+            "Opening-hand LLM run does not have evaluation text."
+          )
+        }
+
+        const prompt = buildOpeningHandEvaluationPrompt({
+          attemptNumber: run.attemptNumber,
+          openingHandEvaluationInputText,
+        })
+        const config = await resolveLlmRunConfigModel(
+          getEvaluationLlmRunConfig()
+        )
+        const responseText = await collectRunEvaluationCompletion({
+          config,
+          llmRunId,
+          metadata: {
+            simulationId,
+            phase: "opening_hand_evaluation",
+            openingHandLlmRunId: llmRunId,
+            attemptNumber: String(run.attemptNumber),
+          },
+          prompt,
+        })
+        const evaluationJson =
+          parseOpeningHandEvaluationResponseText(responseText)
+        const evaluation = await saveOpeningHandEvaluation({
+          evaluationJson,
+          openingHandLlmRunId: llmRunId,
+          simulationId,
+        })
+
+        res.status(200).json({
+          evaluation,
+        })
+      } catch (error) {
+        if (error instanceof SimulationValidationError) {
+          const status =
+            error.message === "Opening-hand LLM run not found." ||
+            error.message === "Simulation not found."
+              ? 404
+              : 400
+
+          res.status(status).json({
+            error: error.message,
+          })
+          return
+        }
+
+        if (error instanceof LlmConfigurationError) {
+          res.status(500).json({
+            error: error.message,
+          })
+          return
+        }
+
+        if (isEvaluationOutputError(error)) {
+          res.status(502).json({
+            error: getErrorMessage(error),
+          })
+          return
+        }
+
+        console.error("Failed to evaluate opening-hand LLM run:", error)
+        res.status(500).json({
+          error: "Failed to evaluate opening-hand LLM run.",
+        })
+      }
+    }
+  )
+
+  app.post(
     "/decks/:deckId/simulations/:simulationId/turn-llm-runs",
     async (req: Request, res: Response) => {
       const deckId = String(req.params.deckId)
@@ -4269,12 +4382,16 @@ async function main() {
         const config = await resolveLlmRunConfigModel(
           getEvaluationLlmRunConfig()
         )
-        const responseText = await collectTurnEvaluationCompletion({
+        const responseText = await collectRunEvaluationCompletion({
           config,
+          llmRunId,
+          metadata: {
+            simulationId,
+            phase: "turn_evaluation",
+            turnLlmRunId: llmRunId,
+            turnNumber: String(run.turnNumber),
+          },
           prompt,
-          simulationId,
-          turnLlmRunId: llmRunId,
-          turnNumber: run.turnNumber,
         })
         const evaluationJson = parseTurnEvaluationResponseText(responseText)
         const evaluation = await saveTurnEvaluation({
@@ -4307,7 +4424,7 @@ async function main() {
           return
         }
 
-        if (isTurnEvaluationOutputError(error)) {
+        if (isEvaluationOutputError(error)) {
           res.status(502).json({
             error: getErrorMessage(error),
           })

@@ -45,6 +45,8 @@ import type {
   CreateStartingHandResponse,
   DeckCard,
   LlmRunFullPromptResponse,
+  OpeningHandEvaluation,
+  OpeningHandEvaluationResponse,
   OpenRouterGenerationDetailsResponse,
   SavedSeed,
   SavedSeedsResponse,
@@ -2097,6 +2099,29 @@ function SimulationDetails({
     })
   }
 
+  function handleOpeningHandEvaluationSaved(evaluation: OpeningHandEvaluation) {
+    setResultsInfo((currentResultsInfo) => {
+      if (!currentResultsInfo) {
+        return currentResultsInfo
+      }
+
+      const updatedResultsInfo = {
+        ...currentResultsInfo,
+        openingHandLlmRuns: currentResultsInfo.openingHandLlmRuns.map((run) =>
+          run.llmRunId === evaluation.openingHandLlmRunId
+            ? {
+                ...run,
+                openingHandEvaluation: evaluation,
+              }
+            : run
+        ),
+      }
+
+      resultsInfoRef.current = updatedResultsInfo
+      return updatedResultsInfo
+    })
+  }
+
   useEffect(() => {
     const eventSource = new EventSource(
       `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/results/stream`
@@ -2251,6 +2276,7 @@ function SimulationDetails({
                 void handleStartTurnRun(turnNumber)
               }
               onStopSimulation={() => void handleStopSimulation()}
+              onOpeningHandEvaluationSaved={handleOpeningHandEvaluationSaved}
               onTurnEvaluationSaved={handleTurnEvaluationSaved}
               openingHandRunError={openingHandRunError}
               reportRunError={reportRunError}
@@ -2391,6 +2417,7 @@ function SimulationResultsPanel({
   onStartTurnRun,
   onStartReportRun,
   onStopSimulation,
+  onOpeningHandEvaluationSaved,
   onTurnEvaluationSaved,
   openingHandRunError,
   reportRunError,
@@ -2415,6 +2442,7 @@ function SimulationResultsPanel({
   onStartTurnRun: (turnNumber: number) => void
   onStartReportRun: () => void
   onStopSimulation: () => void
+  onOpeningHandEvaluationSaved: (evaluation: OpeningHandEvaluation) => void
   onTurnEvaluationSaved: (evaluation: TurnEvaluation) => void
   openingHandRunError: string | null
   reportRunError: string | null
@@ -2549,17 +2577,46 @@ function SimulationResultsPanel({
   ])
   const [renderedSimulationAction, setRenderedSimulationAction] =
     useState<SimulationResultsAction | null>(() => simulationAction)
-  const [evaluationRunId, setEvaluationRunId] = useState<string | null>(null)
+  const [evaluationRunSelection, setEvaluationRunSelection] = useState<{
+    llmRunId: string
+    resultKind: "opening_hand" | "turn"
+  } | null>(null)
   const evaluationRun = useMemo(() => {
-    if (evaluationRunId === null) {
+    if (evaluationRunSelection === null) {
       return null
     }
 
-    return (
-      resultsInfo.turnLlmRuns.find((run) => run.llmRunId === evaluationRunId) ??
-      null
-    )
-  }, [evaluationRunId, resultsInfo.turnLlmRuns])
+    if (evaluationRunSelection.resultKind === "opening_hand") {
+      const run =
+        resultsInfo.openingHandLlmRuns.find(
+          (openingHandRun) =>
+            openingHandRun.llmRunId === evaluationRunSelection.llmRunId
+        ) ?? null
+
+      return run
+        ? {
+            resultKind: "opening_hand" as const,
+            run,
+          }
+        : null
+    }
+
+    const run =
+      resultsInfo.turnLlmRuns.find(
+        (turnRun) => turnRun.llmRunId === evaluationRunSelection.llmRunId
+      ) ?? null
+
+    return run
+      ? {
+          resultKind: "turn" as const,
+          run,
+        }
+      : null
+  }, [
+    evaluationRunSelection,
+    resultsInfo.openingHandLlmRuns,
+    resultsInfo.turnLlmRuns,
+  ])
 
   useEffect(() => {
     if (!simulationAction) {
@@ -2591,7 +2648,10 @@ function SimulationResultsPanel({
   const runs = [
     ...resultsInfo.openingHandLlmRuns.map((run) => ({
       ...run,
-      canEvaluate: false,
+      canEvaluate:
+        run.status === "completed" &&
+        run.openingHandIsValid === true &&
+        !run.chunks.some((chunk) => chunk.kind === "error"),
       canRerun: canStartOpeningHandRun && !isOpeningHandRunning,
       isActive: isActiveLlmRunStatus(run.status),
       resultKind: "opening_hand" as const,
@@ -2702,16 +2762,34 @@ function SimulationResultsPanel({
                 {run.canEvaluate ? (
                   <Button
                     className={
-                      run.turnEvaluation
+                      (run.resultKind === "opening_hand"
+                        ? run.openingHandEvaluation
+                        : run.turnEvaluation)
                         ? "text-emerald-300 hover:text-emerald-200"
                         : ""
                     }
                     type="button"
                     variant="outline"
                     size="icon-sm"
-                    aria-label={`Evaluate turn ${run.turnNumber}`}
-                    title={`Evaluate turn ${run.turnNumber}`}
-                    onClick={() => setEvaluationRunId(run.llmRunId)}
+                    aria-label={
+                      run.resultKind === "opening_hand"
+                        ? `Evaluate opening hand attempt ${run.attemptNumber}`
+                        : `Evaluate turn ${run.turnNumber}`
+                    }
+                    title={
+                      run.resultKind === "opening_hand"
+                        ? `Evaluate opening hand attempt ${run.attemptNumber}`
+                        : `Evaluate turn ${run.turnNumber}`
+                    }
+                    onClick={() =>
+                      setEvaluationRunSelection({
+                        llmRunId: run.llmRunId,
+                        resultKind:
+                          run.resultKind === "opening_hand"
+                            ? "opening_hand"
+                            : "turn",
+                      })
+                    }
                   >
                     <ClipboardCheck />
                   </Button>
@@ -2850,16 +2928,206 @@ function SimulationResultsPanel({
         ) : null}
       </div>
       </div>
-      {evaluationRun ? (
+      {evaluationRun?.resultKind === "opening_hand" ? (
+        <OpeningHandEvaluationModal
+          deckId={deckId}
+          onClose={() => setEvaluationRunSelection(null)}
+          onSaved={onOpeningHandEvaluationSaved}
+          run={evaluationRun.run}
+          simulationId={simulation.id}
+        />
+      ) : evaluationRun?.resultKind === "turn" ? (
         <TurnEvaluationModal
           deckId={deckId}
-          onClose={() => setEvaluationRunId(null)}
+          onClose={() => setEvaluationRunSelection(null)}
           onSaved={onTurnEvaluationSaved}
-          run={evaluationRun}
+          run={evaluationRun.run}
           simulationId={simulation.id}
         />
       ) : null}
     </>
+  )
+}
+
+function OpeningHandEvaluationModal({
+  deckId,
+  onClose,
+  onSaved,
+  run,
+  simulationId,
+}: {
+  deckId: string
+  onClose: () => void
+  onSaved: (evaluation: OpeningHandEvaluation) => void
+  run: SimulationResultsInfo["openingHandLlmRuns"][number]
+  simulationId: string
+}) {
+  const [evaluation, setEvaluation] = useState<OpeningHandEvaluation | null>(
+    run.openingHandEvaluation ?? null
+  )
+  const [error, setError] = useState<string | null>(null)
+  const [isEvaluating, setIsEvaluating] = useState(false)
+
+  useEffect(() => {
+    setEvaluation(run.openingHandEvaluation ?? null)
+    setError(null)
+  }, [run.llmRunId, run.openingHandEvaluation])
+
+  async function handleEvaluate() {
+    if (isEvaluating) {
+      return
+    }
+
+    setIsEvaluating(true)
+    setError(null)
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/decks/${deckId}/simulations/${simulationId}/opening-hand-llm-runs/${run.llmRunId}/evaluation`,
+        {
+          method: "POST",
+        }
+      )
+
+      if (!response.ok) {
+        setError(
+          await readApiError(response, "Opening-hand evaluation failed.")
+        )
+        return
+      }
+
+      const data = (await response.json()) as OpeningHandEvaluationResponse
+
+      setEvaluation(data.evaluation)
+      onSaved(data.evaluation)
+    } catch {
+      setError("Opening-hand evaluation could not be sent to the server.")
+    } finally {
+      setIsEvaluating(false)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 py-6 backdrop-blur-sm"
+      role="presentation"
+      onMouseDown={isEvaluating ? undefined : onClose}
+    >
+      <section
+        aria-labelledby="opening-hand-evaluation-title"
+        className="flex max-h-[calc(100svh-3rem)] w-full max-w-3xl flex-col rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
+        role="dialog"
+        aria-modal="true"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+          <div className="min-w-0 space-y-1">
+            <h2
+              id="opening-hand-evaluation-title"
+              className="text-xl font-semibold"
+            >
+              Opening hand attempt {run.attemptNumber} evaluation
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Attempt {run.attemptNumber} / {run.model}
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Close"
+            title="Close"
+            onClick={onClose}
+            disabled={isEvaluating}
+          >
+            <X />
+          </Button>
+        </header>
+
+        <div className="simulation-scrollbar grid min-h-0 flex-1 gap-4 overflow-y-auto px-5 py-5">
+          {evaluation ? (
+            <div className="grid gap-4">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <TurnEvaluationMetric
+                  label="Legal simulation"
+                  value={evaluation.legalSimulationPass ? "Pass" : "Fail"}
+                  tone={evaluation.legalSimulationPass ? "pass" : "fail"}
+                />
+                <TurnEvaluationMetric
+                  label="Reasoning"
+                  value={evaluation.reasoningPass ? "Pass" : "Fail"}
+                  tone={evaluation.reasoningPass ? "pass" : "fail"}
+                />
+                <TurnEvaluationMetric
+                  label="Quality"
+                  value={`${formatEvaluationScore(
+                    evaluation.simulationQualityScore
+                  )}/10`}
+                  tone="neutral"
+                />
+              </div>
+
+              <TurnEvaluationList
+                emptyText="No illegal actions found."
+                items={evaluation.evaluationJson.illegalActions}
+                title="Illegal actions"
+              />
+              <TurnEvaluationList
+                emptyText="No reasoning mistakes found."
+                items={evaluation.evaluationJson.reasoningMistakes}
+                title="Reasoning mistakes"
+              />
+              <TurnEvaluationList
+                emptyText="No strategic mistakes listed."
+                items={evaluation.evaluationJson.strategicMistakes}
+                title="Strategic mistakes"
+              />
+            </div>
+          ) : (
+            <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+              This opening hand has not been evaluated yet.
+            </p>
+          )}
+
+          {error ? (
+            <p
+              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              role="alert"
+            >
+              {error}
+            </p>
+          ) : null}
+        </div>
+
+        <footer className="flex justify-end gap-2 border-t border-border px-5 py-4">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onClose}
+            disabled={isEvaluating}
+          >
+            Close
+          </Button>
+          <Button
+            type="button"
+            onClick={() => void handleEvaluate()}
+            disabled={isEvaluating}
+          >
+            {isEvaluating ? (
+              <LoaderCircle className="animate-spin" data-icon="inline-start" />
+            ) : (
+              <ClipboardCheck data-icon="inline-start" />
+            )}
+            {isEvaluating
+              ? "Evaluating..."
+              : evaluation
+                ? "Rerun evaluation"
+                : "Run evaluation"}
+          </Button>
+        </footer>
+      </section>
+    </div>
   )
 }
 

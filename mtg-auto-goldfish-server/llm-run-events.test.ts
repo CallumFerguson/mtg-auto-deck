@@ -21,6 +21,7 @@ import {
 import {
   INVALID_OPENING_HAND_SIMULATION_FAILURE_MESSAGE,
   LLM_CHUNK_KINDS,
+  OPENING_HAND_EVALUATION_UPSERT_SQL,
   SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
   STALE_IN_FLIGHT_LLM_RUN_CANCELLATION_MESSAGE,
   STALE_RUNNING_SIMULATION_CANCELLATION_MESSAGE,
@@ -54,8 +55,11 @@ import {
   getTurnSimulationLlmRunConfig,
 } from "./llm-config.js"
 import {
+  buildOpeningHandEvaluationInputText,
   buildTurnEvaluationInputText,
+  getOpeningHandEvaluationIneligibilityMessage,
   getTurnEvaluationIneligibilityMessage,
+  parseOpeningHandEvaluationResponseText,
   parseTurnEvaluationResponseText,
 } from "./turn-evaluations.js"
 
@@ -990,6 +994,191 @@ test("reports invalid completed turn JSON with an explicit message", () => {
     () => parseTurnSimulationFromResponseText("{"),
     /Turn LLM completed response was not valid JSON\./
   )
+})
+
+test("parses opening-hand evaluation JSON", () => {
+  assert.deepEqual(
+    parseOpeningHandEvaluationResponseText(
+      JSON.stringify({
+        legalSimulationPass: true,
+        reasoningPass: false,
+        simulationQualityScore: 8.25,
+        illegalActions: [],
+        reasoningMistakes: ["Assumed a land made green mana."],
+        strategicMistakes: ["Should have bottomed the expensive spell."],
+      })
+    ),
+    {
+      legalSimulationPass: true,
+      reasoningPass: false,
+      simulationQualityScore: 8.25,
+      illegalActions: [],
+      reasoningMistakes: ["Assumed a land made green mana."],
+      strategicMistakes: ["Should have bottomed the expensive spell."],
+    }
+  )
+})
+
+test("rejects invalid opening-hand evaluation JSON", () => {
+  assert.throws(
+    () => parseOpeningHandEvaluationResponseText("{"),
+    /Opening-hand evaluation response was not valid JSON\./
+  )
+  assert.throws(
+    () =>
+      parseOpeningHandEvaluationResponseText(
+        JSON.stringify({
+          legalSimulationPass: true,
+          reasoningPass: true,
+          simulationQualityScore: 11,
+          illegalActions: [],
+          reasoningMistakes: [],
+          strategicMistakes: [],
+        })
+      ),
+    /Opening-hand evaluation response did not match the expected JSON\./
+  )
+  assert.throws(
+    () =>
+      parseOpeningHandEvaluationResponseText(
+        JSON.stringify({
+          reasoningPass: true,
+          simulationQualityScore: 8,
+          illegalActions: [],
+          reasoningMistakes: [],
+          strategicMistakes: [],
+        })
+      ),
+    /Opening-hand evaluation response did not match the expected JSON\./
+  )
+})
+
+test("builds opening-hand evaluation input like copy activity with prompt", () => {
+  const inputText = buildOpeningHandEvaluationInputText({
+    fullPrompt: "Full opening-hand prompt",
+    chunks: [
+      {
+        id: 1,
+        sequence: 1,
+        kind: "reasoning_delta",
+        mcpFunctionName: null,
+        mcpFunctionOutput: null,
+        reasoningDelta: "Reason about the opener.",
+        outputDelta: null,
+        payload: {},
+        cardMentions: [],
+        receivedAt: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        id: 2,
+        sequence: 2,
+        kind: "mcp_call_complete",
+        mcpFunctionName: "draw_starting_hand",
+        mcpFunctionOutput: {
+          cards: ["Sol Ring", "Command Tower"],
+        },
+        reasoningDelta: null,
+        outputDelta: null,
+        payload: {},
+        cardMentions: [],
+        receivedAt: "2026-01-01T00:00:01.000Z",
+      },
+    ],
+  })
+
+  assert.equal(
+    inputText,
+    [
+      "Full opening-hand prompt",
+      "Reason about the opener.",
+      "[called draw_starting_hand]",
+      `[result of draw_starting_hand]\n${JSON.stringify(
+        {
+          cards: ["Sol Ring", "Command Tower"],
+        },
+        null,
+        2
+      )}`,
+    ].join("\n\n")
+  )
+})
+
+test("validates opening-hand evaluation run eligibility", () => {
+  assert.equal(
+    getOpeningHandEvaluationIneligibilityMessage({
+      phase: "opening_hand",
+      status: "completed",
+      openingHandIsValid: true,
+      chunks: [],
+    }),
+    null
+  )
+  assert.equal(
+    getOpeningHandEvaluationIneligibilityMessage({
+      phase: "turn",
+      status: "completed",
+      openingHandIsValid: true,
+      chunks: [],
+    }),
+    "Only opening-hand LLM runs can be evaluated."
+  )
+  assert.equal(
+    getOpeningHandEvaluationIneligibilityMessage({
+      phase: "opening_hand",
+      status: "streaming",
+      openingHandIsValid: true,
+      chunks: [],
+    }),
+    "Only completed opening-hand LLM runs can be evaluated."
+  )
+  assert.equal(
+    getOpeningHandEvaluationIneligibilityMessage({
+      phase: "opening_hand",
+      status: "completed",
+      openingHandIsValid: false,
+      chunks: [],
+    }),
+    "Only valid opening-hand LLM runs can be evaluated."
+  )
+  assert.equal(
+    getOpeningHandEvaluationIneligibilityMessage({
+      phase: "opening_hand",
+      status: "completed",
+      openingHandIsValid: true,
+      chunks: [
+        {
+          kind: "error",
+        },
+      ],
+    }),
+    "Opening-hand LLM runs with errors cannot be evaluated."
+  )
+})
+
+test("opening-hand evaluation upsert overwrites existing evaluation columns", () => {
+  const normalizedSql = OPENING_HAND_EVALUATION_UPSERT_SQL.replace(
+    /\s+/g,
+    " "
+  ).trim()
+
+  assert.match(
+    normalizedSql,
+    /ON CONFLICT \(opening_hand_llm_run_id\) DO UPDATE/
+  )
+
+  for (const column of [
+    "legal_simulation_pass",
+    "reasoning_pass",
+    "simulation_quality_score",
+    "evaluation_json",
+  ]) {
+    assert.match(
+      normalizedSql,
+      new RegExp(`${column} = EXCLUDED\\.${column}`)
+    )
+  }
+
+  assert.match(normalizedSql, /updated_at = now\(\)/)
 })
 
 test("parses turn evaluation JSON", () => {

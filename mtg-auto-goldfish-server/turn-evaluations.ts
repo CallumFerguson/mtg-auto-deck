@@ -4,6 +4,7 @@ import type {
   LlmChunkKind,
   LlmRunPhase,
   LlmRunStatus,
+  OpeningHandEvaluationJson,
   SimulationDebugLlmRunChunk,
   TurnEvaluationJson,
 } from "./simulations-postgres.js"
@@ -18,6 +19,63 @@ const turnEvaluationJsonSchema = z
     strategicMistakes: z.array(z.string()),
   })
   .strict()
+
+const openingHandEvaluationJsonSchema = z
+  .object({
+    legalSimulationPass: z.boolean(),
+    reasoningPass: z.boolean(),
+    simulationQualityScore: z.number().min(0).max(10),
+    illegalActions: z.array(z.string()),
+    reasoningMistakes: z.array(z.string()),
+    strategicMistakes: z.array(z.string()),
+  })
+  .strict()
+
+export function buildOpeningHandEvaluationInputText({
+  chunks,
+  fullPrompt,
+}: {
+  chunks: readonly SimulationDebugLlmRunChunk[]
+  fullPrompt: string
+}) {
+  return formatSimulationRunClipboardText({ chunks }, { fullPrompt })
+}
+
+export function buildOpeningHandEvaluationPrompt({
+  attemptNumber,
+  openingHandEvaluationInputText,
+}: {
+  attemptNumber: number
+  openingHandEvaluationInputText: string
+}) {
+  return `
+You are evaluating a Magic: The Gathering Commander goldfish opening-hand simulation.
+
+Evaluate whether opening-hand attempt was legal, whether the model made reasoning mistakes, and how good the keep/mulligan/bottoming decisions were strategically.
+
+Use the full opening-hand prompt, card reference, tool calls, tool results, reasoning, and final output in the transcript below.
+
+Return only valid JSON in this exact shape:
+{
+  "legalSimulationPass": true,
+  "reasoningPass": true,
+  "simulationQualityScore": 8.5,
+  "illegalActions": [],
+  "reasoningMistakes": [],
+  "strategicMistakes": []
+}
+
+Field rules:
+- legalSimulationPass is false if the run used opening-hand tools illegally, drew the initial hand more than once, drew after mulliganing, mulliganed after deciding to keep, failed to bottom required cards before reporting the final kept hand, performed impossible zone changes, or reported a kept hand inconsistent with tool results.
+- reasoningPass is false if the model made incorrect claims, contradicted itself, relied on wrong card text, or made incorrect mana/castability claims.
+- simulationQualityScore is a subjective score from 0 to 10 for the overall opening-hand simulation quality.
+- illegalActions, reasoningMistakes, and strategicMistakes must be arrays of concise strings. Use [] when none are found.
+
+=== Opening-Hand Prompt And Activity ===
+
+${openingHandEvaluationInputText}
+`.trim()
+}
 
 export function buildTurnEvaluationInputText({
   chunks,
@@ -89,6 +147,66 @@ export function getTurnEvaluationIneligibilityMessage(
   }
 
   return null
+}
+
+export type OpeningHandEvaluationEligibilityRun = {
+  phase: LlmRunPhase
+  status: LlmRunStatus
+  openingHandIsValid?: boolean
+  chunks: readonly {
+    kind: LlmChunkKind
+  }[]
+}
+
+export function getOpeningHandEvaluationIneligibilityMessage(
+  run: OpeningHandEvaluationEligibilityRun
+) {
+  if (run.phase !== "opening_hand") {
+    return "Only opening-hand LLM runs can be evaluated."
+  }
+
+  if (run.status !== "completed") {
+    return "Only completed opening-hand LLM runs can be evaluated."
+  }
+
+  if (run.openingHandIsValid !== true) {
+    return "Only valid opening-hand LLM runs can be evaluated."
+  }
+
+  if (run.chunks.some((chunk) => chunk.kind === "error")) {
+    return "Opening-hand LLM runs with errors cannot be evaluated."
+  }
+
+  return null
+}
+
+export function parseOpeningHandEvaluationResponseText(
+  responseText: string
+): OpeningHandEvaluationJson {
+  if (!responseText.trim()) {
+    throw new Error("Opening-hand evaluation response was empty.")
+  }
+
+  let parsedResponse: unknown
+
+  try {
+    parsedResponse = parseJsonWithLastObjectFallback(responseText)
+  } catch (error) {
+    throw new Error("Opening-hand evaluation response was not valid JSON.", {
+      cause: error,
+    })
+  }
+
+  const parsedEvaluation =
+    openingHandEvaluationJsonSchema.safeParse(parsedResponse)
+
+  if (!parsedEvaluation.success) {
+    throw new Error(
+      "Opening-hand evaluation response did not match the expected JSON."
+    )
+  }
+
+  return parsedEvaluation.data
 }
 
 export function parseTurnEvaluationResponseText(
