@@ -160,4 +160,9 @@
   .simulation-sidebar-surface {
     background: oklch(0.172 0 0);
   }
+
+  .simulation-mana-symbol {
+    margin-inline: 0.08em;
+    vertical-align: -0.15em;
+  }
 }

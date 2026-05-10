@@ -117,6 +117,84 @@ type SimulationResultsAction =
 
 const DEFAULT_TURNS_TO_SIMULATE = "1"
 const ACTIVITY_PANEL_EXIT_FALLBACK_MS = 350
+const MANA_SYMBOL_TEXT_PATTERN = /(\{[^{}\s]+\})/g
+const MANA_SYMBOL_CLASS_NAMES = new Set([
+  "0",
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  "10",
+  "11",
+  "12",
+  "13",
+  "14",
+  "15",
+  "16",
+  "17",
+  "18",
+  "19",
+  "20",
+  "100",
+  "1000000",
+  "b",
+  "bg",
+  "bgp",
+  "bp",
+  "br",
+  "brp",
+  "c",
+  "cb",
+  "cg",
+  "cr",
+  "cu",
+  "cw",
+  "e",
+  "g",
+  "gp",
+  "gu",
+  "gup",
+  "gw",
+  "gwp",
+  "infinity",
+  "p",
+  "r",
+  "rg",
+  "rgp",
+  "rp",
+  "rw",
+  "rwp",
+  "s",
+  "tap",
+  "u",
+  "ub",
+  "ubp",
+  "untap",
+  "up",
+  "ur",
+  "urp",
+  "w",
+  "wb",
+  "wbp",
+  "wp",
+  "wu",
+  "wup",
+  "x",
+  "y",
+  "z",
+  "2b",
+  "2g",
+  "2r",
+  "2u",
+  "2w",
+  "1-2",
+  "chaos",
+])
 
 async function writePlainTextToClipboard(text: string) {
   if (navigator.clipboard?.writeText) {
@@ -4294,7 +4372,9 @@ function SimulationResultLoggedTurnActionEvent({
       {actions.length > 0 ? (
         <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-foreground/90">
           {actions.map((action, index) => (
-            <li key={`${action.action}-${index}`}>{action.action}</li>
+            <li key={`${action.action}-${index}`}>
+              <SimulationLoggedActionText text={action.action} />
+            </li>
           ))}
         </ul>
       ) : (
@@ -4304,6 +4384,61 @@ function SimulationResultLoggedTurnActionEvent({
       )}
     </div>
   )
+}
+
+function SimulationLoggedActionText({ text }: { text: string }) {
+  const parts = text.split(MANA_SYMBOL_TEXT_PATTERN)
+
+  if (parts.length === 1) {
+    return text
+  }
+
+  return parts.map((part, index) => {
+    const manaSymbolClassName = getManaSymbolClassName(part)
+
+    if (manaSymbolClassName === null) {
+      return <Fragment key={`${part}-${index}`}>{part}</Fragment>
+    }
+
+    return (
+      <span
+        key={`${part}-${index}`}
+        aria-label={part}
+        className={`ms ms-cost ms-shadow ms-${manaSymbolClassName} simulation-mana-symbol`}
+        role="img"
+        title={part}
+      />
+    )
+  })
+}
+
+function getManaSymbolClassName(text: string) {
+  const textWithoutBraces = text.match(/^\{([^{}]+)\}$/)?.[1]
+
+  if (textWithoutBraces === undefined) {
+    return null
+  }
+
+  const normalizedText = normalizeManaSymbolText(textWithoutBraces)
+
+  return MANA_SYMBOL_CLASS_NAMES.has(normalizedText) ? normalizedText : null
+}
+
+function normalizeManaSymbolText(text: string) {
+  switch (text.toUpperCase()) {
+    case "T":
+      return "tap"
+    case "Q":
+      return "untap"
+    case "CHAOS":
+      return "chaos"
+    case "\u221e":
+      return "infinity"
+    case "\u00bd":
+      return "1-2"
+    default:
+      return text.toLowerCase().replaceAll("/", "")
+  }
 }
 
 function SimulationResultPhaseChangeEvent({

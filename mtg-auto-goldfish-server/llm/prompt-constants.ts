@@ -380,6 +380,7 @@ ACTION LOGGING AND FINALITY
 - Only include phaseChange for phase or step movement logs.
 - Do not include phaseChange for regular actions such as draws, mana generation, land plays, spell casts, attacks, trigger resolutions, combat damage, or finishing the turn.
 - If an action requires mana, first log the mana-generation action you are taking to produce it, such as tapping lands, mana rocks, mana dorks, or other mana abilities.
+- In mana-generation and mana-spending log entries, use brace mana notation such as {C}{C}, {1}, {G}, or {1}{G} for produced mana, costs, and payments.
 - After that, log the spell, ability, or other action that spends the mana, and state how much mana is being spent in that log entry.
 - Each log entry is irreversible for this turn.
 - Once an action is logged, treat it as locked in and continue from that point.
