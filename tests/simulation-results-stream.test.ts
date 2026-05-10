@@ -786,19 +786,10 @@ test("combines adjacent completed regular turn action log entries after hiding t
       mcpFunctionName: "log_turn_action",
       mcpFunctionOutput: {
         latestAction: {
-          sequence: 1,
           action: "Tap Command Tower for one mana.",
           phaseChange: null,
-          createdAt: "2026-01-01T00:00:00.000Z",
         },
-        actions: [
-          {
-            sequence: 1,
-            action: "Tap Command Tower for one mana.",
-            phaseChange: null,
-            createdAt: "2026-01-01T00:00:00.000Z",
-          },
-        ],
+        actions: ["Tap Command Tower for one mana."],
       },
       sequence: 2,
     }),
@@ -814,24 +805,12 @@ test("combines adjacent completed regular turn action log entries after hiding t
       mcpFunctionName: "log_turn_action",
       mcpFunctionOutput: {
         latestAction: {
-          sequence: 2,
           action: "Cast Sol Ring using one mana.",
           phaseChange: null,
-          createdAt: "2026-01-01T00:00:01.000Z",
         },
         actions: [
-          {
-            sequence: 1,
-            action: "Tap Command Tower for one mana.",
-            phaseChange: null,
-            createdAt: "2026-01-01T00:00:00.000Z",
-          },
-          {
-            sequence: 2,
-            action: "Cast Sol Ring using one mana.",
-            phaseChange: null,
-            createdAt: "2026-01-01T00:00:01.000Z",
-          },
+          "Tap Command Tower for one mana.",
+          "Cast Sol Ring using one mana.",
         ],
       },
       sequence: 4,
@@ -862,19 +841,10 @@ test("keeps turn action log groups separated by other visible events", () => {
       mcpFunctionName: "log_turn_action",
       mcpFunctionOutput: {
         latestAction: {
-          sequence: 1,
           action: "Draw a card.",
           phaseChange: null,
-          createdAt: "2026-01-01T00:00:00.000Z",
         },
-        actions: [
-          {
-            sequence: 1,
-            action: "Draw a card.",
-            phaseChange: null,
-            createdAt: "2026-01-01T00:00:00.000Z",
-          },
-        ],
+        actions: ["Draw a card."],
       },
       sequence: 1,
     }),
@@ -890,25 +860,10 @@ test("keeps turn action log groups separated by other visible events", () => {
       mcpFunctionName: "log_turn_action",
       mcpFunctionOutput: JSON.stringify({
         latestAction: {
-          sequence: 2,
           action: "Play a land.",
           phaseChange: null,
-          createdAt: "2026-01-01T00:00:01.000Z",
         },
-        actions: [
-          {
-            sequence: 1,
-            action: "Draw a card.",
-            phaseChange: null,
-            createdAt: "2026-01-01T00:00:00.000Z",
-          },
-          {
-            sequence: 2,
-            action: "Play a land.",
-            phaseChange: null,
-            createdAt: "2026-01-01T00:00:01.000Z",
-          },
-        ],
+        actions: ["Draw a card.", "Play a land."],
       }),
       sequence: 3,
     }),
@@ -936,12 +891,10 @@ test("keeps phase change logs separate from regular turn action groups", () => {
       mcpFunctionName: "log_turn_action",
       mcpFunctionOutput: {
         latestAction: {
-          sequence: 1,
           action: "Tap Command Tower for one mana.",
           phaseChange: null,
-          createdAt: "2026-01-01T00:00:00.000Z",
         },
-        actions: [],
+        actions: ["Tap Command Tower for one mana."],
       },
       sequence: 1,
     }),
@@ -951,12 +904,13 @@ test("keeps phase change logs separate from regular turn action groups", () => {
       mcpFunctionName: "log_turn_action",
       mcpFunctionOutput: {
         latestAction: {
-          sequence: 2,
           action: "Cast Sol Ring using one mana.",
           phaseChange: null,
-          createdAt: "2026-01-01T00:00:01.000Z",
         },
-        actions: [],
+        actions: [
+          "Tap Command Tower for one mana.",
+          "Cast Sol Ring using one mana.",
+        ],
       },
       sequence: 2,
     }),
@@ -966,12 +920,14 @@ test("keeps phase change logs separate from regular turn action groups", () => {
       mcpFunctionName: "log_turn_action",
       mcpFunctionOutput: {
         latestAction: {
-          sequence: 3,
           action: "Move to combat.",
           phaseChange: "combat",
-          createdAt: "2026-01-01T00:00:02.000Z",
         },
-        actions: [],
+        actions: [
+          "Tap Command Tower for one mana.",
+          "Cast Sol Ring using one mana.",
+          "Move to combat.",
+        ],
       },
       sequence: 3,
     }),
@@ -981,12 +937,15 @@ test("keeps phase change logs separate from regular turn action groups", () => {
       mcpFunctionName: "log_turn_action",
       mcpFunctionOutput: {
         latestAction: {
-          sequence: 4,
           action: "Attack opponent 1 with the commander.",
           phaseChange: null,
-          createdAt: "2026-01-01T00:00:03.000Z",
         },
-        actions: [],
+        actions: [
+          "Tap Command Tower for one mana.",
+          "Cast Sol Ring using one mana.",
+          "Move to combat.",
+          "Attack opponent 1 with the commander.",
+        ],
       },
       sequence: 4,
     }),
@@ -1023,12 +982,10 @@ test("keeps consecutive phase change logs as standalone entries", () => {
       mcpFunctionName: "log_turn_action",
       mcpFunctionOutput: {
         latestAction: {
-          sequence: 1,
           action: "Move to untap.",
           phaseChange: "untap",
-          createdAt: "2026-01-01T00:00:00.000Z",
         },
-        actions: [],
+        actions: ["Move to untap."],
       },
       sequence: 1,
     }),
@@ -1038,12 +995,10 @@ test("keeps consecutive phase change logs as standalone entries", () => {
       mcpFunctionName: "log_turn_action",
       mcpFunctionOutput: {
         latestAction: {
-          sequence: 2,
           action: "Move to upkeep.",
           phaseChange: "upkeep",
-          createdAt: "2026-01-01T00:00:01.000Z",
         },
-        actions: [],
+        actions: ["Move to untap.", "Move to upkeep."],
       },
       sequence: 2,
     }),
@@ -1076,22 +1031,18 @@ test("parses structured turn action log output", () => {
       mcpFunctionName: "log_turn_action",
       mcpFunctionOutput: {
         latestAction: {
-          sequence: 7,
           action: "Move to postcombat main.",
           phaseChange: "postcombat_main",
-          createdAt: "2026-01-01T00:00:00.000Z",
         },
-        actions: [],
+        actions: ["Move to postcombat main."],
       },
       sequence: 1,
     })
   )
 
   assert.deepEqual(loggedAction, {
-    sequence: 7,
     action: "Move to postcombat main.",
     phaseChange: "postcombat_main",
-    createdAt: "2026-01-01T00:00:00.000Z",
   })
 })
 

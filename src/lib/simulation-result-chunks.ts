@@ -17,10 +17,8 @@ export const TURN_PHASE_CHANGES = [
 export type TurnPhaseChange = (typeof TURN_PHASE_CHANGES)[number]
 
 export type LoggedTurnAction = {
-  sequence: number | null
   action: string
   phaseChange: TurnPhaseChange | null
-  createdAt: string | null
 }
 
 export type SimulationResultEntry =
@@ -311,10 +309,8 @@ function parseLoggedTurnAction(value: unknown): LoggedTurnAction | null {
   }
 
   return {
-    sequence: getPayloadNumber(entry, "sequence"),
     action,
     phaseChange: getTurnPhaseChange(entry.phaseChange),
-    createdAt: getPayloadString(entry, "createdAt"),
   }
 }
 
@@ -582,10 +578,4 @@ function getPayloadString(value: unknown, property: string) {
   const propertyValue = asPayloadRecord(value)[property]
 
   return typeof propertyValue === "string" ? propertyValue : null
-}
-
-function getPayloadNumber(value: unknown, property: string) {
-  const propertyValue = asPayloadRecord(value)[property]
-
-  return typeof propertyValue === "number" ? propertyValue : null
 }

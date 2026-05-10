@@ -288,6 +288,7 @@ const createTurnLlmRunSchema = z.object({
 })
 const turnPhaseChangeSchema = z
   .enum(TURN_PHASE_CHANGES)
+  .nullable()
   .describe(
     "Optional phase metadata. Include this only when the action logs moving into a new turn phase or step."
   )
@@ -985,7 +986,7 @@ type McpTakeCardsInput = McpSimulationIdentifierInput & {
 }
 type McpLogTurnActionInput = McpSimulationIdentifierInput & {
   action: string
-  phaseChange?: TurnPhaseChange
+  phaseChange?: TurnPhaseChange | null
 }
 
 type McpSimulationIdentifierConfig = {
@@ -1461,8 +1462,11 @@ function registerLogTurnActionTool(
 
       return {
         content: createCompactToolResultContent({
-          latestAction: response.latestAction,
-          actions: response.actions,
+          actions: response.actions.map((loggedAction) => loggedAction.action),
+          latestAction: {
+            action: response.latestAction.action,
+            phaseChange: response.latestAction.phaseChange,
+          },
         }),
       }
     }
