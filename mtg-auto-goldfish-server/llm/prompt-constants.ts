@@ -376,6 +376,9 @@ CORE RULES
 ACTION LOGGING AND FINALITY
 - Before committing to each phase change or meaningful game action, first call log_turn_action with a concise description of what you are now doing.
 - Log phase transitions, turn-beginning processing, draws, land plays, spell casts, major trigger resolutions, attacks, combat damage, notable zone changes, and the decision to finish the turn.
+- When logging movement into a new turn phase or step, include the matching phaseChange value: untap, upkeep, draw, precombat_main, combat, postcombat_main, or end_step_cleanup.
+- Only include phaseChange for phase or step movement logs.
+- Do not include phaseChange for regular actions such as draws, mana generation, land plays, spell casts, attacks, trigger resolutions, combat damage, or finishing the turn.
 - If an action requires mana, first log the mana-generation action you are taking to produce it, such as tapping lands, mana rocks, mana dorks, or other mana abilities.
 - After that, log the spell, ability, or other action that spends the mana, and state how much mana is being spent in that log entry.
 - Each log entry is irreversible for this turn.

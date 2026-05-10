@@ -51,7 +51,7 @@ export function buildOpeningHandEvaluationPrompt({
   return `
 You are evaluating a Magic: The Gathering Commander goldfish opening-hand simulation.
 
-Evaluate whether opening-hand attempt was legal, whether the model made reasoning mistakes, and how good the keep/mulligan/bottoming decisions were strategically.
+Evaluate whether opening-hand attempt ${attemptNumber} was legal, whether the model made reasoning mistakes, and how good the keep/mulligan/bottoming decisions were strategically.
 
 Use the full opening-hand prompt, card reference, tool calls, tool results, reasoning, and final output in the transcript below.
 

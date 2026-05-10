@@ -1262,9 +1262,20 @@ test("builds turn evaluation input like copy activity with prompt", () => {
         kind: "mcp_call_complete",
         mcpFunctionName: "log_turn_action",
         mcpFunctionOutput: {
-          data: {
-            loggedActions: ["Play Command Tower."],
+          latestAction: {
+            sequence: 1,
+            action: "Play Command Tower.",
+            phaseChange: null,
+            createdAt: "2026-01-01T00:00:01.000Z",
           },
+          actions: [
+            {
+              sequence: 1,
+              action: "Play Command Tower.",
+              phaseChange: null,
+              createdAt: "2026-01-01T00:00:01.000Z",
+            },
+          ],
         },
         reasoningDelta: null,
         outputDelta: null,
@@ -1283,9 +1294,20 @@ test("builds turn evaluation input like copy activity with prompt", () => {
       "[called log_turn_action]",
       `[result of log_turn_action]\n${JSON.stringify(
         {
-          data: {
-            loggedActions: ["Play Command Tower."],
+          latestAction: {
+            sequence: 1,
+            action: "Play Command Tower.",
+            phaseChange: null,
+            createdAt: "2026-01-01T00:00:01.000Z",
           },
+          actions: [
+            {
+              sequence: 1,
+              action: "Play Command Tower.",
+              phaseChange: null,
+              createdAt: "2026-01-01T00:00:01.000Z",
+            },
+          ],
         },
         null,
         2

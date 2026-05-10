@@ -242,27 +242,10 @@ function getLogTurnActionLabel(
 function getLoggedTurnActionFromOutput(output: unknown) {
   const resolvedOutput = parseJsonObjectPayload(output)
   const outputRecord = asRecord(resolvedOutput)
-  const dataRecord = asRecord(outputRecord.data)
-  const loggedActions = dataRecord.loggedActions
+  const latestAction = asRecord(outputRecord.latestAction)
+  const action = getString(latestAction, "action")?.trim()
 
-  if (Array.isArray(loggedActions)) {
-    const lastLoggedAction = loggedActions.at(-1)
-
-    if (typeof lastLoggedAction === "string" && lastLoggedAction.trim()) {
-      return lastLoggedAction
-    }
-  }
-
-  const message = getString(outputRecord, "message")
-  const messagePrefix = "Logged action:"
-
-  if (message?.startsWith(messagePrefix)) {
-    const action = message.slice(messagePrefix.length).trim()
-
-    return action.length > 0 ? action : null
-  }
-
-  return null
+  return action && action.length > 0 ? action : null
 }
 
 function getToolOutputDataRecord(output: unknown) {

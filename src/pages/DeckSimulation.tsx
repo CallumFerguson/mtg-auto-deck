@@ -23,15 +23,22 @@ import {
   Eye,
   EyeOff,
   FileText,
+  Hand,
+  Hourglass,
   LoaderCircle,
   MoreVertical,
+  Moon,
   Plus,
   RefreshCw,
+  RotateCcw,
   Save,
   Search,
   Shuffle,
   Sparkles,
   Square,
+  Sunrise,
+  Sunset,
+  Swords,
   Trash2,
   X,
 } from "lucide-react"
@@ -83,8 +90,10 @@ import {
   getSimulationRunActiveToolCallName,
   getSimulationResultEntries,
   hasSimulationRunFinalParsedOutputChunk,
+  type LoggedTurnAction,
   type SimulationRunActivityBlock,
   type SimulationResultEntry,
+  type TurnPhaseChange,
 } from "@/lib/simulation-result-chunks"
 import {
   getKnownSimulationResultToolLabel,
@@ -4262,10 +4271,19 @@ function SimulationResultLoggedTurnActionEvent({
   actions,
   chunks,
 }: {
-  actions: string[]
+  actions: LoggedTurnAction[]
   chunks: SimulationDebugLlmRunChunk[]
 }) {
   const hasFailure = chunks.some(isMcpCallFailure)
+
+  if (
+    !hasFailure &&
+    actions.length === 1 &&
+    actions[0].phaseChange !== null
+  ) {
+    return <SimulationResultPhaseChangeEvent action={actions[0]} />
+  }
+
   const hasMultipleActions = chunks.length > 1 || actions.length > 1
   const title = hasFailure
     ? "Turn action log failed"
@@ -4279,11 +4297,13 @@ function SimulationResultLoggedTurnActionEvent({
       {hasMultipleActions && actions.length > 0 ? (
         <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-foreground/90">
           {actions.map((action, index) => (
-            <li key={`${action}-${index}`}>{action}</li>
+            <li key={`${action.action}-${index}`}>{action.action}</li>
           ))}
         </ul>
       ) : actions.length === 1 ? (
-        <p className="text-sm leading-6 text-foreground/90">{actions[0]}</p>
+        <p className="text-sm leading-6 text-foreground/90">
+          {actions[0].action}
+        </p>
       ) : (
         <p className="text-sm leading-6 text-muted-foreground">
           {getTurnActionLogFallbackText(chunks)}
@@ -4291,6 +4311,79 @@ function SimulationResultLoggedTurnActionEvent({
       )}
     </div>
   )
+}
+
+function SimulationResultPhaseChangeEvent({
+  action,
+}: {
+  action: LoggedTurnAction
+}) {
+  const phaseChange = action.phaseChange
+
+  if (phaseChange === null) {
+    return (
+      <SimulationResultLoggedTurnActionEvent actions={[action]} chunks={[]} />
+    )
+  }
+
+  return (
+    <div
+      className={`flex min-w-0 items-start gap-3 p-3 ${simulationResultChunkSurfaceClassName}`}
+    >
+      <span
+        className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md border border-sky-400/30 bg-sky-950/40 text-sky-200"
+        aria-hidden="true"
+      >
+        {getTurnPhaseChangeIcon(phaseChange)}
+      </span>
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-sky-100">
+          {getTurnPhaseChangeLabel(phaseChange)}
+        </p>
+        <p className="mt-1 text-sm leading-6 text-foreground/90">
+          {action.action}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function getTurnPhaseChangeIcon(phaseChange: TurnPhaseChange) {
+  switch (phaseChange) {
+    case "untap":
+      return <RotateCcw className="size-4" />
+    case "upkeep":
+      return <Hourglass className="size-4" />
+    case "draw":
+      return <Hand className="size-4" />
+    case "precombat_main":
+      return <Sunrise className="size-4" />
+    case "combat":
+      return <Swords className="size-4" />
+    case "postcombat_main":
+      return <Sunset className="size-4" />
+    case "end_step_cleanup":
+      return <Moon className="size-4" />
+  }
+}
+
+function getTurnPhaseChangeLabel(phaseChange: TurnPhaseChange) {
+  switch (phaseChange) {
+    case "untap":
+      return "Untap step"
+    case "upkeep":
+      return "Upkeep step"
+    case "draw":
+      return "Draw step"
+    case "precombat_main":
+      return "Precombat main phase"
+    case "combat":
+      return "Combat phase"
+    case "postcombat_main":
+      return "Postcombat main phase"
+    case "end_step_cleanup":
+      return "End step and cleanup"
+  }
 }
 
 function SimulationResultEvent({
@@ -4564,7 +4657,7 @@ function getMcpCallCompleteTitle(chunk: SimulationDebugLlmRunChunk) {
     const lastLoggedAction = getLoggedTurnAction(chunk)
 
     if (lastLoggedAction) {
-      return `Tool completed: ${toolName} - ${lastLoggedAction}`
+      return `Tool completed: ${toolName} - ${lastLoggedAction.action}`
     }
   }
 

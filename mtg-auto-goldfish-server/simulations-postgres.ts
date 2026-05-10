@@ -414,9 +414,22 @@ export type LibraryTakeCardsResult = {
   cardsRemaining: number
 }
 
+export const TURN_PHASE_CHANGES = [
+  "untap",
+  "upkeep",
+  "draw",
+  "precombat_main",
+  "combat",
+  "postcombat_main",
+  "end_step_cleanup",
+] as const
+
+export type TurnPhaseChange = (typeof TURN_PHASE_CHANGES)[number]
+
 export type TurnActionLogEntry = {
   sequence: number
   action: string
+  phaseChange: TurnPhaseChange | null
   createdAt: string
 }
 
@@ -934,10 +947,27 @@ export async function ensureSimulationsSchema() {
       turn_llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
       sequence integer NOT NULL CHECK (sequence > 0),
       action text NOT NULL,
+      phase_change text,
       created_at timestamptz NOT NULL DEFAULT now(),
 
       UNIQUE (turn_llm_run_id, sequence)
     )
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulation_turn_actions
+    ADD COLUMN IF NOT EXISTS phase_change text
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulation_turn_actions
+    DROP CONSTRAINT IF EXISTS simulation_turn_actions_phase_change_check
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulation_turn_actions
+    ADD CONSTRAINT simulation_turn_actions_phase_change_check
+      CHECK (
+        phase_change IS NULL
+        OR phase_change IN (${TURN_PHASE_CHANGES.map(quoteSqlLiteral).join(", ")})
+      )
   `)
   await queryDatabase(`
     CREATE TABLE IF NOT EXISTS simulation_turn_evaluations (
@@ -1711,12 +1741,17 @@ export async function takeCardsFromSimulationLibrary(
 
 export async function logTurnAction(
   simulationId: string,
-  action: string
+  action: string,
+  phaseChange: TurnPhaseChange | null = null
 ): Promise<TurnActionLogResult> {
   const trimmedAction = action.trim()
 
   if (!trimmedAction) {
     throw new SimulationValidationError("Turn action is required.")
+  }
+
+  if (phaseChange !== null && !isTurnPhaseChange(phaseChange)) {
+    throw new SimulationValidationError("Turn phase change is invalid.")
   }
 
   return withDatabaseTransaction(async (client) => {
@@ -1767,22 +1802,25 @@ export async function logTurnAction(
         INSERT INTO simulation_turn_actions (
           turn_llm_run_id,
           sequence,
-          action
+          action,
+          phase_change
         )
-        VALUES ($1, $2, $3)
+        VALUES ($1, $2, $3, $4)
       `,
-      [turnRun.llm_run_id, sequence, trimmedAction]
+      [turnRun.llm_run_id, sequence, trimmedAction, phaseChange]
     )
 
     const actionsResult = await client.query<{
       sequence: number
       action: string
+      phase_change: TurnPhaseChange | null
       created_at: Date
     }>(
       `
         SELECT
           sequence,
           action,
+          phase_change,
           created_at
         FROM simulation_turn_actions
         WHERE turn_llm_run_id = $1
@@ -1811,13 +1849,19 @@ export async function logTurnAction(
 function mapTurnActionLogEntry(row: {
   sequence: number
   action: string
+  phase_change: TurnPhaseChange | null
   created_at: Date
 }): TurnActionLogEntry {
   return {
     sequence: row.sequence,
     action: row.action,
+    phaseChange: row.phase_change,
     createdAt: row.created_at.toISOString(),
   }
+}
+
+function isTurnPhaseChange(value: string): value is TurnPhaseChange {
+  return TURN_PHASE_CHANGES.includes(value as TurnPhaseChange)
 }
 
 export async function createOpeningHandLlmRun(

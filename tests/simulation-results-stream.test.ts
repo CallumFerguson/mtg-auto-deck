@@ -6,6 +6,7 @@ import {
   formatSimulationRunClipboardText,
   getSimulationRunActivityBlocks,
   getSimulationRunActiveToolCallName,
+  getLoggedTurnAction,
   getSimulationResultEntries,
   getSimulationResultChunks,
   getSimulationRunThinkingPreview,
@@ -771,7 +772,7 @@ test("clears active tool call name once a newer chunk arrives", () => {
   assert.equal(activeToolCallName, null)
 })
 
-test("combines adjacent completed turn action log entries after hiding tool starts", () => {
+test("combines adjacent completed regular turn action log entries after hiding tool starts", () => {
   const resultEntries = getSimulationResultEntries([
     createChunk({
       id: 1,
@@ -784,9 +785,20 @@ test("combines adjacent completed turn action log entries after hiding tool star
       kind: "mcp_call_complete",
       mcpFunctionName: "log_turn_action",
       mcpFunctionOutput: {
-        data: {
-          loggedActions: ["Move to precombat main phase."],
+        latestAction: {
+          sequence: 1,
+          action: "Tap Command Tower for one mana.",
+          phaseChange: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
         },
+        actions: [
+          {
+            sequence: 1,
+            action: "Tap Command Tower for one mana.",
+            phaseChange: null,
+            createdAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
       },
       sequence: 2,
     }),
@@ -801,9 +813,26 @@ test("combines adjacent completed turn action log entries after hiding tool star
       kind: "mcp_call_complete",
       mcpFunctionName: "log_turn_action",
       mcpFunctionOutput: {
-        data: {
-          loggedActions: ["Move to precombat main phase.", "Cast Sol Ring."],
+        latestAction: {
+          sequence: 2,
+          action: "Cast Sol Ring using one mana.",
+          phaseChange: null,
+          createdAt: "2026-01-01T00:00:01.000Z",
         },
+        actions: [
+          {
+            sequence: 1,
+            action: "Tap Command Tower for one mana.",
+            phaseChange: null,
+            createdAt: "2026-01-01T00:00:00.000Z",
+          },
+          {
+            sequence: 2,
+            action: "Cast Sol Ring using one mana.",
+            phaseChange: null,
+            createdAt: "2026-01-01T00:00:01.000Z",
+          },
+        ],
       },
       sequence: 4,
     }),
@@ -813,9 +842,9 @@ test("combines adjacent completed turn action log entries after hiding tool star
   assert.equal(resultEntries[0]?.type, "turn_action_log")
   assert.deepEqual(
     resultEntries[0]?.type === "turn_action_log"
-      ? resultEntries[0].actions
+      ? resultEntries[0].actions.map((action) => action.action)
       : [],
-    ["Move to precombat main phase.", "Cast Sol Ring."]
+    ["Tap Command Tower for one mana.", "Cast Sol Ring using one mana."]
   )
   assert.deepEqual(
     resultEntries[0]?.type === "turn_action_log"
@@ -832,7 +861,20 @@ test("keeps turn action log groups separated by other visible events", () => {
       kind: "mcp_call_complete",
       mcpFunctionName: "log_turn_action",
       mcpFunctionOutput: {
-        message: "Logged action: Move to draw step.",
+        latestAction: {
+          sequence: 1,
+          action: "Draw a card.",
+          phaseChange: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+        actions: [
+          {
+            sequence: 1,
+            action: "Draw a card.",
+            phaseChange: null,
+            createdAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
       },
       sequence: 1,
     }),
@@ -847,9 +889,26 @@ test("keeps turn action log groups separated by other visible events", () => {
       kind: "mcp_call_complete",
       mcpFunctionName: "log_turn_action",
       mcpFunctionOutput: JSON.stringify({
-        data: {
-          loggedActions: ["Move to draw step.", "Draw a card."],
+        latestAction: {
+          sequence: 2,
+          action: "Play a land.",
+          phaseChange: null,
+          createdAt: "2026-01-01T00:00:01.000Z",
         },
+        actions: [
+          {
+            sequence: 1,
+            action: "Draw a card.",
+            phaseChange: null,
+            createdAt: "2026-01-01T00:00:00.000Z",
+          },
+          {
+            sequence: 2,
+            action: "Play a land.",
+            phaseChange: null,
+            createdAt: "2026-01-01T00:00:01.000Z",
+          },
+        ],
       }),
       sequence: 3,
     }),
@@ -861,10 +920,179 @@ test("keeps turn action log groups separated by other visible events", () => {
   )
   assert.deepEqual(
     resultEntries.flatMap((entry) =>
-      entry.type === "turn_action_log" ? entry.actions : []
+      entry.type === "turn_action_log"
+        ? entry.actions.map((action) => action.action)
+        : []
     ),
-    ["Move to draw step.", "Draw a card."]
+    ["Draw a card.", "Play a land."]
   )
+})
+
+test("keeps phase change logs separate from regular turn action groups", () => {
+  const resultEntries = getSimulationResultEntries([
+    createChunk({
+      id: 1,
+      kind: "mcp_call_complete",
+      mcpFunctionName: "log_turn_action",
+      mcpFunctionOutput: {
+        latestAction: {
+          sequence: 1,
+          action: "Tap Command Tower for one mana.",
+          phaseChange: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+        actions: [],
+      },
+      sequence: 1,
+    }),
+    createChunk({
+      id: 2,
+      kind: "mcp_call_complete",
+      mcpFunctionName: "log_turn_action",
+      mcpFunctionOutput: {
+        latestAction: {
+          sequence: 2,
+          action: "Cast Sol Ring using one mana.",
+          phaseChange: null,
+          createdAt: "2026-01-01T00:00:01.000Z",
+        },
+        actions: [],
+      },
+      sequence: 2,
+    }),
+    createChunk({
+      id: 3,
+      kind: "mcp_call_complete",
+      mcpFunctionName: "log_turn_action",
+      mcpFunctionOutput: {
+        latestAction: {
+          sequence: 3,
+          action: "Move to combat.",
+          phaseChange: "combat",
+          createdAt: "2026-01-01T00:00:02.000Z",
+        },
+        actions: [],
+      },
+      sequence: 3,
+    }),
+    createChunk({
+      id: 4,
+      kind: "mcp_call_complete",
+      mcpFunctionName: "log_turn_action",
+      mcpFunctionOutput: {
+        latestAction: {
+          sequence: 4,
+          action: "Attack opponent 1 with the commander.",
+          phaseChange: null,
+          createdAt: "2026-01-01T00:00:03.000Z",
+        },
+        actions: [],
+      },
+      sequence: 4,
+    }),
+  ])
+
+  assert.equal(resultEntries.length, 3)
+  assert.deepEqual(
+    resultEntries.map((entry) =>
+      entry.type === "turn_action_log"
+        ? entry.actions.map((action) => action.action)
+        : []
+    ),
+    [
+      ["Tap Command Tower for one mana.", "Cast Sol Ring using one mana."],
+      ["Move to combat."],
+      ["Attack opponent 1 with the commander."],
+    ]
+  )
+  assert.deepEqual(
+    resultEntries.map((entry) =>
+      entry.type === "turn_action_log"
+        ? entry.actions.map((action) => action.phaseChange)
+        : []
+    ),
+    [[null, null], ["combat"], [null]]
+  )
+})
+
+test("keeps consecutive phase change logs as standalone entries", () => {
+  const resultEntries = getSimulationResultEntries([
+    createChunk({
+      id: 1,
+      kind: "mcp_call_complete",
+      mcpFunctionName: "log_turn_action",
+      mcpFunctionOutput: {
+        latestAction: {
+          sequence: 1,
+          action: "Move to untap.",
+          phaseChange: "untap",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+        actions: [],
+      },
+      sequence: 1,
+    }),
+    createChunk({
+      id: 2,
+      kind: "mcp_call_complete",
+      mcpFunctionName: "log_turn_action",
+      mcpFunctionOutput: {
+        latestAction: {
+          sequence: 2,
+          action: "Move to upkeep.",
+          phaseChange: "upkeep",
+          createdAt: "2026-01-01T00:00:01.000Z",
+        },
+        actions: [],
+      },
+      sequence: 2,
+    }),
+  ])
+
+  assert.equal(resultEntries.length, 2)
+  assert.deepEqual(
+    resultEntries.map((entry) =>
+      entry.type === "turn_action_log"
+        ? entry.actions.map((action) => action.phaseChange)
+        : []
+    ),
+    [["untap"], ["upkeep"]]
+  )
+  assert.deepEqual(
+    resultEntries.map((entry) =>
+      entry.type === "turn_action_log"
+        ? entry.chunks.map((chunk) => chunk.sequence)
+        : []
+    ),
+    [[1], [2]]
+  )
+})
+
+test("parses structured turn action log output", () => {
+  const loggedAction = getLoggedTurnAction(
+    createChunk({
+      id: 1,
+      kind: "mcp_call_complete",
+      mcpFunctionName: "log_turn_action",
+      mcpFunctionOutput: {
+        latestAction: {
+          sequence: 7,
+          action: "Move to postcombat main.",
+          phaseChange: "postcombat_main",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+        actions: [],
+      },
+      sequence: 1,
+    })
+  )
+
+  assert.deepEqual(loggedAction, {
+    sequence: 7,
+    action: "Move to postcombat main.",
+    phaseChange: "postcombat_main",
+    createdAt: "2026-01-01T00:00:00.000Z",
+  })
 })
 
 test("omits reasoning and output lifecycle chunks and deltas from result chunks", () => {

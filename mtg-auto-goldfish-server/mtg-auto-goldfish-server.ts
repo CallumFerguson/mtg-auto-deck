@@ -77,6 +77,7 @@ import {
   SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
   SimulationValidationError,
   takeCardsFromSimulationLibrary,
+  TURN_PHASE_CHANGES,
   upsertOpeningHandEvaluation,
   upsertTurnEvaluation,
   updateLlmRunRequestData,
@@ -97,6 +98,7 @@ import type {
   SimulationReportPromptData,
   SimulationReportTurnPromptData,
   OpeningHandEvaluationJson,
+  TurnPhaseChange,
   TurnEvaluationJson,
 } from "./simulations-postgres.js"
 import {
@@ -284,6 +286,11 @@ const createSimulationSchema = z.object({
 const createTurnLlmRunSchema = z.object({
   turnNumber: z.number().int().positive(),
 })
+const turnPhaseChangeSchema = z
+  .enum(TURN_PHASE_CHANGES)
+  .describe(
+    "Optional phase metadata. Include this only when the action logs moving into a new turn phase or step."
+  )
 
 type ActiveLlmRunRuntime = {
   abortController: AbortController
@@ -978,6 +985,7 @@ type McpTakeCardsInput = McpSimulationIdentifierInput & {
 }
 type McpLogTurnActionInput = McpSimulationIdentifierInput & {
   action: string
+  phaseChange?: TurnPhaseChange
 }
 
 type McpSimulationIdentifierConfig = {
@@ -1439,21 +1447,22 @@ function registerLogTurnActionTool(
           .describe(
             "A concise description of the action being committed, such as a phase change, land play, spell cast, attack, or other turn progression."
           ),
+        phaseChange: turnPhaseChangeSchema.optional(),
       },
     },
     async (input: McpLogTurnActionInput) => {
       const resolvedSimulationId = await resolveMcpSimulationId(input)
-      const { action } = input
-      const response = await logTurnAction(resolvedSimulationId, action)
+      const { action, phaseChange } = input
+      const response = await logTurnAction(
+        resolvedSimulationId,
+        action,
+        phaseChange ?? null
+      )
 
       return {
         content: createCompactToolResultContent({
-          data: {
-            loggedActions: response.actions.map(
-              (loggedAction) => loggedAction.action
-            ),
-          },
-          message: `Logged action: ${response.latestAction.action}`,
+          latestAction: response.latestAction,
+          actions: response.actions,
         }),
       }
     }
@@ -1518,6 +1527,7 @@ const turnSimulationLlmToolDefinitions: LlamaCppToolDefinition[] = [
         .describe(
           "A concise description of the action being committed, such as a phase change, land play, spell cast, attack, or other turn progression."
         ),
+      phaseChange: turnPhaseChangeSchema.optional(),
     }),
   },
   {

@@ -4,6 +4,25 @@ export {
   formatSimulationRunClipboardText,
 } from "../../mtg-auto-goldfish-server/simulation-run-text.js"
 
+export const TURN_PHASE_CHANGES = [
+  "untap",
+  "upkeep",
+  "draw",
+  "precombat_main",
+  "combat",
+  "postcombat_main",
+  "end_step_cleanup",
+] as const
+
+export type TurnPhaseChange = (typeof TURN_PHASE_CHANGES)[number]
+
+export type LoggedTurnAction = {
+  sequence: number | null
+  action: string
+  phaseChange: TurnPhaseChange | null
+  createdAt: string | null
+}
+
 export type SimulationResultEntry =
   | {
       id: string
@@ -13,7 +32,7 @@ export type SimulationResultEntry =
   | {
       id: string
       type: "turn_action_log"
-      actions: string[]
+      actions: LoggedTurnAction[]
       chunks: SimulationDebugLlmRunChunk[]
     }
 
@@ -77,6 +96,19 @@ export function getSimulationResultEntries(
 
   for (const chunk of getSimulationResultChunks(chunks)) {
     if (isCompletedLogTurnActionChunk(chunk)) {
+      const loggedAction = getLoggedTurnAction(chunk)
+
+      if (loggedAction !== null && loggedAction.phaseChange !== null) {
+        flushPendingTurnActionChunks()
+        entries.push({
+          id: getTurnActionLogEntryId([chunk]),
+          type: "turn_action_log",
+          actions: loggedAction === null ? [] : [loggedAction],
+          chunks: [chunk],
+        })
+        continue
+      }
+
       pendingTurnActionChunks.push(chunk)
       continue
     }
@@ -265,27 +297,33 @@ export function getLoggedTurnAction(chunk: SimulationDebugLlmRunChunk) {
   }
 
   const resolvedPayload = parseJsonObjectPayload(chunk.mcpFunctionOutput)
-  const loggedActions = asPayloadRecord(resolvedPayload).data
-  const loggedActionsList = asPayloadRecord(loggedActions).loggedActions
+  const latestAction = asPayloadRecord(resolvedPayload).latestAction
 
-  if (Array.isArray(loggedActionsList)) {
-    const lastLoggedAction = loggedActionsList.at(-1)
+  return parseLoggedTurnAction(latestAction)
+}
 
-    if (typeof lastLoggedAction === "string" && lastLoggedAction.trim()) {
-      return lastLoggedAction
-    }
+function parseLoggedTurnAction(value: unknown): LoggedTurnAction | null {
+  const entry = asPayloadRecord(value)
+  const action = getPayloadString(entry, "action")?.trim()
+
+  if (!action) {
+    return null
   }
 
-  const message = getPayloadString(resolvedPayload, "message")
-  const messagePrefix = "Logged action:"
-
-  if (message?.startsWith(messagePrefix)) {
-    const messageAction = message.slice(messagePrefix.length).trim()
-
-    return messageAction.length > 0 ? messageAction : null
+  return {
+    sequence: getPayloadNumber(entry, "sequence"),
+    action,
+    phaseChange: getTurnPhaseChange(entry.phaseChange),
+    createdAt: getPayloadString(entry, "createdAt"),
   }
+}
 
-  return null
+function getTurnPhaseChange(value: unknown): TurnPhaseChange | null {
+  return typeof value === "string" && isTurnPhaseChange(value) ? value : null
+}
+
+function isTurnPhaseChange(value: string): value is TurnPhaseChange {
+  return TURN_PHASE_CHANGES.includes(value as TurnPhaseChange)
 }
 
 function isCompletedLogTurnActionChunk(chunk: SimulationDebugLlmRunChunk) {
@@ -544,4 +582,10 @@ function getPayloadString(value: unknown, property: string) {
   const propertyValue = asPayloadRecord(value)[property]
 
   return typeof propertyValue === "string" ? propertyValue : null
+}
+
+function getPayloadNumber(value: unknown, property: string) {
+  const propertyValue = asPayloadRecord(value)[property]
+
+  return typeof propertyValue === "number" ? propertyValue : null
 }
