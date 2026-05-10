@@ -4328,22 +4328,17 @@ function SimulationResultPhaseChangeEvent({
 
   return (
     <div
-      className={`flex min-w-0 items-start gap-3 p-3 ${simulationResultChunkSurfaceClassName}`}
+      className={`flex min-w-0 items-center gap-2 px-3 py-2 text-sm font-medium text-sky-100 ${simulationResultChunkSurfaceClassName}`}
     >
       <span
-        className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md border border-sky-400/30 bg-sky-950/40 text-sky-200"
+        className="flex size-5 shrink-0 items-center justify-center text-sky-300"
         aria-hidden="true"
       >
         {getTurnPhaseChangeIcon(phaseChange)}
       </span>
-      <div className="min-w-0">
-        <p className="text-sm font-medium text-sky-100">
-          {getTurnPhaseChangeLabel(phaseChange)}
-        </p>
-        <p className="mt-1 text-sm leading-6 text-foreground/90">
-          {action.action}
-        </p>
-      </div>
+      <span className="min-w-0 truncate">
+        {getTurnPhaseChangeLabel(phaseChange)}
+      </span>
     </div>
   )
 }
@@ -4370,19 +4365,19 @@ function getTurnPhaseChangeIcon(phaseChange: TurnPhaseChange) {
 function getTurnPhaseChangeLabel(phaseChange: TurnPhaseChange) {
   switch (phaseChange) {
     case "untap":
-      return "Untap step"
+      return "Moved to untap step"
     case "upkeep":
-      return "Upkeep step"
+      return "Moved to upkeep step"
     case "draw":
-      return "Draw step"
+      return "Moved to draw step"
     case "precombat_main":
-      return "Precombat main phase"
+      return "Moved to precombat main phase"
     case "combat":
-      return "Combat phase"
+      return "Moved to combat phase"
     case "postcombat_main":
-      return "Postcombat main phase"
+      return "Moved to postcombat main phase"
     case "end_step_cleanup":
-      return "End step and cleanup"
+      return "Moved to end step and cleanup"
   }
 }
 
