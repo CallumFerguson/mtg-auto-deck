@@ -2,6 +2,8 @@
 
 ![Simulation screenshot](docs/simulation-screenshot.png)
 
+![Simulation screenshot 2](docs/simulation-screenshot-2.png)
+
 ## Setup
 
 1. Copy the example environment file:
