@@ -1,8 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="MTG Auto Deck">
-  <rect width="64" height="64" rx="14" fill="#10131b" />
-  <path d="M18 13h27a5 5 0 0 1 5 5v28H23a5 5 0 0 1-5-5V13Z" fill="#0f766e" stroke="#67e8f9" stroke-width="3" stroke-linejoin="round" />
-  <path d="M14 19h27a5 5 0 0 1 5 5v28H19a5 5 0 0 1-5-5V19Z" fill="#1e293b" stroke="#38bdf8" stroke-width="3" stroke-linejoin="round" />
-  <path d="M24 37l3-7 3 7 7 3-7 3-3 7-3-7-7-3 7-3Z" fill="#f8fafc" stroke="#fde68a" stroke-width="2" stroke-linejoin="round" />
-  <path d="M41 18l1.6 3.4L46 23l-3.4 1.6L41 28l-1.6-3.4L36 23l3.4-1.6L41 18Z" fill="#fbbf24" />
-  <path d="M49 32l1 2 2 1-2 1-1 2-1-2-2-1 2-1 1-2Z" fill="#a5f3fc" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">MTG Auto Deck favicon</title>
+
+  <!-- background -->
+  <rect width="64" height="64" rx="14" fill="#0B1020"/>
+
+  <!-- deck -->
+  <rect x="24" y="10" width="28" height="40" rx="4"
+        fill="#0B1020" stroke="#334155" stroke-width="4"/>
+  <rect x="22" y="12" width="28" height="40" rx="4"
+        fill="#0B1020" stroke="#64748B" stroke-width="4"/>
+  <rect x="20" y="14" width="28" height="40" rx="4"
+        fill="#0B1020" stroke="#E5E7EB" stroke-width="4"/>
+
+  <!-- AI sparkles inside deck -->
+  <path d="M33 24 L35.1 29.9 L41 32 L35.1 34.1 L33 40 L30.9 34.1 L25 32 L30.9 29.9 Z"
+        fill="#38BDF8"/>
+  <path d="M27 39 L28.3 42.7 L32 44 L28.3 45.3 L27 49 L25.7 45.3 L22 44 L25.7 42.7 Z"
+        fill="#7DD3FC"/>
+  <path d="M40 23 L40.9 25.6 L43.5 26.5 L40.9 27.4 L40 30 L39.1 27.4 L36.5 26.5 L39.1 25.6 Z"
+        fill="#BAE6FD"/>
 </svg>
