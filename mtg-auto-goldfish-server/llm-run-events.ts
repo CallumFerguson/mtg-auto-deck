@@ -16,6 +16,16 @@ export class ProviderTerminalEventError extends Error {
   }
 }
 
+export class ModelReportedSimulationError extends Error {
+  readonly modelError: string
+
+  constructor(modelError: string) {
+    super(`Model reported unrecoverable simulation error: ${modelError}`)
+    this.name = "ModelReportedSimulationError"
+    this.modelError = modelError
+  }
+}
+
 export type OpenRouterToolCallNameMap = Map<string, string>
 
 export function normalizeOpenAiStreamEvent(
@@ -352,6 +362,7 @@ export function parseOpeningHandCompletionFromResponseText(
   }
 
   const responseRecord = asRecord(parsedResponse)
+  throwIfModelReportedSimulationError(responseRecord)
   const keptHand = responseRecord.keptHand
 
   if (
@@ -394,6 +405,7 @@ export function parseTurnSimulationCompletionFromResponseText(
   }
 
   const responseRecord = asRecord(parsedResponse)
+  throwIfModelReportedSimulationError(responseRecord)
   const gameState = getStringProperty(responseRecord, "gameState")?.trim()
 
   if (!gameState) {
@@ -403,6 +415,16 @@ export function parseTurnSimulationCompletionFromResponseText(
   return {
     gameState,
     parsedOutput: responseRecord,
+  }
+}
+
+function throwIfModelReportedSimulationError(
+  responseRecord: Record<string, unknown>
+) {
+  const modelError = getStringProperty(responseRecord, "error")?.trim()
+
+  if (modelError) {
+    throw new ModelReportedSimulationError(modelError)
   }
 }
 

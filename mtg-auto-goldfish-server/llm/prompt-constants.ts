@@ -20,6 +20,16 @@ Before every tool call after seeing a hand, first decide:
 
 Tool calls cannot be undone.
 
+UNRECOVERABLE ERROR RULE
+- If you realize an already-made tool call made this hand-resolution run impossible to complete accurately, stop immediately.
+- Examples include drawing the starting hand more than once, calling draw_starting_hand after mulliganing, mulliganing after a final keep decision, failing to bottom required cards before an irreversible finalization step, returning the wrong cards to the library, or any other irreversible tool action that invalidates the run.
+- Do not call more tools, do not keep sequencing decisions, and do not output keptHand.
+- Return only this JSON object:
+{
+  "error": "Short explanation of the unrecoverable mistake."
+}
+- If the mistake is only in your reasoning before an irreversible tool call or final response, correct it and continue normally.
+
 FINALITY RULE
 - Every hand-resolution run has one final decision: the hand you keep.
 - A keep decision is irreversible.
@@ -315,10 +325,15 @@ DECISION STYLE
 - Once you have decided to mulligan, do not keep that same hand.
 
 OUTPUT
-When the hand is finalized, include a JSON object with exactly this shape:
+When the hand is finalized successfully, include a JSON object with exactly this shape:
 {
   "keptHand": ["Card Name", "Card Name"],
   "summary": "Short summary."
+}
+
+If the unrecoverable error rule applies, do not include keptHand or summary. Return only:
+{
+  "error": "Short explanation of the unrecoverable mistake."
 }
 
 keptHand must be the exact final hand after all mulligans and any cards bottomed to the library.
@@ -388,6 +403,16 @@ ACTION LOGGING AND FINALITY
 - Use the returned action list as the authoritative sequence of committed actions for the current turn.
 - Logging does not replace legality checks. Only log an action you are actually committing to take.
 - Do not call log_turn_action after reporting the final result.
+
+UNRECOVERABLE ERROR RULE
+- If you realize an already-made tool call or logged action made this turn impossible to complete accurately, stop immediately.
+- Examples include logging or playing an illegal second land, logging a spell that could not legally be cast, drawing or searching incorrectly, using the wrong tool for a library action, making an impossible mana payment, or any other irreversible committed action that invalidates the run.
+- Do not call more tools, do not call log_turn_action again, do not continue sequencing, and do not output gameState.
+- Return only this JSON object:
+{
+  "error": "Short explanation of the unrecoverable mistake."
+}
+- If the mistake is only in your reasoning before an irreversible tool call, logged action, or final response, correct it and continue normally.
 
 STRATEGIC HORIZON
 - Do not optimize only for the current phase or for spending the most mana right now.
@@ -663,10 +688,14 @@ COMMENTS / NOTES
 - Bad Notes are things like "drew for turn," "played X," "this was probably turn one," or "Y entered untapped because..."
 
 OUTPUT RULES
-- Include a JSON object with exactly this shape:
+- If the turn completed successfully, include a JSON object with exactly this shape:
 {
   "gameState": "Complete end-of-turn game state as a readable string.",
   "summary": "Short summary."
+}
+- If the unrecoverable error rule applies, do not include gameState or summary. Return only:
+{
+  "error": "Short explanation of the unrecoverable mistake."
 }
 - summary should briefly say what you played, what changed on the battlefield, and any important resulting game-state facts.
 - gameState is the serialized state dump; summary is only a brief recap.

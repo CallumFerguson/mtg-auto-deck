@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import {
+  ModelReportedSimulationError,
   ProviderTerminalEventError,
   createCancellationChunk,
   createFinalParsedOutputChunk,
@@ -878,6 +879,18 @@ test("reports invalid completed JSON with an explicit message", () => {
   )
 })
 
+test("reports opening-hand model error JSON as an unrecoverable simulation error", () => {
+  assertThrowsModelReportedSimulationError(
+    () =>
+      parseOpeningHandFromResponseText(
+        JSON.stringify({
+          error: "Drew opening hand twice.",
+        })
+      ),
+    "Drew opening hand twice."
+  )
+})
+
 test("parses opening-hand JSON after leading LLM text", () => {
   assert.deepEqual(
     parseOpeningHandFromResponseText(
@@ -986,6 +999,38 @@ test("rejects completed turn JSON without game state", () => {
   assert.throws(
     () => parseTurnSimulationFromResponseText('{"summary":"No state."}'),
     /Turn LLM response did not include gameState\./
+  )
+})
+
+test("reports turn model error JSON as an unrecoverable simulation error", () => {
+  assertThrowsModelReportedSimulationError(
+    () =>
+      parseTurnSimulationFromResponseText(
+        JSON.stringify({
+          error: "Played a second land after logging the first land play.",
+        })
+      ),
+    "Played a second land after logging the first land play."
+  )
+})
+
+test("reports the final noisy model error JSON as an unrecoverable simulation error", () => {
+  assertThrowsModelReportedSimulationError(
+    () =>
+      parseTurnSimulationFromResponseText(
+        [
+          "Earlier draft:",
+          JSON.stringify({
+            gameState: "Hand:\nSol Ring",
+            summary: "This should be ignored.",
+          }),
+          "Final answer:",
+          JSON.stringify({
+            error: "Logged an impossible mana payment.",
+          }),
+        ].join("\n")
+      ),
+    "Logged an impossible mana payment."
   )
 })
 
@@ -1638,3 +1683,24 @@ test("simulation stop wait times out if a runtime completion does not resolve", 
 test("simulation stop wait returns immediately with no runtime completions", async () => {
   await waitForSimulationStopCompletions([], 1)
 })
+
+function assertThrowsModelReportedSimulationError(
+  action: () => unknown,
+  modelError: string
+) {
+  assert.throws(action, (error: unknown) => {
+    assert.equal(error instanceof ModelReportedSimulationError, true)
+
+    if (!(error instanceof ModelReportedSimulationError)) {
+      return false
+    }
+
+    assert.equal(error.modelError, modelError)
+    assert.equal(
+      error.message,
+      `Model reported unrecoverable simulation error: ${modelError}`
+    )
+
+    return true
+  })
+}
