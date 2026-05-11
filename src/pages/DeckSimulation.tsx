@@ -4357,6 +4357,8 @@ function SimulationRunActivityTimelineRow({
 
 const simulationActivityMarkdownClassName =
   "min-w-0 space-y-2 text-sm leading-6 break-words text-foreground/95 [&_a]:text-sky-300 [&_a]:underline [&_code]:rounded-sm [&_code]:bg-muted/45 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-sky-100 [&_ol]:list-decimal [&_ol]:pl-5 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-black/30 [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_strong]:text-foreground [&_ul]:list-disc [&_ul]:pl-5"
+const simulationResultSummaryMarkdownClassName =
+  "min-w-0 space-y-2 text-sm leading-6 break-words text-muted-foreground [&_a]:text-sky-300 [&_a]:underline [&_code]:rounded-sm [&_code]:bg-muted/45 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-sky-100 [&_ol]:list-decimal [&_ol]:pl-5 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-black/30 [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_strong]:text-foreground/90 [&_ul]:list-disc [&_ul]:pl-5"
 
 type SimulationResultCardMention =
   SimulationDebugLlmRunChunk["cardMentions"][number]
@@ -4371,9 +4373,7 @@ function SimulationFinalOutputBlock({
   return (
     <div className={`grid gap-3 p-3 ${simulationResultChunkSurfaceClassName}`}>
       {finalOutput.type === "report" ? null : (
-        <p className="text-sm leading-6 text-muted-foreground">
-          {finalOutput.summary}
-        </p>
+        <SimulationResultSummaryMarkdown summary={finalOutput.summary} />
       )}
 
       {finalOutput.type === "opening_hand" ? (
@@ -4396,6 +4396,14 @@ function SimulationFinalOutputBlock({
       ) : (
         <SimulationReportMarkdown report={finalOutput.report} />
       )}
+    </div>
+  )
+}
+
+function SimulationResultSummaryMarkdown({ summary }: { summary: string }) {
+  return (
+    <div className={simulationResultSummaryMarkdownClassName}>
+      <ReactMarkdown>{summary}</ReactMarkdown>
     </div>
   )
 }
