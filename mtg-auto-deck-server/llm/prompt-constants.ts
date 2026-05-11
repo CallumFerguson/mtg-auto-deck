@@ -429,7 +429,7 @@ LIBRARY AND TOOL RULES
 - Every tool call must identify this run with the provided llmRunId only.
 - Use the exact llmRunId value from this prompt.
 - Do not include a simulationId in tool calls.
-- Every library tool call must include a short reason argument explaining the game effect or rule being resolved. log_turn_action does not use a reason argument.
+- Every library or randomizer tool call must include a short reason argument explaining the game effect or rule being resolved. log_turn_action does not use a reason argument.
 - Use the correct tool for the correct job:
   - draw_card_from_top: normal draws, reveal-from-top effects, and taking known cards from the top
   - draw_card_from_bottom: only when an effect explicitly takes cards from the bottom
@@ -437,7 +437,10 @@ LIBRARY AND TOOL RULES
   - return_card_to_library: put one known card back on top, bottom, or a specific position
   - return_cards_to_library: put multiple known cards back on top or bottom; use randomizeOrder=true when the rules require random order
   - shuffle_library: whenever an effect says shuffle or otherwise randomizes the library
+  - flip_coin: whenever an effect says to flip one or more coins; results are win/lose
+  - roll_dice: whenever an effect says to roll one or more dice
 - If a game action looks at the top cards of the library, draws cards, mills, searches, shuffles, scries, surveils, explores, cascades, discovers, manifests, cloaks, or otherwise interacts with the library, simulate that correctly with the available tools.
+- If a game action flips coins or rolls dice, use the appropriate randomizer tool and apply the result legally. Do not invent random outcomes.
 - Example: to scry 1, draw the top card with a library tool, decide whether it stays on top or goes to the bottom, then return it to the correct place before continuing.
 - If you temporarily move cards only to inspect or reorder them, restore every non-drawn card to the correct zone and order before taking the next unrelated game action.
 - If a card is known to you but not to opponents, preserve that information in comments or notes if needed.
@@ -597,7 +600,7 @@ In general:
 
 LEGALITY CHECKLIST
 Before finalizing the turn, verify all of the following:
-- All draws and library interactions used tools.
+- All draws, library interactions, coin flips, and dice rolls used tools.
 - The number of lands played this turn was legal.
 - Every mana-requiring action was preceded by a logged mana-generation action, and each mana-spending log stated how much mana was spent.
 - All mana payments were legal.

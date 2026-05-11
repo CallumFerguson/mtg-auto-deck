@@ -38,6 +38,10 @@ export function getKnownSimulationResultToolLabel({
       return getReturnCardsToDeckLabel(state, outputData)
     case "shuffle_library":
       return getShuffleDeckLabel(state)
+    case "flip_coin":
+      return getFlipCoinLabel(state, outputData)
+    case "roll_dice":
+      return getRollDiceLabel(state, outputData)
     case "log_turn_action":
       return getLogTurnActionLabel(state, mcpFunctionOutput)
     default:
@@ -264,6 +268,69 @@ function getShuffleDeckLabel(state: SimulationResultToolLabelState) {
   }
 }
 
+function getFlipCoinLabel(
+  state: SimulationResultToolLabelState,
+  outputData: Record<string, unknown>
+) {
+  switch (state) {
+    case "active":
+    case "started":
+      return "Flipping coin"
+    case "failed":
+      return "Could not flip coin"
+    case "completed": {
+      const resultCount = getArrayLength(outputData, "results")
+      const wins = getNumber(outputData, "wins")
+      const losses = getNumber(outputData, "losses")
+
+      if (resultCount === 1) {
+        const result = getStringFromArray(outputData, "results", 0)
+
+        return result === null ? "Flipped coin" : `Flipped coin: ${result}`
+      }
+
+      if (resultCount !== null && wins !== null && losses !== null) {
+        return `Flipped ${resultCount} coins: ${wins} ${pluralize(
+          wins,
+          "win",
+          "wins"
+        )}, ${losses} ${pluralize(losses, "loss", "losses")}`
+      }
+
+      return "Flipped coin"
+    }
+  }
+}
+
+function getRollDiceLabel(
+  state: SimulationResultToolLabelState,
+  outputData: Record<string, unknown>
+) {
+  switch (state) {
+    case "active":
+    case "started":
+      return "Rolling dice"
+    case "failed":
+      return "Could not roll dice"
+    case "completed": {
+      const rollCount = getArrayLength(outputData, "rolls")
+      const sides = getNumber(outputData, "sides")
+      const total = getNumber(outputData, "total")
+
+      if (rollCount !== null && sides !== null) {
+        const rollLabel =
+          rollCount === 1 ? `d${sides}` : `${rollCount} d${sides}`
+
+        return total === null
+          ? `Rolled ${rollLabel}`
+          : `Rolled ${rollLabel}: total ${total}`
+      }
+
+      return "Rolled dice"
+    }
+  }
+}
+
 function getLogTurnActionLabel(
   state: SimulationResultToolLabelState,
   mcpFunctionOutput: unknown
@@ -337,7 +404,10 @@ function parseJsonObjectPayload(payload: unknown): unknown {
 
         const parsedTextPayload = parseJsonObjectPayload(text)
 
-        if (typeof parsedTextPayload === "object" && parsedTextPayload !== null) {
+        if (
+          typeof parsedTextPayload === "object" &&
+          parsedTextPayload !== null
+        ) {
           return parsedTextPayload
         }
       }
@@ -410,6 +480,18 @@ function getString(value: unknown, property: string) {
   const propertyValue = asRecord(value)[property]
 
   return typeof propertyValue === "string" ? propertyValue : null
+}
+
+function getStringFromArray(value: unknown, property: string, index: number) {
+  const propertyValue = asRecord(value)[property]
+
+  if (!Array.isArray(propertyValue)) {
+    return null
+  }
+
+  const item = propertyValue[index]
+
+  return typeof item === "string" ? item : null
 }
 
 function getTrimmedString(value: unknown) {

@@ -6,7 +6,7 @@ import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js"
 import { OpenRouter, stepCountIs, tool, type Tool } from "@openrouter/agent"
-import { randomUUID } from "node:crypto"
+import { randomInt, randomUUID } from "node:crypto"
 import OpenAI from "openai"
 import { z } from "zod/v4"
 import { closeDatabasePool, verifyDatabaseConnection } from "./db.js"
@@ -970,6 +970,13 @@ type McpSimulationIdentifierInput = {
 type McpDrawCardsInput = McpSimulationIdentifierInput & {
   count: number
 }
+type McpFlipCoinInput = McpSimulationIdentifierInput & {
+  count?: number
+}
+type McpRollDiceInput = McpSimulationIdentifierInput & {
+  count: number
+  sides: number
+}
 type McpMulliganInput = McpSimulationIdentifierInput & {
   reason: string
 }
@@ -1014,6 +1021,18 @@ const mcpShortReasonSchema = z
   .trim()
   .min(1)
   .describe("A short explanation of why this tool call is being made.")
+const randomizerCountSchema = z
+  .number()
+  .int()
+  .min(1)
+  .max(100)
+  .describe("How many results to generate. Must be between 1 and 100.")
+const diceSidesSchema = z
+  .number()
+  .int()
+  .min(2)
+  .max(1000)
+  .describe("How many sides each die has. Must be between 2 and 1000.")
 
 function addMcpReasonToToolResult<T extends object>(
   identifier: McpSimulationIdentifierConfig,
@@ -1026,6 +1045,38 @@ function addMcpReasonToToolResult<T extends object>(
         reason: input.reason.trim(),
       }
     : response
+}
+
+type CoinFlipResult = "win" | "lose"
+
+function flipCoins(count: number) {
+  const results: CoinFlipResult[] = []
+
+  for (let index = 0; index < count; index += 1) {
+    results.push(randomInt(2) === 0 ? "win" : "lose")
+  }
+
+  const wins = results.filter((result) => result === "win").length
+
+  return {
+    results,
+    wins,
+    losses: results.length - wins,
+  }
+}
+
+function rollDice(count: number, sides: number) {
+  const rolls: number[] = []
+
+  for (let index = 0; index < count; index += 1) {
+    rolls.push(randomInt(1, sides + 1))
+  }
+
+  return {
+    rolls,
+    total: rolls.reduce((sum, roll) => sum + roll, 0),
+    sides,
+  }
 }
 
 function createOpeningHandServer() {
@@ -1045,6 +1096,8 @@ function createTurnSimulationServer() {
     registerReturnCardToLibraryTool(server, llmRunMcpIdentifier)
     registerReturnCardsToLibraryTool(server, llmRunMcpIdentifier)
     registerShuffleLibraryTool(server, llmRunMcpIdentifier)
+    registerFlipCoinTool(server, llmRunMcpIdentifier)
+    registerRollDiceTool(server, llmRunMcpIdentifier)
   })
 }
 
@@ -1061,6 +1114,8 @@ function createSimulationServer() {
     registerReturnCardToLibraryTool(server, simulationMcpIdentifier)
     registerReturnCardsToLibraryTool(server, simulationMcpIdentifier)
     registerShuffleLibraryTool(server, simulationMcpIdentifier)
+    registerFlipCoinTool(server, simulationMcpIdentifier)
+    registerRollDiceTool(server, simulationMcpIdentifier)
   })
 }
 
@@ -1460,6 +1515,71 @@ function registerShuffleLibraryTool(
   )
 }
 
+function registerFlipCoinTool(
+  server: McpServer,
+  identifier: McpSimulationIdentifierConfig
+) {
+  server.registerTool(
+    "flip_coin",
+    {
+      title: "Flip Coin",
+      description:
+        'Flip one or more fair coins for Magic card effects that care about winning or losing a flip. Each result is "win" or "lose".',
+      inputSchema: {
+        ...identifier.inputSchema,
+        ...(identifier.requireReason ? { reason: mcpShortReasonSchema } : {}),
+        count: randomizerCountSchema
+          .default(1)
+          .describe(
+            "How many coins to flip. Defaults to 1. Must be between 1 and 100."
+          ),
+      },
+    },
+    async (input: McpFlipCoinInput) => {
+      await resolveMcpSimulationId(input)
+      const response = flipCoins(input.count ?? 1)
+
+      return {
+        content: createToolResultContent(
+          `Flipped ${response.results.length} coin(s): ${response.wins} win(s), ${response.losses} loss(es).`,
+          addMcpReasonToToolResult(identifier, input, response)
+        ),
+      }
+    }
+  )
+}
+
+function registerRollDiceTool(
+  server: McpServer,
+  identifier: McpSimulationIdentifierConfig
+) {
+  server.registerTool(
+    "roll_dice",
+    {
+      title: "Roll Dice",
+      description:
+        "Roll one or more fair dice with a configurable number of sides for Magic card effects that instruct you to roll dice.",
+      inputSchema: {
+        ...identifier.inputSchema,
+        ...(identifier.requireReason ? { reason: mcpShortReasonSchema } : {}),
+        count: randomizerCountSchema,
+        sides: diceSidesSchema,
+      },
+    },
+    async (input: McpRollDiceInput) => {
+      await resolveMcpSimulationId(input)
+      const response = rollDice(input.count, input.sides)
+
+      return {
+        content: createToolResultContent(
+          `Rolled ${response.rolls.length} d${response.sides}: total ${response.total}.`,
+          addMcpReasonToToolResult(identifier, input, response)
+        ),
+      }
+    }
+  )
+}
+
 function registerLogTurnActionTool(
   server: McpServer,
   identifier: McpSimulationIdentifierConfig
@@ -1659,6 +1779,31 @@ const turnSimulationLlmToolDefinitions: LlamaCppToolDefinition[] = [
     inputSchema: z.object({
       ...llmRunIdentifierSchema,
       reason: mcpShortReasonSchema,
+    }),
+  },
+  {
+    name: "flip_coin",
+    description:
+      'Flip one or more fair coins for Magic card effects that care about winning or losing a flip. Each result is "win" or "lose".',
+    inputSchema: z.object({
+      ...llmRunIdentifierSchema,
+      reason: mcpShortReasonSchema,
+      count: randomizerCountSchema
+        .default(1)
+        .describe(
+          "How many coins to flip. Defaults to 1. Must be between 1 and 100."
+        ),
+    }),
+  },
+  {
+    name: "roll_dice",
+    description:
+      "Roll one or more fair dice with a configurable number of sides for Magic card effects that instruct you to roll dice.",
+    inputSchema: z.object({
+      ...llmRunIdentifierSchema,
+      reason: mcpShortReasonSchema,
+      count: randomizerCountSchema,
+      sides: diceSidesSchema,
     }),
   },
 ]
@@ -1874,7 +2019,7 @@ function buildTurnSimulationOpenAiRequestPayload(
         type: "mcp" as const,
         server_label: TURN_SIMULATION_MCP_SERVER_LABEL,
         server_description:
-          "Tools for resolving one Magic: The Gathering goldfish turn, including library operations and turn action logging.",
+          "Tools for resolving one Magic: The Gathering goldfish turn, including library operations, random coin/dice results, and turn action logging.",
         server_url: config.turnSimulationMcpPublicUrl,
         require_approval: "never" as const,
       },

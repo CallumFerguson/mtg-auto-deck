@@ -1487,6 +1487,20 @@ test("formats known active and started tool events as deck actions", () => {
     }),
     "Shuffling deck"
   )
+  assert.equal(
+    getKnownSimulationResultToolLabel({
+      mcpFunctionName: "flip_coin",
+      state: "active",
+    }),
+    "Flipping coin"
+  )
+  assert.equal(
+    getKnownSimulationResultToolLabel({
+      mcpFunctionName: "roll_dice",
+      state: "active",
+    }),
+    "Rolling dice"
+  )
 })
 
 test("formats known completed draw and return events with result details", () => {
@@ -1597,6 +1611,66 @@ test("formats known completed single return, search, mulligan, and shuffle event
   )
 })
 
+test("formats known completed randomizer events with result details", () => {
+  assert.equal(
+    getKnownSimulationResultToolLabelForChunk({
+      chunk: createChunk({
+        id: 1,
+        kind: "mcp_call_complete",
+        mcpFunctionName: "flip_coin",
+        mcpFunctionOutput: {
+          data: {
+            results: ["win", "lose", "win"],
+            wins: 2,
+            losses: 1,
+          },
+        },
+        sequence: 1,
+      }),
+      state: "completed",
+    }),
+    "Flipped 3 coins: 2 wins, 1 loss"
+  )
+  assert.equal(
+    getKnownSimulationResultToolLabelForChunk({
+      chunk: createChunk({
+        id: 2,
+        kind: "mcp_call_complete",
+        mcpFunctionName: "flip_coin",
+        mcpFunctionOutput: {
+          data: {
+            results: ["lose"],
+            wins: 0,
+            losses: 1,
+          },
+        },
+        sequence: 2,
+      }),
+      state: "completed",
+    }),
+    "Flipped coin: lose"
+  )
+  assert.equal(
+    getKnownSimulationResultToolLabelForChunk({
+      chunk: createChunk({
+        id: 3,
+        kind: "mcp_call_complete",
+        mcpFunctionName: "roll_dice",
+        mcpFunctionOutput: {
+          data: {
+            rolls: [8, 9],
+            total: 17,
+            sides: 20,
+          },
+        },
+        sequence: 3,
+      }),
+      state: "completed",
+    }),
+    "Rolled 2 d20: total 17"
+  )
+})
+
 test("formats known failed tool events without raw tool names", () => {
   assert.equal(
     getKnownSimulationResultToolLabelForChunk({
@@ -1609,6 +1683,30 @@ test("formats known failed tool events without raw tool names", () => {
       state: "failed",
     }),
     "Could not draw card from top of deck"
+  )
+  assert.equal(
+    getKnownSimulationResultToolLabelForChunk({
+      chunk: createChunk({
+        id: 2,
+        kind: "mcp_call_complete",
+        mcpFunctionName: "flip_coin",
+        sequence: 2,
+      }),
+      state: "failed",
+    }),
+    "Could not flip coin"
+  )
+  assert.equal(
+    getKnownSimulationResultToolLabelForChunk({
+      chunk: createChunk({
+        id: 3,
+        kind: "mcp_call_complete",
+        mcpFunctionName: "roll_dice",
+        sequence: 3,
+      }),
+      state: "failed",
+    }),
+    "Could not roll dice"
   )
 })
 
