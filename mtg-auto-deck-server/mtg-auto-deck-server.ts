@@ -962,6 +962,9 @@ type LlmRunIdentifier = {
 type McpDeckIdentifierInput = {
   deckId: string
 }
+type McpTestEchoInput = {
+  message: string
+}
 type McpSimulationIdentifierInput = {
   llmRunId?: string
   simulationId?: string
@@ -1103,6 +1106,7 @@ function createTurnSimulationServer() {
 
 function createSimulationServer() {
   return createServer(SIMULATION_SERVER_NAME, (server) => {
+    registerTestEchoTool(server)
     registerListDecksTool(server)
     registerGetDeckCardReferenceTool(server)
     registerCreateSimulationTool(server)
@@ -1117,6 +1121,31 @@ function createSimulationServer() {
     registerFlipCoinTool(server, simulationMcpIdentifier)
     registerRollDiceTool(server, simulationMcpIdentifier)
   })
+}
+
+function registerTestEchoTool(server: McpServer) {
+  server.registerTool(
+    "test_echo",
+    {
+      title: "Test Echo",
+      description:
+        "Echo a message for testing connectivity to the simulation MCP server. This tool does not require a simulation ID.",
+      inputSchema: {
+        message: z.string().describe("The message to echo."),
+      },
+    },
+    async ({ message }: McpTestEchoInput) => {
+      console.log(
+        `Simulation MCP test_echo called at ${new Date().toISOString()} messageLength=${message.length} message=${JSON.stringify(message)}`
+      )
+
+      return {
+        content: createToolResultContent("Echoed test message.", {
+          echo: message,
+        }),
+      }
+    }
+  )
 }
 
 function registerListDecksTool(server: McpServer) {
