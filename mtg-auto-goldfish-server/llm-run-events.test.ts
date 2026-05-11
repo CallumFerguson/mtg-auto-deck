@@ -27,6 +27,7 @@ import {
   STALE_IN_FLIGHT_LLM_RUN_CANCELLATION_MESSAGE,
   STALE_RUNNING_SIMULATION_CANCELLATION_MESSAGE,
   TURN_EVALUATION_UPSERT_SQL,
+  buildAppendLlmRunChunksQuery,
   canApplyLateLlmRunTerminalUpdate,
   extractLlmRunChunkCardMentionRequests,
   getOpeningHandCompletionDecision,
@@ -79,6 +80,27 @@ test("normalizes valid MCP output JSON", () => {
   assert.deepEqual(chunk.mcpFunctionOutput, {
     cards: ["Sol Ring"],
   })
+  assert.equal(chunk.mcpFunctionReason, null)
+})
+
+test("normalizes MCP output reason from nested tool result data", () => {
+  const chunk = normalizeOpenAiStreamEvent({
+    type: "response.output_item.done",
+    item: {
+      type: "mcp_call",
+      name: "draw_starting_hand",
+      output: JSON.stringify({
+        message: "Drew the starting hand.",
+        data: {
+          cards: ["Sol Ring"],
+          reason: " Opening 7 ",
+        },
+      }),
+    },
+  })
+
+  assert.equal(chunk.kind, "mcp_call_complete")
+  assert.equal(chunk.mcpFunctionReason, "Opening 7")
 })
 
 test("keeps malformed MCP output as raw text instead of throwing", () => {
@@ -93,6 +115,34 @@ test("keeps malformed MCP output as raw text instead of throwing", () => {
 
   assert.equal(chunk.kind, "mcp_call_complete")
   assert.equal(chunk.mcpFunctionOutput, '{"cards":')
+  assert.equal(chunk.mcpFunctionReason, null)
+})
+
+test("builds chunk inserts with extracted MCP function reason", () => {
+  const query = buildAppendLlmRunChunksQuery(
+    "00000000-0000-0000-0000-000000000001",
+    [
+      {
+        sequence: 1,
+        kind: "mcp_call_complete",
+        mcpFunctionName: "return_cards_to_library",
+        mcpFunctionOutput: {
+          message: "Returned cards.",
+          data: {
+            cards: ["Sol Ring"],
+            reason: " Bottoming after mulligan ",
+          },
+        },
+        mcpFunctionReason: null,
+        reasoningDelta: null,
+        outputDelta: null,
+        payload: {},
+      },
+    ]
+  )
+
+  assert.match(query.text, /mcp_function_reason/)
+  assert.equal(query.values[5], "Bottoming after mulligan")
 })
 
 test("normalizes OpenAI reasoning and output item lifecycle events", () => {
@@ -1200,6 +1250,7 @@ test("builds opening-hand evaluation input like copy activity with prompt", () =
         kind: "reasoning_delta",
         mcpFunctionName: null,
         mcpFunctionOutput: null,
+        mcpFunctionReason: null,
         reasoningDelta: "Reason about the opener.",
         outputDelta: null,
         payload: {},
@@ -1214,6 +1265,7 @@ test("builds opening-hand evaluation input like copy activity with prompt", () =
         mcpFunctionOutput: {
           cards: ["Sol Ring", "Command Tower"],
         },
+        mcpFunctionReason: null,
         reasoningDelta: null,
         outputDelta: null,
         payload: {},
@@ -1384,6 +1436,7 @@ test("builds turn evaluation input like copy activity with prompt", () => {
         kind: "reasoning_delta",
         mcpFunctionName: null,
         mcpFunctionOutput: null,
+        mcpFunctionReason: null,
         reasoningDelta: "Reason about the turn.",
         outputDelta: null,
         payload: {},
@@ -1402,6 +1455,7 @@ test("builds turn evaluation input like copy activity with prompt", () => {
           },
           actions: ["Play Command Tower."],
         },
+        mcpFunctionReason: null,
         reasoningDelta: null,
         outputDelta: null,
         payload: {},

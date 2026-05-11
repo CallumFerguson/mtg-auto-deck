@@ -1,3 +1,4 @@
+import { extractMcpFunctionReasonFromChunk } from "./simulations-postgres.js"
 import type { LlmChunkKind, LlmRunChunkInput } from "./simulations-postgres.js"
 
 export class ProviderTerminalEventError extends Error {
@@ -634,15 +635,26 @@ function createChunk(
   values: {
     mcpFunctionName?: string | null
     mcpFunctionOutput?: unknown | null
+    mcpFunctionReason?: string | null
     reasoningDelta?: string | null
     outputDelta?: string | null
     payload: unknown
   }
 ): Omit<LlmRunChunkInput, "sequence"> {
+  const mcpFunctionName = values.mcpFunctionName ?? null
+  const mcpFunctionOutput = values.mcpFunctionOutput ?? null
+
   return {
     kind,
-    mcpFunctionName: values.mcpFunctionName ?? null,
-    mcpFunctionOutput: values.mcpFunctionOutput ?? null,
+    mcpFunctionName,
+    mcpFunctionOutput,
+    mcpFunctionReason:
+      values.mcpFunctionReason ??
+      extractMcpFunctionReasonFromChunk({
+        kind,
+        mcpFunctionName,
+        mcpFunctionOutput,
+      }),
     reasoningDelta: values.reasoningDelta ?? null,
     outputDelta: values.outputDelta ?? null,
     payload: values.payload,

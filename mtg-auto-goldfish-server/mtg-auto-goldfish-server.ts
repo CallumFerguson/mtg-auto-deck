@@ -351,6 +351,7 @@ function createRuntimeStreamChunk(
     kind: chunk.kind,
     mcpFunctionName: chunk.mcpFunctionName,
     mcpFunctionOutput: chunk.mcpFunctionOutput,
+    mcpFunctionReason: chunk.mcpFunctionReason,
     reasoningDelta: chunk.reasoningDelta,
     outputDelta: chunk.outputDelta,
     payload: chunk.payload,

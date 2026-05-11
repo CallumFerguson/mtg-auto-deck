@@ -114,6 +114,7 @@ export type LlmRunChunkInput = {
   kind: LlmChunkKind
   mcpFunctionName: string | null
   mcpFunctionOutput: unknown | null
+  mcpFunctionReason: string | null
   reasoningDelta: string | null
   outputDelta: string | null
   payload: unknown
@@ -153,6 +154,7 @@ export type SimulationDebugLlmRunChunk = {
   kind: LlmChunkKind
   mcpFunctionName: string | null
   mcpFunctionOutput: unknown | null
+  mcpFunctionReason: string | null
   reasoningDelta: string | null
   outputDelta: string | null
   payload: unknown
@@ -836,6 +838,7 @@ export async function ensureSimulationsSchema() {
       kind llm_chunk_kind NOT NULL,
       mcp_function_name text,
       mcp_function_output jsonb,
+      mcp_function_reason text,
       reasoning_delta text,
       output_delta text,
       payload jsonb NOT NULL DEFAULT '{}',
@@ -866,6 +869,10 @@ export async function ensureSimulationsSchema() {
 
       UNIQUE (llm_run_chunk_id, source_path, position, requested_name)
     )
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_run_chunks
+    ADD COLUMN IF NOT EXISTS mcp_function_reason text
   `)
   await queryDatabase(`
     ALTER TABLE llm_run_chunks
@@ -2442,13 +2449,13 @@ async function appendLlmRunChunksWithClient(
   return insertedChunks
 }
 
-function buildAppendLlmRunChunksQuery(
+export function buildAppendLlmRunChunksQuery(
   llmRunId: string,
   chunks: readonly LlmRunChunkInput[]
 ) {
   const values: unknown[] = []
   const valuePlaceholders = chunks.map((chunk, index) => {
-    const offset = index * 8
+    const offset = index * 9
 
     values.push(
       llmRunId,
@@ -2458,12 +2465,13 @@ function buildAppendLlmRunChunksQuery(
       chunk.mcpFunctionOutput === null
         ? null
         : JSON.stringify(chunk.mcpFunctionOutput),
+      chunk.mcpFunctionReason ?? extractMcpFunctionReasonFromChunk(chunk),
       chunk.reasoningDelta,
       chunk.outputDelta,
       JSON.stringify(chunk.payload)
     )
 
-    return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}::jsonb, $${offset + 6}, $${offset + 7}, $${offset + 8}::jsonb)`
+    return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}::jsonb, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}::jsonb)`
   })
 
   return {
@@ -2474,6 +2482,7 @@ function buildAppendLlmRunChunksQuery(
         kind,
         mcp_function_name,
         mcp_function_output,
+        mcp_function_reason,
         reasoning_delta,
         output_delta,
         payload
@@ -2486,6 +2495,7 @@ function buildAppendLlmRunChunksQuery(
         kind,
         mcp_function_name,
         mcp_function_output,
+        mcp_function_reason,
         reasoning_delta,
         output_delta,
         payload,
@@ -2495,12 +2505,53 @@ function buildAppendLlmRunChunksQuery(
   }
 }
 
+export function extractMcpFunctionReasonFromChunk(
+  chunk: Pick<
+    LlmRunChunkInput,
+    "kind" | "mcpFunctionName" | "mcpFunctionOutput"
+  >
+) {
+  if (
+    chunk.kind !== "mcp_call_complete" ||
+    chunk.mcpFunctionName === "log_turn_action"
+  ) {
+    return null
+  }
+
+  const output = asUnknownRecord(chunk.mcpFunctionOutput)
+  const directReason = getTrimmedStringProperty(output, "reason")
+
+  if (directReason !== null) {
+    return directReason
+  }
+
+  const data = asUnknownRecord(output.data)
+
+  return getTrimmedStringProperty(data, "reason")
+}
+
+function getTrimmedStringProperty(
+  record: Record<string, unknown>,
+  property: string
+) {
+  const value = record[property]
+
+  if (typeof value !== "string") {
+    return null
+  }
+
+  const trimmedValue = value.trim()
+
+  return trimmedValue ? trimmedValue : null
+}
+
 type InsertedLlmRunChunkRow = {
   id: string | number
   sequence: number
   kind: LlmChunkKind
   mcp_function_name: string | null
   mcp_function_output: unknown | null
+  mcp_function_reason: string | null
   reasoning_delta: string | null
   output_delta: string | null
   payload: unknown
@@ -2869,6 +2920,7 @@ function mapInsertedLlmRunChunkRow(
     kind: row.kind,
     mcpFunctionName: row.mcp_function_name,
     mcpFunctionOutput: row.mcp_function_output,
+    mcpFunctionReason: row.mcp_function_reason,
     reasoningDelta: row.reasoning_delta,
     outputDelta: row.output_delta,
     payload: row.payload,
@@ -3500,6 +3552,7 @@ export async function cancelStaleInFlightLlmRuns(): Promise<StaleInFlightLlmRunC
           kind: "cancelled",
           mcpFunctionName: null,
           mcpFunctionOutput: null,
+          mcpFunctionReason: null,
           reasoningDelta: null,
           outputDelta: null,
           payload: {
@@ -3955,6 +4008,7 @@ async function getLlmRunEvaluationChunks(llmRunId: string) {
     kind: LlmChunkKind
     mcp_function_name: string | null
     mcp_function_output: unknown | null
+    mcp_function_reason: string | null
     reasoning_delta: string | null
     output_delta: string | null
     payload: unknown
@@ -3967,6 +4021,7 @@ async function getLlmRunEvaluationChunks(llmRunId: string) {
         kind,
         mcp_function_name,
         mcp_function_output,
+        mcp_function_reason,
         reasoning_delta,
         output_delta,
         payload,
@@ -3987,6 +4042,7 @@ async function getLlmRunEvaluationChunks(llmRunId: string) {
     kind: row.kind,
     mcpFunctionName: row.mcp_function_name,
     mcpFunctionOutput: row.mcp_function_output,
+    mcpFunctionReason: row.mcp_function_reason,
     reasoningDelta: row.reasoning_delta,
     outputDelta: row.output_delta,
     payload: row.payload,
@@ -4722,6 +4778,7 @@ type SimulationDebugLlmRunRow = {
   kind: LlmChunkKind | null
   mcp_function_name: string | null
   mcp_function_output: unknown | null
+  mcp_function_reason: string | null
   reasoning_delta: string | null
   output_delta: string | null
   payload: unknown
@@ -4799,6 +4856,7 @@ async function getSimulationDebugLlmRuns({
         chunk.kind,
         chunk.mcp_function_name,
         chunk.mcp_function_output,
+        chunk.mcp_function_reason,
         chunk.reasoning_delta,
         chunk.output_delta,
         chunk.payload,
@@ -4878,6 +4936,7 @@ async function getSimulationDebugLlmRuns({
         kind: row.kind,
         mcpFunctionName: row.mcp_function_name,
         mcpFunctionOutput: row.mcp_function_output,
+        mcpFunctionReason: row.mcp_function_reason,
         reasoningDelta: row.reasoning_delta,
         outputDelta: row.output_delta,
         payload: row.payload,

@@ -1685,6 +1685,7 @@ function createChunk(overrides: {
   kind?: string
   mcpFunctionName?: string | null
   mcpFunctionOutput?: unknown | null
+  mcpFunctionReason?: string | null
   outputDelta?: string
   payload?: unknown
   reasoningDelta?: string
@@ -1696,6 +1697,7 @@ function createChunk(overrides: {
     kind: overrides.kind ?? "message_delta",
     mcpFunctionName: overrides.mcpFunctionName ?? null,
     mcpFunctionOutput: overrides.mcpFunctionOutput ?? null,
+    mcpFunctionReason: overrides.mcpFunctionReason ?? null,
     reasoningDelta: overrides.reasoningDelta ?? null,
     outputDelta: overrides.outputDelta ?? null,
     payload: overrides.payload ?? {},
