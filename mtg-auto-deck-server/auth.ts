@@ -10,7 +10,6 @@ export const auth = betterAuth({
   database: getDatabasePool(),
   emailAndPassword: {
     enabled: true,
-    autoSignIn: false,
     revokeSessionsOnPasswordReset: true,
     sendResetPassword: async ({ user, url }) => {
       void sendPasswordResetEmail({

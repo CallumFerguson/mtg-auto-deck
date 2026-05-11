@@ -73,8 +73,17 @@ export function AuthPage({
           return
         }
 
-        setMode("sign-in")
-        setNotice("Account created. Sign in with your new password.")
+        const session = await waitForSession()
+
+        if (!session) {
+          setError(
+            "Account created, but the browser did not keep the session cookie. Open the app using the same host as APP_PUBLIC_URL, then sign in."
+          )
+          setMode("sign-in")
+          return
+        }
+
+        await onAuthenticated()
         return
       }
 
