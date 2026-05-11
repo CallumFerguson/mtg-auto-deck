@@ -2,7 +2,7 @@ import { useState, type FormEvent, type ReactNode } from "react"
 import { Save, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { API_BASE_URL } from "@/lib/api"
+import { API_BASE_URL, apiFetch } from "@/lib/api"
 import { readApiError } from "@/lib/api-error"
 import type { Deck } from "@/lib/deck-types"
 
@@ -34,7 +34,7 @@ export function EditDeckDetailsModal({
     setIsSaving(true)
 
     try {
-      const response = await fetch(`${API_BASE_URL}/decks/${deck.id}`, {
+      const response = await apiFetch(`${API_BASE_URL}/decks/${deck.id}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",

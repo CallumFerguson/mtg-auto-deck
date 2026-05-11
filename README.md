@@ -14,6 +14,14 @@
 
 2. Fill in the variables in `.env`.
 
+   For user accounts, set `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`,
+   `APP_PUBLIC_URL`, and the `SMTP_*` variables used for password reset email.
+   In local development, open the app at the same host configured in
+   `APP_PUBLIC_URL` so auth cookies are sent consistently.
+   The standalone `/mcp/simulation` server is test-only and is disabled by
+   default; set `SIMULATION_MCP_SERVER_ENABLED=true` only when intentionally
+   testing that endpoint.
+
 3. Install dependencies:
 
    ```sh

@@ -4,22 +4,61 @@ import {
   getDeckIdFromPathname,
   getDeckPageTabFromSearch,
   getDeckSimulationIdFromSearch,
+  navigateTo,
 } from "@/lib/navigation"
+import { authClient, type AuthUser } from "@/lib/auth-client"
+import { AuthPage, type AuthMode } from "@/pages/AuthPage"
 import { DeckListPage } from "@/pages/DeckListPage"
 import { DeckPage } from "@/pages/DeckPage"
 
 export function App() {
   const location = useLocation()
+  const session = authClient.useSession()
+  const authMode = getAuthModeFromLocation(location.pathname)
   const deckId = getDeckIdFromPathname(location.pathname)
+  const handleAuthenticated = async () => {
+    await session.refetch()
+    navigateTo("/")
+  }
+
+  if (session.isPending) {
+    return (
+      <main className="flex min-h-svh items-center justify-center bg-background px-4 text-sm text-muted-foreground">
+        Loading account...
+      </main>
+    )
+  }
+
+  if (authMode === "reset-password" && !session.data?.user) {
+    return (
+      <AuthPage initialMode={authMode} onAuthenticated={handleAuthenticated} />
+    )
+  }
+
+  if (!session.data?.user) {
+    return (
+      <AuthPage
+        initialMode={authMode ?? "sign-in"}
+        onAuthenticated={handleAuthenticated}
+      />
+    )
+  }
+
+  const user = toAuthUser(session.data.user)
+  const handleSignedOut = () => {
+    void session.refetch()
+  }
 
   return deckId ? (
     <DeckPage
       deckId={deckId}
       initialTab={getDeckPageTabFromSearch(location.search)}
       initialSimulationId={getDeckSimulationIdFromSearch(location.search)}
+      user={user}
+      onSignedOut={handleSignedOut}
     />
   ) : (
-    <DeckListPage />
+    <DeckListPage user={user} onSignedOut={handleSignedOut} />
   )
 }
 
@@ -47,6 +86,34 @@ function useLocation() {
   }, [])
 
   return location
+}
+
+function getAuthModeFromLocation(pathname: string): AuthMode | null {
+  if (pathname === "/sign-up") {
+    return "sign-up"
+  }
+
+  if (pathname === "/forgot-password") {
+    return "forgot-password"
+  }
+
+  if (pathname === "/reset-password") {
+    return "reset-password"
+  }
+
+  if (pathname === "/sign-in") {
+    return "sign-in"
+  }
+
+  return null
+}
+
+function toAuthUser(user: { email: string; id: string; name?: string | null }) {
+  return {
+    email: user.email,
+    id: user.id,
+    name: user.name ?? "",
+  } satisfies AuthUser
 }
 
 export default App

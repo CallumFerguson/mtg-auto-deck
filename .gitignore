@@ -13,6 +13,7 @@ dist
 dist-ssr
 dist-server
 *.tsbuildinfo
+.tsbuildinfo-temp/
 *.local
 mtg-auto-deck-server/data/
 mtg-auto-deck-server/prompt-logs/

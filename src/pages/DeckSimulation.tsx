@@ -44,7 +44,7 @@ import {
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { API_BASE_URL } from "@/lib/api"
+import { API_BASE_URL, apiFetch } from "@/lib/api"
 import { readApiError } from "@/lib/api-error"
 import type {
   CreateSavedSeedResponse,
@@ -237,7 +237,7 @@ async function loadLlmRunFullPrompt({
   llmRunId: string
   simulationId: string
 }) {
-  const response = await fetch(
+  const response = await apiFetch(
     `${API_BASE_URL}/decks/${deckId}/simulations/${simulationId}/llm-runs/${llmRunId}/full-prompt`
   )
 
@@ -377,16 +377,15 @@ function canGenerateReportFromVisibleResults(
   resultsInfo: SimulationResultsInfo
 ) {
   if (simulation.startingHandId === null) {
-    const latestOpeningHandRun =
-      resultsInfo.openingHandLlmRuns.reduce<
-        SimulationResultsInfo["openingHandLlmRuns"][number] | null
-      >((latestRun, run) => {
-        if (!latestRun || run.attemptNumber > latestRun.attemptNumber) {
-          return run
-        }
+    const latestOpeningHandRun = resultsInfo.openingHandLlmRuns.reduce<
+      SimulationResultsInfo["openingHandLlmRuns"][number] | null
+    >((latestRun, run) => {
+      if (!latestRun || run.attemptNumber > latestRun.attemptNumber) {
+        return run
+      }
 
-        return latestRun
-      }, null)
+      return latestRun
+    }, null)
 
     if (
       !latestOpeningHandRun ||
@@ -455,7 +454,9 @@ function canGenerateReportFromVisibleResults(
   return true
 }
 
-function hasLoggedTurnAction(run: SimulationResultsInfo["turnLlmRuns"][number]) {
+function hasLoggedTurnAction(
+  run: SimulationResultsInfo["turnLlmRuns"][number]
+) {
   return getSimulationResultEntries(run.chunks).some(
     (entry) => entry.type === "turn_action_log" && entry.actions.length > 0
   )
@@ -628,7 +629,7 @@ export function DeckSimulation({
       }
 
       try {
-        const response = await fetch(
+        const response = await apiFetch(
           `${API_BASE_URL}/decks/${deckId}/simulations`
         )
 
@@ -675,7 +676,7 @@ export function DeckSimulation({
     setStartingHandLoadError(null)
 
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/starting-hands`
       )
 
@@ -710,7 +711,7 @@ export function DeckSimulation({
     setSavedSeedLoadError(null)
 
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/saved-seeds`
       )
 
@@ -838,7 +839,7 @@ export function DeckSimulation({
     setIsCreatingSimulation(true)
 
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/simulations`,
         {
           method: "POST",
@@ -904,7 +905,7 @@ export function DeckSimulation({
     setDeleteSimulationError(null)
 
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/simulations/${simulationId}`,
         {
           method: "DELETE",
@@ -1642,7 +1643,7 @@ function SimulationDetailsModal({
     setDebugInfoError(null)
 
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/debug`
       )
 
@@ -2129,7 +2130,7 @@ function SimulationDetails({
         return
       }
 
-      const response = await fetch(
+      const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/opening-hand-llm-runs`,
         {
           method: "POST",
@@ -2180,7 +2181,7 @@ function SimulationDetails({
         return
       }
 
-      const response = await fetch(
+      const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/turn-llm-runs`,
         {
           method: "POST",
@@ -2224,7 +2225,7 @@ function SimulationDetails({
     setOpeningHandRunError(null)
 
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/report-llm-runs`,
         {
           method: "POST",
@@ -2251,7 +2252,7 @@ function SimulationDetails({
     setStopSimulationError(null)
 
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/stop`,
         {
           method: "POST",
@@ -2331,7 +2332,10 @@ function SimulationDetails({
 
   useEffect(() => {
     const eventSource = new EventSource(
-      `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/results/stream`
+      `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/results/stream`,
+      {
+        withCredentials: true,
+      }
     )
     let isStreamClosed = false
 
@@ -2904,238 +2908,241 @@ function SimulationResultsPanel({
   return (
     <>
       <div className="grid gap-3">
-      {hasPresetStartingHand ? (
-        <SimulationPresetStartingHandBlock
-          isLoadingStartingHand={isLoadingStartingHand}
-          startingHand={startingHand}
-          startingHandLoadError={startingHandLoadError}
-        />
-      ) : null}
-
-      {runs.length === 0 && !hasPresetStartingHand ? (
-        <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
-          No opening hand or turn runs have been saved for this simulation yet.
-        </p>
-      ) : null}
-
-      {runs.map((run) => {
-        const finishedDurationText = getSimulationRunFinishedDurationText(run)
-        const shouldShowFinishedThinkingStatus =
-          !run.isActive && getSimulationRunFinishedTimeMs(run) !== null
-        const finishedThinkingStatus = shouldShowFinishedThinkingStatus ? (
-          <SimulationResultThinkingStatus
-            activeToolCallName={null}
-            canStopSimulation={false}
-            finishedDurationText={finishedDurationText}
-            isFinishedSuccessfully={run.status === "completed"}
-            isFinished={true}
-            isActivitySelected={selectedActivityRunId === run.llmRunId}
-            isStoppingSimulation={false}
-            onViewActivity={() => onSelectActivityRun(run.llmRunId)}
-            onStopSimulation={onStopSimulation}
-            runStartTimeMs={null}
-            stopSimulationError={null}
+        {hasPresetStartingHand ? (
+          <SimulationPresetStartingHandBlock
+            isLoadingStartingHand={isLoadingStartingHand}
+            startingHand={startingHand}
+            startingHandLoadError={startingHandLoadError}
           />
-        ) : null
-        const runMetadata = [
-          run.status,
-          run.model,
-          run.estimatedPriceCents ? `${run.estimatedPriceCents} cents` : null,
-          finishedDurationText ? `took ${finishedDurationText}` : null,
-          run.outdated ? "outdated" : null,
-        ].filter(Boolean)
-        const hasLiveReport =
-          run.resultKind === "report" &&
-          !run.hasFinalParsedOutputChunk &&
-          getReportTextFromChunks(run.chunks) !== null
+        ) : null}
 
-        return (
-          <section
-            key={run.llmRunId}
-            className={`grid gap-3 rounded-md border border-border bg-background/35 p-3 ${
-              run.resultKind === "report" ? "order-last" : ""
-            }`}
-          >
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="min-w-0">
-                <h5 className="text-sm font-medium text-foreground">
-                  {run.resultLabel}
-                </h5>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {runMetadata.join(" / ")}
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-1">
-                {run.canEvaluate ? (
-                  <Button
-                    className={
-                      (run.resultKind === "opening_hand"
-                        ? run.openingHandEvaluation
-                        : run.turnEvaluation)
-                        ? "text-emerald-300 hover:text-emerald-200"
-                        : ""
-                    }
-                    type="button"
-                    variant="outline"
-                    size="icon-sm"
-                    aria-label={
-                      run.resultKind === "opening_hand"
-                        ? `Evaluate opening hand attempt ${run.attemptNumber}`
-                        : `Evaluate turn ${run.turnNumber}`
-                    }
-                    title={
-                      run.resultKind === "opening_hand"
-                        ? `Evaluate opening hand attempt ${run.attemptNumber}`
-                        : `Evaluate turn ${run.turnNumber}`
-                    }
-                    onClick={() =>
-                      setEvaluationRunSelection({
-                        llmRunId: run.llmRunId,
-                        resultKind:
+        {runs.length === 0 && !hasPresetStartingHand ? (
+          <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+            No opening hand or turn runs have been saved for this simulation
+            yet.
+          </p>
+        ) : null}
+
+        {runs.map((run) => {
+          const finishedDurationText = getSimulationRunFinishedDurationText(run)
+          const shouldShowFinishedThinkingStatus =
+            !run.isActive && getSimulationRunFinishedTimeMs(run) !== null
+          const finishedThinkingStatus = shouldShowFinishedThinkingStatus ? (
+            <SimulationResultThinkingStatus
+              activeToolCallName={null}
+              canStopSimulation={false}
+              finishedDurationText={finishedDurationText}
+              isFinishedSuccessfully={run.status === "completed"}
+              isFinished={true}
+              isActivitySelected={selectedActivityRunId === run.llmRunId}
+              isStoppingSimulation={false}
+              onViewActivity={() => onSelectActivityRun(run.llmRunId)}
+              onStopSimulation={onStopSimulation}
+              runStartTimeMs={null}
+              stopSimulationError={null}
+            />
+          ) : null
+          const runMetadata = [
+            run.status,
+            run.model,
+            run.estimatedPriceCents ? `${run.estimatedPriceCents} cents` : null,
+            finishedDurationText ? `took ${finishedDurationText}` : null,
+            run.outdated ? "outdated" : null,
+          ].filter(Boolean)
+          const hasLiveReport =
+            run.resultKind === "report" &&
+            !run.hasFinalParsedOutputChunk &&
+            getReportTextFromChunks(run.chunks) !== null
+
+          return (
+            <section
+              key={run.llmRunId}
+              className={`grid gap-3 rounded-md border border-border bg-background/35 p-3 ${
+                run.resultKind === "report" ? "order-last" : ""
+              }`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <h5 className="text-sm font-medium text-foreground">
+                    {run.resultLabel}
+                  </h5>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {runMetadata.join(" / ")}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  {run.canEvaluate ? (
+                    <Button
+                      className={
+                        (
                           run.resultKind === "opening_hand"
-                            ? "opening_hand"
-                            : "turn",
-                      })
-                    }
-                  >
-                    <ClipboardCheck />
-                  </Button>
-                ) : null}
-                {run.canRerun ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon-sm"
-                    disabled={isStartingSimulationRun}
-                    aria-label={
-                      run.resultKind === "opening_hand"
-                        ? "Rerun opening hand"
-                        : run.resultKind === "report"
-                          ? "Rerun report"
-                          : `Rerun turn ${run.turnNumber}`
-                    }
-                    title={
-                      run.resultKind === "opening_hand"
-                        ? "Rerun opening hand"
-                        : run.resultKind === "report"
-                          ? "Rerun report"
-                          : `Rerun turn ${run.turnNumber}`
-                    }
-                    onClick={() => {
-                      onKeepResultsScrolledToBottom()
-
-                      if (run.resultKind === "opening_hand") {
-                        onStartOpeningHandRun()
-                        return
+                            ? run.openingHandEvaluation
+                            : run.turnEvaluation
+                        )
+                          ? "text-emerald-300 hover:text-emerald-200"
+                          : ""
                       }
-
-                      if (run.resultKind === "report") {
-                        onStartReportRun()
-                        return
+                      type="button"
+                      variant="outline"
+                      size="icon-sm"
+                      aria-label={
+                        run.resultKind === "opening_hand"
+                          ? `Evaluate opening hand attempt ${run.attemptNumber}`
+                          : `Evaluate turn ${run.turnNumber}`
                       }
-
-                      if (typeof run.turnNumber === "number") {
-                        onStartTurnRun(run.turnNumber)
+                      title={
+                        run.resultKind === "opening_hand"
+                          ? `Evaluate opening hand attempt ${run.attemptNumber}`
+                          : `Evaluate turn ${run.turnNumber}`
                       }
-                    }}
-                  >
-                    <RefreshCw />
-                  </Button>
-                ) : null}
+                      onClick={() =>
+                        setEvaluationRunSelection({
+                          llmRunId: run.llmRunId,
+                          resultKind:
+                            run.resultKind === "opening_hand"
+                              ? "opening_hand"
+                              : "turn",
+                        })
+                      }
+                    >
+                      <ClipboardCheck />
+                    </Button>
+                  ) : null}
+                  {run.canRerun ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon-sm"
+                      disabled={isStartingSimulationRun}
+                      aria-label={
+                        run.resultKind === "opening_hand"
+                          ? "Rerun opening hand"
+                          : run.resultKind === "report"
+                            ? "Rerun report"
+                            : `Rerun turn ${run.turnNumber}`
+                      }
+                      title={
+                        run.resultKind === "opening_hand"
+                          ? "Rerun opening hand"
+                          : run.resultKind === "report"
+                            ? "Rerun report"
+                            : `Rerun turn ${run.turnNumber}`
+                      }
+                      onClick={() => {
+                        onKeepResultsScrolledToBottom()
+
+                        if (run.resultKind === "opening_hand") {
+                          onStartOpeningHandRun()
+                          return
+                        }
+
+                        if (run.resultKind === "report") {
+                          onStartReportRun()
+                          return
+                        }
+
+                        if (typeof run.turnNumber === "number") {
+                          onStartTurnRun(run.turnNumber)
+                        }
+                      }}
+                    >
+                      <RefreshCw />
+                    </Button>
+                  ) : null}
+                </div>
               </div>
-            </div>
 
-            {run.gameState && !getSimulationFinalParsedOutput(run) ? (
-              <details className={simulationResultChunkSurfaceClassName}>
-                <summary className={simulationResultChunkSummaryClassName}>
-                  Game state
-                </summary>
-                <p className={simulationResultChunkTextClassName}>
-                  {run.gameState}
+              {run.gameState && !getSimulationFinalParsedOutput(run) ? (
+                <details className={simulationResultChunkSurfaceClassName}>
+                  <summary className={simulationResultChunkSummaryClassName}>
+                    Game state
+                  </summary>
+                  <p className={simulationResultChunkTextClassName}>
+                    {run.gameState}
+                  </p>
+                </details>
+              ) : null}
+
+              {run.resultEntries.length > 0 ||
+              finishedThinkingStatus ||
+              hasLiveReport ? (
+                <SimulationResultChunkCards
+                  run={run}
+                  entries={run.resultEntries}
+                  finishedThinkingStatus={finishedThinkingStatus}
+                />
+              ) : null}
+
+              {run.isActive && !run.hasFinalParsedOutputChunk ? (
+                <SimulationResultThinkingStatus
+                  activeToolCallName={run.activeToolCallName}
+                  canStopSimulation={run.status !== "cancel_requested"}
+                  finishedDurationText={null}
+                  isFinishedSuccessfully={false}
+                  isFinished={false}
+                  isActivitySelected={selectedActivityRunId === run.llmRunId}
+                  isStoppingSimulation={isStoppingSimulation}
+                  onViewActivity={() => onSelectActivityRun(run.llmRunId)}
+                  onStopSimulation={onStopSimulation}
+                  runStartTimeMs={getSimulationRunStartTimeMs(run)}
+                  stopSimulationError={stopSimulationError}
+                />
+              ) : run.resultEntries.length === 0 && !run.gameState ? (
+                <p className="rounded-md border border-border bg-black/20 px-3 py-2 text-sm text-muted-foreground">
+                  No user-facing events have been saved for this run yet.
                 </p>
-              </details>
-            ) : null}
+              ) : null}
+            </section>
+          )
+        })}
 
-            {run.resultEntries.length > 0 ||
-            finishedThinkingStatus ||
-            hasLiveReport ? (
-              <SimulationResultChunkCards
-                run={run}
-                entries={run.resultEntries}
-                finishedThinkingStatus={finishedThinkingStatus}
-              />
-            ) : null}
-
-            {run.isActive && !run.hasFinalParsedOutputChunk ? (
-              <SimulationResultThinkingStatus
-                activeToolCallName={run.activeToolCallName}
-                canStopSimulation={run.status !== "cancel_requested"}
-                finishedDurationText={null}
-                isFinishedSuccessfully={false}
-                isFinished={false}
-                isActivitySelected={selectedActivityRunId === run.llmRunId}
-                isStoppingSimulation={isStoppingSimulation}
-                onViewActivity={() => onSelectActivityRun(run.llmRunId)}
-                onStopSimulation={onStopSimulation}
-                runStartTimeMs={getSimulationRunStartTimeMs(run)}
-                stopSimulationError={stopSimulationError}
-              />
-            ) : run.resultEntries.length === 0 && !run.gameState ? (
-              <p className="rounded-md border border-border bg-black/20 px-3 py-2 text-sm text-muted-foreground">
-                No user-facing events have been saved for this run yet.
-              </p>
-            ) : null}
-          </section>
-        )
-      })}
-
-      {actionError ? (
-        <p
-          className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-          role="alert"
-        >
-          {actionError}
-        </p>
-      ) : null}
-
-      <div className="flex min-h-8 flex-wrap justify-center gap-2">
-        {renderedSimulationAction ? (
-          <Button
-            className="w-fit bg-background/35 text-foreground hover:bg-muted/45"
-            variant="outline"
-            type="button"
-            onClick={() => {
-              if (renderedSimulationAction.kind === "opening_hand") {
-                onStartOpeningHandRun()
-                return
-              }
-
-              onKeepResultsScrolledToBottom()
-              onStartTurnRun(renderedSimulationAction.turnNumber)
-            }}
+        {actionError ? (
+          <p
+            className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            role="alert"
           >
-            <Sparkles data-icon="inline-start" />
-            {renderedSimulationAction.kind === "opening_hand"
-              ? "Simulate opening hand"
-              : "Simulate next turn"}
-          </Button>
+            {actionError}
+          </p>
         ) : null}
-        {canStartReportRun ? (
-          <Button
-            className="w-fit bg-background/35 text-foreground hover:bg-muted/45"
-            variant="outline"
-            type="button"
-            disabled={isStartingSimulationRun}
-            onClick={() => {
-              onKeepResultsScrolledToBottom()
-              onStartReportRun()
-            }}
-          >
-            <FileText data-icon="inline-start" />
-            Generate report
-          </Button>
-        ) : null}
-      </div>
+
+        <div className="flex min-h-8 flex-wrap justify-center gap-2">
+          {renderedSimulationAction ? (
+            <Button
+              className="w-fit bg-background/35 text-foreground hover:bg-muted/45"
+              variant="outline"
+              type="button"
+              onClick={() => {
+                if (renderedSimulationAction.kind === "opening_hand") {
+                  onStartOpeningHandRun()
+                  return
+                }
+
+                onKeepResultsScrolledToBottom()
+                onStartTurnRun(renderedSimulationAction.turnNumber)
+              }}
+            >
+              <Sparkles data-icon="inline-start" />
+              {renderedSimulationAction.kind === "opening_hand"
+                ? "Simulate opening hand"
+                : "Simulate next turn"}
+            </Button>
+          ) : null}
+          {canStartReportRun ? (
+            <Button
+              className="w-fit bg-background/35 text-foreground hover:bg-muted/45"
+              variant="outline"
+              type="button"
+              disabled={isStartingSimulationRun}
+              onClick={() => {
+                onKeepResultsScrolledToBottom()
+                onStartReportRun()
+              }}
+            >
+              <FileText data-icon="inline-start" />
+              Generate report
+            </Button>
+          ) : null}
+        </div>
       </div>
       {evaluationRun?.resultKind === "opening_hand" ? (
         <OpeningHandEvaluationModal
@@ -3191,7 +3198,7 @@ function OpeningHandEvaluationModal({
     setError(null)
 
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/simulations/${simulationId}/opening-hand-llm-runs/${run.llmRunId}/evaluation`,
         {
           method: "POST",
@@ -3375,7 +3382,7 @@ function TurnEvaluationModal({
     setError(null)
 
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/simulations/${simulationId}/turn-llm-runs/${run.llmRunId}/evaluation`,
         {
           method: "POST",
@@ -4484,11 +4491,7 @@ function SimulationResultLoggedTurnActionEvent({
 }) {
   const hasFailure = chunks.some(isMcpCallFailure)
 
-  if (
-    !hasFailure &&
-    actions.length === 1 &&
-    actions[0].phaseChange !== null
-  ) {
+  if (!hasFailure && actions.length === 1 && actions[0].phaseChange !== null) {
     return <SimulationResultPhaseChangeEvent action={actions[0]} />
   }
 
@@ -5274,7 +5277,7 @@ function OpenRouterGenerationsTable({
       }))
 
       try {
-        const response = await fetch(
+        const response = await apiFetch(
           `${API_BASE_URL}/decks/${encodeURIComponent(deckId)}/simulations/${encodeURIComponent(simulationId)}/openrouter-generations/${encodeURIComponent(generationId)}`
         )
 
@@ -5670,7 +5673,7 @@ function CreateSavedSeedModal({
     setIsSaving(true)
 
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/saved-seeds`,
         {
           method: "POST",
@@ -5857,7 +5860,7 @@ function CreateStartingHandModal({
     setIsSaving(true)
 
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/starting-hands`,
         {
           method: "POST",

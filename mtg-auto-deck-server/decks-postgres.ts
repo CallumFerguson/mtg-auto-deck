@@ -32,6 +32,7 @@ export type CreateDeckCardInput = {
 export type CreateDeckInput = {
   name: string
   desc: string
+  ownerUserId: string
   commanders: CreateDeckCardInput[]
   cards: CreateDeckCardInput[]
 }
@@ -59,10 +60,15 @@ export async function ensureDecksSchema() {
       name text NOT NULL,
       description text,
       format text NOT NULL DEFAULT 'commander',
+      owner_user_id text REFERENCES "user"(id) ON DELETE CASCADE,
 
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now()
     )
+  `)
+  await queryDatabase(`
+    ALTER TABLE decks
+    ADD COLUMN IF NOT EXISTS owner_user_id text REFERENCES "user"(id) ON DELETE CASCADE
   `)
   await queryDatabase(`
     CREATE TABLE IF NOT EXISTS deck_cards (
@@ -92,9 +98,14 @@ export async function ensureDecksSchema() {
     CREATE INDEX IF NOT EXISTS deck_cards_deck_id_zone_idx
       ON deck_cards (deck_id, zone)
   `)
+  await queryDatabase(`
+    CREATE INDEX IF NOT EXISTS decks_owner_user_id_updated_at_idx
+      ON decks (owner_user_id, updated_at DESC)
+      WHERE owner_user_id IS NOT NULL
+  `)
 }
 
-export async function listDecks(): Promise<DeckSummary[]> {
+export async function listDecks(ownerUserId?: string): Promise<DeckSummary[]> {
   const result = await queryDatabase<{
     id: string
     name: string
@@ -102,11 +113,15 @@ export async function listDecks(): Promise<DeckSummary[]> {
     format: string
     created_at: Date
     updated_at: Date
-  }>(`
-    SELECT id, name, description, format, created_at, updated_at
-    FROM decks
-    ORDER BY updated_at DESC, name ASC
-  `)
+  }>(
+    `
+      SELECT id, name, description, format, created_at, updated_at
+      FROM decks
+      WHERE ($1::text IS NULL OR owner_user_id = $1)
+      ORDER BY updated_at DESC, name ASC
+    `,
+    [ownerUserId ?? null]
+  )
 
   return result.rows.map((deck) => ({
     id: deck.id,
@@ -118,7 +133,10 @@ export async function listDecks(): Promise<DeckSummary[]> {
   }))
 }
 
-export async function getDeck(deckId: string): Promise<DeckDetails | null> {
+export async function getDeck(
+  deckId: string,
+  ownerUserId?: string
+): Promise<DeckDetails | null> {
   const deckResult = await queryDatabase<{
     id: string
     name: string
@@ -131,8 +149,9 @@ export async function getDeck(deckId: string): Promise<DeckDetails | null> {
       SELECT id, name, description, format, created_at, updated_at
       FROM decks
       WHERE id = $1
+        AND ($2::text IS NULL OR owner_user_id = $2)
     `,
-    [deckId]
+    [deckId, ownerUserId ?? null]
   )
   const deck = deckResult.rows[0]
 
@@ -199,13 +218,17 @@ export async function getDeck(deckId: string): Promise<DeckDetails | null> {
   }
 }
 
-export async function deleteDeck(deckId: string): Promise<boolean> {
+export async function deleteDeck(
+  deckId: string,
+  ownerUserId?: string
+): Promise<boolean> {
   const result = await queryDatabase(
     `
       DELETE FROM decks
       WHERE id = $1
+        AND ($2::text IS NULL OR owner_user_id = $2)
     `,
-    [deckId]
+    [deckId, ownerUserId ?? null]
   )
 
   return (result.rowCount ?? 0) > 0
@@ -213,7 +236,8 @@ export async function deleteDeck(deckId: string): Promise<boolean> {
 
 export async function updateDeckDetails(
   deckId: string,
-  { description, name }: UpdateDeckDetailsInput
+  { description, name }: UpdateDeckDetailsInput,
+  ownerUserId?: string
 ): Promise<DeckSummary | null> {
   const result = await queryDatabase<{
     id: string
@@ -230,9 +254,10 @@ export async function updateDeckDetails(
         description = $3,
         updated_at = now()
       WHERE id = $1
+        AND ($4::text IS NULL OR owner_user_id = $4)
       RETURNING id, name, description, format, created_at, updated_at
     `,
-    [deckId, name, description.trim() || null]
+    [deckId, name, description.trim() || null, ownerUserId ?? null]
   )
   const deck = result.rows[0]
 
@@ -255,6 +280,7 @@ export async function createDeck({
   commanders,
   desc,
   name,
+  ownerUserId,
 }: CreateDeckInput): Promise<DeckSummary> {
   return withDatabaseTransaction(async (client) => {
     const deckResult = await client.query<{
@@ -266,11 +292,11 @@ export async function createDeck({
       updated_at: Date
     }>(
       `
-        INSERT INTO decks (name, description)
-        VALUES ($1, $2)
+        INSERT INTO decks (name, description, owner_user_id)
+        VALUES ($1, $2, $3)
         RETURNING id, name, description, format, created_at, updated_at
       `,
-      [name, desc.trim() || null]
+      [name, desc.trim() || null, ownerUserId]
     )
     const deck = deckResult.rows[0]
 

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react"
 import { ArrowLeft, Edit3, MoreVertical, Trash2 } from "lucide-react"
 
+import { AccountMenu } from "@/components/AccountMenu"
 import { DeleteDeckModal } from "@/components/DeleteDeckModal"
 import { EditDeckDetailsModal } from "@/components/EditDeckDetailsModal"
 import { Button } from "@/components/ui/button"
-import { API_BASE_URL } from "@/lib/api"
+import { API_BASE_URL, apiFetch } from "@/lib/api"
 import { readApiError } from "@/lib/api-error"
+import type { AuthUser } from "@/lib/auth-client"
 import type { DeckDetails, DeckResponse } from "@/lib/deck-types"
 import {
   getDeckSimulationPath,
@@ -19,10 +21,14 @@ export function DeckPage({
   deckId,
   initialTab,
   initialSimulationId,
+  onSignedOut,
+  user,
 }: {
   deckId: string
   initialTab: DeckPageTab
   initialSimulationId: string | null
+  onSignedOut: () => void
+  user: AuthUser
 }) {
   const [deck, setDeck] = useState<DeckDetails | null>(null)
   const [activeTab, setActiveTab] = useState<DeckPageTab>(initialTab)
@@ -39,7 +45,7 @@ export function DeckPage({
     setDeckLoadError(null)
 
     try {
-      const response = await fetch(`${API_BASE_URL}/decks/${deckId}`)
+      const response = await apiFetch(`${API_BASE_URL}/decks/${deckId}`)
 
       if (!response.ok) {
         setDeckLoadError(
@@ -79,7 +85,7 @@ export function DeckPage({
     setDeleteDeckError(null)
 
     try {
-      const response = await fetch(`${API_BASE_URL}/decks/${deckId}`, {
+      const response = await apiFetch(`${API_BASE_URL}/decks/${deckId}`, {
         method: "DELETE",
       })
 
@@ -185,19 +191,22 @@ export function DeckPage({
               ) : null}
             </div>
 
-            <div className="inline-grid w-full grid-cols-2 rounded-lg border border-border bg-card/70 p-1 sm:w-auto">
-              <TabButton
-                isActive={activeTab === "details"}
-                onClick={() => selectTab("details")}
-              >
-                Details
-              </TabButton>
-              <TabButton
-                isActive={activeTab === "simulation"}
-                onClick={() => selectTab("simulation")}
-              >
-                Simulation
-              </TabButton>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <AccountMenu user={user} onSignedOut={onSignedOut} />
+              <div className="inline-grid w-full grid-cols-2 rounded-lg border border-border bg-card/70 p-1 sm:w-auto">
+                <TabButton
+                  isActive={activeTab === "details"}
+                  onClick={() => selectTab("details")}
+                >
+                  Details
+                </TabButton>
+                <TabButton
+                  isActive={activeTab === "simulation"}
+                  onClick={() => selectTab("simulation")}
+                >
+                  Simulation
+                </TabButton>
+              </div>
             </div>
           </div>
         </header>

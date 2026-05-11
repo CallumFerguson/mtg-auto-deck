@@ -2,7 +2,7 @@ import { useState, type FormEvent, type ReactNode } from "react"
 import { X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { API_BASE_URL } from "@/lib/api"
+import { API_BASE_URL, apiFetch } from "@/lib/api"
 import { readApiError } from "@/lib/api-error"
 import { validateAndParseDeckInput } from "@/lib/deck-input"
 
@@ -37,7 +37,7 @@ export function CreateDeckModal({
     setIsCreating(true)
 
     try {
-      const response = await fetch(`${API_BASE_URL}/decks`, {
+      const response = await apiFetch(`${API_BASE_URL}/decks`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -46,9 +46,7 @@ export function CreateDeckModal({
       })
 
       if (!response.ok) {
-        setErrors([
-          await readApiError(response, "Deck could not be created."),
-        ])
+        setErrors([await readApiError(response, "Deck could not be created.")])
         return
       }
 

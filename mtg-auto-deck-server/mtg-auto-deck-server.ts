@@ -1,14 +1,16 @@
 ﻿import "dotenv/config"
 import express, { type Request, type Response } from "express"
+import { fromNodeHeaders, toNodeHandler } from "better-auth/node"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js"
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js"
 import { OpenRouter, stepCountIs, tool, type Tool } from "@openrouter/agent"
-import { randomInt, randomUUID } from "node:crypto"
+import { createHash, randomBytes, randomInt, randomUUID } from "node:crypto"
 import OpenAI from "openai"
 import { z } from "zod/v4"
+import { auth, ensureAuthSchema } from "./auth.js"
 import { closeDatabasePool, verifyDatabaseConnection } from "./db.js"
 import {
   DRAW_STARTING_HAND_PROMPT,
@@ -34,6 +36,7 @@ import {
   completeOpeningHandLlmRun,
   completeReportLlmRun,
   completeTurnLlmRun,
+  createLlmRunMcpToken,
   createOpeningHandLlmRun,
   createReportLlmRun,
   createSimulation,
@@ -45,6 +48,7 @@ import {
   ensureSimulationsSchema,
   failLlmRun,
   failReportLlmRun,
+  getActiveLlmRunMcpTokenContext,
   getDeckCardReferenceData,
   getOpeningHandLlmRunEvaluationData,
   getOpenRouterGenerationForSimulation,
@@ -70,6 +74,7 @@ import {
   resetSimulationForOpeningHandLlmRun,
   returnCardToSimulationLibrary,
   returnCardsToSimulationLibrary,
+  revokeLlmRunMcpToken,
   resolveSimulationIdentifier,
   shuffleSimulationLibrary,
   SIMULATION_AUTO_ADVANCE_DISABLED_MESSAGE,
@@ -84,6 +89,8 @@ import {
 } from "./simulations-postgres.js"
 import type {
   LlmRunChunkInput,
+  LlmRunMcpTokenContext,
+  LlmRunMcpTokenPhase,
   LlmRunPhase,
   LlmRunStatus,
   OpenRouterGeneration,
@@ -205,11 +212,13 @@ const SIMULATION_SERVER_NAME = "simulation-server"
 const OPENING_HAND_MCP_PATH = "/mcp/opening-hand"
 const TURN_SIMULATION_MCP_PATH = "/mcp/turn-simulation"
 const SIMULATION_MCP_PATH = "/mcp/simulation"
+const AUTH_PATH_PREFIX = "/api/auth"
 const OPENING_HAND_MCP_SERVER_LABEL = "opening_hand"
 const TURN_SIMULATION_MCP_SERVER_LABEL = "turn_simulation"
 const STREAM_FLUSH_INTERVAL_MS = 1000
 const STREAM_RECENT_CHUNK_LIMIT = 500
 const SSE_KEEPALIVE_INTERVAL_MS = 15000
+const MCP_RUN_TOKEN_TTL_MS = 6 * 60 * 60 * 1000
 const OPENROUTER_GENERATION_ENDPOINT = "https://openrouter.ai/api/v1/generation"
 const OPENROUTER_PROVIDERS_ENDPOINT = "https://openrouter.ai/api/v1/providers"
 const OPENROUTER_CHAT_COMPLETIONS_ENDPOINT =
@@ -319,8 +328,20 @@ type ActiveLlmRunRuntime = {
   turnNumber?: number
 }
 
+type AuthenticatedUser = {
+  email: string
+  id: string
+}
+
+type GeneratedMcpRunToken = {
+  expiresAt: Date
+  token: string
+  tokenHash: string
+}
+
 const activeLlmRunRuntimes = new Map<string, ActiveLlmRunRuntime>()
 const simulationResultsBroadcaster = new SimulationResultsBroadcaster()
+const authenticatedUsersByRequest = new WeakMap<Request, AuthenticatedUser>()
 
 function createRuntimeCompletion() {
   let resolveCompletion: () => void = () => { }
@@ -1002,6 +1023,7 @@ type McpLogTurnActionInput = McpSimulationIdentifierInput & {
 }
 
 type McpSimulationIdentifierConfig = {
+  authContext?: LlmRunMcpTokenContext
   inputSchema: typeof llmRunIdentifierSchema | typeof simulationIdentifierSchema
   requireReason: boolean
 }
@@ -1015,7 +1037,25 @@ const simulationMcpIdentifier: McpSimulationIdentifierConfig = {
   requireReason: false,
 }
 
-async function resolveMcpSimulationId(input: McpSimulationIdentifierInput) {
+async function resolveMcpSimulationId(
+  input: McpSimulationIdentifierInput,
+  authContext?: LlmRunMcpTokenContext
+) {
+  if (authContext) {
+    const llmRunId = input.llmRunId?.trim()
+    const simulationId = input.simulationId?.trim()
+
+    if (llmRunId && llmRunId !== authContext.llmRunId) {
+      throw new Error("MCP run token does not match the requested LLM run.")
+    }
+
+    if (simulationId && simulationId !== authContext.simulationId) {
+      throw new Error("MCP run token does not match the requested simulation.")
+    }
+
+    return authContext.simulationId
+  }
+
   return resolveSimulationIdentifier(input)
 }
 
@@ -1082,25 +1122,35 @@ function rollDice(count: number, sides: number) {
   }
 }
 
-function createOpeningHandServer() {
+function createOpeningHandServer(authContext?: LlmRunMcpTokenContext) {
+  const identifier = {
+    ...llmRunMcpIdentifier,
+    authContext,
+  }
+
   return createServer(OPENING_HAND_SERVER_NAME, (server) => {
-    registerDrawStartingHandTool(server, llmRunMcpIdentifier)
-    registerMulliganTool(server, llmRunMcpIdentifier)
-    registerReturnCardsToLibraryTool(server, llmRunMcpIdentifier)
+    registerDrawStartingHandTool(server, identifier)
+    registerMulliganTool(server, identifier)
+    registerReturnCardsToLibraryTool(server, identifier)
   })
 }
 
-function createTurnSimulationServer() {
+function createTurnSimulationServer(authContext?: LlmRunMcpTokenContext) {
+  const identifier = {
+    ...llmRunMcpIdentifier,
+    authContext,
+  }
+
   return createServer(TURN_SIMULATION_SERVER_NAME, (server) => {
-    registerLogTurnActionTool(server, llmRunMcpIdentifier)
-    registerDrawCardFromTopTool(server, llmRunMcpIdentifier)
-    registerDrawCardFromBottomTool(server, llmRunMcpIdentifier)
-    registerTakeCardsFromLibraryTool(server, llmRunMcpIdentifier)
-    registerReturnCardToLibraryTool(server, llmRunMcpIdentifier)
-    registerReturnCardsToLibraryTool(server, llmRunMcpIdentifier)
-    registerShuffleLibraryTool(server, llmRunMcpIdentifier)
-    registerFlipCoinTool(server, llmRunMcpIdentifier)
-    registerRollDiceTool(server, llmRunMcpIdentifier)
+    registerLogTurnActionTool(server, identifier)
+    registerDrawCardFromTopTool(server, identifier)
+    registerDrawCardFromBottomTool(server, identifier)
+    registerTakeCardsFromLibraryTool(server, identifier)
+    registerReturnCardToLibraryTool(server, identifier)
+    registerReturnCardsToLibraryTool(server, identifier)
+    registerShuffleLibraryTool(server, identifier)
+    registerFlipCoinTool(server, identifier)
+    registerRollDiceTool(server, identifier)
   })
 }
 
@@ -1266,7 +1316,10 @@ function registerDrawCardFromTopTool(
       },
     },
     async (input: McpDrawCardsInput) => {
-      const resolvedSimulationId = await resolveMcpSimulationId(input)
+      const resolvedSimulationId = await resolveMcpSimulationId(
+        input,
+        identifier.authContext
+      )
       const { count } = input
       const response = await drawCardsFromTop(resolvedSimulationId, count)
 
@@ -1297,7 +1350,10 @@ function registerDrawCardFromBottomTool(
       },
     },
     async (input: McpDrawCardsInput) => {
-      const resolvedSimulationId = await resolveMcpSimulationId(input)
+      const resolvedSimulationId = await resolveMcpSimulationId(
+        input,
+        identifier.authContext
+      )
       const { count } = input
       const response = await drawCardsFromBottom(resolvedSimulationId, count)
 
@@ -1327,7 +1383,10 @@ function registerDrawStartingHandTool(
       },
     },
     async (input: McpSimulationIdentifierInput) => {
-      const resolvedSimulationId = await resolveMcpSimulationId(input)
+      const resolvedSimulationId = await resolveMcpSimulationId(
+        input,
+        identifier.authContext
+      )
       const response = await drawStartingHand(resolvedSimulationId)
 
       return {
@@ -1362,7 +1421,10 @@ function registerMulliganTool(
       },
     },
     async (input: McpMulliganInput) => {
-      const resolvedSimulationId = await resolveMcpSimulationId(input)
+      const resolvedSimulationId = await resolveMcpSimulationId(
+        input,
+        identifier.authContext
+      )
       const { reason } = input
       const response = await mulliganSimulation(resolvedSimulationId, reason)
 
@@ -1409,7 +1471,10 @@ function registerReturnCardToLibraryTool(
       },
     },
     async (input: McpReturnCardInput) => {
-      const resolvedSimulationId = await resolveMcpSimulationId(input)
+      const resolvedSimulationId = await resolveMcpSimulationId(
+        input,
+        identifier.authContext
+      )
       const { card, position, side } = input
       const response = await returnCardToSimulationLibrary({
         simulationId: resolvedSimulationId,
@@ -1458,7 +1523,10 @@ function registerReturnCardsToLibraryTool(
       },
     },
     async (input: McpReturnCardsInput) => {
-      const resolvedSimulationId = await resolveMcpSimulationId(input)
+      const resolvedSimulationId = await resolveMcpSimulationId(
+        input,
+        identifier.authContext
+      )
       const { cards, randomizeOrder, side } = input
       const response = await returnCardsToSimulationLibrary({
         simulationId: resolvedSimulationId,
@@ -1499,7 +1567,10 @@ function registerTakeCardsFromLibraryTool(
       },
     },
     async (input: McpTakeCardsInput) => {
-      const resolvedSimulationId = await resolveMcpSimulationId(input)
+      const resolvedSimulationId = await resolveMcpSimulationId(
+        input,
+        identifier.authContext
+      )
       const { cards } = input
       const response = await takeCardsFromSimulationLibrary(
         resolvedSimulationId,
@@ -1531,7 +1602,10 @@ function registerShuffleLibraryTool(
       },
     },
     async (input: McpSimulationIdentifierInput) => {
-      const resolvedSimulationId = await resolveMcpSimulationId(input)
+      const resolvedSimulationId = await resolveMcpSimulationId(
+        input,
+        identifier.authContext
+      )
       const response = await shuffleSimulationLibrary(resolvedSimulationId)
 
       return {
@@ -1565,7 +1639,7 @@ function registerFlipCoinTool(
       },
     },
     async (input: McpFlipCoinInput) => {
-      await resolveMcpSimulationId(input)
+      await resolveMcpSimulationId(input, identifier.authContext)
       const response = flipCoins(input.count ?? 1)
 
       return {
@@ -1596,7 +1670,7 @@ function registerRollDiceTool(
       },
     },
     async (input: McpRollDiceInput) => {
-      await resolveMcpSimulationId(input)
+      await resolveMcpSimulationId(input, identifier.authContext)
       const response = rollDice(input.count, input.sides)
 
       return {
@@ -1632,7 +1706,10 @@ function registerLogTurnActionTool(
       },
     },
     async (input: McpLogTurnActionInput) => {
-      const resolvedSimulationId = await resolveMcpSimulationId(input)
+      const resolvedSimulationId = await resolveMcpSimulationId(
+        input,
+        identifier.authContext
+      )
       const { action, phaseChange } = input
       const response = await logTurnAction(
         resolvedSimulationId,
@@ -1995,6 +2072,7 @@ async function createProviderMcpClient({
 function buildOpeningHandOpenAiRequestPayload(
   config: OpeningHandOpenAiRunConfig,
   fullPrompt: string,
+  mcpRunToken: string,
   simulationId: string
 ) {
   return {
@@ -2016,7 +2094,10 @@ function buildOpeningHandOpenAiRequestPayload(
         server_label: OPENING_HAND_MCP_SERVER_LABEL,
         server_description:
           "Tools for drawing, mulliganing, and finalizing a Magic: The Gathering opening hand simulation.",
-        server_url: config.openingHandMcpPublicUrl,
+        server_url: appendMcpRunTokenToUrl(
+          config.openingHandMcpPublicUrl,
+          mcpRunToken
+        ),
         require_approval: "never" as const,
       },
     ],
@@ -2026,6 +2107,7 @@ function buildOpeningHandOpenAiRequestPayload(
 function buildTurnSimulationOpenAiRequestPayload(
   config: TurnSimulationOpenAiRunConfig,
   fullPrompt: string,
+  mcpRunToken: string,
   simulationId: string,
   turnNumber: number
 ) {
@@ -2049,7 +2131,10 @@ function buildTurnSimulationOpenAiRequestPayload(
         server_label: TURN_SIMULATION_MCP_SERVER_LABEL,
         server_description:
           "Tools for resolving one Magic: The Gathering goldfish turn, including library operations, random coin/dice results, and turn action logging.",
-        server_url: config.turnSimulationMcpPublicUrl,
+        server_url: appendMcpRunTokenToUrl(
+          config.turnSimulationMcpPublicUrl,
+          mcpRunToken
+        ),
         require_approval: "never" as const,
       },
     ],
@@ -2075,6 +2160,36 @@ function buildReportOpenAiRequestPayload(
       summary: "auto" as const,
     },
   }
+}
+
+function generateMcpRunToken(): GeneratedMcpRunToken {
+  const token = randomBytes(32).toString("base64url")
+
+  return {
+    token,
+    tokenHash: hashMcpRunToken(token),
+    expiresAt: new Date(Date.now() + MCP_RUN_TOKEN_TTL_MS),
+  }
+}
+
+function hashMcpRunToken(token: string) {
+  return createHash("sha256").update(token).digest("base64url")
+}
+
+function appendMcpRunTokenToUrl(url: string, token: string) {
+  const parsedUrl = new URL(url)
+
+  parsedUrl.searchParams.set("mcpRunToken", token)
+
+  return parsedUrl.toString()
+}
+
+function appendMcpRunTokenToPath(path: string, token: string) {
+  const parsedUrl = new URL(path, `http://${DEFAULT_HOST}:${DEFAULT_PORT}`)
+
+  parsedUrl.searchParams.set("mcpRunToken", token)
+
+  return `${parsedUrl.pathname}${parsedUrl.search}`
 }
 
 function buildOpeningHandOpenRouterRequestPayload(
@@ -2248,12 +2363,14 @@ function getLlmRunOpenRouterModelProvider(
 function buildOpeningHandLlmRequestPayload(
   config: ResolvedOpeningHandLlmRunConfig,
   fullPrompt: string,
+  mcpRunToken: string,
   simulationId: string
 ) {
   if (config.provider === "openai") {
     return buildOpeningHandOpenAiRequestPayload(
       config,
       fullPrompt,
+      mcpRunToken,
       simulationId
     )
   }
@@ -2276,6 +2393,7 @@ function buildOpeningHandLlmRequestPayload(
 function buildTurnSimulationLlmRequestPayload(
   config: ResolvedTurnSimulationLlmRunConfig,
   fullPrompt: string,
+  mcpRunToken: string,
   simulationId: string,
   turnNumber: number
 ) {
@@ -2283,6 +2401,7 @@ function buildTurnSimulationLlmRequestPayload(
     return buildTurnSimulationOpenAiRequestPayload(
       config,
       fullPrompt,
+      mcpRunToken,
       simulationId,
       turnNumber
     )
@@ -2357,7 +2476,43 @@ function getPersistableLlmRequestPayload<
     persistableRequestPayload.messages = "[stored in llm_runs.full_prompt]"
   }
 
-  return persistableRequestPayload
+  return redactMcpRunTokens(persistableRequestPayload)
+}
+
+function redactMcpRunTokens(value: unknown): unknown {
+  if (typeof value === "string") {
+    return redactMcpRunTokenFromString(value)
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(redactMcpRunTokens)
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, propertyValue]) => [
+        key,
+        key === "mcpRunToken" ? "[redacted]" : redactMcpRunTokens(propertyValue),
+      ])
+    )
+  }
+
+  return value
+}
+
+function redactMcpRunTokenFromString(value: string) {
+  try {
+    const parsedUrl = new URL(value)
+
+    if (parsedUrl.searchParams.has("mcpRunToken")) {
+      parsedUrl.searchParams.set("mcpRunToken", "[redacted]")
+      return parsedUrl.toString()
+    }
+  } catch {
+    // Not a URL; fall through to the query-param regex.
+  }
+
+  return value.replace(/([?&]mcpRunToken=)[^&#]*/g, "$1[redacted]")
 }
 
 function formatLlmRunPhase(phase: LlmRunPhase) {
@@ -2442,12 +2597,24 @@ async function prepareAndStartOpeningHandLlmRun({
       requestPayload: {},
     })
     createdLlmRunId = openingHandRun.llmRunId
+    const mcpRunToken = generateMcpRunToken()
+
+    await createLlmRunMcpToken({
+      deckId,
+      llmRunId: openingHandRun.llmRunId,
+      simulationId,
+      phase: "opening_hand",
+      tokenHash: mcpRunToken.tokenHash,
+      expiresAt: mcpRunToken.expiresAt,
+    })
+
     const fullPrompt = await buildStartingHandSimulationPrompt({
       llmRunId: openingHandRun.llmRunId,
     })
     const requestPayload = buildOpeningHandLlmRequestPayload(
       llmConfig,
       fullPrompt,
+      mcpRunToken.token,
       simulationId
     )
 
@@ -2464,6 +2631,7 @@ async function prepareAndStartOpeningHandLlmRun({
       fullPrompt,
       attemptNumber: openingHandRun.attemptNumber,
       llmRunId: openingHandRun.llmRunId,
+      mcpRunToken: mcpRunToken.token,
       requestPayload,
       runtimeStreamKey: openingHandRun.runtimeStreamKey,
       simulationId,
@@ -2472,6 +2640,14 @@ async function prepareAndStartOpeningHandLlmRun({
     return openingHandRun
   } catch (error) {
     if (createdLlmRunId !== null) {
+      await revokeLlmRunMcpToken(createdLlmRunId).catch(
+        (revokeError: unknown) => {
+          console.error(
+            "Failed to revoke opening-hand MCP run token:",
+            revokeError
+          )
+        }
+      )
       await failLlmRun(createdLlmRunId, getErrorMessage(error)).catch(
         (failError: unknown) => {
           console.error(
@@ -2514,6 +2690,16 @@ async function prepareAndStartTurnLlmRun({
       requireAutoSimulateNextStep,
     })
     createdLlmRunId = turnRun.llmRunId
+    const mcpRunToken = generateMcpRunToken()
+
+    await createLlmRunMcpToken({
+      deckId,
+      llmRunId: turnRun.llmRunId,
+      simulationId,
+      phase: "turn",
+      tokenHash: mcpRunToken.tokenHash,
+      expiresAt: mcpRunToken.expiresAt,
+    })
 
     const fullPrompt =
       turnNumber === 1
@@ -2525,6 +2711,7 @@ async function prepareAndStartTurnLlmRun({
     const requestPayload = buildTurnSimulationLlmRequestPayload(
       llmConfig,
       fullPrompt,
+      mcpRunToken.token,
       simulationId,
       turnNumber
     )
@@ -2542,6 +2729,7 @@ async function prepareAndStartTurnLlmRun({
       fullPrompt,
       attemptNumber: turnRun.attemptNumber,
       llmRunId: turnRun.llmRunId,
+      mcpRunToken: mcpRunToken.token,
       requestPayload,
       runtimeStreamKey: turnRun.runtimeStreamKey,
       simulationId,
@@ -2551,6 +2739,11 @@ async function prepareAndStartTurnLlmRun({
     return turnRun
   } catch (error) {
     if (createdLlmRunId !== null) {
+      await revokeLlmRunMcpToken(createdLlmRunId).catch(
+        (revokeError: unknown) => {
+          console.error("Failed to revoke turn MCP run token:", revokeError)
+        }
+      )
       await failLlmRun(createdLlmRunId, getErrorMessage(error)).catch(
         (failError: unknown) => {
           console.error("Failed to mark turn LLM run failed:", failError)
@@ -3408,6 +3601,7 @@ function startOpeningHandLlmRun({
   deckId,
   fullPrompt,
   llmRunId,
+  mcpRunToken,
   requestPayload,
   runtimeStreamKey,
   simulationId,
@@ -3418,6 +3612,7 @@ function startOpeningHandLlmRun({
   deckId: string
   fullPrompt: string
   llmRunId: string
+  mcpRunToken: string
   requestPayload: OpeningHandLlmRequestPayload
   runtimeStreamKey: string
   simulationId: string
@@ -3429,6 +3624,7 @@ function startOpeningHandLlmRun({
     deckId,
     fullPrompt,
     llmRunId,
+    mcpRunToken,
     requestPayload,
     runtimeStreamKey,
     simulationId,
@@ -3442,6 +3638,7 @@ async function runOpeningHandLlmRun({
   deckId,
   fullPrompt,
   llmRunId,
+  mcpRunToken,
   requestPayload,
   runtimeStreamKey,
   simulationId,
@@ -3452,6 +3649,7 @@ async function runOpeningHandLlmRun({
   deckId: string
   fullPrompt: string
   llmRunId: string
+  mcpRunToken: string
   requestPayload: OpeningHandLlmRequestPayload
   runtimeStreamKey: string
   simulationId: string
@@ -3511,7 +3709,10 @@ async function runOpeningHandLlmRun({
             config,
             createTools: createOpeningHandOpenRouterTools,
             llmRunId,
-            mcpPath: OPENING_HAND_MCP_PATH,
+            mcpPath: appendMcpRunTokenToPath(
+              OPENING_HAND_MCP_PATH,
+              mcpRunToken
+            ),
             phase: "opening_hand",
             requestPayload: requireOpenRouterRequestPayload(requestPayload),
             runtime,
@@ -3519,7 +3720,10 @@ async function runOpeningHandLlmRun({
           : await collectLlamaCppLlmStream({
             config,
             llmRunId,
-            mcpPath: OPENING_HAND_MCP_PATH,
+            mcpPath: appendMcpRunTokenToPath(
+              OPENING_HAND_MCP_PATH,
+              mcpRunToken
+            ),
             phase: "opening_hand",
             requestPayload: requireLlamaCppRequestPayload(requestPayload),
             runtime,
@@ -3604,6 +3808,9 @@ async function runOpeningHandLlmRun({
       simulationId,
     })
   } finally {
+    await revokeLlmRunMcpToken(llmRunId).catch((error: unknown) => {
+      console.error("Failed to revoke opening-hand MCP run token:", error)
+    })
     clearRuntimeFlushTimer(runtime)
     activeLlmRunRuntimes.delete(runtimeStreamKey)
     runtime.resolveCompletion()
@@ -3617,6 +3824,7 @@ function startTurnLlmRun({
   deckId,
   fullPrompt,
   llmRunId,
+  mcpRunToken,
   requestPayload,
   runtimeStreamKey,
   simulationId,
@@ -3628,6 +3836,7 @@ function startTurnLlmRun({
   deckId: string
   fullPrompt: string
   llmRunId: string
+  mcpRunToken: string
   requestPayload: TurnSimulationLlmRequestPayload
   runtimeStreamKey: string
   simulationId: string
@@ -3640,6 +3849,7 @@ function startTurnLlmRun({
     deckId,
     fullPrompt,
     llmRunId,
+    mcpRunToken,
     requestPayload,
     runtimeStreamKey,
     simulationId,
@@ -3654,6 +3864,7 @@ async function runTurnLlmRun({
   deckId,
   fullPrompt,
   llmRunId,
+  mcpRunToken,
   requestPayload,
   runtimeStreamKey,
   simulationId,
@@ -3665,6 +3876,7 @@ async function runTurnLlmRun({
   deckId: string
   fullPrompt: string
   llmRunId: string
+  mcpRunToken: string
   requestPayload: TurnSimulationLlmRequestPayload
   runtimeStreamKey: string
   simulationId: string
@@ -3726,7 +3938,10 @@ async function runTurnLlmRun({
             config,
             createTools: createTurnSimulationOpenRouterTools,
             llmRunId,
-            mcpPath: TURN_SIMULATION_MCP_PATH,
+            mcpPath: appendMcpRunTokenToPath(
+              TURN_SIMULATION_MCP_PATH,
+              mcpRunToken
+            ),
             phase: "turn",
             requestPayload: requireOpenRouterRequestPayload(requestPayload),
             runtime,
@@ -3734,7 +3949,10 @@ async function runTurnLlmRun({
           : await collectLlamaCppLlmStream({
             config,
             llmRunId,
-            mcpPath: TURN_SIMULATION_MCP_PATH,
+            mcpPath: appendMcpRunTokenToPath(
+              TURN_SIMULATION_MCP_PATH,
+              mcpRunToken
+            ),
             phase: "turn",
             requestPayload: requireLlamaCppRequestPayload(requestPayload),
             runtime,
@@ -3822,6 +4040,9 @@ async function runTurnLlmRun({
       simulationId,
     })
   } finally {
+    await revokeLlmRunMcpToken(llmRunId).catch((error: unknown) => {
+      console.error("Failed to revoke turn MCP run token:", error)
+    })
     clearRuntimeFlushTimer(runtime)
     activeLlmRunRuntimes.delete(runtimeStreamKey)
     runtime.resolveCompletion()
@@ -4208,6 +4429,7 @@ function clearRuntimeFlushTimer(runtime: ActiveLlmRunRuntime) {
 async function main() {
   registerShutdownHandlers()
   await verifyDatabaseConnection()
+  await ensureAuthSchema()
   await ensureFreshScryfallOracleCards()
   await ensureDecksSchema()
   await ensureStartingHandsSchema()
@@ -4230,6 +4452,7 @@ async function main() {
   const host = DEFAULT_HOST
   const port = DEFAULT_PORT
   const allowedOrigins = DEFAULT_ALLOWED_ORIGINS
+  const simulationMcpServerEnabled = getSimulationMcpServerEnabled()
   const app = createMcpExpressApp({ host })
 
   app.use((req: Request, res: Response, next) => {
@@ -4243,8 +4466,10 @@ async function main() {
     next()
   })
 
+  app.all("/api/auth/*splat", toNodeHandler(auth))
+
   app.use((req: Request, res: Response, next) => {
-    if (isMcpPath(req.path)) {
+    if (isMcpPath(req.path, simulationMcpServerEnabled)) {
       next()
       return
     }
@@ -4270,10 +4495,66 @@ async function main() {
     })
   })
 
+  app.use(async (req: Request, res: Response, next) => {
+    if (
+      req.path === "/health" ||
+      isAuthPath(req.path) ||
+      isMcpPath(req.path, simulationMcpServerEnabled)
+    ) {
+      next()
+      return
+    }
+
+    try {
+      const session = await auth.api.getSession({
+        headers: fromNodeHeaders(req.headers),
+      })
+
+      if (!session) {
+        res.status(401).json({
+          error: "Authentication required.",
+        })
+        return
+      }
+
+      authenticatedUsersByRequest.set(req, {
+        id: session.user.id,
+        email: session.user.email,
+      })
+      next()
+    } catch (error) {
+      console.error("Failed to authenticate request:", error)
+      res.status(500).json({
+        error: "Authentication could not be verified.",
+      })
+    }
+  })
+
+  app.use("/decks/:deckId", async (req: Request, res: Response, next) => {
+    try {
+      const deckId = String(req.params.deckId)
+      const deck = await getDeck(deckId, getAuthenticatedUser(req).id)
+
+      if (!deck) {
+        res.status(404).json({
+          error: "Deck not found.",
+        })
+        return
+      }
+
+      next()
+    } catch (error) {
+      console.error("Failed to verify deck ownership:", error)
+      res.status(500).json({
+        error: "Deck access could not be verified.",
+      })
+    }
+  })
+
   app.get("/decks", async (_req: Request, res: Response) => {
     try {
       res.status(200).json({
-        decks: await listDecks(),
+        decks: await listDecks(getAuthenticatedUser(_req).id),
       })
     } catch (error) {
       console.error("Failed to list decks:", error)
@@ -5252,7 +5533,11 @@ async function main() {
     }
 
     try {
-      const updatedDeck = await updateDeckDetails(deckId, parsedDeck.data)
+      const updatedDeck = await updateDeckDetails(
+        deckId,
+        parsedDeck.data,
+        getAuthenticatedUser(req).id
+      )
 
       if (!updatedDeck) {
         res.status(404).json({
@@ -5274,6 +5559,7 @@ async function main() {
 
   app.post("/decks", async (req: Request, res: Response) => {
     const parsedDeck = createDeckSchema.safeParse(req.body)
+    const user = getAuthenticatedUser(req)
 
     if (!parsedDeck.success) {
       res.status(400).json({
@@ -5339,6 +5625,7 @@ async function main() {
       const createdDeck = await createDeck({
         name: parsedDeck.data.name,
         desc: parsedDeck.data.desc,
+        ownerUserId: user.id,
         commanders: commanderOracleIds.map((oracleId) => ({
           oracleId,
           quantity: 1,
@@ -5364,7 +5651,7 @@ async function main() {
     const deckId = String(req.params.deckId)
 
     try {
-      const wasDeleted = await deleteDeck(deckId)
+      const wasDeleted = await deleteDeck(deckId, getAuthenticatedUser(req).id)
 
       if (!wasDeleted) {
         res.status(404).json({
@@ -5382,9 +5669,16 @@ async function main() {
     }
   })
 
-  registerMcpEndpoint(app, OPENING_HAND_MCP_PATH, createOpeningHandServer)
-  registerMcpEndpoint(app, TURN_SIMULATION_MCP_PATH, createTurnSimulationServer)
-  registerMcpEndpoint(app, SIMULATION_MCP_PATH, createSimulationServer)
+  registerMcpEndpoint(app, OPENING_HAND_MCP_PATH, createOpeningHandServer, {
+    phase: "opening_hand",
+  })
+  registerMcpEndpoint(app, TURN_SIMULATION_MCP_PATH, createTurnSimulationServer, {
+    phase: "turn",
+  })
+
+  if (simulationMcpServerEnabled) {
+    registerMcpEndpoint(app, SIMULATION_MCP_PATH, createSimulationServer)
+  }
 
   app.listen(port, host, (error?: Error) => {
     if (error) {
@@ -5399,9 +5693,11 @@ async function main() {
     console.error(
       `Turn-simulation MCP endpoint available at http://${host}:${port}${TURN_SIMULATION_MCP_PATH}`
     )
-    console.error(
-      `Simulation MCP endpoint available at http://${host}:${port}${SIMULATION_MCP_PATH}`
-    )
+    if (simulationMcpServerEnabled) {
+      console.error(
+        `Simulation MCP test endpoint available at http://${host}:${port}${SIMULATION_MCP_PATH}`
+      )
+    }
   })
 }
 
@@ -5632,6 +5928,7 @@ function applyCors(
 
   if (requestOrigin && isAllowedOrigin(requestOrigin, allowedOrigins)) {
     res.setHeader("Access-Control-Allow-Origin", requestOrigin)
+    res.setHeader("Access-Control-Allow-Credentials", "true")
     res.setHeader("Vary", "Origin")
   }
 
@@ -5645,6 +5942,26 @@ function applyCors(
     getAllowedRequestHeaders(req.headers["access-control-request-headers"])
   )
   res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id")
+}
+
+function getAuthenticatedUser(req: Request) {
+  const user = authenticatedUsersByRequest.get(req)
+
+  if (!user) {
+    throw new Error("Request has not been authenticated.")
+  }
+
+  return user
+}
+
+function isAuthPath(path: string) {
+  return path === AUTH_PATH_PREFIX || path.startsWith(`${AUTH_PATH_PREFIX}/`)
+}
+
+function getSimulationMcpServerEnabled() {
+  const value = process.env.SIMULATION_MCP_SERVER_ENABLED?.trim().toLowerCase()
+
+  return value === "true" || value === "1" || value === "yes"
 }
 
 function isAllowedOrigin(origin: string, allowedOrigins: readonly string[]) {
@@ -5696,10 +6013,13 @@ function getAllowedRequestHeaders(
 function registerMcpEndpoint(
   app: ReturnType<typeof createMcpExpressApp>,
   path: string,
-  createScopedServer: () => McpServer
+  createScopedServer: (authContext?: LlmRunMcpTokenContext) => McpServer,
+  authOptions?: {
+    phase: LlmRunMcpTokenPhase
+  }
 ) {
   app.post(path, async (req: Request, res: Response) => {
-    await handleMcpRequest(req, res, createScopedServer)
+    await handleMcpRequest(req, res, createScopedServer, authOptions)
   })
 
   app.get(path, (_req: Request, res: Response) => {
@@ -5711,12 +6031,78 @@ function registerMcpEndpoint(
   })
 }
 
+async function authenticateMcpRequest(
+  req: Request,
+  res: Response,
+  phase: LlmRunMcpTokenPhase
+) {
+  const token = getMcpRunTokenFromRequest(req)
+
+  if (!token) {
+    res.status(401).json({
+      error: "MCP run token is required.",
+    })
+    return null
+  }
+
+  const authContext = await getActiveLlmRunMcpTokenContext({
+    phase,
+    tokenHash: hashMcpRunToken(token),
+  })
+
+  if (!authContext) {
+    res.status(401).json({
+      error: "MCP run token is invalid or expired.",
+    })
+    return null
+  }
+
+  return authContext
+}
+
+function getMcpRunTokenFromRequest(req: Request) {
+  const authorization = req.headers.authorization
+
+  if (typeof authorization === "string") {
+    const match = authorization.match(/^Bearer\s+(.+)$/i)
+
+    if (match?.[1]?.trim()) {
+      return match[1].trim()
+    }
+  }
+
+  const requestUrl = new URL(req.originalUrl, `http://${DEFAULT_HOST}`)
+
+  return requestUrl.searchParams.get("mcpRunToken")?.trim() || null
+}
+
 async function handleMcpRequest(
   req: Request,
   res: Response,
-  createScopedServer: () => McpServer
+  createScopedServer: (authContext?: LlmRunMcpTokenContext) => McpServer,
+  authOptions?: {
+    phase: LlmRunMcpTokenPhase
+  }
 ) {
-  const server = createScopedServer()
+  let authContext: LlmRunMcpTokenContext | null | undefined
+
+  try {
+    authContext = authOptions
+      ? await authenticateMcpRequest(req, res, authOptions.phase)
+      : undefined
+  } catch (error) {
+    console.error("Failed to authenticate MCP request:", error)
+    res.status(500).json({
+      error: "MCP authentication could not be verified.",
+    })
+    return
+  }
+
+  if (authContext === null) {
+    return
+  }
+
+  const server = createScopedServer(authContext)
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
   })
@@ -5765,11 +6151,11 @@ function respondWithMethodNotAllowed(res: Response) {
   })
 }
 
-function isMcpPath(path: string) {
+function isMcpPath(path: string, simulationMcpServerEnabled: boolean) {
   return (
     path === OPENING_HAND_MCP_PATH ||
     path === TURN_SIMULATION_MCP_PATH ||
-    path === SIMULATION_MCP_PATH
+    (simulationMcpServerEnabled && path === SIMULATION_MCP_PATH)
   )
 }
 

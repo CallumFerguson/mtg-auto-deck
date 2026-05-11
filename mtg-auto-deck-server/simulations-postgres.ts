@@ -168,6 +168,15 @@ export type OpenRouterGeneration = {
   createdAt: string
 }
 
+export type LlmRunMcpTokenPhase = Extract<LlmRunPhase, "opening_hand" | "turn">
+
+export type LlmRunMcpTokenContext = {
+  deckId: string
+  llmRunId: string
+  phase: LlmRunMcpTokenPhase
+  simulationId: string
+}
+
 export type TurnEvaluationJson = {
   legalTurnPass: boolean
   reasoningPass: boolean
@@ -1010,6 +1019,27 @@ export async function ensureSimulationsSchema() {
       UNIQUE (llm_run_id)
     )
   `)
+  await queryDatabase(`
+    CREATE TABLE IF NOT EXISTS llm_run_mcp_tokens (
+      id bigserial PRIMARY KEY,
+
+      llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
+      simulation_id uuid NOT NULL REFERENCES simulations(id) ON DELETE CASCADE,
+      deck_id uuid NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
+      phase llm_run_phase NOT NULL,
+      token_hash text NOT NULL,
+      expires_at timestamptz NOT NULL,
+      revoked_at timestamptz,
+
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+
+      CONSTRAINT llm_run_mcp_tokens_phase_check
+        CHECK (phase IN ('opening_hand', 'turn')),
+      UNIQUE (llm_run_id),
+      UNIQUE (token_hash)
+    )
+  `)
 
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS simulations_deck_id_idx
@@ -1026,6 +1056,10 @@ export async function ensureSimulationsSchema() {
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS llm_runs_provider_model_idx
       ON llm_runs (provider, model)
+  `)
+  await queryDatabase(`
+    CREATE INDEX IF NOT EXISTS llm_run_mcp_tokens_hash_phase_idx
+      ON llm_run_mcp_tokens (token_hash, phase)
   `)
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS llm_run_openrouter_generations_llm_run_id_turn_idx
@@ -2357,6 +2391,97 @@ export async function updateLlmRunRequestData({
   if (result.rowCount === 0) {
     throw new SimulationValidationError("LLM run not found.")
   }
+}
+
+export async function createLlmRunMcpToken({
+  deckId,
+  expiresAt,
+  llmRunId,
+  phase,
+  simulationId,
+  tokenHash,
+}: LlmRunMcpTokenContext & {
+  expiresAt: Date
+  tokenHash: string
+}) {
+  await queryDatabase(
+    `
+      INSERT INTO llm_run_mcp_tokens (
+        llm_run_id,
+        simulation_id,
+        deck_id,
+        phase,
+        token_hash,
+        expires_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6)
+      ON CONFLICT (llm_run_id)
+      DO UPDATE SET
+        token_hash = EXCLUDED.token_hash,
+        phase = EXCLUDED.phase,
+        expires_at = EXCLUDED.expires_at,
+        revoked_at = NULL,
+        updated_at = now()
+    `,
+    [llmRunId, simulationId, deckId, phase, tokenHash, expiresAt]
+  )
+}
+
+export async function getActiveLlmRunMcpTokenContext({
+  phase,
+  tokenHash,
+}: {
+  phase: LlmRunMcpTokenPhase
+  tokenHash: string
+}): Promise<LlmRunMcpTokenContext | null> {
+  const result = await queryDatabase<{
+    deck_id: string
+    llm_run_id: string
+    phase: LlmRunMcpTokenPhase
+    simulation_id: string
+  }>(
+    `
+      SELECT
+        token.deck_id,
+        token.llm_run_id,
+        token.phase,
+        token.simulation_id
+      FROM llm_run_mcp_tokens token
+      JOIN llm_runs run
+        ON run.id = token.llm_run_id
+      WHERE token.token_hash = $1
+        AND token.phase = $2
+        AND token.revoked_at IS NULL
+        AND token.expires_at > now()
+        AND run.status IN ('pending', 'streaming')
+    `,
+    [tokenHash, phase]
+  )
+  const token = result.rows[0]
+
+  if (!token) {
+    return null
+  }
+
+  return {
+    deckId: token.deck_id,
+    llmRunId: token.llm_run_id,
+    phase: token.phase,
+    simulationId: token.simulation_id,
+  }
+}
+
+export async function revokeLlmRunMcpToken(llmRunId: string) {
+  await queryDatabase(
+    `
+      UPDATE llm_run_mcp_tokens
+      SET
+        revoked_at = COALESCE(revoked_at, now()),
+        updated_at = now()
+      WHERE llm_run_id = $1
+    `,
+    [llmRunId]
+  )
 }
 
 export async function appendLlmRunChunks(

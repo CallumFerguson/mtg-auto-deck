@@ -11,14 +11,22 @@ import {
 
 import { DeleteDeckModal } from "@/components/DeleteDeckModal"
 import { EditDeckDetailsModal } from "@/components/EditDeckDetailsModal"
+import { AccountMenu } from "@/components/AccountMenu"
 import { Button } from "@/components/ui/button"
-import { API_BASE_URL } from "@/lib/api"
+import { API_BASE_URL, apiFetch } from "@/lib/api"
 import { readApiError } from "@/lib/api-error"
+import type { AuthUser } from "@/lib/auth-client"
 import type { Deck, DecksResponse } from "@/lib/deck-types"
 import { navigateTo } from "@/lib/navigation"
 import { CreateDeckModal } from "@/pages/CreateDeckModal"
 
-export function DeckListPage() {
+export function DeckListPage({
+  user,
+  onSignedOut,
+}: {
+  user: AuthUser
+  onSignedOut: () => void
+}) {
   const [decks, setDecks] = useState<Deck[]>([])
   const [isLoadingDecks, setIsLoadingDecks] = useState(true)
   const [deckLoadError, setDeckLoadError] = useState<string | null>(null)
@@ -34,7 +42,7 @@ export function DeckListPage() {
     setDeckLoadError(null)
 
     try {
-      const response = await fetch(`${API_BASE_URL}/decks`)
+      const response = await apiFetch(`${API_BASE_URL}/decks`)
 
       if (!response.ok) {
         setDeckLoadError(
@@ -69,9 +77,12 @@ export function DeckListPage() {
     setDeleteDeckError(null)
 
     try {
-      const response = await fetch(`${API_BASE_URL}/decks/${deckToDelete.id}`, {
-        method: "DELETE",
-      })
+      const response = await apiFetch(
+        `${API_BASE_URL}/decks/${deckToDelete.id}`,
+        {
+          method: "DELETE",
+        }
+      )
 
       if (!response.ok) {
         setDeleteDeckError(
@@ -105,6 +116,7 @@ export function DeckListPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            <AccountMenu user={user} onSignedOut={onSignedOut} />
             <Button
               type="button"
               variant="outline"
