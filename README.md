@@ -1,4 +1,4 @@
-# MTG Auto Goldfish
+# MTG Auto Deck
 
 ![Simulation screenshot](docs/simulation-screenshot.png)
 

@@ -198,7 +198,7 @@ import {
 
 const DEFAULT_HOST = "127.0.0.1"
 const DEFAULT_PORT = 3001
-const SERVER_NAME = "mtg-auto-goldfish-server"
+const SERVER_NAME = "mtg-auto-deck-server"
 const OPENING_HAND_SERVER_NAME = "opening-hand-server"
 const TURN_SIMULATION_SERVER_NAME = "turn-simulation-server"
 const SIMULATION_SERVER_NAME = "simulation-server"

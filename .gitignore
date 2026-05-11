@@ -14,8 +14,8 @@ dist-ssr
 dist-server
 *.tsbuildinfo
 *.local
-mtg-auto-goldfish-server/data/
-mtg-auto-goldfish-server/prompt-logs/
+mtg-auto-deck-server/data/
+mtg-auto-deck-server/prompt-logs/
 .env
 .env.*
 !.env.example

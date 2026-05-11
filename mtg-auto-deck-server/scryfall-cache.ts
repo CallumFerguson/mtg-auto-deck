@@ -13,7 +13,7 @@ import { pipeline } from "node:stream/promises"
 import { fileURLToPath } from "node:url"
 import { importScryfallOracleCardsToPostgres } from "./scryfall-postgres.js"
 
-const SERVER_NAME = "mtg-auto-goldfish-server"
+const SERVER_NAME = "mtg-auto-deck-server"
 const SCRYFALL_BULK_DATA_URL = "https://api.scryfall.com/bulk-data"
 const SCRYFALL_ORACLE_CARDS_TYPE = "oracle_cards"
 const SCRYFALL_DATA_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000

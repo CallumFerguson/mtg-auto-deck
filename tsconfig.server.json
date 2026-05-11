@@ -5,7 +5,7 @@
     "noEmit": false,
     "allowImportingTsExtensions": false,
     "outDir": "./dist-server",
-    "rootDir": "./mtg-auto-goldfish-server"
+    "rootDir": "./mtg-auto-deck-server"
   },
-  "include": ["mtg-auto-goldfish-server/**/*.ts"]
+  "include": ["mtg-auto-deck-server/**/*.ts"]
 }

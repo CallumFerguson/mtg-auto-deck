@@ -1,12 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="MTG Auto Goldfish">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="MTG Auto Deck">
   <rect width="64" height="64" rx="14" fill="#10131b" />
-  <path
-    d="M8 32c9-14 30-14 39 0-9 14-30 14-39 0Z"
-    fill="#f4b13d"
-    stroke="#ffd56a"
-    stroke-width="3"
-    stroke-linejoin="round"
-  />
-  <path d="M46 32l12-10v20l-12-10Z" fill="#e28329" stroke="#ffd56a" stroke-width="3" stroke-linejoin="round" />
-  <circle cx="24" cy="29" r="3.25" fill="#10131b" />
+  <path d="M18 13h27a5 5 0 0 1 5 5v28H23a5 5 0 0 1-5-5V13Z" fill="#0f766e" stroke="#67e8f9" stroke-width="3" stroke-linejoin="round" />
+  <path d="M14 19h27a5 5 0 0 1 5 5v28H19a5 5 0 0 1-5-5V19Z" fill="#1e293b" stroke="#38bdf8" stroke-width="3" stroke-linejoin="round" />
+  <path d="M24 37l3-7 3 7 7 3-7 3-3 7-3-7-7-3 7-3Z" fill="#f8fafc" stroke="#fde68a" stroke-width="2" stroke-linejoin="round" />
+  <path d="M41 18l1.6 3.4L46 23l-3.4 1.6L41 28l-1.6-3.4L36 23l3.4-1.6L41 18Z" fill="#fbbf24" />
+  <path d="M49 32l1 2 2 1-2 1-1 2-1-2-2-1 2-1 1-2Z" fill="#a5f3fc" />
 </svg>

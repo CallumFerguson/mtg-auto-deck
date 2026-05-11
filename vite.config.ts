@@ -9,7 +9,7 @@ export default defineConfig({
   server: {
     watch: {
       ignored: (watchPath) =>
-        watchPath.includes("mtg-auto-goldfish-server") &&
+        watchPath.includes("mtg-auto-deck-server") &&
         !watchPath.endsWith("simulation-run-text.ts"),
     },
   },
