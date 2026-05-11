@@ -43,6 +43,7 @@ TOOL USAGE RULES
 - Every tool call must identify this run with the provided llmRunId only.
 - Use the exact llmRunId value from this prompt.
 - Do not include a simulationId in tool calls.
+- Every opening-hand tool call must include a short reason argument explaining why that tool call is being made.
 - Call draw_starting_hand exactly once to get the very first opening hand.
 - Do not call draw_starting_hand again after that.
 - If you decide a hand is not keepable, and only then, call mulligan.
@@ -50,7 +51,7 @@ TOOL USAGE RULES
 - mulligan already shuffles and draws the new seven-card hand for you.
 - After any mulligan call, stop and evaluate only the newly returned hand before deciding anything else.
 - Once a new hand is returned from mulligan, the previous hand is no longer relevant except as history for the summary field.
-- Every mulligan tool call must include a short reason argument explaining why the current hand is not keepable.
+- Every mulligan tool call reason must explain why the current hand is not keepable.
 - If a hand is keepable, keep it and do not call mulligan.
 - If you keep after a non-free mulligan and must put cards on the bottom, first decide the full set of cards you will bottom, then call return_cards_to_library once with that full set.
 - return_cards_to_library must happen before you report the final kept hand whenever bottoming is required.
@@ -294,6 +295,7 @@ DECISION FLOW
 - After a mulligan returns a new hand, stop and evaluate that hand on its own merits.
 - If the hand is keepable and no cards must be bottomed, report the full kept hand.
 - If the hand is keepable and cards must be bottomed, first decide the full set of cards to bottom, then call return_cards_to_library once with all of them, then report the final kept hand.
+- The return_cards_to_library reason should briefly explain that you are bottoming cards after a non-free mulligan.
 - Do not treat the hand as finalized until any required return_cards_to_library call has already happened.
 - If you reach the practical cap, keep the hand rather than mulliganing again.
 
@@ -427,6 +429,7 @@ LIBRARY AND TOOL RULES
 - Every tool call must identify this run with the provided llmRunId only.
 - Use the exact llmRunId value from this prompt.
 - Do not include a simulationId in tool calls.
+- Every library tool call must include a short reason argument explaining the game effect or rule being resolved. log_turn_action does not use a reason argument.
 - Use the correct tool for the correct job:
   - draw_card_from_top: normal draws, reveal-from-top effects, and taking known cards from the top
   - draw_card_from_bottom: only when an effect explicitly takes cards from the bottom

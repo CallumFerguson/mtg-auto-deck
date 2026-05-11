@@ -964,6 +964,7 @@ type McpDeckIdentifierInput = {
 type McpSimulationIdentifierInput = {
   llmRunId?: string
   simulationId?: string
+  reason?: string
 }
 type McpDrawCardsInput = McpSimulationIdentifierInput & {
   count: number
@@ -991,17 +992,39 @@ type McpLogTurnActionInput = McpSimulationIdentifierInput & {
 
 type McpSimulationIdentifierConfig = {
   inputSchema: typeof llmRunIdentifierSchema | typeof simulationIdentifierSchema
+  requireReason: boolean
 }
 
 const llmRunMcpIdentifier: McpSimulationIdentifierConfig = {
   inputSchema: llmRunIdentifierSchema,
+  requireReason: true,
 }
 const simulationMcpIdentifier: McpSimulationIdentifierConfig = {
   inputSchema: simulationIdentifierSchema,
+  requireReason: false,
 }
 
 async function resolveMcpSimulationId(input: McpSimulationIdentifierInput) {
   return resolveSimulationIdentifier(input)
+}
+
+const mcpShortReasonSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .describe("A short explanation of why this tool call is being made.")
+
+function addMcpReasonToToolResult<T extends object>(
+  identifier: McpSimulationIdentifierConfig,
+  input: McpSimulationIdentifierInput,
+  response: T
+) {
+  return identifier.requireReason && typeof input.reason === "string"
+    ? {
+        ...response,
+        reason: input.reason.trim(),
+      }
+    : response
 }
 
 function createOpeningHandServer() {
@@ -1153,6 +1176,7 @@ function registerDrawCardFromTopTool(
         "Draw one or more cards from the top of the stored library for an existing simulation.",
       inputSchema: {
         ...identifier.inputSchema,
+        ...(identifier.requireReason ? { reason: mcpShortReasonSchema } : {}),
         count: z.number().int().positive().describe("How many cards to draw."),
       },
     },
@@ -1164,7 +1188,7 @@ function registerDrawCardFromTopTool(
       return {
         content: createToolResultContent(
           `Drew ${response.cards.length} card(s) from the top. ${response.cardsRemaining} card(s) remain.`,
-          response
+          addMcpReasonToToolResult(identifier, input, response)
         ),
       }
     }
@@ -1183,6 +1207,7 @@ function registerDrawCardFromBottomTool(
         "Draw one or more cards from the bottom of the stored library for an existing simulation.",
       inputSchema: {
         ...identifier.inputSchema,
+        ...(identifier.requireReason ? { reason: mcpShortReasonSchema } : {}),
         count: z.number().int().positive().describe("How many cards to draw."),
       },
     },
@@ -1194,7 +1219,7 @@ function registerDrawCardFromBottomTool(
       return {
         content: createToolResultContent(
           `Drew ${response.cards.length} card(s) from the bottom. ${response.cardsRemaining} card(s) remain.`,
-          response
+          addMcpReasonToToolResult(identifier, input, response)
         ),
       }
     }
@@ -1213,6 +1238,7 @@ function registerDrawStartingHandTool(
         "Draw the very first opening seven-card hand from the stored library for an existing simulation. Call this exactly once per simulation, before any mulligans. Never call this after mulligan, because mulligan already shuffles and draws the replacement seven-card hand.",
       inputSchema: {
         ...identifier.inputSchema,
+        ...(identifier.requireReason ? { reason: mcpShortReasonSchema } : {}),
       },
     },
     async (input: McpSimulationIdentifierInput) => {
@@ -1222,7 +1248,7 @@ function registerDrawStartingHandTool(
       return {
         content: createToolResultContent(
           `Drew the starting hand. ${response.cardsRemaining} card(s) remain in the library.`,
-          response
+          addMcpReasonToToolResult(identifier, input, response)
         ),
       }
     }
@@ -1277,6 +1303,7 @@ function registerReturnCardToLibraryTool(
         "Return a card to the library for an existing simulation, placing it a specific number of cards from the top or bottom.",
       inputSchema: {
         ...identifier.inputSchema,
+        ...(identifier.requireReason ? { reason: mcpShortReasonSchema } : {}),
         card: z
           .string()
           .trim()
@@ -1309,7 +1336,7 @@ function registerReturnCardToLibraryTool(
       return {
         content: createToolResultContent(
           `Returned ${JSON.stringify(response.card)} to the ${side} of the library. ${response.cardsRemaining} card(s) remain.`,
-          response
+          addMcpReasonToToolResult(identifier, input, response)
         ),
       }
     }
@@ -1328,6 +1355,7 @@ function registerReturnCardsToLibraryTool(
         "Return multiple cards to the top or bottom of the library for an existing simulation, optionally randomizing the order they are returned in.",
       inputSchema: {
         ...identifier.inputSchema,
+        ...(identifier.requireReason ? { reason: mcpShortReasonSchema } : {}),
         cards: z
           .array(z.string().trim().min(1))
           .min(1)
@@ -1357,7 +1385,7 @@ function registerReturnCardsToLibraryTool(
       return {
         content: createToolResultContent(
           `Returned ${response.cards.length} card(s) to the ${side} of the library. ${response.cardsRemaining} card(s) remain.`,
-          response
+          addMcpReasonToToolResult(identifier, input, response)
         ),
       }
     }
@@ -1376,6 +1404,7 @@ function registerTakeCardsFromLibraryTool(
         "Take one or more specific cards out of the stored library for tutor and search effects. Each requested name uses the best reasonably close fuzzy match, ignoring case and punctuation. If no close enough match exists, that request returns no card.",
       inputSchema: {
         ...identifier.inputSchema,
+        ...(identifier.requireReason ? { reason: mcpShortReasonSchema } : {}),
         cards: z
           .array(z.string().trim().min(1))
           .min(1)
@@ -1395,7 +1424,7 @@ function registerTakeCardsFromLibraryTool(
       return {
         content: createToolResultContent(
           `Found and removed ${response.foundCards.length} requested card(s). ${response.cardsRemaining} card(s) remain.`,
-          response
+          addMcpReasonToToolResult(identifier, input, response)
         ),
       }
     }
@@ -1413,6 +1442,7 @@ function registerShuffleLibraryTool(
       description: "Shuffle the stored library for an existing simulation.",
       inputSchema: {
         ...identifier.inputSchema,
+        ...(identifier.requireReason ? { reason: mcpShortReasonSchema } : {}),
       },
     },
     async (input: McpSimulationIdentifierInput) => {
@@ -1422,7 +1452,7 @@ function registerShuffleLibraryTool(
       return {
         content: createToolResultContent(
           `Shuffled the library. ${response.cardsRemaining} card(s) remain.`,
-          response
+          addMcpReasonToToolResult(identifier, input, response)
         ),
       }
     }
@@ -1478,7 +1508,10 @@ const openingHandLlmToolDefinitions: LlamaCppToolDefinition[] = [
     name: "draw_starting_hand",
     description:
       "Draw the very first opening seven-card hand from the stored library for an existing simulation. Call this exactly once per simulation, before any mulligans. Never call this after mulligan, because mulligan already shuffles and draws the replacement seven-card hand.",
-    inputSchema: z.object(llmRunIdentifierSchema),
+    inputSchema: z.object({
+      ...llmRunIdentifierSchema,
+      reason: mcpShortReasonSchema,
+    }),
   },
   {
     name: "mulligan",
@@ -1499,6 +1532,7 @@ const openingHandLlmToolDefinitions: LlamaCppToolDefinition[] = [
       "Return multiple cards to the top or bottom of the library for an existing simulation, optionally randomizing the order they are returned in.",
     inputSchema: z.object({
       ...llmRunIdentifierSchema,
+      reason: mcpShortReasonSchema,
       cards: z
         .array(z.string().trim().min(1))
         .min(1)
@@ -1540,6 +1574,7 @@ const turnSimulationLlmToolDefinitions: LlamaCppToolDefinition[] = [
       "Draw one or more cards from the top of the stored library for an existing simulation.",
     inputSchema: z.object({
       ...llmRunIdentifierSchema,
+      reason: mcpShortReasonSchema,
       count: z.number().int().positive().describe("How many cards to draw."),
     }),
   },
@@ -1549,6 +1584,7 @@ const turnSimulationLlmToolDefinitions: LlamaCppToolDefinition[] = [
       "Draw one or more cards from the bottom of the stored library for an existing simulation.",
     inputSchema: z.object({
       ...llmRunIdentifierSchema,
+      reason: mcpShortReasonSchema,
       count: z.number().int().positive().describe("How many cards to draw."),
     }),
   },
@@ -1558,6 +1594,7 @@ const turnSimulationLlmToolDefinitions: LlamaCppToolDefinition[] = [
       "Take one or more specific cards out of the stored library for tutor and search effects. Each requested name uses the best reasonably close fuzzy match, ignoring case and punctuation. If no close enough match exists, that request returns no card.",
     inputSchema: z.object({
       ...llmRunIdentifierSchema,
+      reason: mcpShortReasonSchema,
       cards: z
         .array(z.string().trim().min(1))
         .min(1)
@@ -1572,6 +1609,7 @@ const turnSimulationLlmToolDefinitions: LlamaCppToolDefinition[] = [
       "Return a card to the library for an existing simulation, placing it a specific number of cards from the top or bottom.",
     inputSchema: z.object({
       ...llmRunIdentifierSchema,
+      reason: mcpShortReasonSchema,
       card: z
         .string()
         .trim()
@@ -1597,6 +1635,7 @@ const turnSimulationLlmToolDefinitions: LlamaCppToolDefinition[] = [
       "Return multiple cards to the top or bottom of the library for an existing simulation, optionally randomizing the order they are returned in.",
     inputSchema: z.object({
       ...llmRunIdentifierSchema,
+      reason: mcpShortReasonSchema,
       cards: z
         .array(z.string().trim().min(1))
         .min(1)
@@ -1616,7 +1655,10 @@ const turnSimulationLlmToolDefinitions: LlamaCppToolDefinition[] = [
   {
     name: "shuffle_library",
     description: "Shuffle the stored library for an existing simulation.",
-    inputSchema: z.object(llmRunIdentifierSchema),
+    inputSchema: z.object({
+      ...llmRunIdentifierSchema,
+      reason: mcpShortReasonSchema,
+    }),
   },
 ]
 
