@@ -16,6 +16,7 @@ import {
 import { AuthPage, type AuthMode } from "@/pages/AuthPage"
 import { DeckListPage } from "@/pages/DeckListPage"
 import { DeckPage } from "@/pages/DeckPage"
+import { SettingsPage } from "@/pages/SettingsPage"
 
 const ADMIN_OPTIONS_ENABLED_STORAGE_KEY = "mtg-auto-deck.admin-options-enabled"
 
@@ -72,6 +73,17 @@ export function App() {
   const handleAdminOptionsEnabledChange = (isEnabled: boolean) => {
     setAdminOptionsEnabled(isEnabled)
     storeAdminOptionsEnabled(isEnabled)
+  }
+
+  if (location.pathname === "/settings") {
+    return (
+      <SettingsPage
+        adminOptionsEnabled={adminOptionsEnabled}
+        onAdminOptionsEnabledChange={handleAdminOptionsEnabledChange}
+        onSignedOut={handleSignedOut}
+        user={user}
+      />
+    )
   }
 
   if (isAdminPathname(location.pathname)) {
