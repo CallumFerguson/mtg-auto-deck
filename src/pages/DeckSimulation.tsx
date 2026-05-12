@@ -1276,18 +1276,48 @@ export function DeckSimulation({
                       </select>
                     </div>
 
-                    <label className="flex items-center gap-2 rounded-md border border-border bg-background/35 px-3 py-3 text-sm text-muted-foreground transition-colors has-checked:border-ring has-checked:bg-accent has-checked:text-accent-foreground has-disabled:cursor-not-allowed has-disabled:opacity-50">
-                      <input
-                        className="size-4 accent-sky-300"
-                        type="checkbox"
-                        checked={canAutoGenerateReport && autoGenerateReport}
-                        disabled={!canAutoGenerateReport}
-                        onChange={(event) =>
-                          setAutoGenerateReport(event.target.checked)
+                    <div
+                      className={`flex items-center gap-3 rounded-md border px-3 py-3 text-sm transition-colors ${
+                        canAutoGenerateReport && autoGenerateReport
+                          ? "border-ring bg-accent text-accent-foreground"
+                          : "border-border bg-background/35 text-muted-foreground"
+                      } ${
+                        canAutoGenerateReport
+                          ? ""
+                          : "cursor-not-allowed opacity-50"
+                      }`}
+                    >
+                      <button
+                        className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus:ring-3 focus:ring-ring/25 focus:outline-none disabled:cursor-not-allowed ${
+                          canAutoGenerateReport && autoGenerateReport
+                            ? "border-sky-300/70 bg-sky-500/70"
+                            : "border-border bg-muted/55"
+                        }`}
+                        type="button"
+                        role="switch"
+                        aria-checked={
+                          canAutoGenerateReport && autoGenerateReport
                         }
-                      />
-                      Auto-generate report after final turn
-                    </label>
+                        aria-label="Auto-generate report after final turn"
+                        disabled={!canAutoGenerateReport}
+                        onClick={() =>
+                          setAutoGenerateReport(
+                            (currentValue) => !currentValue
+                          )
+                        }
+                      >
+                        <span
+                          className={`absolute top-1/2 left-1 size-4 -translate-y-1/2 rounded-full bg-foreground shadow-sm shadow-black/30 transition-transform ${
+                            canAutoGenerateReport && autoGenerateReport
+                              ? "translate-x-5"
+                              : "translate-x-0"
+                          }`}
+                        />
+                      </button>
+                      <span className="font-medium">
+                        Auto-generate report after final turn
+                      </span>
+                    </div>
 
                     <fieldset className="grid gap-3">
                       <legend className="text-sm font-medium text-foreground">
