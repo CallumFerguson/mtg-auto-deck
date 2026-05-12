@@ -6,6 +6,11 @@ type SendPasswordResetEmailInput = {
   userName: string
 }
 
+type SendPasswordChangedEmailInput = {
+  to: string
+  userName: string
+}
+
 type SendVerificationCodeEmailInput = {
   code: string
   to: string
@@ -25,6 +30,22 @@ export async function sendPasswordResetEmail({
     subject: "Reset your MTG Auto Deck password",
     text: renderPasswordResetText({ displayName, resetUrl }),
     html: renderPasswordResetHtml({ displayName, resetUrl, to }),
+  })
+}
+
+export async function sendPasswordChangedEmail({
+  to,
+  userName,
+}: SendPasswordChangedEmailInput) {
+  const { from, transporter } = getEmailTransport()
+  const displayName = userName.trim() || "there"
+
+  await transporter.sendMail({
+    from,
+    to,
+    subject: "Your MTG Auto Deck password was changed",
+    text: renderPasswordChangedText({ displayName }),
+    html: renderPasswordChangedHtml({ displayName, to }),
   })
 }
 
@@ -60,6 +81,16 @@ ${resetUrl}
 This link expires in 5 minutes and can only be used once.
 
 If you did not request this change, you can ignore this email. Your current password will keep working.`
+}
+
+function renderPasswordChangedText({ displayName }: { displayName: string }) {
+  return `Hi ${displayName},
+
+This is a confirmation that the password for your MTG Auto Deck account was changed.
+
+If this was you, no action is needed.
+
+If you did not make this change, reset your password immediately and review any other places where you use the same password.`
 }
 
 function renderVerificationCodeText({ code }: { code: string }) {
@@ -101,6 +132,34 @@ function renderPasswordResetHtml({
         body: "If you did not request this change, you can safely ignore this email. Your current password will keep working.",
       })}
       ${renderFallbackLink(resetUrl)}
+    `,
+  })
+}
+
+function renderPasswordChangedHtml({
+  displayName,
+  to,
+}: {
+  displayName: string
+  to: string
+}) {
+  return renderEmailLayout({
+    previewText: "Your MTG Auto Deck password was changed.",
+    to,
+    content: `
+      ${renderHeadingBlock({
+        eyebrow: "Password changed",
+        heading: `Hi ${displayName}, your password was changed`,
+        body: "This is a confirmation that the password for your MTG Auto Deck account was changed.",
+      })}
+      ${renderInfoPanel({
+        title: "If this was you",
+        body: "No action is needed. You can keep using MTG Auto Deck with your new password.",
+      })}
+      ${renderInfoPanel({
+        title: "If this was not you",
+        body: "Reset your password immediately and review any other places where you use the same password.",
+      })}
     `,
   })
 }
