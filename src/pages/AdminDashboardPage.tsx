@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react"
 import {
   ArrowLeft,
-  Ban,
   CheckCircle2,
   LayoutDashboard,
   RefreshCw,
@@ -314,7 +313,6 @@ function AdminUsersSection() {
                   <TableHeader>Account</TableHeader>
                   <TableHeader>Verified</TableHeader>
                   <TableHeader>Role</TableHeader>
-                  <TableHeader>Status</TableHeader>
                   <TableHeader>Created</TableHeader>
                   <TableHeader>Updated</TableHeader>
                 </tr>
@@ -340,9 +338,6 @@ function AdminUsersSection() {
                     </TableCell>
                     <TableCell>
                       <RoleBadge role={user.role} />
-                    </TableCell>
-                    <TableCell>
-                      <AccountStatusBadge user={user} />
                     </TableCell>
                     <TableCell>{formatDateTime(user.createdAt)}</TableCell>
                     <TableCell>{formatDateTime(user.updatedAt)}</TableCell>
@@ -373,9 +368,6 @@ function AdminUsersSection() {
                 <dl className="mt-4 grid gap-3 text-sm">
                   <AdminUserDetail label="Verified">
                     <VerificationBadge isVerified={user.emailVerified} />
-                  </AdminUserDetail>
-                  <AdminUserDetail label="Status">
-                    <AccountStatusBadge user={user} />
                   </AdminUserDetail>
                   <AdminUserDetail label="Created">
                     {formatDateTime(user.createdAt)}
@@ -493,44 +485,18 @@ function RoleBadge({ role }: { role: string | null }) {
   )
 }
 
-function AccountStatusBadge({ user }: { user: AdminUser }) {
-  if (user.banned) {
-    return (
-      <StatusBadge
-        className="border-destructive/40 bg-destructive/10 text-destructive"
-        icon={<Ban className="size-3.5" aria-hidden="true" />}
-        title={getBanTitle(user)}
-      >
-        Banned
-      </StatusBadge>
-    )
-  }
-
-  return (
-    <StatusBadge
-      className="border-border bg-muted/35 text-muted-foreground"
-      icon={<CheckCircle2 className="size-3.5" aria-hidden="true" />}
-    >
-      Active
-    </StatusBadge>
-  )
-}
-
 function StatusBadge({
   children,
   className,
   icon,
-  title,
 }: {
   children: ReactNode
   className: string
   icon: ReactNode
-  title?: string
 }) {
   return (
     <span
       className={`inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium ${className}`}
-      title={title}
     >
       {icon}
       <span className="truncate">{children}</span>
@@ -544,15 +510,6 @@ function getDisplayName(user: AdminUser) {
 
 function getRoleLabel(role: string | null) {
   return role?.trim() || "user"
-}
-
-function getBanTitle(user: AdminUser) {
-  const parts = [
-    user.banReason ? `Reason: ${user.banReason}` : null,
-    user.banExpires ? `Expires: ${formatDateTime(user.banExpires)}` : null,
-  ].filter((part) => part !== null)
-
-  return parts.length > 0 ? parts.join(" | ") : undefined
 }
 
 function formatDateTime(value: string) {
