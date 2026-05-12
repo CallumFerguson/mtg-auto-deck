@@ -37,7 +37,7 @@ export async function sendVerificationCodeEmail({
   await transporter.sendMail({
     from,
     to,
-    subject: "Verify your MTG Auto Deck email",
+    subject: `Your MTG Auto Deck code is ${code}`,
     text: renderVerificationCodeText({ code }),
     html: renderVerificationCodeHtml({ code, to }),
   })
