@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react"
 import { ArrowLeft, KeyRound, LogOut, Mail, Settings, X } from "lucide-react"
 
 import { AccountMenu } from "@/components/AccountMenu"
+import { SignOutConfirmModal } from "@/components/SignOutConfirmModal"
 import { Button } from "@/components/ui/button"
 import { API_BASE_URL, apiFetch } from "@/lib/api"
 import { authClient, type AuthUser } from "@/lib/auth-client"
@@ -25,6 +26,7 @@ export function SettingsPage({
 }: SettingsPageProps) {
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false)
   const [passwordNotice, setPasswordNotice] = useState<string | null>(null)
+  const [isSignOutConfirmOpen, setIsSignOutConfirmOpen] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
 
   async function handleSignOut() {
@@ -33,6 +35,7 @@ export function SettingsPage({
     try {
       await authClient.signOut()
       onSignedOut()
+      setIsSignOutConfirmOpen(false)
     } finally {
       setIsSigningOut(false)
     }
@@ -130,11 +133,11 @@ export function SettingsPage({
             <Button
               type="button"
               variant="destructive"
-              onClick={() => void handleSignOut()}
+              onClick={() => setIsSignOutConfirmOpen(true)}
               disabled={isSigningOut}
             >
               <LogOut data-icon="inline-start" />
-              {isSigningOut ? "Signing out..." : "Sign out"}
+              Sign out
             </Button>
           </div>
         </div>
@@ -147,6 +150,13 @@ export function SettingsPage({
             setIsChangePasswordOpen(false)
             setPasswordNotice("Password changed.")
           }}
+        />
+      ) : null}
+      {isSignOutConfirmOpen ? (
+        <SignOutConfirmModal
+          isSigningOut={isSigningOut}
+          onClose={() => setIsSignOutConfirmOpen(false)}
+          onConfirm={() => void handleSignOut()}
         />
       ) : null}
     </main>

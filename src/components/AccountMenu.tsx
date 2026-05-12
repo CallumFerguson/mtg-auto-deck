@@ -8,6 +8,7 @@ import {
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { SignOutConfirmModal } from "@/components/SignOutConfirmModal"
 import { authClient, type AuthUser } from "@/lib/auth-client"
 import { navigateTo } from "@/lib/navigation"
 
@@ -23,6 +24,7 @@ export function AccountMenu({
   user: AuthUser
 }) {
   const [isOpen, setIsOpen] = useState(false)
+  const [isSignOutConfirmOpen, setIsSignOutConfirmOpen] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
   const accountLabel =
     user.name && user.name !== user.email ? user.name : "MTG Auto Deck"
@@ -33,6 +35,7 @@ export function AccountMenu({
     try {
       await authClient.signOut()
       onSignedOut()
+      setIsSignOutConfirmOpen(false)
     } finally {
       setIsSigningOut(false)
     }
@@ -137,14 +140,24 @@ export function AccountMenu({
             <button
               className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
               type="button"
-              onClick={() => void handleSignOut()}
+              onClick={() => {
+                setIsOpen(false)
+                setIsSignOutConfirmOpen(true)
+              }}
               disabled={isSigningOut}
             >
               <LogOut data-icon="inline-start" />
-              {isSigningOut ? "Signing out..." : "Sign out"}
+              Sign out
             </button>
           </div>
         </>
+      ) : null}
+      {isSignOutConfirmOpen ? (
+        <SignOutConfirmModal
+          isSigningOut={isSigningOut}
+          onClose={() => setIsSignOutConfirmOpen(false)}
+          onConfirm={() => void handleSignOut()}
+        />
       ) : null}
     </div>
   )
