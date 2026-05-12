@@ -18,15 +18,19 @@ import { DeckSimulation } from "@/pages/DeckSimulation"
 import { ViewDeckCards } from "@/pages/ViewDeckCards"
 
 export function DeckPage({
+  adminOptionsEnabled,
   deckId,
   initialTab,
   initialSimulationId,
+  onAdminOptionsEnabledChange,
   onSignedOut,
   user,
 }: {
+  adminOptionsEnabled: boolean
   deckId: string
   initialTab: DeckPageTab
   initialSimulationId: string | null
+  onAdminOptionsEnabledChange: (isEnabled: boolean) => void
   onSignedOut: () => void
   user: AuthUser
 }) {
@@ -105,6 +109,7 @@ export function DeckPage({
   }
 
   const isSimulationTab = activeTab === "simulation"
+  const shouldShowAdminOptions = user.role === "admin" && adminOptionsEnabled
 
   return (
     <main className="flex h-svh overflow-hidden bg-background pt-3 text-foreground">
@@ -192,7 +197,12 @@ export function DeckPage({
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <AccountMenu user={user} onSignedOut={onSignedOut} />
+              <AccountMenu
+                adminOptionsEnabled={adminOptionsEnabled}
+                onAdminOptionsEnabledChange={onAdminOptionsEnabledChange}
+                user={user}
+                onSignedOut={onSignedOut}
+              />
               <div className="inline-grid w-full grid-cols-2 rounded-lg border border-border bg-card/70 p-1 sm:w-auto">
                 <TabButton
                   isActive={activeTab === "details"}
@@ -232,7 +242,7 @@ export function DeckPage({
               <DeckSimulation
                 cards={deck.cards}
                 deckId={deck.id}
-                isAdmin={user.role === "admin"}
+                isAdmin={shouldShowAdminOptions}
                 selectedSimulationIdFromUrl={initialSimulationId}
               />
             </div>

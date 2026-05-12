@@ -21,10 +21,14 @@ import { navigateTo } from "@/lib/navigation"
 import { CreateDeckModal } from "@/pages/CreateDeckModal"
 
 export function DeckListPage({
+  adminOptionsEnabled,
   user,
+  onAdminOptionsEnabledChange,
   onSignedOut,
 }: {
+  adminOptionsEnabled: boolean
   user: AuthUser
+  onAdminOptionsEnabledChange: (isEnabled: boolean) => void
   onSignedOut: () => void
 }) {
   const [decks, setDecks] = useState<Deck[]>([])
@@ -116,7 +120,12 @@ export function DeckListPage({
           </div>
 
           <div className="flex items-center gap-2">
-            <AccountMenu user={user} onSignedOut={onSignedOut} />
+            <AccountMenu
+              adminOptionsEnabled={adminOptionsEnabled}
+              onAdminOptionsEnabledChange={onAdminOptionsEnabledChange}
+              user={user}
+              onSignedOut={onSignedOut}
+            />
             <Button
               type="button"
               variant="outline"

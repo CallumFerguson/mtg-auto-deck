@@ -11,9 +11,15 @@ import { AuthPage, type AuthMode } from "@/pages/AuthPage"
 import { DeckListPage } from "@/pages/DeckListPage"
 import { DeckPage } from "@/pages/DeckPage"
 
+const ADMIN_OPTIONS_ENABLED_STORAGE_KEY =
+  "mtg-auto-deck.admin-options-enabled"
+
 export function App() {
   const location = useLocation()
   const session = authClient.useSession()
+  const [adminOptionsEnabled, setAdminOptionsEnabled] = useState(
+    getStoredAdminOptionsEnabled
+  )
   const authMode = getAuthModeFromLocation(location.pathname)
   const deckId = getDeckIdFromPathname(location.pathname)
   const handleAuthenticated = async () => {
@@ -58,18 +64,49 @@ export function App() {
   const handleSignedOut = () => {
     void session.refetch()
   }
+  const handleAdminOptionsEnabledChange = (isEnabled: boolean) => {
+    setAdminOptionsEnabled(isEnabled)
+    storeAdminOptionsEnabled(isEnabled)
+  }
 
   return deckId ? (
     <DeckPage
+      adminOptionsEnabled={adminOptionsEnabled}
       deckId={deckId}
       initialTab={getDeckPageTabFromSearch(location.search)}
       initialSimulationId={getDeckSimulationIdFromSearch(location.search)}
+      onAdminOptionsEnabledChange={handleAdminOptionsEnabledChange}
       user={user}
       onSignedOut={handleSignedOut}
     />
   ) : (
-    <DeckListPage user={user} onSignedOut={handleSignedOut} />
+    <DeckListPage
+      adminOptionsEnabled={adminOptionsEnabled}
+      onAdminOptionsEnabledChange={handleAdminOptionsEnabledChange}
+      user={user}
+      onSignedOut={handleSignedOut}
+    />
   )
+}
+
+function getStoredAdminOptionsEnabled() {
+  try {
+    return window.localStorage.getItem(ADMIN_OPTIONS_ENABLED_STORAGE_KEY) !==
+      "false"
+  } catch {
+    return true
+  }
+}
+
+function storeAdminOptionsEnabled(isEnabled: boolean) {
+  try {
+    window.localStorage.setItem(
+      ADMIN_OPTIONS_ENABLED_STORAGE_KEY,
+      String(isEnabled)
+    )
+  } catch {
+    // Local storage is only a convenience for this display preference.
+  }
 }
 
 function useLocation() {
