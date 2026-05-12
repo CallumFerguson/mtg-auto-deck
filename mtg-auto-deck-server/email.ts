@@ -57,6 +57,8 @@ We received a request to reset the password for your MTG Auto Deck account.
 Choose a new password here:
 ${resetUrl}
 
+This link expires in 5 minutes and can only be used once.
+
 If you did not request this change, you can ignore this email. Your current password will keep working.`
 }
 
@@ -89,6 +91,10 @@ function renderPasswordResetHtml({
       ${renderCtaButton({
         href: resetUrl,
         label: "Reset password",
+      })}
+      ${renderInfoPanel({
+        title: "This link expires in 5 minutes",
+        body: "It can only be used once. If it no longer works, request a new password reset email.",
       })}
       ${renderInfoPanel({
         title: "Security note",

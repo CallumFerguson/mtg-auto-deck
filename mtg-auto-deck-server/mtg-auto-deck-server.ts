@@ -10,7 +10,11 @@ import { OpenRouter, stepCountIs, tool, type Tool } from "@openrouter/agent"
 import { createHash, randomBytes, randomInt, randomUUID } from "node:crypto"
 import OpenAI from "openai"
 import { z } from "zod/v4"
-import { auth, ensureAuthSchema } from "./auth.js"
+import {
+  auth,
+  ensureAuthSchema,
+  isPasswordResetTokenValid,
+} from "./auth.js"
 import { listAdminUsers } from "./admin-users-postgres.js"
 import {
   closeDatabasePool,
@@ -224,6 +228,7 @@ const TURN_SIMULATION_MCP_PATH = "/mcp/turn-simulation"
 const SIMULATION_MCP_PATH = "/mcp/simulation"
 const AUTH_PATH_PREFIX = "/api/auth"
 const APP_SIGN_UP_PATH = "/api/app-auth/sign-up"
+const APP_PASSWORD_RESET_TOKEN_PATH = "/api/app-auth/password-reset-token/:token"
 const OPENING_HAND_MCP_SERVER_LABEL = "opening_hand"
 const TURN_SIMULATION_MCP_SERVER_LABEL = "turn_simulation"
 const STREAM_FLUSH_INTERVAL_MS = 1000
@@ -284,6 +289,7 @@ const appSignUpSchema = z.object({
   email: z.email(),
   password: z.string().min(8).max(128),
 })
+const passwordResetTokenSchema = z.string().trim().min(1).max(256)
 const updateDeckDetailsSchema = z.object({
   name: z.string().trim().min(1),
   description: z.string(),
@@ -4743,6 +4749,26 @@ async function main() {
     }
   })
 
+  app.get(APP_PASSWORD_RESET_TOKEN_PATH, async (req: Request, res: Response) => {
+    const token = parsePasswordResetTokenParam(req.params.token)
+
+    if (!token) {
+      res.status(200).json({ valid: false })
+      return
+    }
+
+    try {
+      res.status(200).json({
+        valid: await isPasswordResetTokenValid(token),
+      })
+    } catch (error) {
+      console.error("Failed to check password reset token:", error)
+      res.status(500).json({
+        error: "Password reset link could not be checked.",
+      })
+    }
+  })
+
   app.get("/health", (_req: Request, res: Response) => {
     res.status(200).json({
       ok: true,
@@ -6290,6 +6316,12 @@ function parseAppSignUpBody(body: unknown) {
   })
 
   return parsedBody.success ? parsedBody.data : null
+}
+
+function parsePasswordResetTokenParam(token: unknown) {
+  const parsedToken = passwordResetTokenSchema.safeParse(token)
+
+  return parsedToken.success ? parsedToken.data : null
 }
 
 async function userEmailExists(email: string) {

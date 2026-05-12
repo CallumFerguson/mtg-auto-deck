@@ -8,6 +8,8 @@ import {
   sendVerificationCodeEmail,
 } from "./email.js"
 
+const PASSWORD_RESET_TOKEN_EXPIRES_IN_SECONDS = 5 * 60
+
 export const auth = betterAuth({
   appName: "MTG Auto Deck",
   baseURL: getRequiredEnvironmentVariable("BETTER_AUTH_URL"),
@@ -15,6 +17,7 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: true,
+    resetPasswordTokenExpiresIn: PASSWORD_RESET_TOKEN_EXPIRES_IN_SECONDS,
     revokeSessionsOnPasswordReset: true,
     sendResetPassword: async ({ user, url }) => {
       void sendPasswordResetEmail({
@@ -62,6 +65,15 @@ export async function ensureAuthSchema() {
   const { runMigrations } = await getMigrations(auth.options)
 
   await runMigrations()
+}
+
+export async function isPasswordResetTokenValid(token: string) {
+  const context = await auth.$context
+  const verification = await context.internalAdapter.findVerificationValue(
+    `reset-password:${token}`
+  )
+
+  return Boolean(verification && verification.expiresAt > new Date())
 }
 
 function getTrustedOrigins() {

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react"
+import { useEffect, useState, type FormEvent } from "react"
 import { KeyRound, LogIn, MailCheck, RotateCcw, UserPlus } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -14,6 +14,11 @@ export type AuthMode =
   | "sign-up"
   | "verify-email"
 
+type ResetLinkStatus = "checking" | "invalid" | "unavailable" | "valid"
+
+const INVALID_PASSWORD_RESET_LINK_MESSAGE =
+  "This password reset link is no longer valid."
+
 export function AuthPage({
   initialEmail = "",
   initialMode = "sign-in",
@@ -23,12 +28,67 @@ export function AuthPage({
   initialMode?: AuthMode
   onAuthenticated: () => Promise<void> | void
 }) {
+  const initialResetLinkStatus = getInitialResetLinkStatus(initialMode)
   const [mode, setMode] = useState<AuthMode>(initialMode)
-  const [error, setError] = useState<string | null>(getInitialError())
+  const [error, setError] = useState<string | null>(
+    getInitialError(initialMode, initialResetLinkStatus)
+  )
   const [notice, setNotice] = useState<string | null>(getInitialNotice())
+  const [resetLinkStatus, setResetLinkStatus] = useState<ResetLinkStatus>(
+    initialResetLinkStatus
+  )
   const [verificationEmail, setVerificationEmail] = useState(initialEmail)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isResendingCode, setIsResendingCode] = useState(false)
+
+  useEffect(() => {
+    if (mode !== "reset-password") {
+      setResetLinkStatus("valid")
+      return
+    }
+
+    const token = getPasswordResetToken()
+
+    if (!token || hasPasswordResetErrorParam()) {
+      setResetLinkStatus("invalid")
+      setError(INVALID_PASSWORD_RESET_LINK_MESSAGE)
+      setNotice(null)
+      return
+    }
+
+    let isActive = true
+    setResetLinkStatus("checking")
+    setError(null)
+    setNotice(null)
+
+    verifyPasswordResetToken(token)
+      .then((isValid) => {
+        if (!isActive) {
+          return
+        }
+
+        if (isValid) {
+          setResetLinkStatus("valid")
+          setError(null)
+          return
+        }
+
+        setResetLinkStatus("invalid")
+        setError(INVALID_PASSWORD_RESET_LINK_MESSAGE)
+      })
+      .catch(() => {
+        if (!isActive) {
+          return
+        }
+
+        setResetLinkStatus("unavailable")
+        setError("Password reset link could not be checked. Refresh the page.")
+      })
+
+    return () => {
+      isActive = false
+    }
+  }, [mode])
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -39,6 +99,16 @@ export function AuthPage({
     const email = String(formData.get("email") ?? "").trim()
     const password = String(formData.get("password") ?? "")
     const otp = String(formData.get("otp") ?? "").trim()
+
+    if (mode === "reset-password" && resetLinkStatus !== "valid") {
+      setError(
+        resetLinkStatus === "checking"
+          ? "Password reset link is still being checked."
+          : INVALID_PASSWORD_RESET_LINK_MESSAGE
+      )
+      return
+    }
+
     const passwordError = getPreSubmitPasswordError(mode, password)
 
     if (passwordError) {
@@ -146,10 +216,11 @@ export function AuthPage({
         return
       }
 
-      const token = new URLSearchParams(window.location.search).get("token")
+      const token = getPasswordResetToken()
 
       if (!token) {
-        setError("Password reset token is missing or invalid.")
+        setResetLinkStatus("invalid")
+        setError(INVALID_PASSWORD_RESET_LINK_MESSAGE)
         return
       }
 
@@ -159,9 +230,13 @@ export function AuthPage({
       })
 
       if (result.error) {
-        setError(
-          getAuthErrorMessage(result.error, "Password could not be reset.")
-        )
+        const message = getResetPasswordErrorMessage(result.error)
+
+        if (message === INVALID_PASSWORD_RESET_LINK_MESSAGE) {
+          setResetLinkStatus("invalid")
+        }
+
+        setError(message)
         return
       }
 
@@ -213,6 +288,9 @@ export function AuthPage({
   const isForgotPassword = mode === "forgot-password"
   const isResetPassword = mode === "reset-password"
   const isVerifyEmail = mode === "verify-email"
+  const canUseResetLink = !isResetPassword || resetLinkStatus === "valid"
+  const isCheckingResetLink =
+    isResetPassword && resetLinkStatus === "checking"
 
   return (
     <main className="flex min-h-svh items-center justify-center bg-background px-4 py-8 text-foreground">
@@ -254,7 +332,7 @@ export function AuthPage({
             </label>
           ) : null}
 
-          {!isForgotPassword && !isVerifyEmail ? (
+          {!isForgotPassword && !isVerifyEmail && canUseResetLink ? (
             <label className="grid gap-2 text-sm font-medium">
               <span>{isResetPassword ? "New password" : "Password"}</span>
               <input
@@ -265,6 +343,15 @@ export function AuthPage({
                 disabled={isSubmitting}
               />
             </label>
+          ) : null}
+
+          {isCheckingResetLink ? (
+            <p
+              className="rounded-md border border-sky-300/30 bg-sky-400/10 px-3 py-2 text-sm text-sky-100"
+              role="status"
+            >
+              Checking password reset link...
+            </p>
           ) : null}
 
           {isVerifyEmail ? (
@@ -300,28 +387,30 @@ export function AuthPage({
             </p>
           ) : null}
 
-          <Button type="submit" disabled={isSubmitting}>
-            {isSignIn ? (
-              <LogIn data-icon="inline-start" />
-            ) : isSignUp ? (
-              <UserPlus data-icon="inline-start" />
-            ) : isVerifyEmail ? (
-              <MailCheck data-icon="inline-start" />
-            ) : (
-              <KeyRound data-icon="inline-start" />
-            )}
-            {isSubmitting
-              ? "Working..."
-              : isSignIn
-                ? "Sign in"
-                : isSignUp
-                  ? "Create account"
-                  : isVerifyEmail
-                    ? "Verify email"
-                    : isForgotPassword
-                      ? "Send reset link"
-                      : "Reset password"}
-          </Button>
+          {canUseResetLink ? (
+            <Button type="submit" disabled={isSubmitting}>
+              {isSignIn ? (
+                <LogIn data-icon="inline-start" />
+              ) : isSignUp ? (
+                <UserPlus data-icon="inline-start" />
+              ) : isVerifyEmail ? (
+                <MailCheck data-icon="inline-start" />
+              ) : (
+                <KeyRound data-icon="inline-start" />
+              )}
+              {isSubmitting
+                ? "Working..."
+                : isSignIn
+                  ? "Sign in"
+                  : isSignUp
+                    ? "Create account"
+                    : isVerifyEmail
+                      ? "Verify email"
+                      : isForgotPassword
+                        ? "Send reset link"
+                        : "Reset password"}
+            </Button>
+          ) : null}
 
           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4 text-sm">
             <button
@@ -389,6 +478,26 @@ async function createAccount({
   }
 }
 
+async function verifyPasswordResetToken(token: string) {
+  const response = await apiFetch(
+    `${API_BASE_URL}/api/app-auth/password-reset-token/${encodeURIComponent(
+      token
+    )}`
+  )
+
+  if (!response.ok) {
+    throw new Error("Password reset token check failed.")
+  }
+
+  const body = (await response.json()) as unknown
+
+  return Boolean(
+    body &&
+      typeof body === "object" &&
+      (body as Record<string, unknown>).valid === true
+  )
+}
+
 async function getApiErrorMessage(response: Response, fallbackMessage: string) {
   try {
     const body = (await response.json()) as unknown
@@ -408,10 +517,28 @@ async function getApiErrorMessage(response: Response, fallbackMessage: string) {
   return fallbackMessage
 }
 
-function getInitialError() {
-  const error = new URLSearchParams(window.location.search).get("error")
+function getInitialResetLinkStatus(initialMode: AuthMode): ResetLinkStatus {
+  if (initialMode !== "reset-password") {
+    return "valid"
+  }
 
-  return error ? "Password reset link is invalid or expired." : null
+  return getPasswordResetToken() && !hasPasswordResetErrorParam()
+    ? "checking"
+    : "invalid"
+}
+
+function getInitialError(
+  initialMode: AuthMode,
+  initialResetLinkStatus: ResetLinkStatus
+) {
+  if (
+    initialMode === "reset-password" &&
+    initialResetLinkStatus === "invalid"
+  ) {
+    return INVALID_PASSWORD_RESET_LINK_MESSAGE
+  }
+
+  return null
 }
 
 function getInitialNotice() {
@@ -438,6 +565,25 @@ function getAuthErrorMessage(error: unknown, fallbackMessage: string) {
   const message = getStringErrorProperty(error, "message")
 
   return message?.trim() ? message : fallbackMessage
+}
+
+function getResetPasswordErrorMessage(error: unknown) {
+  if (isInvalidTokenError(error)) {
+    return INVALID_PASSWORD_RESET_LINK_MESSAGE
+  }
+
+  return getAuthErrorMessage(error, "Password could not be reset.")
+}
+
+function isInvalidTokenError(error: unknown) {
+  const code = getStringErrorProperty(error, "code")
+  const message = getStringErrorProperty(error, "message")
+
+  return (
+    code === "INVALID_TOKEN" ||
+    message?.toLowerCase().includes("invalid token") === true ||
+    message?.toLowerCase().includes("expired") === true
+  )
 }
 
 function isEmailNotVerifiedError(error: unknown) {
@@ -474,6 +620,14 @@ function getNumberErrorProperty(error: unknown, property: string) {
   }
 
   return null
+}
+
+function getPasswordResetToken() {
+  return new URLSearchParams(window.location.search).get("token")?.trim() ?? ""
+}
+
+function hasPasswordResetErrorParam() {
+  return new URLSearchParams(window.location.search).has("error")
 }
 
 async function waitForSession() {
