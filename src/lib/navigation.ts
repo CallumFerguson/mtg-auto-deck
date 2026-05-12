@@ -22,6 +22,21 @@ export function navigateTo(pathname: string) {
 }
 
 export type DeckPageTab = "details" | "simulation"
+export type AdminDashboardSectionId = "users"
+
+export function isAdminPathname(pathname: string) {
+  return pathname === "/admin" || pathname.startsWith("/admin/")
+}
+
+export function getAdminDashboardSectionIdFromPathname(
+  pathname: string
+): AdminDashboardSectionId | null {
+  if (pathname === "/admin" || pathname === "/admin/users") {
+    return "users"
+  }
+
+  return null
+}
 
 export function getDeckIdFromPathname(pathname: string) {
   const match = pathname.match(/^\/decks\/([^/]+)$/)

@@ -1,18 +1,23 @@
 import { useEffect, useState } from "react"
 
 import {
+  getAdminDashboardSectionIdFromPathname,
   getDeckIdFromPathname,
   getDeckPageTabFromSearch,
   getDeckSimulationIdFromSearch,
+  isAdminPathname,
   navigateTo,
 } from "@/lib/navigation"
 import { authClient, type AuthUser } from "@/lib/auth-client"
+import {
+  AdminAccessDeniedPage,
+  AdminDashboardPage,
+} from "@/pages/AdminDashboardPage"
 import { AuthPage, type AuthMode } from "@/pages/AuthPage"
 import { DeckListPage } from "@/pages/DeckListPage"
 import { DeckPage } from "@/pages/DeckPage"
 
-const ADMIN_OPTIONS_ENABLED_STORAGE_KEY =
-  "mtg-auto-deck.admin-options-enabled"
+const ADMIN_OPTIONS_ENABLED_STORAGE_KEY = "mtg-auto-deck.admin-options-enabled"
 
 export function App() {
   const location = useLocation()
@@ -69,6 +74,31 @@ export function App() {
     storeAdminOptionsEnabled(isEnabled)
   }
 
+  if (isAdminPathname(location.pathname)) {
+    if (user.role !== "admin") {
+      return (
+        <AdminAccessDeniedPage
+          adminOptionsEnabled={adminOptionsEnabled}
+          onAdminOptionsEnabledChange={handleAdminOptionsEnabledChange}
+          user={user}
+          onSignedOut={handleSignedOut}
+        />
+      )
+    }
+
+    return (
+      <AdminDashboardPage
+        activeSectionId={getAdminDashboardSectionIdFromPathname(
+          location.pathname
+        )}
+        adminOptionsEnabled={adminOptionsEnabled}
+        onAdminOptionsEnabledChange={handleAdminOptionsEnabledChange}
+        user={user}
+        onSignedOut={handleSignedOut}
+      />
+    )
+  }
+
   return deckId ? (
     <DeckPage
       adminOptionsEnabled={adminOptionsEnabled}
@@ -91,8 +121,9 @@ export function App() {
 
 function getStoredAdminOptionsEnabled() {
   try {
-    return window.localStorage.getItem(ADMIN_OPTIONS_ENABLED_STORAGE_KEY) !==
-      "false"
+    return (
+      window.localStorage.getItem(ADMIN_OPTIONS_ENABLED_STORAGE_KEY) !== "false"
+    )
   } catch {
     return true
   }

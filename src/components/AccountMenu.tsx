@@ -1,8 +1,16 @@
 import { useState, type FormEvent } from "react"
-import { KeyRound, LogOut, ShieldCheck, UserRound, X } from "lucide-react"
+import {
+  KeyRound,
+  LayoutDashboard,
+  LogOut,
+  ShieldCheck,
+  UserRound,
+  X,
+} from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { authClient, type AuthUser } from "@/lib/auth-client"
+import { navigateTo } from "@/lib/navigation"
 
 export function AccountMenu({
   adminOptionsEnabled,
@@ -62,45 +70,58 @@ export function AccountMenu({
               </p>
             </div>
             {user.role === "admin" ? (
-              <div className="border-b border-border px-3 py-2">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <ShieldCheck
-                      className="size-4 shrink-0 text-sky-300"
-                      aria-hidden="true"
-                    />
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">
-                        Admin options
-                      </p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {adminOptionsEnabled ? "Visible" : "Hidden"}
-                      </p>
+              <div className="border-b border-border py-1">
+                <button
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-muted/45 hover:text-foreground focus:bg-muted/45 focus:outline-none"
+                  type="button"
+                  onClick={() => {
+                    setIsOpen(false)
+                    navigateTo("/admin")
+                  }}
+                >
+                  <LayoutDashboard data-icon="inline-start" />
+                  Admin dashboard
+                </button>
+                <div className="px-3 py-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <ShieldCheck
+                        className="size-4 shrink-0 text-sky-300"
+                        aria-hidden="true"
+                      />
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">
+                          Admin options
+                        </p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {adminOptionsEnabled ? "Visible" : "Hidden"}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                  <button
-                    className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus:ring-3 focus:ring-ring/25 focus:outline-none ${
-                      adminOptionsEnabled
-                        ? "border-sky-300/70 bg-sky-500/70"
-                        : "border-border bg-muted/55"
-                    }`}
-                    type="button"
-                    role="switch"
-                    aria-checked={adminOptionsEnabled}
-                    aria-label="Show admin options"
-                    title="Show admin options"
-                    onClick={() =>
-                      onAdminOptionsEnabledChange(!adminOptionsEnabled)
-                    }
-                  >
-                    <span
-                      className={`absolute top-1/2 left-1 size-4 -translate-y-1/2 rounded-full bg-foreground shadow-sm shadow-black/30 transition-transform ${
+                    <button
+                      className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus:ring-3 focus:ring-ring/25 focus:outline-none ${
                         adminOptionsEnabled
-                          ? "translate-x-5"
-                          : "translate-x-0"
+                          ? "border-sky-300/70 bg-sky-500/70"
+                          : "border-border bg-muted/55"
                       }`}
-                    />
-                  </button>
+                      type="button"
+                      role="switch"
+                      aria-checked={adminOptionsEnabled}
+                      aria-label="Show admin options"
+                      title="Show admin options"
+                      onClick={() =>
+                        onAdminOptionsEnabledChange(!adminOptionsEnabled)
+                      }
+                    >
+                      <span
+                        className={`absolute top-1/2 left-1 size-4 -translate-y-1/2 rounded-full bg-foreground shadow-sm shadow-black/30 transition-transform ${
+                          adminOptionsEnabled
+                            ? "translate-x-5"
+                            : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
                 </div>
               </div>
             ) : null}

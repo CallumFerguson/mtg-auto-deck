@@ -11,6 +11,7 @@ import { createHash, randomBytes, randomInt, randomUUID } from "node:crypto"
 import OpenAI from "openai"
 import { z } from "zod/v4"
 import { auth, ensureAuthSchema } from "./auth.js"
+import { listAdminUsers } from "./admin-users-postgres.js"
 import {
   closeDatabasePool,
   queryDatabase,
@@ -4791,6 +4792,26 @@ async function main() {
       console.error("Failed to authenticate request:", error)
       res.status(500).json({
         error: "Authentication could not be verified.",
+      })
+    }
+  })
+
+  app.get("/admin/users", async (req: Request, res: Response) => {
+    if (!requireAdminUser(req, res)) {
+      return
+    }
+
+    try {
+      const users = await listAdminUsers()
+
+      res.status(200).json({
+        users,
+        total: users.length,
+      })
+    } catch (error) {
+      console.error("Failed to list admin users:", error)
+      res.status(500).json({
+        error: "Failed to list users.",
       })
     }
   })
