@@ -4776,6 +4776,10 @@ async function main() {
   app.post(
     "/decks/:deckId/simulations/:simulationId/opening-hand-llm-runs/:llmRunId/evaluation",
     async (req: Request, res: Response) => {
+      if (!requireAdminUser(req, res)) {
+        return
+      }
+
       const deckId = String(req.params.deckId)
       const simulationId = String(req.params.simulationId)
       const llmRunId = String(req.params.llmRunId)
@@ -4930,6 +4934,10 @@ async function main() {
   app.post(
     "/decks/:deckId/simulations/:simulationId/turn-llm-runs/:llmRunId/evaluation",
     async (req: Request, res: Response) => {
+      if (!requireAdminUser(req, res)) {
+        return
+      }
+
       const deckId = String(req.params.deckId)
       const simulationId = String(req.params.simulationId)
       const llmRunId = String(req.params.llmRunId)

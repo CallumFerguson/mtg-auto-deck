@@ -2483,6 +2483,7 @@ function SimulationDetails({
           {resultsInfo ? (
             <SimulationResultsPanel
               deckId={deckId}
+              isAdmin={isAdmin}
               isStartingOpeningHandRun={isStartingOpeningHandRun}
               isStartingReportRun={isStartingReportRun}
               isStartingTurnRun={isStartingTurnRun}
@@ -2627,6 +2628,7 @@ function SimulationDebugModal({
 
 function SimulationResultsPanel({
   deckId,
+  isAdmin,
   isStartingOpeningHandRun,
   isStartingReportRun,
   isStartingTurnRun,
@@ -2652,6 +2654,7 @@ function SimulationResultsPanel({
   turnRunError,
 }: {
   deckId: string
+  isAdmin: boolean
   isStartingOpeningHandRun: boolean
   isStartingReportRun: boolean
   isStartingTurnRun: boolean
@@ -2871,6 +2874,7 @@ function SimulationResultsPanel({
     ...resultsInfo.openingHandLlmRuns.map((run) => ({
       ...run,
       canEvaluate:
+        isAdmin &&
         run.status === "completed" &&
         run.openingHandIsValid === true &&
         !run.chunks.some((chunk) => chunk.kind === "error"),
@@ -2887,6 +2891,7 @@ function SimulationResultsPanel({
     ...resultsInfo.turnLlmRuns.map((run) => ({
       ...run,
       canEvaluate:
+        isAdmin &&
         run.status === "completed" &&
         !run.chunks.some((chunk) => chunk.kind === "error"),
       canRerun:
@@ -3155,7 +3160,7 @@ function SimulationResultsPanel({
           ) : null}
         </div>
       </div>
-      {evaluationRun?.resultKind === "opening_hand" ? (
+      {isAdmin && evaluationRun?.resultKind === "opening_hand" ? (
         <OpeningHandEvaluationModal
           deckId={deckId}
           onClose={() => setEvaluationRunSelection(null)}
@@ -3163,7 +3168,7 @@ function SimulationResultsPanel({
           run={evaluationRun.run}
           simulationId={simulation.id}
         />
-      ) : evaluationRun?.resultKind === "turn" ? (
+      ) : isAdmin && evaluationRun?.resultKind === "turn" ? (
         <TurnEvaluationModal
           deckId={deckId}
           onClose={() => setEvaluationRunSelection(null)}
