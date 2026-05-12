@@ -123,12 +123,14 @@ function toAuthUser(user: {
   emailVerified: boolean
   id: string
   name?: string | null
+  role?: string | null
 }) {
   return {
     email: user.email,
     emailVerified: user.emailVerified,
     id: user.id,
     name: user.name ?? "",
+    role: user.role ?? null,
   } satisfies AuthUser
 }
 

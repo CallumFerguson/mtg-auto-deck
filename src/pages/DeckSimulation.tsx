@@ -502,10 +502,12 @@ function getOpeningHandCardOptions(
 export function DeckSimulation({
   cards,
   deckId,
+  isAdmin,
   selectedSimulationIdFromUrl,
 }: {
   cards: DeckCard[]
   deckId: string
+  isAdmin: boolean
   selectedSimulationIdFromUrl: string | null
 }) {
   const [simulations, setSimulations] = useState<Simulation[]>([])
@@ -1448,6 +1450,7 @@ export function DeckSimulation({
           ) : selectedSimulation ? (
             <SimulationDetails
               deckId={deckId}
+              isAdmin={isAdmin}
               isLoadingStartingHand={isLoadingStartingHands}
               onSimulationUpdated={updateSimulation}
               simulation={selectedSimulation}
@@ -1480,6 +1483,7 @@ export function DeckSimulation({
       {detailsSimulation ? (
         <SimulationDetailsModal
           deckId={deckId}
+          isAdmin={isAdmin}
           onClose={() => setDetailsSimulationId(null)}
           simulation={detailsSimulation}
           startingHand={detailsSimulationStartingHand}
@@ -1617,11 +1621,13 @@ function DeleteSimulationModal({
 
 function SimulationDetailsModal({
   deckId,
+  isAdmin,
   onClose,
   simulation,
   startingHand,
 }: {
   deckId: string
+  isAdmin: boolean
   onClose: () => void
   simulation: Simulation
   startingHand: StartingHand | null
@@ -1795,21 +1801,23 @@ function SimulationDetailsModal({
             </section>
           </div>
 
-          <footer className="flex justify-end border-t border-border px-5 py-4">
-            <Button
-              className="w-fit"
-              type="button"
-              variant="outline"
-              onClick={() => setIsDebugModalOpen(true)}
-            >
-              <Bug data-icon="inline-start" />
-              View debug info
-            </Button>
-          </footer>
+          {isAdmin ? (
+            <footer className="flex justify-end border-t border-border px-5 py-4">
+              <Button
+                className="w-fit"
+                type="button"
+                variant="outline"
+                onClick={() => setIsDebugModalOpen(true)}
+              >
+                <Bug data-icon="inline-start" />
+                View debug info
+              </Button>
+            </footer>
+          ) : null}
         </section>
       </div>
 
-      {isDebugModalOpen ? (
+      {isAdmin && isDebugModalOpen ? (
         <SimulationDebugModal
           deckId={deckId}
           debugInfo={debugInfo}
@@ -1826,6 +1834,7 @@ function SimulationDetailsModal({
 
 function SimulationDetails({
   deckId,
+  isAdmin,
   isLoadingStartingHand,
   onSimulationUpdated,
   simulation,
@@ -1833,6 +1842,7 @@ function SimulationDetails({
   startingHandLoadError,
 }: {
   deckId: string
+  isAdmin: boolean
   isLoadingStartingHand: boolean
   onSimulationUpdated: (simulation: Simulation) => void
   simulation: Simulation
@@ -2510,6 +2520,7 @@ function SimulationDetails({
       {activityPanelRun ? (
         <SimulationRunActivityPanel
           deckId={deckId}
+          isAdmin={isAdmin}
           isOpen={isActivityPanelOpen}
           run={activityPanelRun}
           simulationId={simulation.id}
@@ -3819,6 +3830,7 @@ function SimulationResultThinkingStatus({
 
 function SimulationRunActivityPanel({
   deckId,
+  isAdmin,
   isOpen,
   onClose,
   onExited,
@@ -3826,6 +3838,7 @@ function SimulationRunActivityPanel({
   simulationId,
 }: {
   deckId: string
+  isAdmin: boolean
   isOpen: boolean
   onClose: () => void
   onExited: () => void
@@ -4004,6 +4017,10 @@ function SimulationRunActivityPanel({
   }
 
   async function handleCopyRunText(mode: "run_text" | "with_prompt") {
+    if (!isAdmin) {
+      return
+    }
+
     try {
       let text = runClipboardText
 
@@ -4064,48 +4081,52 @@ function SimulationRunActivityPanel({
             {durationText ? `Activity • ${durationText}` : "Activity"}
           </h3>
           <div className="flex shrink-0 items-center gap-1">
-            <Button
-              className={
-                copiedMode === "with_prompt"
-                  ? "text-emerald-300 hover:text-emerald-200"
-                  : "text-muted-foreground hover:text-foreground"
-              }
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Copy activity with prompt"
-              title="Copy activity with prompt"
-              disabled={isCopyingWithPrompt}
-              onClick={() => void handleCopyRunText("with_prompt")}
-            >
-              {isCopyingWithPrompt ? (
-                <LoaderCircle className="animate-spin" />
-              ) : copiedMode === "with_prompt" ? (
-                <ClipboardCheck />
-              ) : (
-                <BookCopy />
-              )}
-            </Button>
-            <Button
-              className={
-                copiedMode === "run_text"
-                  ? "text-emerald-300 hover:text-emerald-200"
-                  : "text-muted-foreground hover:text-foreground"
-              }
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Copy activity text"
-              title="Copy activity text"
-              disabled={runClipboardText.length === 0}
-              onClick={() => void handleCopyRunText("run_text")}
-            >
-              {copiedMode === "run_text" ? (
-                <ClipboardCheck />
-              ) : (
-                <ClipboardCopy />
-              )}
-            </Button>
+            {isAdmin ? (
+              <>
+                <Button
+                  className={
+                    copiedMode === "with_prompt"
+                      ? "text-emerald-300 hover:text-emerald-200"
+                      : "text-muted-foreground hover:text-foreground"
+                  }
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Copy activity with prompt"
+                  title="Copy activity with prompt"
+                  disabled={isCopyingWithPrompt}
+                  onClick={() => void handleCopyRunText("with_prompt")}
+                >
+                  {isCopyingWithPrompt ? (
+                    <LoaderCircle className="animate-spin" />
+                  ) : copiedMode === "with_prompt" ? (
+                    <ClipboardCheck />
+                  ) : (
+                    <BookCopy />
+                  )}
+                </Button>
+                <Button
+                  className={
+                    copiedMode === "run_text"
+                      ? "text-emerald-300 hover:text-emerald-200"
+                      : "text-muted-foreground hover:text-foreground"
+                  }
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Copy activity text"
+                  title="Copy activity text"
+                  disabled={runClipboardText.length === 0}
+                  onClick={() => void handleCopyRunText("run_text")}
+                >
+                  {copiedMode === "run_text" ? (
+                    <ClipboardCheck />
+                  ) : (
+                    <ClipboardCopy />
+                  )}
+                </Button>
+              </>
+            ) : null}
             <Button
               type="button"
               variant="ghost"

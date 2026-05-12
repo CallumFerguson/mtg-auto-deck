@@ -1,6 +1,6 @@
 import { betterAuth } from "better-auth"
 import { getMigrations } from "better-auth/db/migration"
-import { emailOTP } from "better-auth/plugins"
+import { admin, emailOTP } from "better-auth/plugins"
 
 import { getDatabasePool } from "./db.js"
 import {
@@ -48,6 +48,10 @@ export const auth = betterAuth({
           to: email,
         })
       },
+    }),
+    admin({
+      adminRoles: ["admin"],
+      defaultRole: "user",
     }),
   ],
   secret: getRequiredEnvironmentVariable("BETTER_AUTH_SECRET"),

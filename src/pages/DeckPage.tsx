@@ -232,6 +232,7 @@ export function DeckPage({
               <DeckSimulation
                 cards={deck.cards}
                 deckId={deck.id}
+                isAdmin={user.role === "admin"}
                 selectedSimulationIdFromUrl={initialSimulationId}
               />
             </div>

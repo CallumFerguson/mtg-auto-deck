@@ -341,6 +341,7 @@ type AuthenticatedUser = {
   email: string
   emailVerified: boolean
   id: string
+  role?: string | null
 }
 
 type GeneratedMcpRunToken = {
@@ -4577,6 +4578,7 @@ async function main() {
         id: session.user.id,
         email: session.user.email,
         emailVerified: session.user.emailVerified,
+        role: session.user.role ?? null,
       })
       next()
     } catch (error) {
@@ -5097,6 +5099,10 @@ async function main() {
   app.get(
     "/decks/:deckId/simulations/:simulationId/debug",
     async (req: Request, res: Response) => {
+      if (!requireAdminUser(req, res)) {
+        return
+      }
+
       const deckId = String(req.params.deckId)
       const simulationId = String(req.params.simulationId)
 
@@ -5125,6 +5131,10 @@ async function main() {
   app.get(
     "/decks/:deckId/simulations/:simulationId/openrouter-generations/:generationId",
     async (req: Request, res: Response) => {
+      if (!requireAdminUser(req, res)) {
+        return
+      }
+
       const deckId = String(req.params.deckId)
       const simulationId = String(req.params.simulationId)
       const generationId = String(req.params.generationId)
@@ -5220,6 +5230,10 @@ async function main() {
   app.get(
     "/decks/:deckId/simulations/:simulationId/llm-runs/:llmRunId/full-prompt",
     async (req: Request, res: Response) => {
+      if (!requireAdminUser(req, res)) {
+        return
+      }
+
       const deckId = String(req.params.deckId)
       const simulationId = String(req.params.simulationId)
       const llmRunId = String(req.params.llmRunId)
@@ -6006,6 +6020,19 @@ function getAuthenticatedUser(req: Request) {
 
   if (!user) {
     throw new Error("Request has not been authenticated.")
+  }
+
+  return user
+}
+
+function requireAdminUser(req: Request, res: Response) {
+  const user = getAuthenticatedUser(req)
+
+  if (user.role !== "admin") {
+    res.status(403).json({
+      error: "Admin access required.",
+    })
+    return null
   }
 
   return user

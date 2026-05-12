@@ -1,11 +1,11 @@
 import { createAuthClient } from "better-auth/react"
-import { emailOTPClient } from "better-auth/client/plugins"
+import { adminClient, emailOTPClient } from "better-auth/client/plugins"
 
 import { API_BASE_URL } from "@/lib/api"
 
 export const authClient = createAuthClient({
   baseURL: API_BASE_URL,
-  plugins: [emailOTPClient()],
+  plugins: [emailOTPClient(), adminClient()],
 })
 
 export type AuthUser = {
@@ -13,4 +13,5 @@ export type AuthUser = {
   emailVerified: boolean
   id: string
   name: string
+  role?: string | null
 }
