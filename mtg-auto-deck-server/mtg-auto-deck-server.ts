@@ -31,6 +31,7 @@ import {
   GENERIC_GAME_RULES_REFERENCE,
   SIMULATE_TURN_PROMPT,
 } from "./llm/prompt-constants.js"
+import { formatUserGuidelinesSection } from "./llm/user-guidelines.js"
 import {
   createDeck,
   deleteDeck,
@@ -6725,6 +6726,7 @@ function buildStartingHandSimulationPromptFromData(
   const cardReference = formatCardReference(uniqueCards)
   const mulliganGuidelinesSection = formatUserGuidelinesSection(
     "User provided mulligan guidelines",
+    "USER PROVIDED MULLIGAN GUIDELINES",
     mulliganGuidelines
   )
   const mulliganGuidelinesBlock = mulliganGuidelinesSection
@@ -6852,11 +6854,12 @@ function buildTurnSimulationPromptFromData(
   const resolvedGameState = gameState?.trim()
     ? gameState.trim()
     : buildInitialTurnGameState({
-      commanderNames,
-      startingHand,
-    })
+        commanderNames,
+        startingHand,
+      })
   const strategyGuidelinesSection = formatUserGuidelinesSection(
     "User provided strategy guidelines",
+    "USER PROVIDED STRATEGY GUIDELINES",
     strategyGuidelines
   )
   const strategyGuidelinesBlock = strategyGuidelinesSection
@@ -6881,12 +6884,6 @@ ${resolvedGameState}
 
 LLM Run ID: ${llmRunId}
 `.trim()
-}
-
-function formatUserGuidelinesSection(label: string, guidelines: string | null) {
-  const trimmedGuidelines = guidelines?.trim()
-
-  return trimmedGuidelines ? `${label}:\n${trimmedGuidelines}` : null
 }
 
 export async function buildSimulationReportPrompt({
