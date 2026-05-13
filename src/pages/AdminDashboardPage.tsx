@@ -18,7 +18,6 @@ import {
   RefreshCw,
   ShieldAlert,
   Star,
-  StarOff,
   Trash2,
   UserRound,
   UsersRound,
@@ -534,6 +533,12 @@ function AdminModelPresetsSection() {
   const [actionError, setActionError] = useState<string | null>(null)
   const [isCreating, setIsCreating] = useState(false)
   const [workingPresetId, setWorkingPresetId] = useState<string | null>(null)
+  const [presetToDelete, setPresetToDelete] =
+    useState<AdminLlmModelPreset | null>(null)
+  const [deletingPresetId, setDeletingPresetId] = useState<string | null>(null)
+  const [deletePresetError, setDeletePresetError] = useState<string | null>(
+    null
+  )
   const [form, setForm] = useState({
     provider: "openai" as LlmProvider,
     model: "",
@@ -660,6 +665,38 @@ function AdminModelPresetsSection() {
       setActionError(fallbackMessage)
     } finally {
       setWorkingPresetId(null)
+    }
+  }
+
+  async function handleDeletePreset() {
+    if (!presetToDelete || !presetToDelete.canDelete) {
+      return
+    }
+
+    setDeletingPresetId(presetToDelete.id)
+    setDeletePresetError(null)
+
+    try {
+      const response = await apiFetch(
+        `${API_BASE_URL}/admin/llm-model-presets/${presetToDelete.id}`,
+        {
+          method: "DELETE",
+        }
+      )
+
+      if (!response.ok) {
+        setDeletePresetError(
+          await readApiError(response, "Model preset could not be deleted.")
+        )
+        return
+      }
+
+      setPresetToDelete(null)
+      await loadPresets()
+    } catch {
+      setDeletePresetError("Model preset could not be deleted.")
+    } finally {
+      setDeletingPresetId(null)
     }
   }
 
@@ -872,15 +909,23 @@ function AdminModelPresetsSection() {
           </Button>
         </div>
       ) : presets.length > 0 ? (
-        <div className="debug-scrollbar-neutral overflow-x-auto rounded-lg border border-border bg-card/70">
-          <table className="w-full min-w-[74rem] border-collapse text-sm">
+        <div className="rounded-lg border border-border bg-card/70">
+          <table className="w-full table-fixed border-collapse text-xs sm:text-sm">
+            <colgroup>
+              <col className="w-[28%]" />
+              <col className="w-[14%]" />
+              <col className="w-[16%]" />
+              <col className="w-[22%]" />
+              <col className="w-[12%]" />
+              <col className="w-[8%]" />
+            </colgroup>
             <thead className="border-b border-border bg-muted/25 text-xs text-muted-foreground">
               <tr>
                 <TableHeader>Preset</TableHeader>
                 <TableHeader>Status</TableHeader>
+                <TableHeader>Default</TableHeader>
                 <TableHeader>Costs</TableHeader>
-                <TableHeader>References</TableHeader>
-                <TableHeader>Updated</TableHeader>
+                <TableHeader>Refs</TableHeader>
                 <TableHeader>
                   <span className="sr-only">Actions</span>
                 </TableHeader>
@@ -891,10 +936,10 @@ function AdminModelPresetsSection() {
                 <tr className="transition-colors hover:bg-muted/25" key={preset.id}>
                   <TableCell>
                     <div className="min-w-0">
-                      <p className="truncate font-medium text-foreground">
+                      <p className="break-words font-medium text-foreground">
                         {getLlmModelPresetLabel(preset)}
                       </p>
-                      <p className="truncate text-xs text-muted-foreground">
+                      <p className="break-words text-xs text-muted-foreground">
                         {formatProviderLabel(preset.provider)}
                         {preset.openrouterModelProvider
                           ? ` via ${preset.openrouterModelProvider}`
@@ -903,80 +948,76 @@ function AdminModelPresetsSection() {
                     </div>
                   </TableCell>
                   <TableCell>
-                    <div className="flex flex-wrap gap-2">
-                      <StatusBadge
-                        className={
-                          preset.isEnabled
-                            ? "border-emerald-300/35 bg-emerald-400/10 text-emerald-200"
-                            : "border-border bg-muted/35 text-muted-foreground"
-                        }
-                        icon={
-                          preset.isEnabled ? (
-                            <Power className="size-3.5" aria-hidden />
-                          ) : (
-                            <CircleOff className="size-3.5" aria-hidden />
-                          )
-                        }
-                      >
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      aria-pressed={preset.isEnabled}
+                      aria-label={
+                        preset.isEnabled
+                          ? "Disable model preset"
+                          : "Enable model preset"
+                      }
+                      title={
+                        preset.isEnabled
+                          ? "Disable model preset"
+                          : "Enable model preset"
+                      }
+                      className={
+                        preset.isEnabled
+                          ? "w-full min-w-0 border-emerald-300/35 bg-emerald-400/10 text-emerald-200 hover:bg-emerald-400/15 hover:text-emerald-100"
+                          : "w-full min-w-0 border-border bg-muted/35 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                      }
+                      disabled={workingPresetId === preset.id}
+                      onClick={() =>
+                        void updatePresetAction(
+                          preset.id,
+                          () =>
+                            apiFetch(
+                              `${API_BASE_URL}/admin/llm-model-presets/${preset.id}/enabled`,
+                              {
+                                method: "PATCH",
+                                headers: {
+                                  "Content-Type": "application/json",
+                                },
+                                body: JSON.stringify({
+                                  isEnabled: !preset.isEnabled,
+                                }),
+                              }
+                            ),
+                          "Model preset could not be updated."
+                        )
+                      }
+                    >
+                      {preset.isEnabled ? <Power /> : <CircleOff />}
+                      <span className="hidden xl:inline">
                         {preset.isEnabled ? "Enabled" : "Disabled"}
-                      </StatusBadge>
-                      {preset.isDefault ? (
-                        <StatusBadge
-                          className="border-sky-300/35 bg-sky-400/10 text-sky-200"
-                          icon={<Star className="size-3.5" aria-hidden />}
-                        >
-                          Default
-                        </StatusBadge>
-                      ) : null}
-                    </div>
+                      </span>
+                    </Button>
                   </TableCell>
                   <TableCell>
-                    <span className="text-muted-foreground">
-                      {formatPresetCosts(preset)}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <span className="text-muted-foreground">
-                      {preset.simulationReferenceCount} simulations,{" "}
-                      {preset.llmRunReferenceCount} runs,{" "}
-                      {preset.evaluationReferenceCount} evals
-                    </span>
-                  </TableCell>
-                  <TableCell>{formatDateTime(preset.updatedAt)}</TableCell>
-                  <TableCell>
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        disabled={workingPresetId === preset.id}
-                        onClick={() =>
-                          void updatePresetAction(
-                            preset.id,
-                            () =>
-                              apiFetch(
-                                `${API_BASE_URL}/admin/llm-model-presets/${preset.id}/enabled`,
-                                {
-                                  method: "PATCH",
-                                  headers: {
-                                    "Content-Type": "application/json",
-                                  },
-                                  body: JSON.stringify({
-                                    isEnabled: !preset.isEnabled,
-                                  }),
-                                }
-                              ),
-                            "Model preset could not be updated."
-                          )
-                        }
+                    {preset.isDefault ? (
+                      <StatusBadge
+                        className="border-sky-300/35 bg-sky-400/10 text-sky-200"
+                        icon={<Star className="size-3.5" aria-hidden />}
                       >
-                        {preset.isEnabled ? "Disable" : "Enable"}
-                      </Button>
+                        Default
+                      </StatusBadge>
+                    ) : (
                       <Button
                         type="button"
                         variant="outline"
-                        size="sm"
-                        disabled={workingPresetId === preset.id || !preset.isEnabled}
+                        size="xs"
+                        className="w-full min-w-0"
+                        aria-label="Set default model preset"
+                        title={
+                          preset.isEnabled
+                            ? "Set default model preset"
+                            : "Enable preset before making it default"
+                        }
+                        disabled={
+                          workingPresetId === preset.id || !preset.isEnabled
+                        }
                         onClick={() =>
                           void updatePresetAction(
                             preset.id,
@@ -989,7 +1030,7 @@ function AdminModelPresetsSection() {
                                     "Content-Type": "application/json",
                                   },
                                   body: JSON.stringify({
-                                    presetId: preset.isDefault ? null : preset.id,
+                                    presetId: preset.id,
                                   }),
                                 }
                               ),
@@ -997,41 +1038,52 @@ function AdminModelPresetsSection() {
                           )
                         }
                       >
-                        {preset.isDefault ? (
-                          <StarOff data-icon="inline-start" />
-                        ) : (
-                          <Star data-icon="inline-start" />
-                        )}
-                        {preset.isDefault ? "Clear" : "Default"}
+                        <Star data-icon="inline-start" />
+                        <span className="hidden xl:inline">Make default</span>
                       </Button>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <CompactMetricList
+                      items={[
+                        ["in", formatOptionalCost(preset.inputTokenCostUsdPerMillion)],
+                        [
+                          "cached",
+                          formatOptionalCost(
+                            preset.cachedInputTokenCostUsdPerMillion
+                          ),
+                        ],
+                        [
+                          "out",
+                          formatOptionalCost(preset.outputTokenCostUsdPerMillion),
+                        ],
+                      ]}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <CompactMetricList
+                      items={[
+                        ["sims", String(preset.simulationReferenceCount)],
+                        ["runs", String(preset.llmRunReferenceCount)],
+                        ["evals", String(preset.evaluationReferenceCount)],
+                      ]}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap justify-end gap-1.5">
                       <Button
                         type="button"
                         variant="destructive"
-                        size="sm"
-                        disabled={
-                          workingPresetId === preset.id || !preset.canDelete
-                        }
-                        title={
-                          preset.canDelete
-                            ? "Delete preset"
-                            : "Referenced presets cannot be deleted"
-                        }
-                        onClick={() =>
-                          void updatePresetAction(
-                            preset.id,
-                            () =>
-                              apiFetch(
-                                `${API_BASE_URL}/admin/llm-model-presets/${preset.id}`,
-                                {
-                                  method: "DELETE",
-                                }
-                              ),
-                            "Model preset could not be deleted."
-                          )
-                        }
+                        size="icon-sm"
+                        aria-label="Delete model preset"
+                        disabled={workingPresetId === preset.id}
+                        title="Delete preset"
+                        onClick={() => {
+                          setPresetToDelete(preset)
+                          setDeletePresetError(null)
+                        }}
                       >
-                        <Trash2 data-icon="inline-start" />
-                        Delete
+                        <Trash2 />
                       </Button>
                     </div>
                   </TableCell>
@@ -1043,6 +1095,19 @@ function AdminModelPresetsSection() {
       ) : (
         <AdminPanelMessage>No model presets found.</AdminPanelMessage>
       )}
+
+      {presetToDelete ? (
+        <DeleteLlmModelPresetModal
+          error={deletePresetError}
+          isDeleting={deletingPresetId === presetToDelete.id}
+          preset={presetToDelete}
+          onClose={() => {
+            setPresetToDelete(null)
+            setDeletePresetError(null)
+          }}
+          onConfirm={() => void handleDeletePreset()}
+        />
+      ) : null}
     </section>
   )
 }
@@ -1070,6 +1135,139 @@ function UnknownAdminSection() {
         </div>
       </div>
     </section>
+  )
+}
+
+function DeleteLlmModelPresetModal({
+  error,
+  isDeleting,
+  onClose,
+  onConfirm,
+  preset,
+}: {
+  error: string | null
+  isDeleting: boolean
+  onClose: () => void
+  onConfirm: () => void
+  preset: AdminLlmModelPreset
+}) {
+  const canDelete = preset.canDelete
+  const title = canDelete ? "Delete model preset" : "Cannot delete preset"
+  const closeIfAllowed = () => {
+    if (!isDeleting) {
+      onClose()
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 py-6 backdrop-blur-sm"
+      role="presentation"
+      onMouseDown={closeIfAllowed}
+    >
+      <section
+        aria-labelledby="delete-model-preset-title"
+        className="w-full max-w-lg rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
+        role="alertdialog"
+        aria-modal="true"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+          <div className="flex items-start gap-3">
+            <div
+              className={
+                canDelete
+                  ? "flex size-9 shrink-0 items-center justify-center rounded-lg border border-destructive/30 bg-destructive/10 text-destructive"
+                  : "flex size-9 shrink-0 items-center justify-center rounded-lg border border-amber-300/35 bg-amber-400/10 text-amber-200"
+              }
+            >
+              {canDelete ? (
+                <Trash2 className="size-4" aria-hidden />
+              ) : (
+                <ShieldAlert className="size-4" aria-hidden />
+              )}
+            </div>
+            <div className="min-w-0 space-y-1">
+              <h2 id="delete-model-preset-title" className="text-xl font-semibold">
+                {title}
+              </h2>
+              <p className="text-sm break-words text-muted-foreground">
+                {getLlmModelPresetLabel(preset)}
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Close"
+            title="Close"
+            disabled={isDeleting}
+            onClick={onClose}
+          >
+            <X />
+          </Button>
+        </header>
+
+        <div className="grid gap-4 px-5 py-5">
+          {canDelete ? (
+            <p className="text-sm leading-6 text-muted-foreground">
+              This preset has no references and can be permanently deleted.
+              Disable presets instead when you want to retire a model that has
+              already been used.
+            </p>
+          ) : (
+            <>
+              <p className="text-sm leading-6 text-muted-foreground">
+                This preset is already referenced, so it cannot be deleted.
+                Disable it instead to keep historical simulations and runs
+                intact while preventing future use.
+              </p>
+              <div className="rounded-md border border-border bg-background/35 px-3 py-2">
+                <CompactMetricList
+                  items={[
+                    ["sims", String(preset.simulationReferenceCount)],
+                    ["runs", String(preset.llmRunReferenceCount)],
+                    ["evals", String(preset.evaluationReferenceCount)],
+                  ]}
+                />
+              </div>
+            </>
+          )}
+
+          {error ? (
+            <p
+              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              role="alert"
+            >
+              {error}
+            </p>
+          ) : null}
+
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isDeleting}
+              onClick={onClose}
+            >
+              {canDelete ? "Cancel" : "Close"}
+            </Button>
+            {canDelete ? (
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={isDeleting}
+                onClick={onConfirm}
+              >
+                <Trash2 data-icon="inline-start" />
+                {isDeleting ? "Deleting..." : "Delete preset"}
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      </section>
+    </div>
   )
 }
 
@@ -1278,6 +1476,23 @@ function CostInput({
   )
 }
 
+function CompactMetricList({
+  items,
+}: {
+  items: readonly (readonly [label: string, value: string])[]
+}) {
+  return (
+    <dl className="grid gap-0.5 text-xs text-muted-foreground">
+      {items.map(([label, value]) => (
+        <div className="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-1" key={label}>
+          <dt>{label}</dt>
+          <dd className="min-w-0 break-words text-foreground/85">{value}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
 function parseOptionalCost(value: string) {
   const trimmedValue = value.trim()
 
@@ -1288,20 +1503,6 @@ function parseOptionalCost(value: string) {
   const parsedValue = Number(trimmedValue)
 
   return Number.isFinite(parsedValue) && parsedValue >= 0 ? parsedValue : null
-}
-
-function formatPresetCosts(preset: AdminLlmModelPreset) {
-  const inputCost = formatOptionalCost(preset.inputTokenCostUsdPerMillion)
-  const cachedInputCost = formatOptionalCost(
-    preset.cachedInputTokenCostUsdPerMillion
-  )
-  const outputCost = formatOptionalCost(preset.outputTokenCostUsdPerMillion)
-
-  if (inputCost === "n/a" && cachedInputCost === "n/a" && outputCost === "n/a") {
-    return "No costs"
-  }
-
-  return `in ${inputCost}, cached ${cachedInputCost}, out ${outputCost}`
 }
 
 function formatOptionalCost(value: number | null) {

@@ -175,7 +175,7 @@ export async function listAdminLlmModelPresets() {
         WHERE turn_evaluation.llm_model_preset_id = preset.id
       ) AS evaluation_reference_count
     FROM llm_model_presets preset
-    ORDER BY preset.is_default DESC, preset.is_enabled DESC, preset.provider ASC, preset.model ASC, preset.reasoning_effort ASC, preset.created_at ASC
+    ORDER BY preset.created_at DESC
   `)
 
   return result.rows.map((row) => {
