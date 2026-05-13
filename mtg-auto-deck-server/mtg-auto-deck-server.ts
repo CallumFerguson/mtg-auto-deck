@@ -6764,7 +6764,10 @@ function applyCors(
     res.setHeader("Access-Control-Allow-Private-Network", "true")
   }
 
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+  )
   res.setHeader(
     "Access-Control-Allow-Headers",
     getAllowedRequestHeaders(req.headers["access-control-request-headers"])
