@@ -644,6 +644,7 @@ export type SimulationPromptCard = {
 export type StartingHandSimulationPromptData = {
   simulationId: string
   deckId: string
+  mulliganGuidelines: string | null
   commanders: SimulationPromptCard[]
   library: SimulationPromptCard[]
 }
@@ -652,6 +653,8 @@ export type DeckCardReferenceData = {
   deckId: string
   name: string
   description: string | null
+  mulliganGuidelines: string | null
+  strategyGuidelines: string | null
   format: string
   createdAt: string
   updatedAt: string
@@ -667,6 +670,7 @@ export type SimulationIdentifier = {
 export type TurnSimulationPromptData = {
   simulationId: string
   deckId: string
+  strategyGuidelines: string | null
   commanders: SimulationPromptCard[]
   libraryCards: SimulationPromptCard[]
   library: string[]
@@ -4767,6 +4771,8 @@ export async function getStartingHandSimulationPromptData(
       SELECT
         simulation.id AS simulation_id,
         simulation.deck_id,
+        deck.mulligan_guidelines AS deck_mulligan_guidelines,
+        deck.strategy_guidelines AS deck_strategy_guidelines,
         deck_card.id AS deck_card_id,
         deck_card.oracle_id,
         deck_card.quantity,
@@ -4781,6 +4787,8 @@ export async function getStartingHandSimulationPromptData(
         card.loyalty,
         card.card_faces
       FROM simulations simulation
+      JOIN decks deck
+        ON deck.id = simulation.deck_id
       JOIN deck_cards deck_card
         ON deck_card.deck_id = simulation.deck_id
       JOIN scryfall_oracle_cards card
@@ -4807,6 +4815,7 @@ export async function getStartingHandSimulationPromptData(
   return {
     simulationId: firstRow.simulation_id,
     deckId: firstRow.deck_id,
+    mulliganGuidelines: firstRow.deck_mulligan_guidelines ?? null,
     commanders: cards.filter((card) => card.zone === "commander"),
     library: cards.filter((card) => card.zone === "library"),
   }
@@ -4821,6 +4830,8 @@ export async function getDeckCardReferenceData(
         deck.id AS deck_id,
         deck.name AS deck_name,
         deck.description AS deck_description,
+        deck.mulligan_guidelines AS deck_mulligan_guidelines,
+        deck.strategy_guidelines AS deck_strategy_guidelines,
         deck.format AS deck_format,
         deck.created_at AS deck_created_at,
         deck.updated_at AS deck_updated_at,
@@ -4865,6 +4876,8 @@ export async function getDeckCardReferenceData(
     deckId: firstRow.deck_id,
     name: firstRow.deck_name,
     description: firstRow.deck_description,
+    mulliganGuidelines: firstRow.deck_mulligan_guidelines,
+    strategyGuidelines: firstRow.deck_strategy_guidelines,
     format: firstRow.deck_format,
     createdAt: firstRow.deck_created_at.toISOString(),
     updatedAt: firstRow.deck_updated_at.toISOString(),
@@ -4879,17 +4892,21 @@ export async function getTurnSimulationPromptData(
   const simulationResult = await queryDatabase<{
     simulation_id: string
     deck_id: string
+    strategy_guidelines: string | null
     starting_hand_id: string | null
     library: unknown
   }>(
     `
       SELECT
-        id AS simulation_id,
-        deck_id,
-        starting_hand_id,
-        library
-      FROM simulations
-      WHERE id = $1
+        simulation.id AS simulation_id,
+        simulation.deck_id,
+        deck.strategy_guidelines,
+        simulation.starting_hand_id,
+        simulation.library
+      FROM simulations simulation
+      JOIN decks deck
+        ON deck.id = simulation.deck_id
+      WHERE simulation.id = $1
     `,
     [simulationId]
   )
@@ -4937,6 +4954,7 @@ export async function getTurnSimulationPromptData(
   return {
     simulationId: simulation.simulation_id,
     deckId: simulation.deck_id,
+    strategyGuidelines: simulation.strategy_guidelines,
     commanders: cards.filter((card) => card.zone === "commander"),
     libraryCards: cards.filter((card) => card.zone === "library"),
     library: parseStringArray(simulation.library),
@@ -5637,12 +5655,16 @@ type PromptCardRow = {
 type SimulationPromptCardRow = PromptCardRow & {
   simulation_id: string
   deck_id: string
+  deck_mulligan_guidelines?: string | null
+  deck_strategy_guidelines?: string | null
 }
 
 type DeckCardReferenceRow = PromptCardRow & {
   deck_id: string
   deck_name: string
   deck_description: string | null
+  deck_mulligan_guidelines: string | null
+  deck_strategy_guidelines: string | null
   deck_format: string
   deck_created_at: Date
   deck_updated_at: Date

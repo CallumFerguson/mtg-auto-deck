@@ -4,6 +4,8 @@ export type DeckSummary = {
   id: string
   name: string
   description: string | null
+  mulliganGuidelines: string | null
+  strategyGuidelines: string | null
   format: string
   createdAt: string
   updatedAt: string
@@ -32,6 +34,8 @@ export type CreateDeckCardInput = {
 export type CreateDeckInput = {
   name: string
   desc: string
+  mulliganGuidelines: string
+  strategyGuidelines: string
   ownerUserId: string
   commanders: CreateDeckCardInput[]
   cards: CreateDeckCardInput[]
@@ -40,6 +44,19 @@ export type CreateDeckInput = {
 export type UpdateDeckDetailsInput = {
   name: string
   description: string
+  mulliganGuidelines: string
+  strategyGuidelines: string
+}
+
+type DeckSummaryRow = {
+  id: string
+  name: string
+  description: string | null
+  mulligan_guidelines: string | null
+  strategy_guidelines: string | null
+  format: string
+  created_at: Date
+  updated_at: Date
 }
 
 export async function ensureDecksSchema() {
@@ -69,6 +86,14 @@ export async function ensureDecksSchema() {
   await queryDatabase(`
     ALTER TABLE decks
     ADD COLUMN IF NOT EXISTS owner_user_id text REFERENCES "user"(id) ON DELETE CASCADE
+  `)
+  await queryDatabase(`
+    ALTER TABLE decks
+    ADD COLUMN IF NOT EXISTS mulligan_guidelines text
+  `)
+  await queryDatabase(`
+    ALTER TABLE decks
+    ADD COLUMN IF NOT EXISTS strategy_guidelines text
   `)
   await queryDatabase(`
     CREATE TABLE IF NOT EXISTS deck_cards (
@@ -106,16 +131,17 @@ export async function ensureDecksSchema() {
 }
 
 export async function listDecks(ownerUserId?: string): Promise<DeckSummary[]> {
-  const result = await queryDatabase<{
-    id: string
-    name: string
-    description: string | null
-    format: string
-    created_at: Date
-    updated_at: Date
-  }>(
+  const result = await queryDatabase<DeckSummaryRow>(
     `
-      SELECT id, name, description, format, created_at, updated_at
+      SELECT
+        id,
+        name,
+        description,
+        mulligan_guidelines,
+        strategy_guidelines,
+        format,
+        created_at,
+        updated_at
       FROM decks
       WHERE ($1::text IS NULL OR owner_user_id = $1)
       ORDER BY updated_at DESC, name ASC
@@ -123,30 +149,24 @@ export async function listDecks(ownerUserId?: string): Promise<DeckSummary[]> {
     [ownerUserId ?? null]
   )
 
-  return result.rows.map((deck) => ({
-    id: deck.id,
-    name: deck.name,
-    description: deck.description,
-    format: deck.format,
-    createdAt: deck.created_at.toISOString(),
-    updatedAt: deck.updated_at.toISOString(),
-  }))
+  return result.rows.map(mapDeckSummaryRow)
 }
 
 export async function getDeck(
   deckId: string,
   ownerUserId?: string
 ): Promise<DeckDetails | null> {
-  const deckResult = await queryDatabase<{
-    id: string
-    name: string
-    description: string | null
-    format: string
-    created_at: Date
-    updated_at: Date
-  }>(
+  const deckResult = await queryDatabase<DeckSummaryRow>(
     `
-      SELECT id, name, description, format, created_at, updated_at
+      SELECT
+        id,
+        name,
+        description,
+        mulligan_guidelines,
+        strategy_guidelines,
+        format,
+        created_at,
+        updated_at
       FROM decks
       WHERE id = $1
         AND ($2::text IS NULL OR owner_user_id = $2)
@@ -203,12 +223,7 @@ export async function getDeck(
   })
 
   return {
-    id: deck.id,
-    name: deck.name,
-    description: deck.description,
-    format: deck.format,
-    createdAt: deck.created_at.toISOString(),
-    updatedAt: deck.updated_at.toISOString(),
+    ...mapDeckSummaryRow(deck),
     commanders: cardResult.rows
       .filter((card) => card.zone === "commander")
       .map(mapCard),
@@ -236,28 +251,43 @@ export async function deleteDeck(
 
 export async function updateDeckDetails(
   deckId: string,
-  { description, name }: UpdateDeckDetailsInput,
+  {
+    description,
+    mulliganGuidelines,
+    name,
+    strategyGuidelines,
+  }: UpdateDeckDetailsInput,
   ownerUserId?: string
 ): Promise<DeckSummary | null> {
-  const result = await queryDatabase<{
-    id: string
-    name: string
-    description: string | null
-    format: string
-    created_at: Date
-    updated_at: Date
-  }>(
+  const result = await queryDatabase<DeckSummaryRow>(
     `
       UPDATE decks
       SET
         name = $2,
         description = $3,
+        mulligan_guidelines = $4,
+        strategy_guidelines = $5,
         updated_at = now()
       WHERE id = $1
-        AND ($4::text IS NULL OR owner_user_id = $4)
-      RETURNING id, name, description, format, created_at, updated_at
+        AND ($6::text IS NULL OR owner_user_id = $6)
+      RETURNING
+        id,
+        name,
+        description,
+        mulligan_guidelines,
+        strategy_guidelines,
+        format,
+        created_at,
+        updated_at
     `,
-    [deckId, name, description.trim() || null, ownerUserId ?? null]
+    [
+      deckId,
+      name,
+      normalizeNullableText(description),
+      normalizeNullableText(mulliganGuidelines),
+      normalizeNullableText(strategyGuidelines),
+      ownerUserId ?? null,
+    ]
   )
   const deck = result.rows[0]
 
@@ -265,38 +295,46 @@ export async function updateDeckDetails(
     return null
   }
 
-  return {
-    id: deck.id,
-    name: deck.name,
-    description: deck.description,
-    format: deck.format,
-    createdAt: deck.created_at.toISOString(),
-    updatedAt: deck.updated_at.toISOString(),
-  }
+  return mapDeckSummaryRow(deck)
 }
 
 export async function createDeck({
   cards,
   commanders,
   desc,
+  mulliganGuidelines,
   name,
   ownerUserId,
+  strategyGuidelines,
 }: CreateDeckInput): Promise<DeckSummary> {
   return withDatabaseTransaction(async (client) => {
-    const deckResult = await client.query<{
-      id: string
-      name: string
-      description: string | null
-      format: string
-      created_at: Date
-      updated_at: Date
-    }>(
+    const deckResult = await client.query<DeckSummaryRow>(
       `
-        INSERT INTO decks (name, description, owner_user_id)
-        VALUES ($1, $2, $3)
-        RETURNING id, name, description, format, created_at, updated_at
+        INSERT INTO decks (
+          name,
+          description,
+          mulligan_guidelines,
+          strategy_guidelines,
+          owner_user_id
+        )
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING
+          id,
+          name,
+          description,
+          mulligan_guidelines,
+          strategy_guidelines,
+          format,
+          created_at,
+          updated_at
       `,
-      [name, desc.trim() || null, ownerUserId]
+      [
+        name,
+        normalizeNullableText(desc),
+        normalizeNullableText(mulliganGuidelines),
+        normalizeNullableText(strategyGuidelines),
+        ownerUserId,
+      ]
     )
     const deck = deckResult.rows[0]
 
@@ -331,15 +369,25 @@ export async function createDeck({
       cards: mergeCardsByOracleId(cards),
     })
 
-    return {
-      id: deck.id,
-      name: deck.name,
-      description: deck.description,
-      format: deck.format,
-      createdAt: deck.created_at.toISOString(),
-      updatedAt: deck.updated_at.toISOString(),
-    }
+    return mapDeckSummaryRow(deck)
   })
+}
+
+function mapDeckSummaryRow(deck: DeckSummaryRow): DeckSummary {
+  return {
+    id: deck.id,
+    name: deck.name,
+    description: deck.description,
+    mulliganGuidelines: deck.mulligan_guidelines,
+    strategyGuidelines: deck.strategy_guidelines,
+    format: deck.format,
+    createdAt: deck.created_at.toISOString(),
+    updatedAt: deck.updated_at.toISOString(),
+  }
+}
+
+function normalizeNullableText(value: string) {
+  return value.trim() || null
 }
 
 function mergeCardsByOracleId(cards: readonly CreateDeckCardInput[]) {

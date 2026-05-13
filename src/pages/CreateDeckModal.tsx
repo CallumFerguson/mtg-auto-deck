@@ -4,7 +4,10 @@ import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { API_BASE_URL, apiFetch } from "@/lib/api"
 import { readApiError } from "@/lib/api-error"
-import { validateAndParseDeckInput } from "@/lib/deck-input"
+import {
+  DECK_GUIDELINES_MAX_LENGTH,
+  validateAndParseDeckInput,
+} from "@/lib/deck-input"
 
 export function CreateDeckModal({
   onClose,
@@ -23,6 +26,8 @@ export function CreateDeckModal({
     const result = validateAndParseDeckInput({
       name: String(formData.get("name") ?? ""),
       description: String(formData.get("description") ?? ""),
+      mulliganGuidelines: String(formData.get("mulliganGuidelines") ?? ""),
+      strategyGuidelines: String(formData.get("strategyGuidelines") ?? ""),
       commanderOne: String(formData.get("commanderOne") ?? ""),
       commanderTwo: String(formData.get("commanderTwo") ?? ""),
       deckList: String(formData.get("deckList") ?? ""),
@@ -108,6 +113,26 @@ export function CreateDeckModal({
               name="description"
               className="min-h-24 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground transition outline-none focus:border-ring focus:ring-3 focus:ring-ring/25"
               placeholder="Optional description"
+            />
+          </Field>
+
+          <Field label="Mulligan guidelines" htmlFor="deck-mulligan-guidelines">
+            <textarea
+              id="deck-mulligan-guidelines"
+              name="mulliganGuidelines"
+              className="min-h-24 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground transition outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/25"
+              maxLength={DECK_GUIDELINES_MAX_LENGTH}
+              placeholder="(optional) A good starting hand usually has around 3 lands and some ramp so you can play the commander on turn 4."
+            />
+          </Field>
+
+          <Field label="Strategy guidelines" htmlFor="deck-strategy-guidelines">
+            <textarea
+              id="deck-strategy-guidelines"
+              name="strategyGuidelines"
+              className="min-h-24 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground transition outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/25"
+              maxLength={DECK_GUIDELINES_MAX_LENGTH}
+              placeholder="(optional) Use the commander as a Voltron threat and win through commander damage."
             />
           </Field>
 

@@ -4,6 +4,7 @@ import { Save, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { API_BASE_URL, apiFetch } from "@/lib/api"
 import { readApiError } from "@/lib/api-error"
+import { DECK_GUIDELINES_MAX_LENGTH } from "@/lib/deck-input"
 import type { Deck } from "@/lib/deck-types"
 
 export function EditDeckDetailsModal({
@@ -24,9 +25,25 @@ export function EditDeckDetailsModal({
     const formData = new FormData(event.currentTarget)
     const name = String(formData.get("name") ?? "").trim()
     const description = String(formData.get("description") ?? "").trim()
+    const mulliganGuidelines = String(
+      formData.get("mulliganGuidelines") ?? ""
+    ).trim()
+    const strategyGuidelines = String(
+      formData.get("strategyGuidelines") ?? ""
+    ).trim()
 
     if (!name) {
       setError("Deck name is required.")
+      return
+    }
+
+    if (mulliganGuidelines.length > DECK_GUIDELINES_MAX_LENGTH) {
+      setError("Mulligan guidelines must be 1000 characters or fewer.")
+      return
+    }
+
+    if (strategyGuidelines.length > DECK_GUIDELINES_MAX_LENGTH) {
+      setError("Strategy guidelines must be 1000 characters or fewer.")
       return
     }
 
@@ -42,6 +59,8 @@ export function EditDeckDetailsModal({
         body: JSON.stringify({
           name,
           description,
+          mulliganGuidelines,
+          strategyGuidelines,
         }),
       })
 
@@ -69,7 +88,7 @@ export function EditDeckDetailsModal({
     >
       <section
         aria-labelledby="edit-deck-title"
-        className="w-full max-w-lg rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
+        className="max-h-full w-full max-w-lg overflow-y-auto rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
         role="dialog"
         aria-modal="true"
         onMouseDown={(event) => event.stopPropagation()}
@@ -115,6 +134,36 @@ export function EditDeckDetailsModal({
               className="min-h-32 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground transition outline-none focus:border-ring focus:ring-3 focus:ring-ring/25"
               placeholder="Optional description"
               defaultValue={deck.description ?? ""}
+              disabled={isSaving}
+            />
+          </Field>
+
+          <Field
+            label="Mulligan guidelines"
+            htmlFor="edit-deck-mulligan-guidelines"
+          >
+            <textarea
+              id="edit-deck-mulligan-guidelines"
+              name="mulliganGuidelines"
+              className="min-h-28 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground transition outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/25"
+              placeholder="(optional) A good starting hand usually has around 3 lands and some ramp so you can play the commander on turn 4."
+              defaultValue={deck.mulliganGuidelines ?? ""}
+              maxLength={DECK_GUIDELINES_MAX_LENGTH}
+              disabled={isSaving}
+            />
+          </Field>
+
+          <Field
+            label="Strategy guidelines"
+            htmlFor="edit-deck-strategy-guidelines"
+          >
+            <textarea
+              id="edit-deck-strategy-guidelines"
+              name="strategyGuidelines"
+              className="min-h-28 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground transition outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/25"
+              placeholder="(optional) Use the commander as a Voltron threat and win through commander damage."
+              defaultValue={deck.strategyGuidelines ?? ""}
+              maxLength={DECK_GUIDELINES_MAX_LENGTH}
               disabled={isSaving}
             />
           </Field>

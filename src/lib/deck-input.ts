@@ -3,9 +3,13 @@ export type DeckCardInput = {
   quantity: number
 }
 
+export const DECK_GUIDELINES_MAX_LENGTH = 1000
+
 export type ParsedDeckInput = {
   name: string
   desc: string
+  mulliganGuidelines: string
+  strategyGuidelines: string
   commanders: string[]
   cards: DeckCardInput[]
 }
@@ -30,15 +34,21 @@ export function validateAndParseDeckInput({
   commanderTwo,
   deckList,
   description,
+  mulliganGuidelines,
   name,
+  strategyGuidelines,
 }: {
   commanderOne: string
   commanderTwo: string
   deckList: string
   description: string
+  mulliganGuidelines: string
   name: string
+  strategyGuidelines: string
 }): DeckInputValidationResult {
   const trimmedName = name.trim()
+  const trimmedMulliganGuidelines = mulliganGuidelines.trim()
+  const trimmedStrategyGuidelines = strategyGuidelines.trim()
   const trimmedCommanderOne = commanderOne.trim()
   const trimmedCommanderTwo = commanderTwo.trim()
   const parsedCommanderOne = trimmedCommanderOne
@@ -55,6 +65,14 @@ export function validateAndParseDeckInput({
 
   if (!trimmedCommanderOne) {
     errors.push("Commander 1 is required.")
+  }
+
+  if (trimmedMulliganGuidelines.length > DECK_GUIDELINES_MAX_LENGTH) {
+    errors.push("Mulligan guidelines must be 1000 characters or fewer.")
+  }
+
+  if (trimmedStrategyGuidelines.length > DECK_GUIDELINES_MAX_LENGTH) {
+    errors.push("Strategy guidelines must be 1000 characters or fewer.")
   }
 
   if (trimmedCommanderOne && !parsedCommanderOne) {
@@ -110,6 +128,8 @@ export function validateAndParseDeckInput({
     deck: {
       name: trimmedName,
       desc: description.trim(),
+      mulliganGuidelines: trimmedMulliganGuidelines,
+      strategyGuidelines: trimmedStrategyGuidelines,
       commanders: [parsedCommanderOne, parsedCommanderTwo]
         .filter((commander): commander is ParsedDeckLine => commander !== null)
         .map((commander) => commander.name),

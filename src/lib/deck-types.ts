@@ -2,6 +2,8 @@ export type Deck = {
   id: string
   name: string
   description: string | null
+  mulliganGuidelines: string | null
+  strategyGuidelines: string | null
 }
 
 export type DeckCard = {

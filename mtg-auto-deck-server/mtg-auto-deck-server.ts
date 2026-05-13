@@ -260,6 +260,7 @@ const DEFAULT_ALLOWED_HEADERS = [
   "Mcp-Session-Id",
   "Mcp-Protocol-Version",
 ]
+const DECK_GUIDELINES_MAX_LENGTH = 1000
 
 const llmRunIdSchema = z
   .string()
@@ -284,6 +285,8 @@ const simulationIdentifierSchema = {
 const createDeckSchema = z.object({
   name: z.string().trim().min(1),
   desc: z.string(),
+  mulliganGuidelines: createDeckGuidelinesSchema(),
+  strategyGuidelines: createDeckGuidelinesSchema(),
   commanders: z.array(z.string().trim().min(1)).min(1).max(2),
   cards: z.array(
     z.object({
@@ -300,7 +303,14 @@ const passwordResetTokenSchema = z.string().trim().min(1).max(256)
 const updateDeckDetailsSchema = z.object({
   name: z.string().trim().min(1),
   description: z.string(),
+  mulliganGuidelines: createDeckGuidelinesSchema(),
+  strategyGuidelines: createDeckGuidelinesSchema(),
 })
+
+function createDeckGuidelinesSchema() {
+  return z.string().max(DECK_GUIDELINES_MAX_LENGTH).default("")
+}
+
 const createStartingHandSchema = z.object({
   name: z.string().trim().min(1),
   cards: z
@@ -379,7 +389,7 @@ let llmRunQueueDrainTimer: NodeJS.Timeout | null = null
 let llmRunQueueDrainPromise: Promise<void> | null = null
 
 function createRuntimeCompletion() {
-  let resolveCompletion: () => void = () => {}
+  let resolveCompletion: () => void = () => { }
   const completionPromise = new Promise<void>((resolve) => {
     resolveCompletion = resolve
   })
@@ -1117,9 +1127,9 @@ function addMcpReasonToToolResult<T extends object>(
 ) {
   return identifier.requireReason && typeof input.reason === "string"
     ? {
-        ...response,
-        reason: input.reason.trim(),
-      }
+      ...response,
+      reason: input.reason.trim(),
+    }
     : response
 }
 
@@ -1286,6 +1296,8 @@ function registerGetDeckCardReferenceTool(server: McpServer) {
               id: deck.deckId,
               name: deck.name,
               description: deck.description,
+              mulliganGuidelines: deck.mulliganGuidelines,
+              strategyGuidelines: deck.strategyGuidelines,
               format: deck.format,
               createdAt: deck.createdAt,
               updatedAt: deck.updatedAt,
@@ -6071,6 +6083,8 @@ async function main() {
       const createdDeck = await createDeck({
         name: parsedDeck.data.name,
         desc: parsedDeck.data.desc,
+        mulliganGuidelines: parsedDeck.data.mulliganGuidelines,
+        strategyGuidelines: parsedDeck.data.strategyGuidelines,
         ownerUserId: user.id,
         commanders: commanderOracleIds.map((oracleId) => ({
           oracleId,
@@ -6701,7 +6715,7 @@ export async function buildStartingHandSimulationPrompt(
 }
 
 function buildStartingHandSimulationPromptFromData(
-  { commanders, library }: StartingHandSimulationPromptData,
+  { commanders, library, mulliganGuidelines }: StartingHandSimulationPromptData,
   llmRunId: string
 ) {
   const commanderLabel = commanders.length === 1 ? "Commander" : "Commanders"
@@ -6709,6 +6723,13 @@ function buildStartingHandSimulationPromptFromData(
   const cardNames = expandCardNames(library)
   const uniqueCards = dedupeCardsByNameAndText([...commanders, ...library])
   const cardReference = formatCardReference(uniqueCards)
+  const mulliganGuidelinesSection = formatUserGuidelinesSection(
+    "User provided mulligan guidelines",
+    mulliganGuidelines
+  )
+  const mulliganGuidelinesBlock = mulliganGuidelinesSection
+    ? `\n\n${mulliganGuidelinesSection}`
+    : ""
 
   return `${DRAW_STARTING_HAND_PROMPT}
 
@@ -6719,7 +6740,7 @@ Decklist:
 ${cardNames.join("\n")}
 
 Card reference:
-${cardReference}
+${cardReference}${mulliganGuidelinesBlock}
 
 LLM Run ID: ${llmRunId}
 `.trim()
@@ -6812,7 +6833,13 @@ export async function buildTurnSimulationPrompt(
 }
 
 function buildTurnSimulationPromptFromData(
-  { commanders, library, libraryCards, startingHand }: TurnSimulationPromptData,
+  {
+    commanders,
+    library,
+    libraryCards,
+    startingHand,
+    strategyGuidelines,
+  }: TurnSimulationPromptData,
   llmRunId: string,
   gameState?: string
 ) {
@@ -6828,13 +6855,20 @@ function buildTurnSimulationPromptFromData(
       commanderNames,
       startingHand,
     })
+  const strategyGuidelinesSection = formatUserGuidelinesSection(
+    "User provided strategy guidelines",
+    strategyGuidelines
+  )
+  const strategyGuidelinesBlock = strategyGuidelinesSection
+    ? `\n\n${strategyGuidelinesSection}`
+    : ""
 
   return `${SIMULATE_TURN_PROMPT}
 
 ${GENERIC_GAME_RULES_REFERENCE}
 
 Card reference:
-${cardReference}
+${cardReference}${strategyGuidelinesBlock}
 
 Cards in library. Not actual order of library. Use tools to interact with library:
 ${cardNames.join("\n")}
@@ -6847,6 +6881,12 @@ ${resolvedGameState}
 
 LLM Run ID: ${llmRunId}
 `.trim()
+}
+
+function formatUserGuidelinesSection(label: string, guidelines: string | null) {
+  const trimmedGuidelines = guidelines?.trim()
+
+  return trimmedGuidelines ? `${label}:\n${trimmedGuidelines}` : null
 }
 
 export async function buildSimulationReportPrompt({
