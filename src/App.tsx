@@ -172,6 +172,16 @@ export function App() {
           </RequireVerifiedUser>
         }
       />
+      <Route
+        path="/admin/model-presets"
+        element={
+          <RequireVerifiedUser sessionUser={sessionUser}>
+            {verifiedPageProps ? (
+              <AdminDashboardRoute {...verifiedPageProps} />
+            ) : null}
+          </RequireVerifiedUser>
+        }
+      />
       <Route path="*" element={<UnknownRoute sessionUser={sessionUser} />} />
     </Routes>
   )

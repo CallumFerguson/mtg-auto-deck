@@ -50,6 +50,7 @@ import { readApiError } from "@/lib/api-error"
 import type {
   CreateSavedSeedResponse,
   CreateSimulationResponse,
+  UpdateSimulationResponse,
   CreateStartingHandResponse,
   DeckCard,
   LlmRunFullPromptResponse,
@@ -72,6 +73,11 @@ import type {
   TurnEvaluation,
   TurnEvaluationResponse,
 } from "@/lib/deck-types"
+import {
+  getLlmModelPresetLabel,
+  type LlmModelPreset,
+  type LlmModelPresetsResponse,
+} from "@/lib/llm-model-preset-types"
 import { getDeckSimulationPath } from "@/lib/navigation"
 import {
   getSimulationFinalParsedOutput,
@@ -514,6 +520,15 @@ export function DeckSimulation({
   const [savedSeedLoadError, setSavedSeedLoadError] = useState<string | null>(
     null
   )
+  const [modelPresets, setModelPresets] = useState<LlmModelPreset[]>([])
+  const [isLoadingModelPresets, setIsLoadingModelPresets] = useState(true)
+  const [modelPresetLoadError, setModelPresetLoadError] = useState<
+    string | null
+  >(null)
+  const [defaultModelPresetId, setDefaultModelPresetId] = useState<
+    string | null
+  >(null)
+  const [selectedModelPresetId, setSelectedModelPresetId] = useState("")
   const [simulationLoadError, setSimulationLoadError] = useState<string | null>(
     null
   )
@@ -565,6 +580,12 @@ export function DeckSimulation({
     () => savedSeeds.find((seed) => seed.id === selectedSavedSeedId) ?? null,
     [savedSeeds, selectedSavedSeedId]
   )
+  const selectedModelPreset = useMemo(
+    () =>
+      modelPresets.find((preset) => preset.id === selectedModelPresetId) ??
+      null,
+    [modelPresets, selectedModelPresetId]
+  )
   const selectedSimulation = useMemo(
     () =>
       simulations.find(
@@ -600,6 +621,7 @@ export function DeckSimulation({
   )
   const canStartSimulation =
     (seedMode === "random" || Boolean(selectedSavedSeed)) &&
+    Boolean(selectedModelPreset) &&
     turnsToSimulate.length > 0 &&
     (openingHandMode !== "provide" || Boolean(selectedOpeningHand))
   const parsedTurnsToSimulateForForm = Number(turnsToSimulate)
@@ -735,6 +757,40 @@ export function DeckSimulation({
     }
   }, [deckId])
 
+  const loadModelPresets = useCallback(async () => {
+    setIsLoadingModelPresets(true)
+    setModelPresetLoadError(null)
+
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/llm-model-presets`)
+
+      if (!response.ok) {
+        setModelPresetLoadError(
+          await readApiError(response, "Model presets could not be loaded.")
+        )
+        return
+      }
+
+      const data = (await response.json()) as LlmModelPresetsResponse
+      setModelPresets(data.presets)
+      setDefaultModelPresetId(data.defaultPresetId)
+      setSelectedModelPresetId((currentPresetId) => {
+        if (
+          currentPresetId &&
+          data.presets.some((preset) => preset.id === currentPresetId)
+        ) {
+          return currentPresetId
+        }
+
+        return data.defaultPresetId ?? ""
+      })
+    } catch {
+      setModelPresetLoadError("Model presets could not be loaded.")
+    } finally {
+      setIsLoadingModelPresets(false)
+    }
+  }, [])
+
   useEffect(() => {
     void loadSimulations()
   }, [loadSimulations])
@@ -782,6 +838,10 @@ export function DeckSimulation({
   }, [loadSavedSeeds])
 
   useEffect(() => {
+    void loadModelPresets()
+  }, [loadModelPresets])
+
+  useEffect(() => {
     if (selectedSimulationIdFromUrl) {
       setSelectedSimulationId(selectedSimulationIdFromUrl)
       setIsNewSimulationSelected(false)
@@ -809,6 +869,7 @@ export function DeckSimulation({
   function resetCreateSimulationForm() {
     setSeedMode("random")
     setSelectedSavedSeedId(savedSeeds[0]?.id ?? "")
+    setSelectedModelPresetId(defaultModelPresetId ?? "")
     setTurnsToSimulate(DEFAULT_TURNS_TO_SIMULATE)
     setAutoGenerateReport(false)
     setOpeningHandMode("simulate")
@@ -829,6 +890,11 @@ export function DeckSimulation({
       return
     }
 
+    if (!selectedModelPreset) {
+      setCreateSimulationError("Choose a model preset.")
+      return
+    }
+
     setCreateSimulationError(null)
     setIsCreatingSimulation(true)
 
@@ -845,6 +911,7 @@ export function DeckSimulation({
               seedMode === "random"
                 ? createRandomSimulationSeed()
                 : selectedSavedSeed?.seed,
+            llmModelPresetId: selectedModelPreset.id,
             turnsToSimulate: parsedTurnsToSimulate,
             autoGenerateReport: autoGenerateReport && canAutoGenerateReport,
             startingHandId:
@@ -1246,6 +1313,61 @@ export function DeckSimulation({
                     <div className="grid gap-3">
                       <label
                         className="text-sm font-medium text-foreground"
+                        htmlFor="model-preset"
+                      >
+                        Model preset
+                      </label>
+                      {modelPresetLoadError ? (
+                        <div className="grid gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2">
+                          <p className="text-sm text-destructive">
+                            {modelPresetLoadError}
+                          </p>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => void loadModelPresets()}
+                          >
+                            <RefreshCw data-icon="inline-start" />
+                            Try again
+                          </Button>
+                        </div>
+                      ) : null}
+                      <select
+                        id="model-preset"
+                        className="h-9 w-full rounded-md border border-input bg-background/60 px-3 text-sm text-foreground transition-colors outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
+                        value={selectedModelPresetId}
+                        disabled={
+                          isLoadingModelPresets || modelPresets.length === 0
+                        }
+                        onChange={(event) =>
+                          setSelectedModelPresetId(event.target.value)
+                        }
+                      >
+                        {isLoadingModelPresets ? (
+                          <option value="">Loading model presets...</option>
+                        ) : modelPresets.length === 0 ? (
+                          <option value="">No enabled model presets</option>
+                        ) : defaultModelPresetId === null ? (
+                          <option value="">Choose a model preset</option>
+                        ) : null}
+                        {modelPresets.map((preset) => (
+                          <option key={preset.id} value={preset.id}>
+                            {getLlmModelPresetLabel(preset)}
+                            {preset.isDefault ? " (default)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                      {!isLoadingModelPresets && modelPresets.length === 0 ? (
+                        <p className="rounded-md border border-amber-300/35 bg-amber-400/10 px-3 py-2 text-sm text-amber-100">
+                          Ask an admin to add or enable a model preset before
+                          creating simulations.
+                        </p>
+                      ) : null}
+                    </div>
+
+                    <div className="grid gap-3">
+                      <label
+                        className="text-sm font-medium text-foreground"
                         htmlFor="turns-to-simulate"
                       >
                         Turns to simulate
@@ -1472,6 +1594,7 @@ export function DeckSimulation({
               deckId={deckId}
               isAdmin={isAdmin}
               isLoadingStartingHand={isLoadingStartingHands}
+              modelPresets={modelPresets}
               onSimulationUpdated={updateSimulation}
               simulation={selectedSimulation}
               startingHand={selectedSimulationStartingHand}
@@ -1504,6 +1627,8 @@ export function DeckSimulation({
         <SimulationDetailsModal
           deckId={deckId}
           isAdmin={isAdmin}
+          modelPresets={modelPresets}
+          onSimulationUpdated={updateSimulation}
           onClose={() => setDetailsSimulationId(null)}
           simulation={detailsSimulation}
           startingHand={detailsSimulationStartingHand}
@@ -1642,12 +1767,16 @@ function DeleteSimulationModal({
 function SimulationDetailsModal({
   deckId,
   isAdmin,
+  modelPresets,
+  onSimulationUpdated,
   onClose,
   simulation,
   startingHand,
 }: {
   deckId: string
   isAdmin: boolean
+  modelPresets: LlmModelPreset[]
+  onSimulationUpdated: (simulation: Simulation) => void
   onClose: () => void
   simulation: Simulation
   startingHand: StartingHand | null
@@ -1658,6 +1787,9 @@ function SimulationDetailsModal({
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false)
   const isLoadingDebugInfoRef = useRef(false)
   const shouldSimulateOpeningHand = simulation.startingHandId === null
+  const selectedModelPreset =
+    modelPresets.find((preset) => preset.id === simulation.llmModelPresetId) ??
+    null
 
   const handleRefreshDebugInfo = useCallback(async () => {
     if (isLoadingDebugInfoRef.current) {
@@ -1783,6 +1915,18 @@ function SimulationDetailsModal({
                     {simulation.autoGenerateReport ? "Yes" : "No"}
                   </dd>
                 </div>
+                <div className="rounded-md border border-border bg-background/35 p-3 sm:col-span-2">
+                  <dt className="text-muted-foreground">Model preset</dt>
+                  <dd className="mt-2">
+                    <SimulationModelPresetSelector
+                      deckId={deckId}
+                      modelPresets={modelPresets}
+                      onSimulationUpdated={onSimulationUpdated}
+                      selectedModelPreset={selectedModelPreset}
+                      simulation={simulation}
+                    />
+                  </dd>
+                </div>
               </dl>
 
               {!shouldSimulateOpeningHand ? (
@@ -1856,6 +2000,7 @@ function SimulationDetails({
   deckId,
   isAdmin,
   isLoadingStartingHand,
+  modelPresets,
   onSimulationUpdated,
   simulation,
   startingHand,
@@ -1864,6 +2009,7 @@ function SimulationDetails({
   deckId: string
   isAdmin: boolean
   isLoadingStartingHand: boolean
+  modelPresets: LlmModelPreset[]
   onSimulationUpdated: (simulation: Simulation) => void
   simulation: Simulation
   startingHand: StartingHand | null
@@ -1905,6 +2051,9 @@ function SimulationDetails({
   const [isActivityPanelOpen, setIsActivityPanelOpen] = useState(false)
   const openActivityPanelFrameRef = useRef<number | null>(null)
   const shouldSimulateOpeningHand = simulation.startingHandId === null
+  const selectedModelPreset =
+    modelPresets.find((preset) => preset.id === simulation.llmModelPresetId) ??
+    null
   const activityRuns = useMemo(() => {
     if (!resultsInfo) {
       return []
@@ -2485,6 +2634,16 @@ function SimulationDetails({
         onScroll={handleResultsScroll}
       >
         <section className="mx-auto grid w-full max-w-5xl gap-4">
+          <div className="rounded-lg border border-border bg-card/70 p-4">
+            <SimulationModelPresetSelector
+              deckId={deckId}
+              modelPresets={modelPresets}
+              onSimulationUpdated={onSimulationUpdated}
+              selectedModelPreset={selectedModelPreset}
+              simulation={simulation}
+            />
+          </div>
+
           {resultsError ? (
             <p
               className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
@@ -2503,6 +2662,7 @@ function SimulationDetails({
           {resultsInfo ? (
             <SimulationResultsPanel
               deckId={deckId}
+              hasUsableModelPreset={selectedModelPreset !== null}
               isAdmin={isAdmin}
               isStartingOpeningHandRun={isStartingOpeningHandRun}
               isStartingReportRun={isStartingReportRun}
@@ -2548,6 +2708,131 @@ function SimulationDetails({
           onClose={closeActivityPanel}
           onExited={handleActivityPanelExited}
         />
+      ) : null}
+    </div>
+  )
+}
+
+function SimulationModelPresetSelector({
+  deckId,
+  modelPresets,
+  onSimulationUpdated,
+  selectedModelPreset,
+  simulation,
+}: {
+  deckId: string
+  modelPresets: LlmModelPreset[]
+  onSimulationUpdated: (simulation: Simulation) => void
+  selectedModelPreset: LlmModelPreset | null
+  simulation: Simulation
+}) {
+  const [selectedPresetId, setSelectedPresetId] = useState(
+    simulation.llmModelPresetId ?? ""
+  )
+  const [isSaving, setIsSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const currentPresetUnavailable =
+    Boolean(simulation.llmModelPresetId) && selectedModelPreset === null
+
+  useEffect(() => {
+    setSelectedPresetId(simulation.llmModelPresetId ?? "")
+    setError(null)
+  }, [simulation.id, simulation.llmModelPresetId])
+
+  async function handleModelPresetChange(nextPresetId: string) {
+    setSelectedPresetId(nextPresetId)
+    setError(null)
+
+    if (!nextPresetId || nextPresetId === simulation.llmModelPresetId) {
+      return
+    }
+
+    setIsSaving(true)
+
+    try {
+      const response = await apiFetch(
+        `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            llmModelPresetId: nextPresetId,
+          }),
+        }
+      )
+
+      if (!response.ok) {
+        setSelectedPresetId(simulation.llmModelPresetId ?? "")
+        setError(
+          await readApiError(response, "Simulation model could not be updated.")
+        )
+        return
+      }
+
+      const data = (await response.json()) as UpdateSimulationResponse
+      onSimulationUpdated(data.simulation)
+    } catch {
+      setSelectedPresetId(simulation.llmModelPresetId ?? "")
+      setError("Simulation model could not be updated.")
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  return (
+    <div className="grid gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <label
+          className="text-sm font-medium text-foreground"
+          htmlFor={`simulation-model-preset-${simulation.id}`}
+        >
+          Model preset
+        </label>
+        <select
+          id={`simulation-model-preset-${simulation.id}`}
+          className="h-9 min-w-0 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50 sm:w-80"
+          value={selectedPresetId}
+          disabled={isSaving || modelPresets.length === 0}
+          onChange={(event) => void handleModelPresetChange(event.target.value)}
+        >
+          {!simulation.llmModelPresetId ? (
+            <option value="">Choose a model preset</option>
+          ) : currentPresetUnavailable ? (
+            <option value={simulation.llmModelPresetId}>
+              Current preset unavailable
+            </option>
+          ) : null}
+          {modelPresets.map((preset) => (
+            <option key={preset.id} value={preset.id}>
+              {getLlmModelPresetLabel(preset)}
+              {preset.isDefault ? " (default)" : ""}
+            </option>
+          ))}
+        </select>
+      </div>
+      {selectedModelPreset ? (
+        <p className="text-sm text-muted-foreground">
+          {getLlmModelPresetLabel(selectedModelPreset)}
+        </p>
+      ) : simulation.llmModelPresetId ? (
+        <p className="rounded-md border border-amber-300/35 bg-amber-400/10 px-3 py-2 text-sm text-amber-100">
+          The selected preset is disabled or unavailable. Future LLM calls are
+          blocked until an enabled preset is selected.
+        </p>
+      ) : (
+        <p className="rounded-md border border-amber-300/35 bg-amber-400/10 px-3 py-2 text-sm text-amber-100">
+          Select a model preset before starting future LLM calls.
+        </p>
+      )}
+      {error ? (
+        <p
+          className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          role="alert"
+        >
+          {error}
+        </p>
       ) : null}
     </div>
   )
@@ -2648,6 +2933,7 @@ function SimulationDebugModal({
 
 function SimulationResultsPanel({
   deckId,
+  hasUsableModelPreset,
   isAdmin,
   isStartingOpeningHandRun,
   isStartingReportRun,
@@ -2674,6 +2960,7 @@ function SimulationResultsPanel({
   turnRunError,
 }: {
   deckId: string
+  hasUsableModelPreset: boolean
   isAdmin: boolean
   isStartingOpeningHandRun: boolean
   isStartingReportRun: boolean
@@ -2725,6 +3012,7 @@ function SimulationResultsPanel({
     isStoppingSimulation
   const isSimulationActionBlocked =
     isStartingSimulationRun ||
+    !hasUsableModelPreset ||
     isOpeningHandRunning ||
     isTurnRunning ||
     isReportRunning ||
@@ -2895,10 +3183,12 @@ function SimulationResultsPanel({
       ...run,
       canEvaluate:
         isAdmin &&
+        hasUsableModelPreset &&
         run.status === "completed" &&
         run.openingHandIsValid === true &&
         !run.chunks.some((chunk) => chunk.kind === "error"),
-      canRerun: canStartOpeningHandRun && !isOpeningHandRunning,
+      canRerun:
+        hasUsableModelPreset && canStartOpeningHandRun && !isOpeningHandRunning,
       isActive: isActiveLlmRunStatus(run.status),
       resultKind: "opening_hand" as const,
       resultLabel: `Opening hand attempt ${run.attemptNumber}`,
@@ -2912,10 +3202,12 @@ function SimulationResultsPanel({
       ...run,
       canEvaluate:
         isAdmin &&
+        hasUsableModelPreset &&
         run.status === "completed" &&
         !run.chunks.some((chunk) => chunk.kind === "error"),
       canRerun:
         typeof run.turnNumber === "number" &&
+        hasUsableModelPreset &&
         !activeTurnNumbers.has(run.turnNumber),
       isActive: isActiveLlmRunStatus(run.status),
       resultKind: "turn" as const,

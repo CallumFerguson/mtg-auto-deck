@@ -4,6 +4,12 @@ type OpenAiTokenPrice = {
   outputDollarsPerMillion: number
 }
 
+export type TokenPrice = {
+  inputDollarsPerMillion: number | null
+  cachedInputDollarsPerMillion: number | null
+  outputDollarsPerMillion: number | null
+}
+
 export type OpenAiPriceEstimate = {
   cents: number
   formattedCents: string
@@ -55,18 +61,44 @@ export function estimateOpenAiTokenPriceCents({
     return null
   }
 
+  return estimateTokenPriceCents({
+    price: OPENAI_TOKEN_PRICES[normalizedModel],
+    usage,
+  })
+}
+
+export function estimateTokenPriceCents({
+  price,
+  usage,
+}: {
+  price: OpenAiTokenPrice
+  usage: unknown
+}): OpenAiPriceEstimate | null {
   const usageRecord = asRecord(usage)
-  const inputTokens = getNumberProperty(usageRecord, "input_tokens")
-  const outputTokens = getNumberProperty(usageRecord, "output_tokens")
+  const inputTokens = getNumberProperty(
+    usageRecord,
+    "input_tokens",
+    "inputTokens",
+    "prompt_tokens",
+    "promptTokens"
+  )
+  const outputTokens = getNumberProperty(
+    usageRecord,
+    "output_tokens",
+    "outputTokens",
+    "completion_tokens",
+    "completionTokens"
+  )
 
   if (inputTokens === null || outputTokens === null) {
     return null
   }
 
-  const price = OPENAI_TOKEN_PRICES[normalizedModel]
-  const inputDetails = asRecord(usageRecord.input_tokens_details)
+  const inputDetails = asRecord(
+    usageRecord.input_tokens_details ?? usageRecord.inputTokensDetails
+  )
   const cachedInputTokens = Math.min(
-    getNumberProperty(inputDetails, "cached_tokens") ?? 0,
+    getNumberProperty(inputDetails, "cached_tokens", "cachedTokens") ?? 0,
     inputTokens
   )
   const standardInputTokens = inputTokens - cachedInputTokens
@@ -87,12 +119,35 @@ export function estimateOpenAiTokenPriceCents({
 export function estimateLlmTokenPriceCents({
   model,
   provider,
+  tokenCosts,
   usage,
 }: {
   model: string
   provider: string
+  tokenCosts?: TokenPrice
   usage: unknown
 }): OpenAiPriceEstimate | null {
+  if (
+    tokenCosts?.inputDollarsPerMillion !== null &&
+    tokenCosts?.inputDollarsPerMillion !== undefined &&
+    tokenCosts.outputDollarsPerMillion !== null &&
+    tokenCosts.outputDollarsPerMillion !== undefined
+  ) {
+    const presetEstimate = estimateTokenPriceCents({
+      price: {
+        inputDollarsPerMillion: tokenCosts.inputDollarsPerMillion,
+        cachedInputDollarsPerMillion:
+          tokenCosts.cachedInputDollarsPerMillion,
+        outputDollarsPerMillion: tokenCosts.outputDollarsPerMillion,
+      },
+      usage,
+    })
+
+    if (presetEstimate !== null) {
+      return presetEstimate
+    }
+  }
+
   if (provider === "openai") {
     return estimateOpenAiTokenPriceCents({ model, usage })
   }

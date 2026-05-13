@@ -59,6 +59,7 @@ export const SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS: readonly LlmChunkKind[] =
 
 export type CreateOpeningHandLlmRunInput = {
   simulationId: string
+  llmModelPresetId: string
   provider: string
   model: string
   openrouterModelProvider: string | null
@@ -70,6 +71,7 @@ export type CreateOpeningHandLlmRunInput = {
 
 export type CreateTurnLlmRunInput = {
   simulationId: string
+  llmModelPresetId: string
   turnNumber: number
   provider: string
   model: string
@@ -81,6 +83,7 @@ export type CreateTurnLlmRunInput = {
 
 export type CreateReportLlmRunInput = {
   simulationId: string
+  llmModelPresetId: string
   provider: string
   model: string
   openrouterModelProvider: string | null
@@ -114,6 +117,7 @@ export type ClaimedQueuedLlmRun = {
   simulationId: string
   deckId: string
   llmRunId: string
+  llmModelPresetId: string | null
   phase: Extract<LlmRunPhase, "opening_hand" | "turn" | "report">
   provider: string
   model: string
@@ -214,6 +218,7 @@ export type TurnEvaluation = {
   id: number
   simulationId: string
   turnLlmRunId: string
+  llmModelPresetId: string | null
   legalTurnPass: boolean
   reasoningPass: boolean
   simulationQualityScore: number
@@ -235,6 +240,7 @@ export type OpeningHandEvaluation = {
   id: number
   simulationId: string
   openingHandLlmRunId: string
+  llmModelPresetId: string | null
   legalSimulationPass: boolean
   reasoningPass: boolean
   simulationQualityScore: number
@@ -247,15 +253,17 @@ export const TURN_EVALUATION_UPSERT_SQL = `
   INSERT INTO simulation_turn_evaluations (
     simulation_id,
     turn_llm_run_id,
+    llm_model_preset_id,
     legal_turn_pass,
     reasoning_pass,
     simulation_quality_score,
     evaluation_json
   )
-  VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+  VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
   ON CONFLICT (turn_llm_run_id)
   DO UPDATE
-  SET legal_turn_pass = EXCLUDED.legal_turn_pass,
+  SET llm_model_preset_id = EXCLUDED.llm_model_preset_id,
+      legal_turn_pass = EXCLUDED.legal_turn_pass,
       reasoning_pass = EXCLUDED.reasoning_pass,
       simulation_quality_score = EXCLUDED.simulation_quality_score,
       evaluation_json = EXCLUDED.evaluation_json,
@@ -264,6 +272,7 @@ export const TURN_EVALUATION_UPSERT_SQL = `
     id,
     simulation_id,
     turn_llm_run_id,
+    llm_model_preset_id,
     legal_turn_pass,
     reasoning_pass,
     simulation_quality_score::float8 AS simulation_quality_score,
@@ -276,15 +285,17 @@ export const OPENING_HAND_EVALUATION_UPSERT_SQL = `
   INSERT INTO simulation_opening_hand_evaluations (
     simulation_id,
     opening_hand_llm_run_id,
+    llm_model_preset_id,
     legal_simulation_pass,
     reasoning_pass,
     simulation_quality_score,
     evaluation_json
   )
-  VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+  VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
   ON CONFLICT (opening_hand_llm_run_id)
   DO UPDATE
-  SET legal_simulation_pass = EXCLUDED.legal_simulation_pass,
+  SET llm_model_preset_id = EXCLUDED.llm_model_preset_id,
+      legal_simulation_pass = EXCLUDED.legal_simulation_pass,
       reasoning_pass = EXCLUDED.reasoning_pass,
       simulation_quality_score = EXCLUDED.simulation_quality_score,
       evaluation_json = EXCLUDED.evaluation_json,
@@ -293,6 +304,7 @@ export const OPENING_HAND_EVALUATION_UPSERT_SQL = `
     id,
     simulation_id,
     opening_hand_llm_run_id,
+    llm_model_preset_id,
     legal_simulation_pass,
     reasoning_pass,
     simulation_quality_score::float8 AS simulation_quality_score,
@@ -303,6 +315,7 @@ export const OPENING_HAND_EVALUATION_UPSERT_SQL = `
 
 export type SimulationDebugLlmRun = {
   llmRunId: string
+  llmModelPresetId: string | null
   phase: LlmRunPhase
   provider: string
   model: string
@@ -388,6 +401,7 @@ export type SimulationSummary = {
   id: string
   deckId: string
   createdVia: SimulationCreatedVia
+  llmModelPresetId: string | null
   startingHandId: string | null
   seed: string
   library: string[]
@@ -479,6 +493,7 @@ export type TurnActionLogResult = {
 
 export type CreateSimulationInput = {
   seed: string
+  llmModelPresetId: string | null
   turnsToSimulate: number
   autoGenerateReport: boolean
   startingHandId: string | null
@@ -739,6 +754,7 @@ export async function ensureSimulationsSchema() {
 
       deck_id uuid NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
       created_via simulation_created_via NOT NULL DEFAULT 'app',
+      llm_model_preset_id uuid REFERENCES llm_model_presets(id) ON DELETE RESTRICT,
 
       seed text NOT NULL,
       random_state bigint NOT NULL,
@@ -774,6 +790,10 @@ export async function ensureSimulationsSchema() {
     ADD COLUMN IF NOT EXISTS created_via simulation_created_via NOT NULL DEFAULT 'app'
   `)
   await queryDatabase(`
+    ALTER TABLE simulations
+    ADD COLUMN IF NOT EXISTS llm_model_preset_id uuid REFERENCES llm_model_presets(id) ON DELETE RESTRICT
+  `)
+  await queryDatabase(`
     UPDATE simulations
     SET status = 'unmanaged',
         updated_at = now()
@@ -789,6 +809,7 @@ export async function ensureSimulationsSchema() {
       model text NOT NULL,
       openrouter_model_provider text,
       reasoning_effort text,
+      llm_model_preset_id uuid REFERENCES llm_model_presets(id) ON DELETE RESTRICT,
       owner_user_id text REFERENCES "user"(id) ON DELETE SET NULL,
 
       status llm_run_status NOT NULL DEFAULT 'pending',
@@ -814,6 +835,10 @@ export async function ensureSimulationsSchema() {
   await queryDatabase(`
     ALTER TABLE llm_runs
     ADD COLUMN IF NOT EXISTS openrouter_model_provider text
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_runs
+    ADD COLUMN IF NOT EXISTS llm_model_preset_id uuid REFERENCES llm_model_presets(id) ON DELETE RESTRICT
   `)
   await queryDatabase(`
     ALTER TABLE llm_runs
@@ -985,6 +1010,7 @@ export async function ensureSimulationsSchema() {
 
       simulation_id uuid NOT NULL REFERENCES simulations(id) ON DELETE CASCADE,
       opening_hand_llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
+      llm_model_preset_id uuid REFERENCES llm_model_presets(id) ON DELETE RESTRICT,
 
       legal_simulation_pass boolean NOT NULL,
       reasoning_pass boolean NOT NULL,
@@ -999,6 +1025,10 @@ export async function ensureSimulationsSchema() {
 
       UNIQUE (opening_hand_llm_run_id)
     )
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulation_opening_hand_evaluations
+    ADD COLUMN IF NOT EXISTS llm_model_preset_id uuid REFERENCES llm_model_presets(id) ON DELETE RESTRICT
   `)
   await queryDatabase(`
     CREATE TABLE IF NOT EXISTS simulation_turn_llm_runs (
@@ -1059,6 +1089,7 @@ export async function ensureSimulationsSchema() {
 
       simulation_id uuid NOT NULL REFERENCES simulations(id) ON DELETE CASCADE,
       turn_llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
+      llm_model_preset_id uuid REFERENCES llm_model_presets(id) ON DELETE RESTRICT,
 
       legal_turn_pass boolean NOT NULL,
       reasoning_pass boolean NOT NULL,
@@ -1073,6 +1104,10 @@ export async function ensureSimulationsSchema() {
 
       UNIQUE (turn_llm_run_id)
     )
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulation_turn_evaluations
+    ADD COLUMN IF NOT EXISTS llm_model_preset_id uuid REFERENCES llm_model_presets(id) ON DELETE RESTRICT
   `)
   await queryDatabase(`
     CREATE TABLE IF NOT EXISTS simulation_report_llm_runs (
@@ -1114,6 +1149,10 @@ export async function ensureSimulationsSchema() {
       ON simulations (deck_id)
   `)
   await queryDatabase(`
+    CREATE INDEX IF NOT EXISTS simulations_llm_model_preset_id_idx
+      ON simulations (llm_model_preset_id)
+  `)
+  await queryDatabase(`
     CREATE INDEX IF NOT EXISTS simulations_status_idx
       ON simulations (status)
   `)
@@ -1124,6 +1163,10 @@ export async function ensureSimulationsSchema() {
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS llm_runs_provider_model_idx
       ON llm_runs (provider, model)
+  `)
+  await queryDatabase(`
+    CREATE INDEX IF NOT EXISTS llm_runs_llm_model_preset_id_idx
+      ON llm_runs (llm_model_preset_id)
   `)
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS llm_runs_queue_idx
@@ -1185,6 +1228,7 @@ type SimulationSummaryRow = {
   id: string
   deck_id: string
   created_via: SimulationCreatedVia
+  llm_model_preset_id: string | null
   starting_hand_id: string | null
   seed: string
   library: unknown
@@ -1284,6 +1328,7 @@ function mapSimulationSummaryRow(
     id: simulation.id,
     deckId: simulation.deck_id,
     createdVia: simulation.created_via,
+    llmModelPresetId: simulation.llm_model_preset_id,
     startingHandId: simulation.starting_hand_id,
     seed: simulation.seed,
     library: parseStringArray(simulation.library),
@@ -1306,6 +1351,7 @@ export async function listSimulationsForDeck(
         id,
         deck_id,
         created_via,
+        llm_model_preset_id,
         starting_hand_id,
         seed,
         library,
@@ -1333,6 +1379,7 @@ export async function createSimulation(
 ): Promise<SimulationSummary> {
   const seed = input.seed.trim()
   const createdVia = input.createdVia ?? "app"
+  const llmModelPresetId = input.llmModelPresetId?.trim() || null
 
   if (!seed) {
     throw new SimulationValidationError("Simulation seed is required.")
@@ -1350,12 +1397,34 @@ export async function createSimulation(
     )
   }
 
+  if (createdVia === "app" && llmModelPresetId === null) {
+    throw new SimulationValidationError("Model preset is required.")
+  }
+
   const deckResult = await queryDatabase("SELECT id FROM decks WHERE id = $1", [
     deckId,
   ])
 
   if (deckResult.rowCount === 0) {
     throw new SimulationValidationError("Deck not found.")
+  }
+
+  if (llmModelPresetId !== null) {
+    const presetResult = await queryDatabase(
+      `
+        SELECT id
+        FROM llm_model_presets
+        WHERE id = $1
+          AND is_enabled = true
+      `,
+      [llmModelPresetId]
+    )
+
+    if (presetResult.rowCount === 0) {
+      throw new SimulationValidationError(
+        "Model preset not found or disabled."
+      )
+    }
   }
 
   if (input.startingHandId !== null) {
@@ -1388,6 +1457,7 @@ export async function createSimulation(
       INSERT INTO simulations (
         deck_id,
         created_via,
+        llm_model_preset_id,
         seed,
         random_state,
         turns_to_simulate,
@@ -1397,11 +1467,12 @@ export async function createSimulation(
         has_drawn_starting_hand,
         status
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11)
       RETURNING
         id,
         deck_id,
         created_via,
+        llm_model_preset_id,
         starting_hand_id,
         seed,
         library,
@@ -1416,6 +1487,7 @@ export async function createSimulation(
     [
       deckId,
       createdVia,
+      llmModelPresetId,
       seed,
       shuffledLibrary.randomState,
       input.turnsToSimulate,
@@ -1440,6 +1512,7 @@ export async function getSimulationSummary(
         id,
         deck_id,
         created_via,
+        llm_model_preset_id,
         starting_hand_id,
         seed,
         library,
@@ -1463,6 +1536,64 @@ export async function getSimulationSummary(
   }
 
   return mapSimulationSummaryRow(simulation)
+}
+
+export async function updateSimulationLlmModelPreset(
+  deckId: string,
+  simulationId: string,
+  llmModelPresetId: string
+): Promise<SimulationSummary> {
+  const trimmedPresetId = llmModelPresetId.trim()
+
+  if (!trimmedPresetId) {
+    throw new SimulationValidationError("Model preset is required.")
+  }
+
+  const presetResult = await queryDatabase(
+    `
+      SELECT id
+      FROM llm_model_presets
+      WHERE id = $1
+        AND is_enabled = true
+    `,
+    [trimmedPresetId]
+  )
+
+  if (presetResult.rowCount === 0) {
+    throw new SimulationValidationError("Model preset not found or disabled.")
+  }
+
+  const result = await queryDatabase<SimulationSummaryRow>(
+    `
+      UPDATE simulations
+      SET llm_model_preset_id = $3,
+          updated_at = now()
+      WHERE id = $1
+        AND deck_id = $2
+      RETURNING
+        id,
+        deck_id,
+        created_via,
+        llm_model_preset_id,
+        starting_hand_id,
+        seed,
+        library,
+        turns_to_simulate,
+        auto_generate_report,
+        ${SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL} AS completed_llm_run_count,
+        ${SIMULATION_SUMMARY_ACTIVE_RUN_COUNT_SQL} AS active_llm_run_count,
+        status,
+        created_at,
+        updated_at
+    `,
+    [simulationId, deckId, trimmedPresetId]
+  )
+
+  if (result.rowCount === 0) {
+    throw new SimulationValidationError("Simulation not found.")
+  }
+
+  return mapSimulationSummaryRow(result.rows[0])
 }
 
 export async function markSimulationCompleted(simulationId: string) {
@@ -2042,6 +2173,7 @@ export async function createOpeningHandLlmRun(
       `
         INSERT INTO llm_runs (
           phase,
+          llm_model_preset_id,
           provider,
           model,
           openrouter_model_provider,
@@ -2060,11 +2192,13 @@ export async function createOpeningHandLlmRun(
           $5,
           $6,
           $7,
-          $8::jsonb
+          $8,
+          $9::jsonb
         )
         RETURNING id, status, runtime_stream_key, created_at
       `,
       [
+        input.llmModelPresetId,
         input.provider,
         input.model,
         openrouterModelProvider,
@@ -2299,6 +2433,7 @@ export async function createTurnLlmRun(
       `
         INSERT INTO llm_runs (
           phase,
+          llm_model_preset_id,
           provider,
           model,
           openrouter_model_provider,
@@ -2313,11 +2448,13 @@ export async function createTurnLlmRun(
           $3,
           $4,
           $5,
-          $6
+          $6,
+          $7
         )
         RETURNING id, status, runtime_stream_key, created_at
       `,
       [
+        input.llmModelPresetId,
         input.provider,
         input.model,
         openrouterModelProvider,
@@ -2418,6 +2555,7 @@ export async function createReportLlmRun(
       `
         INSERT INTO llm_runs (
           phase,
+          llm_model_preset_id,
           provider,
           model,
           openrouter_model_provider,
@@ -2436,11 +2574,13 @@ export async function createReportLlmRun(
           $5,
           $6,
           $7,
-          $8::jsonb
+          $8,
+          $9::jsonb
         )
         RETURNING id, status, runtime_stream_key, created_at
       `,
       [
+        input.llmModelPresetId,
         input.provider,
         input.model,
         openrouterModelProvider,
@@ -3205,6 +3345,7 @@ export async function claimNextQueuedLlmRun({
       simulation_id: string
       deck_id: string
       llm_run_id: string
+      llm_model_preset_id: string | null
       phase: Extract<LlmRunPhase, "opening_hand" | "turn" | "report">
       provider: string
       model: string
@@ -3287,6 +3428,7 @@ export async function claimNextQueuedLlmRun({
           candidate.simulation_id,
           candidate.deck_id,
           llm_run.id AS llm_run_id,
+          llm_run.llm_model_preset_id,
           llm_run.phase,
           llm_run.provider,
           llm_run.model,
@@ -3311,6 +3453,7 @@ export async function claimNextQueuedLlmRun({
       simulationId: run.simulation_id,
       deckId: run.deck_id,
       llmRunId: run.llm_run_id,
+      llmModelPresetId: run.llm_model_preset_id,
       phase: run.phase,
       provider: run.provider,
       model: run.model,
@@ -4503,6 +4646,7 @@ async function getLlmRunEvaluationChunks(llmRunId: string) {
 export async function upsertOpeningHandEvaluation({
   evaluationJson,
   legalSimulationPass,
+  llmModelPresetId,
   openingHandLlmRunId,
   reasoningPass,
   simulationId,
@@ -4510,6 +4654,7 @@ export async function upsertOpeningHandEvaluation({
 }: {
   simulationId: string
   openingHandLlmRunId: string
+  llmModelPresetId: string
   legalSimulationPass: boolean
   reasoningPass: boolean
   simulationQualityScore: number
@@ -4520,6 +4665,7 @@ export async function upsertOpeningHandEvaluation({
     [
       simulationId,
       openingHandLlmRunId,
+      llmModelPresetId,
       legalSimulationPass,
       reasoningPass,
       simulationQualityScore,
@@ -4533,6 +4679,7 @@ export async function upsertOpeningHandEvaluation({
 export async function upsertTurnEvaluation({
   evaluationJson,
   legalTurnPass,
+  llmModelPresetId,
   reasoningPass,
   simulationId,
   simulationQualityScore,
@@ -4540,6 +4687,7 @@ export async function upsertTurnEvaluation({
 }: {
   simulationId: string
   turnLlmRunId: string
+  llmModelPresetId: string
   legalTurnPass: boolean
   reasoningPass: boolean
   simulationQualityScore: number
@@ -4550,6 +4698,7 @@ export async function upsertTurnEvaluation({
     [
       simulationId,
       turnLlmRunId,
+      llmModelPresetId,
       legalTurnPass,
       reasoningPass,
       simulationQualityScore,
@@ -5209,11 +5358,15 @@ function getFinalParsedOutputPayload(run: SimulationDebugLlmRun) {
 
 type SimulationDebugLlmRunRow = {
   llm_run_id: string
+  llm_model_preset_id: string | null
   phase: LlmRunPhase
   provider: string
   model: string
   usage: unknown
   reasoning_effort: string | null
+  input_token_cost_usd_per_million: string | number | null
+  cached_input_token_cost_usd_per_million: string | number | null
+  output_token_cost_usd_per_million: string | number | null
   status: LlmRunStatus
   runtime_stream_key: string | null
   created_at: Date
@@ -5250,6 +5403,7 @@ type OpeningHandEvaluationRow = {
   id: string
   simulation_id: string
   opening_hand_llm_run_id: string
+  llm_model_preset_id: string | null
   legal_simulation_pass: boolean
   reasoning_pass: boolean
   simulation_quality_score: number
@@ -5262,6 +5416,7 @@ type TurnEvaluationRow = {
   id: string
   simulation_id: string
   turn_llm_run_id: string
+  llm_model_preset_id: string | null
   legal_turn_pass: boolean
   reasoning_pass: boolean
   simulation_quality_score: number
@@ -5292,11 +5447,15 @@ async function getSimulationDebugLlmRuns({
     `
       SELECT
         llm_run.id AS llm_run_id,
+        llm_run.llm_model_preset_id,
         llm_run.phase,
-        llm_run.provider,
-        llm_run.model,
+        COALESCE(preset.provider, llm_run.provider) AS provider,
+        COALESCE(preset.model, llm_run.model) AS model,
         llm_run.usage,
-        llm_run.reasoning_effort,
+        COALESCE(preset.reasoning_effort, llm_run.reasoning_effort) AS reasoning_effort,
+        preset.input_token_cost_usd_per_million,
+        preset.cached_input_token_cost_usd_per_million,
+        preset.output_token_cost_usd_per_million,
         llm_run.status,
         llm_run.runtime_stream_key,
         llm_run.created_at,
@@ -5318,6 +5477,8 @@ async function getSimulationDebugLlmRuns({
       FROM ${tableName} run
       JOIN llm_runs llm_run
         ON llm_run.id = run.llm_run_id
+      LEFT JOIN llm_model_presets preset
+        ON preset.id = llm_run.llm_model_preset_id
       LEFT JOIN llm_run_chunks chunk
         ON chunk.llm_run_id = llm_run.id
        AND (
@@ -5338,6 +5499,7 @@ async function getSimulationDebugLlmRuns({
     if (!run) {
       run = {
         llmRunId: row.llm_run_id,
+        llmModelPresetId: row.llm_model_preset_id,
         phase: row.phase,
         provider: row.provider,
         model: row.model,
@@ -5345,6 +5507,17 @@ async function getSimulationDebugLlmRuns({
           estimateLlmTokenPriceCents({
             model: row.model,
             provider: row.provider,
+            tokenCosts: {
+              inputDollarsPerMillion: toOptionalNumber(
+                row.input_token_cost_usd_per_million
+              ),
+              cachedInputDollarsPerMillion: toOptionalNumber(
+                row.cached_input_token_cost_usd_per_million
+              ),
+              outputDollarsPerMillion: toOptionalNumber(
+                row.output_token_cost_usd_per_million
+              ),
+            },
             usage: row.usage,
           })?.formattedCents ?? null,
         reasoningEffort: row.reasoning_effort || null,
@@ -5451,6 +5624,7 @@ async function getOpeningHandEvaluationsByLlmRunIds(
         id,
         simulation_id,
         opening_hand_llm_run_id,
+        llm_model_preset_id,
         legal_simulation_pass,
         reasoning_pass,
         simulation_quality_score::float8 AS simulation_quality_score,
@@ -5481,6 +5655,7 @@ function mapOpeningHandEvaluationRow(
     id: Number(row.id),
     simulationId: row.simulation_id,
     openingHandLlmRunId: row.opening_hand_llm_run_id,
+    llmModelPresetId: row.llm_model_preset_id,
     legalSimulationPass: row.legal_simulation_pass,
     reasoningPass: row.reasoning_pass,
     simulationQualityScore: Number(row.simulation_quality_score),
@@ -5602,6 +5777,7 @@ async function getTurnEvaluationsByLlmRunIds(llmRunIds: readonly string[]) {
         id,
         simulation_id,
         turn_llm_run_id,
+        llm_model_preset_id,
         legal_turn_pass,
         reasoning_pass,
         simulation_quality_score::float8 AS simulation_quality_score,
@@ -5627,6 +5803,7 @@ function mapTurnEvaluationRow(row: TurnEvaluationRow): TurnEvaluation {
     id: Number(row.id),
     simulationId: row.simulation_id,
     turnLlmRunId: row.turn_llm_run_id,
+    llmModelPresetId: row.llm_model_preset_id,
     legalTurnPass: row.legal_turn_pass,
     reasoningPass: row.reasoning_pass,
     simulationQualityScore: Number(row.simulation_quality_score),
@@ -6718,4 +6895,14 @@ function getSafeSqlIdentifier(identifier: string) {
 
 function quoteSqlLiteral(value: string) {
   return `'${value.replace(/'/g, "''")}'`
+}
+
+function toOptionalNumber(value: string | number | null) {
+  if (value === null) {
+    return null
+  }
+
+  const parsedValue = Number(value)
+
+  return Number.isFinite(parsedValue) ? parsedValue : null
 }

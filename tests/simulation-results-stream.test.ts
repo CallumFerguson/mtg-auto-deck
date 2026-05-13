@@ -1865,6 +1865,7 @@ function createRun(overrides: {
 }): SimulationDebugLlmRun {
   return {
     llmRunId: overrides.llmRunId,
+    llmModelPresetId: "preset-test",
     phase: overrides.phase,
     provider: overrides.provider ?? "openai",
     model: "gpt-test",

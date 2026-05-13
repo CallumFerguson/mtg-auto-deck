@@ -22,6 +22,18 @@ import {
   listAdminUsers,
 } from "./admin-users-postgres.js"
 import {
+  createLlmModelPreset,
+  deleteUnusedLlmModelPreset,
+  ensureLlmModelPresetsSchema,
+  getEnabledLlmModelPreset,
+  listAdminLlmModelPresets,
+  listEnabledLlmModelPresets,
+  setDefaultLlmModelPreset,
+  setLlmModelPresetEnabled,
+  LlmModelPresetValidationError,
+  type LlmModelPreset,
+} from "./llm-model-presets-postgres.js"
+import {
   closeDatabasePool,
   queryDatabase,
   verifyDatabaseConnection,
@@ -103,6 +115,7 @@ import {
   upsertOpeningHandEvaluation,
   upsertTurnEvaluation,
   updateLlmRunRequestData,
+  updateSimulationLlmModelPreset,
 } from "./simulations-postgres.js"
 import type {
   LlmRunChunkInput,
@@ -176,6 +189,8 @@ import {
   getLlmRunQueueConfig,
   getOpeningHandLlmRunConfig,
   getTurnSimulationLlmRunConfig,
+  llmProviderSchema,
+  reasoningEffortSchema,
   type EvaluationLlmRunConfig,
   type OpenAiRunConfig,
   type OpenRouterRunConfig,
@@ -328,9 +343,36 @@ const createSavedSeedSchema = z.object({
 })
 const createSimulationSchema = z.object({
   seed: z.string().trim().min(1),
+  llmModelPresetId: z.uuid(),
   turnsToSimulate: z.number().int().nonnegative(),
   autoGenerateReport: z.boolean().default(false),
   startingHandId: z.uuid().nullable(),
+})
+const updateSimulationModelPresetSchema = z.object({
+  llmModelPresetId: z.uuid(),
+})
+const optionalTokenCostSchema = z
+  .number()
+  .finite()
+  .nonnegative()
+  .nullable()
+  .default(null)
+const createLlmModelPresetSchema = z.object({
+  provider: llmProviderSchema,
+  model: z.string().trim().min(1),
+  reasoningEffort: reasoningEffortSchema,
+  openrouterModelProvider: z.string().trim().nullable().default(null),
+  inputTokenCostUsdPerMillion: optionalTokenCostSchema,
+  cachedInputTokenCostUsdPerMillion: optionalTokenCostSchema,
+  outputTokenCostUsdPerMillion: optionalTokenCostSchema,
+  isEnabled: z.boolean().default(true),
+  isDefault: z.boolean().default(false),
+})
+const updateLlmModelPresetEnabledSchema = z.object({
+  isEnabled: z.boolean(),
+})
+const setDefaultLlmModelPresetSchema = z.object({
+  presetId: z.uuid().nullable(),
 })
 const createTurnLlmRunSchema = z.object({
   turnNumber: z.number().int().positive(),
@@ -352,6 +394,7 @@ type ActiveLlmRunRuntime = {
   flushTimer: NodeJS.Timeout | null
   flushPromise: Promise<void> | null
   llmRunId: string
+  llmModelPresetId: string
   model: string
   fullPrompt: string
   nextSequence: number
@@ -472,6 +515,7 @@ function createStreamRunFromRuntime(
 ): SimulationResultsStreamRun {
   return {
     llmRunId: runtime.llmRunId,
+    llmModelPresetId: runtime.llmModelPresetId,
     phase: runtime.phase,
     provider: runtime.provider,
     model: runtime.model,
@@ -1328,6 +1372,7 @@ function registerCreateSimulationTool(server: McpServer) {
     async ({ deckId }) => {
       const simulation = await createSimulation(deckId, {
         seed: randomUUID(),
+        llmModelPresetId: null,
         turnsToSimulate: 0,
         autoGenerateReport: false,
         startingHandId: null,
@@ -2598,6 +2643,59 @@ async function resolveLlmRunConfigModel(
   return config
 }
 
+async function getRequiredEnabledSimulationLlmModelPreset(
+  deckId: string,
+  simulationId: string
+) {
+  const simulation = await getSimulationSummary(deckId, simulationId)
+
+  if (!simulation) {
+    throw new SimulationValidationError("Simulation not found.")
+  }
+
+  if (!simulation.llmModelPresetId) {
+    throw new SimulationValidationError(
+      "Select an enabled model preset before starting LLM runs for this simulation."
+    )
+  }
+
+  const preset = await getEnabledLlmModelPreset(simulation.llmModelPresetId)
+
+  if (!preset) {
+    throw new SimulationValidationError(
+      "The selected model preset is disabled. Choose an enabled model preset before starting LLM runs."
+    )
+  }
+
+  return preset
+}
+
+async function getRequiredEnabledQueuedRunLlmModelPreset(
+  run: ClaimedQueuedLlmRun
+) {
+  if (!run.llmModelPresetId) {
+    throw new Error("Queued LLM run is missing a model preset.")
+  }
+
+  const preset = await getEnabledLlmModelPreset(run.llmModelPresetId)
+
+  if (!preset) {
+    throw new Error("Queued LLM run model preset is disabled or missing.")
+  }
+
+  return preset
+}
+
+function getLlmModelPresetRunConfig(preset: LlmModelPreset) {
+  return {
+    id: preset.id,
+    provider: preset.provider,
+    model: preset.model,
+    reasoningEffort: preset.reasoningEffort,
+    openrouterModelProvider: preset.openrouterModelProvider,
+  }
+}
+
 async function prepareAndStartOpeningHandLlmRun({
   deckId,
   resetBeforeStart,
@@ -2610,8 +2708,12 @@ async function prepareAndStartOpeningHandLlmRun({
   let createdLlmRunId: string | null = null
 
   try {
+    const modelPreset = await getRequiredEnabledSimulationLlmModelPreset(
+      deckId,
+      simulationId
+    )
     const llmConfig = await resolveLlmRunConfigModel(
-      getOpeningHandLlmRunConfig()
+      getOpeningHandLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
     )
 
     if (resetBeforeStart) {
@@ -2620,6 +2722,7 @@ async function prepareAndStartOpeningHandLlmRun({
 
     const openingHandRun = await createOpeningHandLlmRun(deckId, {
       simulationId,
+      llmModelPresetId: llmConfig.modelPresetId,
       provider: llmConfig.provider,
       model: llmConfig.model,
       openrouterModelProvider: getLlmRunOpenRouterModelProvider(llmConfig),
@@ -2687,11 +2790,16 @@ async function prepareAndStartTurnLlmRun({
   let createdLlmRunId: string | null = null
 
   try {
+    const modelPreset = await getRequiredEnabledSimulationLlmModelPreset(
+      deckId,
+      simulationId
+    )
     const llmConfig = await resolveLlmRunConfigModel(
-      getTurnSimulationLlmRunConfig()
+      getTurnSimulationLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
     )
     const turnRun = await createTurnLlmRun(deckId, {
       simulationId,
+      llmModelPresetId: llmConfig.modelPresetId,
       turnNumber,
       provider: llmConfig.provider,
       model: llmConfig.model,
@@ -2759,8 +2867,12 @@ async function prepareAndStartReportLlmRun({
   let createdLlmRunId: string | null = null
 
   try {
+    const modelPreset = await getRequiredEnabledSimulationLlmModelPreset(
+      deckId,
+      simulationId
+    )
     const llmConfig = await resolveLlmRunConfigModel(
-      getTurnSimulationLlmRunConfig()
+      getTurnSimulationLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
     )
     const fullPrompt = await buildSimulationReportPrompt({
       deckId,
@@ -2773,6 +2885,7 @@ async function prepareAndStartReportLlmRun({
     )
     const reportRun = await createReportLlmRun(deckId, {
       simulationId,
+      llmModelPresetId: llmConfig.modelPresetId,
       provider: llmConfig.provider,
       model: llmConfig.model,
       openrouterModelProvider: getLlmRunOpenRouterModelProvider(llmConfig),
@@ -2948,9 +3061,11 @@ async function drainLlmRunQueue(config: LlmRunQueueConfig) {
 
 async function startClaimedQueuedLlmRun(run: ClaimedQueuedLlmRun) {
   try {
+    const modelPreset = await getRequiredEnabledQueuedRunLlmModelPreset(run)
+
     if (run.phase === "opening_hand") {
       const config = await resolveLlmRunConfigModel(
-        getOpeningHandLlmRunConfig()
+        getOpeningHandLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
       )
 
       assertClaimedRunMatchesConfig(run, config)
@@ -2974,7 +3089,7 @@ async function startClaimedQueuedLlmRun(run: ClaimedQueuedLlmRun) {
     }
 
     const config = await resolveLlmRunConfigModel(
-      getTurnSimulationLlmRunConfig()
+      getTurnSimulationLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
     )
 
     assertClaimedRunMatchesConfig(run, config)
@@ -3028,6 +3143,7 @@ function assertClaimedRunMatchesConfig(
     getLlmRunOpenRouterModelProvider(config)
 
   if (
+    run.llmModelPresetId === config.modelPresetId &&
     run.provider === config.provider &&
     run.model === config.model &&
     run.openrouterModelProvider === currentOpenRouterModelProvider &&
@@ -3745,16 +3861,19 @@ function getChatMessageContentText(content: unknown) {
 
 async function saveTurnEvaluation({
   evaluationJson,
+  llmModelPresetId,
   simulationId,
   turnLlmRunId,
 }: {
   evaluationJson: TurnEvaluationJson
+  llmModelPresetId: string
   simulationId: string
   turnLlmRunId: string
 }) {
   return upsertTurnEvaluation({
     simulationId,
     turnLlmRunId,
+    llmModelPresetId,
     legalTurnPass: evaluationJson.legalTurnPass,
     reasoningPass: evaluationJson.reasoningPass,
     simulationQualityScore: evaluationJson.simulationQualityScore,
@@ -3764,16 +3883,19 @@ async function saveTurnEvaluation({
 
 async function saveOpeningHandEvaluation({
   evaluationJson,
+  llmModelPresetId,
   openingHandLlmRunId,
   simulationId,
 }: {
   evaluationJson: OpeningHandEvaluationJson
+  llmModelPresetId: string
   openingHandLlmRunId: string
   simulationId: string
 }) {
   return upsertOpeningHandEvaluation({
     simulationId,
     openingHandLlmRunId,
+    llmModelPresetId,
     legalSimulationPass: evaluationJson.legalSimulationPass,
     reasoningPass: evaluationJson.reasoningPass,
     simulationQualityScore: evaluationJson.simulationQualityScore,
@@ -3855,6 +3977,7 @@ async function runOpeningHandLlmRun({
     flushTimer: null,
     flushPromise: null,
     llmRunId,
+    llmModelPresetId: config.modelPresetId,
     model: config.model,
     fullPrompt,
     nextSequence: 1,
@@ -4098,6 +4221,7 @@ async function runTurnLlmRun({
     flushTimer: null,
     flushPromise: null,
     llmRunId,
+    llmModelPresetId: config.modelPresetId,
     model: config.model,
     fullPrompt,
     nextSequence: 1,
@@ -4341,6 +4465,7 @@ async function runReportLlmRun({
     flushTimer: null,
     flushPromise: null,
     llmRunId,
+    llmModelPresetId: config.modelPresetId,
     model: config.model,
     fullPrompt,
     nextSequence: 1,
@@ -4680,6 +4805,7 @@ async function main() {
   await ensureDecksSchema()
   await ensureStartingHandsSchema()
   await ensureSavedSeedsSchema()
+  await ensureLlmModelPresetsSchema()
   await ensureSimulationsSchema()
   const staleLlmRunCleanup = await cancelStaleInFlightLlmRuns()
 
@@ -4955,6 +5081,202 @@ async function main() {
     }
   })
 
+  app.get("/llm-model-presets", async (_req: Request, res: Response) => {
+    try {
+      const presets = await listEnabledLlmModelPresets()
+
+      res.status(200).json({
+        presets,
+        defaultPresetId:
+          presets.find((preset) => preset.isDefault)?.id ?? null,
+      })
+    } catch (error) {
+      console.error("Failed to list model presets:", error)
+      res.status(500).json({
+        error: "Failed to list model presets.",
+      })
+    }
+  })
+
+  app.get(
+    "/admin/llm-model-presets",
+    async (req: Request, res: Response) => {
+      if (!requireAdminUser(req, res)) {
+        return
+      }
+
+      try {
+        const presets = await listAdminLlmModelPresets()
+
+        res.status(200).json({
+          presets,
+          total: presets.length,
+        })
+      } catch (error) {
+        console.error("Failed to list admin model presets:", error)
+        res.status(500).json({
+          error: "Failed to list model presets.",
+        })
+      }
+    }
+  )
+
+  app.post(
+    "/admin/llm-model-presets",
+    async (req: Request, res: Response) => {
+      if (!requireAdminUser(req, res)) {
+        return
+      }
+
+      const parsedPreset = createLlmModelPresetSchema.safeParse(req.body)
+
+      if (!parsedPreset.success) {
+        res.status(400).json({
+          error: "Model preset payload is not in the expected format.",
+        })
+        return
+      }
+
+      try {
+        const preset = await createLlmModelPreset(parsedPreset.data)
+
+        res.status(201).json({
+          preset,
+        })
+      } catch (error) {
+        if (error instanceof LlmModelPresetValidationError) {
+          res.status(400).json({
+            error: error.message,
+          })
+          return
+        }
+
+        console.error("Failed to create model preset:", error)
+        res.status(500).json({
+          error: "Failed to create model preset.",
+        })
+      }
+    }
+  )
+
+  app.patch(
+    "/admin/llm-model-presets/:presetId/enabled",
+    async (req: Request, res: Response) => {
+      if (!requireAdminUser(req, res)) {
+        return
+      }
+
+      const presetId = String(req.params.presetId)
+      const parsedUpdate = updateLlmModelPresetEnabledSchema.safeParse(req.body)
+
+      if (!parsedUpdate.success) {
+        res.status(400).json({
+          error: "Model preset update payload is not in the expected format.",
+        })
+        return
+      }
+
+      try {
+        const preset = await setLlmModelPresetEnabled(
+          presetId,
+          parsedUpdate.data.isEnabled
+        )
+
+        if (!preset) {
+          res.status(404).json({
+            error: "Model preset not found.",
+          })
+          return
+        }
+
+        res.status(200).json({
+          preset,
+        })
+      } catch (error) {
+        console.error("Failed to update model preset:", error)
+        res.status(500).json({
+          error: "Failed to update model preset.",
+        })
+      }
+    }
+  )
+
+  app.put(
+    "/admin/llm-model-presets/default",
+    async (req: Request, res: Response) => {
+      if (!requireAdminUser(req, res)) {
+        return
+      }
+
+      const parsedDefault = setDefaultLlmModelPresetSchema.safeParse(req.body)
+
+      if (!parsedDefault.success) {
+        res.status(400).json({
+          error: "Default model preset payload is not in the expected format.",
+        })
+        return
+      }
+
+      try {
+        const preset = await setDefaultLlmModelPreset(
+          parsedDefault.data.presetId
+        )
+
+        res.status(200).json({
+          preset,
+        })
+      } catch (error) {
+        if (error instanceof LlmModelPresetValidationError) {
+          res.status(400).json({
+            error: error.message,
+          })
+          return
+        }
+
+        console.error("Failed to set default model preset:", error)
+        res.status(500).json({
+          error: "Failed to set default model preset.",
+        })
+      }
+    }
+  )
+
+  app.delete(
+    "/admin/llm-model-presets/:presetId",
+    async (req: Request, res: Response) => {
+      if (!requireAdminUser(req, res)) {
+        return
+      }
+
+      const presetId = String(req.params.presetId)
+
+      try {
+        const wasDeleted = await deleteUnusedLlmModelPreset(presetId)
+
+        if (!wasDeleted) {
+          res.status(404).json({
+            error: "Model preset not found.",
+          })
+          return
+        }
+
+        res.status(204).send()
+      } catch (error) {
+        if (error instanceof LlmModelPresetValidationError) {
+          res.status(400).json({
+            error: error.message,
+          })
+          return
+        }
+
+        console.error("Failed to delete model preset:", error)
+        res.status(500).json({
+          error: "Failed to delete model preset.",
+        })
+      }
+    }
+  )
+
   app.use("/decks/:deckId", async (req: Request, res: Response, next) => {
     try {
       const deckId = String(req.params.deckId)
@@ -5180,8 +5502,12 @@ async function main() {
           attemptNumber: run.attemptNumber,
           openingHandEvaluationInputText,
         })
+        const modelPreset = await getRequiredEnabledSimulationLlmModelPreset(
+          deckId,
+          simulationId
+        )
         const config = await resolveLlmRunConfigModel(
-          getEvaluationLlmRunConfig()
+          getEvaluationLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
         )
         const responseText = await collectRunEvaluationCompletion({
           config,
@@ -5198,6 +5524,7 @@ async function main() {
           parseOpeningHandEvaluationResponseText(responseText)
         const evaluation = await saveOpeningHandEvaluation({
           evaluationJson,
+          llmModelPresetId: config.modelPresetId,
           openingHandLlmRunId: llmRunId,
           simulationId,
         })
@@ -5337,8 +5664,12 @@ async function main() {
           turnEvaluationInputText,
           turnNumber: run.turnNumber,
         })
+        const modelPreset = await getRequiredEnabledSimulationLlmModelPreset(
+          deckId,
+          simulationId
+        )
         const config = await resolveLlmRunConfigModel(
-          getEvaluationLlmRunConfig()
+          getEvaluationLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
         )
         const responseText = await collectRunEvaluationCompletion({
           config,
@@ -5354,6 +5685,7 @@ async function main() {
         const evaluationJson = parseTurnEvaluationResponseText(responseText)
         const evaluation = await saveTurnEvaluation({
           evaluationJson,
+          llmModelPresetId: config.modelPresetId,
           simulationId,
           turnLlmRunId: llmRunId,
         })
@@ -5789,6 +6121,53 @@ async function main() {
         console.error("Failed to open simulation results stream:", error)
         res.status(500).json({
           error: "Failed to open simulation results stream.",
+        })
+      }
+    }
+  )
+
+  app.patch(
+    "/decks/:deckId/simulations/:simulationId",
+    async (req: Request, res: Response) => {
+      const deckId = String(req.params.deckId)
+      const simulationId = String(req.params.simulationId)
+      const parsedUpdate = updateSimulationModelPresetSchema.safeParse(req.body)
+
+      if (!parsedUpdate.success) {
+        res.status(400).json({
+          error: "Simulation update payload is not in the expected format.",
+        })
+        return
+      }
+
+      try {
+        const simulation = await updateSimulationLlmModelPreset(
+          deckId,
+          simulationId,
+          parsedUpdate.data.llmModelPresetId
+        )
+
+        await publishSimulationResultsState({
+          deckId,
+          simulationId,
+        })
+
+        res.status(200).json({
+          simulation,
+        })
+      } catch (error) {
+        if (error instanceof SimulationValidationError) {
+          const status = error.message === "Simulation not found." ? 404 : 400
+
+          res.status(status).json({
+            error: error.message,
+          })
+          return
+        }
+
+        console.error("Failed to update simulation:", error)
+        res.status(500).json({
+          error: "Failed to update simulation.",
         })
       }
     }

@@ -43,6 +43,7 @@ export type Simulation = {
   id: string
   deckId: string
   createdVia: SimulationCreatedVia
+  llmModelPresetId: string | null
   startingHandId: string | null
   seed: string
   library: string[]
@@ -60,6 +61,10 @@ export type SimulationsResponse = {
 }
 
 export type CreateSimulationResponse = {
+  simulation: Simulation
+}
+
+export type UpdateSimulationResponse = {
   simulation: Simulation
 }
 
@@ -125,6 +130,7 @@ export type TurnEvaluation = {
   id: number
   simulationId: string
   turnLlmRunId: string
+  llmModelPresetId: string | null
   legalTurnPass: boolean
   reasoningPass: boolean
   simulationQualityScore: number
@@ -146,6 +152,7 @@ export type OpeningHandEvaluation = {
   id: number
   simulationId: string
   openingHandLlmRunId: string
+  llmModelPresetId: string | null
   legalSimulationPass: boolean
   reasoningPass: boolean
   simulationQualityScore: number
@@ -156,6 +163,7 @@ export type OpeningHandEvaluation = {
 
 export type SimulationDebugLlmRun = {
   llmRunId: string
+  llmModelPresetId: string | null
   phase: string
   provider: string
   model: string

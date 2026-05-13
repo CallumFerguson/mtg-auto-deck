@@ -8,11 +8,17 @@ import {
 } from "react"
 import {
   ArrowLeft,
+  BrainCircuit,
   CheckCircle2,
+  CircleOff,
   LayoutDashboard,
   MoreVertical,
+  Plus,
+  Power,
   RefreshCw,
   ShieldAlert,
+  Star,
+  StarOff,
   Trash2,
   UserRound,
   UsersRound,
@@ -27,6 +33,14 @@ import { API_BASE_URL, apiFetch } from "@/lib/api"
 import { readApiError } from "@/lib/api-error"
 import type { AdminUser, AdminUsersResponse } from "@/lib/admin-types"
 import type { AuthUser } from "@/lib/auth-client"
+import {
+  formatProviderLabel,
+  getLlmModelPresetLabel,
+  type AdminLlmModelPreset,
+  type AdminLlmModelPresetsResponse,
+  type LlmProvider,
+  type ReasoningEffort,
+} from "@/lib/llm-model-preset-types"
 import type { AdminDashboardSectionId } from "@/lib/navigation"
 
 type AdminDashboardProps = {
@@ -53,6 +67,22 @@ const ADMIN_SECTIONS: readonly AdminSection[] = [
     path: "/admin/users",
     Icon: UsersRound,
   },
+  {
+    id: "model-presets",
+    label: "Model presets",
+    description: "Runtime LLM choices",
+    path: "/admin/model-presets",
+    Icon: BrainCircuit,
+  },
+]
+
+const REASONING_EFFORT_OPTIONS: readonly ReasoningEffort[] = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
 ]
 
 export function AdminDashboardPage({
@@ -99,6 +129,8 @@ export function AdminDashboardPage({
 
             {activeSection?.id === "users" ? (
               <AdminUsersSection currentUserId={user.id} />
+            ) : activeSection?.id === "model-presets" ? (
+              <AdminModelPresetsSection />
             ) : (
               <UnknownAdminSection />
             )}
@@ -495,6 +527,526 @@ function AdminUsersSection({ currentUserId }: { currentUserId: string }) {
   )
 }
 
+function AdminModelPresetsSection() {
+  const [presets, setPresets] = useState<AdminLlmModelPreset[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [isCreating, setIsCreating] = useState(false)
+  const [workingPresetId, setWorkingPresetId] = useState<string | null>(null)
+  const [form, setForm] = useState({
+    provider: "openai" as LlmProvider,
+    model: "",
+    reasoningEffort: "medium" as ReasoningEffort,
+    openrouterModelProvider: "",
+    inputTokenCostUsdPerMillion: "",
+    cachedInputTokenCostUsdPerMillion: "",
+    outputTokenCostUsdPerMillion: "",
+    isEnabled: true,
+    isDefault: false,
+  })
+
+  const loadPresets = useCallback(async () => {
+    setIsLoading(true)
+    setLoadError(null)
+
+    try {
+      const response = await apiFetch(
+        `${API_BASE_URL}/admin/llm-model-presets`
+      )
+
+      if (!response.ok) {
+        setLoadError(
+          await readApiError(response, "Model presets could not be loaded.")
+        )
+        return
+      }
+
+      const data = (await response.json()) as AdminLlmModelPresetsResponse
+      setPresets(data.presets)
+    } catch {
+      setLoadError("Model presets could not be loaded.")
+    } finally {
+      setIsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadPresets()
+  }, [loadPresets])
+
+  async function handleCreatePreset() {
+    const model = form.model.trim()
+
+    if (!model) {
+      setActionError("Model is required.")
+      return
+    }
+
+    setIsCreating(true)
+    setActionError(null)
+
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/admin/llm-model-presets`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          provider: form.provider,
+          model,
+          reasoningEffort: form.reasoningEffort,
+          openrouterModelProvider:
+            form.provider === "openrouter"
+              ? form.openrouterModelProvider.trim() || null
+              : null,
+          inputTokenCostUsdPerMillion: parseOptionalCost(
+            form.inputTokenCostUsdPerMillion
+          ),
+          cachedInputTokenCostUsdPerMillion: parseOptionalCost(
+            form.cachedInputTokenCostUsdPerMillion
+          ),
+          outputTokenCostUsdPerMillion: parseOptionalCost(
+            form.outputTokenCostUsdPerMillion
+          ),
+          isEnabled: form.isEnabled,
+          isDefault: form.isDefault,
+        }),
+      })
+
+      if (!response.ok) {
+        setActionError(
+          await readApiError(response, "Model preset could not be created.")
+        )
+        return
+      }
+
+      await response.json()
+      setForm((currentForm) => ({
+        ...currentForm,
+        model: "",
+        openrouterModelProvider: "",
+        inputTokenCostUsdPerMillion: "",
+        cachedInputTokenCostUsdPerMillion: "",
+        outputTokenCostUsdPerMillion: "",
+        isDefault: false,
+      }))
+      await loadPresets()
+    } catch {
+      setActionError("Model preset could not be created.")
+    } finally {
+      setIsCreating(false)
+    }
+  }
+
+  async function updatePresetAction(
+    presetId: string,
+    action: () => Promise<Response>,
+    fallbackMessage: string
+  ) {
+    setWorkingPresetId(presetId)
+    setActionError(null)
+
+    try {
+      const response = await action()
+
+      if (!response.ok) {
+        setActionError(await readApiError(response, fallbackMessage))
+        return
+      }
+
+      await loadPresets()
+    } catch {
+      setActionError(fallbackMessage)
+    } finally {
+      setWorkingPresetId(null)
+    }
+  }
+
+  return (
+    <section className="min-w-0 space-y-4">
+      <div className="flex flex-col gap-3 rounded-lg border border-border bg-card/70 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 space-y-1">
+          <div className="flex items-center gap-2">
+            <BrainCircuit
+              className="size-5 shrink-0 text-sky-300"
+              aria-hidden
+            />
+            <h2 className="text-xl font-semibold">Model presets</h2>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {isLoading
+              ? "Loading presets..."
+              : `${presets.length} ${
+                  presets.length === 1 ? "preset" : "presets"
+                }`}
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => void loadPresets()}
+          disabled={isLoading}
+        >
+          <RefreshCw
+            data-icon="inline-start"
+            className={isLoading ? "animate-spin" : undefined}
+          />
+          Refresh
+        </Button>
+      </div>
+
+      <div className="rounded-lg border border-border bg-card/70 p-4">
+        <form
+          className="grid gap-4"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void handleCreatePreset()
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <Plus className="size-4 text-sky-300" aria-hidden />
+            <h3 className="text-sm font-semibold">Add preset</h3>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <AdminFormField label="Provider">
+              <select
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-3 focus:ring-ring/30"
+                value={form.provider}
+                onChange={(event) =>
+                  setForm((currentForm) => ({
+                    ...currentForm,
+                    provider: event.target.value as LlmProvider,
+                  }))
+                }
+              >
+                <option value="openai">OpenAI</option>
+                <option value="openrouter">OpenRouter</option>
+                <option value="llamacpp">llama.cpp</option>
+              </select>
+            </AdminFormField>
+            <AdminFormField label="Model">
+              <input
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/30"
+                value={form.model}
+                placeholder="gpt-5.4-nano"
+                onChange={(event) =>
+                  setForm((currentForm) => ({
+                    ...currentForm,
+                    model: event.target.value,
+                  }))
+                }
+              />
+            </AdminFormField>
+            <AdminFormField label="Reasoning">
+              <select
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-3 focus:ring-ring/30"
+                value={form.reasoningEffort}
+                onChange={(event) =>
+                  setForm((currentForm) => ({
+                    ...currentForm,
+                    reasoningEffort: event.target.value as ReasoningEffort,
+                  }))
+                }
+              >
+                {REASONING_EFFORT_OPTIONS.map((effort) => (
+                  <option key={effort} value={effort}>
+                    {effort}
+                  </option>
+                ))}
+              </select>
+            </AdminFormField>
+            <AdminFormField label="OpenRouter provider">
+              <input
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:opacity-50"
+                value={form.openrouterModelProvider}
+                placeholder="openai"
+                disabled={form.provider !== "openrouter"}
+                onChange={(event) =>
+                  setForm((currentForm) => ({
+                    ...currentForm,
+                    openrouterModelProvider: event.target.value,
+                  }))
+                }
+              />
+            </AdminFormField>
+            <AdminFormField label="Input $/M">
+              <CostInput
+                value={form.inputTokenCostUsdPerMillion}
+                onChange={(value) =>
+                  setForm((currentForm) => ({
+                    ...currentForm,
+                    inputTokenCostUsdPerMillion: value,
+                  }))
+                }
+              />
+            </AdminFormField>
+            <AdminFormField label="Cached input $/M">
+              <CostInput
+                value={form.cachedInputTokenCostUsdPerMillion}
+                onChange={(value) =>
+                  setForm((currentForm) => ({
+                    ...currentForm,
+                    cachedInputTokenCostUsdPerMillion: value,
+                  }))
+                }
+              />
+            </AdminFormField>
+            <AdminFormField label="Output $/M">
+              <CostInput
+                value={form.outputTokenCostUsdPerMillion}
+                onChange={(value) =>
+                  setForm((currentForm) => ({
+                    ...currentForm,
+                    outputTokenCostUsdPerMillion: value,
+                  }))
+                }
+              />
+            </AdminFormField>
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="flex h-9 items-center gap-2 rounded-md border border-border bg-background/35 px-3 text-sm">
+                <input
+                  className="size-4 accent-sky-300"
+                  type="checkbox"
+                  checked={form.isEnabled}
+                  onChange={(event) =>
+                    setForm((currentForm) => ({
+                      ...currentForm,
+                      isEnabled: event.target.checked,
+                      isDefault:
+                        event.target.checked && currentForm.isDefault,
+                    }))
+                  }
+                />
+                Enabled
+              </label>
+              <label className="flex h-9 items-center gap-2 rounded-md border border-border bg-background/35 px-3 text-sm">
+                <input
+                  className="size-4 accent-sky-300"
+                  type="checkbox"
+                  checked={form.isDefault}
+                  disabled={!form.isEnabled}
+                  onChange={(event) =>
+                    setForm((currentForm) => ({
+                      ...currentForm,
+                      isDefault: event.target.checked,
+                    }))
+                  }
+                />
+                Default
+              </label>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            {actionError ? (
+              <p
+                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                role="alert"
+              >
+                {actionError}
+              </p>
+            ) : (
+              <span />
+            )}
+            <Button type="submit" disabled={isCreating}>
+              <Plus data-icon="inline-start" />
+              {isCreating ? "Adding..." : "Add preset"}
+            </Button>
+          </div>
+        </form>
+      </div>
+
+      {isLoading ? (
+        <AdminPanelMessage>Loading model presets...</AdminPanelMessage>
+      ) : loadError ? (
+        <div className="flex flex-col gap-3 rounded-lg border border-destructive/35 bg-destructive/10 px-4 py-5 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-destructive" role="alert">
+            {loadError}
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void loadPresets()}
+          >
+            Try again
+          </Button>
+        </div>
+      ) : presets.length > 0 ? (
+        <div className="debug-scrollbar-neutral overflow-x-auto rounded-lg border border-border bg-card/70">
+          <table className="w-full min-w-[74rem] border-collapse text-sm">
+            <thead className="border-b border-border bg-muted/25 text-xs text-muted-foreground">
+              <tr>
+                <TableHeader>Preset</TableHeader>
+                <TableHeader>Status</TableHeader>
+                <TableHeader>Costs</TableHeader>
+                <TableHeader>References</TableHeader>
+                <TableHeader>Updated</TableHeader>
+                <TableHeader>
+                  <span className="sr-only">Actions</span>
+                </TableHeader>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {presets.map((preset) => (
+                <tr className="transition-colors hover:bg-muted/25" key={preset.id}>
+                  <TableCell>
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-foreground">
+                        {getLlmModelPresetLabel(preset)}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {formatProviderLabel(preset.provider)}
+                        {preset.openrouterModelProvider
+                          ? ` via ${preset.openrouterModelProvider}`
+                          : ""}
+                      </p>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-2">
+                      <StatusBadge
+                        className={
+                          preset.isEnabled
+                            ? "border-emerald-300/35 bg-emerald-400/10 text-emerald-200"
+                            : "border-border bg-muted/35 text-muted-foreground"
+                        }
+                        icon={
+                          preset.isEnabled ? (
+                            <Power className="size-3.5" aria-hidden />
+                          ) : (
+                            <CircleOff className="size-3.5" aria-hidden />
+                          )
+                        }
+                      >
+                        {preset.isEnabled ? "Enabled" : "Disabled"}
+                      </StatusBadge>
+                      {preset.isDefault ? (
+                        <StatusBadge
+                          className="border-sky-300/35 bg-sky-400/10 text-sky-200"
+                          icon={<Star className="size-3.5" aria-hidden />}
+                        >
+                          Default
+                        </StatusBadge>
+                      ) : null}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <span className="text-muted-foreground">
+                      {formatPresetCosts(preset)}
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    <span className="text-muted-foreground">
+                      {preset.simulationReferenceCount} simulations,{" "}
+                      {preset.llmRunReferenceCount} runs,{" "}
+                      {preset.evaluationReferenceCount} evals
+                    </span>
+                  </TableCell>
+                  <TableCell>{formatDateTime(preset.updatedAt)}</TableCell>
+                  <TableCell>
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={workingPresetId === preset.id}
+                        onClick={() =>
+                          void updatePresetAction(
+                            preset.id,
+                            () =>
+                              apiFetch(
+                                `${API_BASE_URL}/admin/llm-model-presets/${preset.id}/enabled`,
+                                {
+                                  method: "PATCH",
+                                  headers: {
+                                    "Content-Type": "application/json",
+                                  },
+                                  body: JSON.stringify({
+                                    isEnabled: !preset.isEnabled,
+                                  }),
+                                }
+                              ),
+                            "Model preset could not be updated."
+                          )
+                        }
+                      >
+                        {preset.isEnabled ? "Disable" : "Enable"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={workingPresetId === preset.id || !preset.isEnabled}
+                        onClick={() =>
+                          void updatePresetAction(
+                            preset.id,
+                            () =>
+                              apiFetch(
+                                `${API_BASE_URL}/admin/llm-model-presets/default`,
+                                {
+                                  method: "PUT",
+                                  headers: {
+                                    "Content-Type": "application/json",
+                                  },
+                                  body: JSON.stringify({
+                                    presetId: preset.isDefault ? null : preset.id,
+                                  }),
+                                }
+                              ),
+                            "Default model preset could not be changed."
+                          )
+                        }
+                      >
+                        {preset.isDefault ? (
+                          <StarOff data-icon="inline-start" />
+                        ) : (
+                          <Star data-icon="inline-start" />
+                        )}
+                        {preset.isDefault ? "Clear" : "Default"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        disabled={
+                          workingPresetId === preset.id || !preset.canDelete
+                        }
+                        title={
+                          preset.canDelete
+                            ? "Delete preset"
+                            : "Referenced presets cannot be deleted"
+                        }
+                        onClick={() =>
+                          void updatePresetAction(
+                            preset.id,
+                            () =>
+                              apiFetch(
+                                `${API_BASE_URL}/admin/llm-model-presets/${preset.id}`,
+                                {
+                                  method: "DELETE",
+                                }
+                              ),
+                            "Model preset could not be deleted."
+                          )
+                        }
+                      >
+                        <Trash2 data-icon="inline-start" />
+                        Delete
+                      </Button>
+                    </div>
+                  </TableCell>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <AdminPanelMessage>No model presets found.</AdminPanelMessage>
+      )}
+    </section>
+  )
+}
+
 function UnknownAdminSection() {
   const navigate = useNavigate()
 
@@ -689,6 +1241,71 @@ function DeleteAdminUserModal({
       </section>
     </div>
   )
+}
+
+function AdminFormField({
+  children,
+  label,
+}: {
+  children: ReactNode
+  label: string
+}) {
+  return (
+    <label className="grid gap-2 text-sm font-medium">
+      <span>{label}</span>
+      {children}
+    </label>
+  )
+}
+
+function CostInput({
+  onChange,
+  value,
+}: {
+  onChange: (value: string) => void
+  value: string
+}) {
+  return (
+    <input
+      className="no-number-spinner h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/30"
+      type="number"
+      min="0"
+      step="0.000001"
+      value={value}
+      placeholder="optional"
+      onChange={(event) => onChange(event.target.value)}
+    />
+  )
+}
+
+function parseOptionalCost(value: string) {
+  const trimmedValue = value.trim()
+
+  if (!trimmedValue) {
+    return null
+  }
+
+  const parsedValue = Number(trimmedValue)
+
+  return Number.isFinite(parsedValue) && parsedValue >= 0 ? parsedValue : null
+}
+
+function formatPresetCosts(preset: AdminLlmModelPreset) {
+  const inputCost = formatOptionalCost(preset.inputTokenCostUsdPerMillion)
+  const cachedInputCost = formatOptionalCost(
+    preset.cachedInputTokenCostUsdPerMillion
+  )
+  const outputCost = formatOptionalCost(preset.outputTokenCostUsdPerMillion)
+
+  if (inputCost === "n/a" && cachedInputCost === "n/a" && outputCost === "n/a") {
+    return "No costs"
+  }
+
+  return `in ${inputCost}, cached ${cachedInputCost}, out ${outputCost}`
+}
+
+function formatOptionalCost(value: number | null) {
+  return value === null ? "n/a" : `$${value.toFixed(6).replace(/0+$/u, "").replace(/\.$/u, "")}`
 }
 
 function TableHeader({ children }: { children: ReactNode }) {

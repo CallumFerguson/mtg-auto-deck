@@ -17,6 +17,7 @@ type Environment = Record<string, string | undefined>
 
 type BaseLlmRunConfig = {
   apiKey: string
+  modelPresetId: string
   maxOutputTokens: number
   provider: LlmProvider
 }
@@ -27,6 +28,14 @@ type ReasoningEffortLlmRunConfig = BaseLlmRunConfig & {
 
 type ConfiguredModelLlmRunConfig = ReasoningEffortLlmRunConfig & {
   model: string
+}
+
+export type LlmModelPresetRunConfig = {
+  id: string
+  provider: LlmProvider
+  model: string
+  reasoningEffort: ReasoningEffort
+  openrouterModelProvider: string | null
 }
 
 export type OpenAiRunConfig = ConfiguredModelLlmRunConfig & {
@@ -100,9 +109,10 @@ export class LlmConfigurationError extends Error {
 }
 
 export function getOpeningHandLlmRunConfig(
+  preset: LlmModelPresetRunConfig,
   environment: Environment = process.env
 ): OpeningHandLlmRunConfig {
-  const config = getLlmRunConfig(environment)
+  const config = getLlmRunConfig(preset, environment)
 
   if (config.provider === "openai") {
     return {
@@ -118,9 +128,10 @@ export function getOpeningHandLlmRunConfig(
 }
 
 export function getTurnSimulationLlmRunConfig(
+  preset: LlmModelPresetRunConfig,
   environment: Environment = process.env
 ): TurnSimulationLlmRunConfig {
-  const config = getLlmRunConfig(environment)
+  const config = getLlmRunConfig(preset, environment)
 
   if (config.provider === "openai") {
     return {
@@ -136,9 +147,10 @@ export function getTurnSimulationLlmRunConfig(
 }
 
 export function getEvaluationLlmRunConfig(
+  preset: LlmModelPresetRunConfig,
   environment: Environment = process.env
 ): EvaluationLlmRunConfig {
-  return getLlmRunConfig(environment)
+  return getLlmRunConfig(preset, environment)
 }
 
 export function getOpenRouterApiKey(environment: Environment = process.env) {
@@ -161,36 +173,35 @@ export function getLlmRunQueueConfig(
 }
 
 function getLlmRunConfig(
+  preset: LlmModelPresetRunConfig,
   environment: Environment
 ): OpenAiRunConfig | OpenRouterRunConfig | LlamaCppRunConfig {
-  const provider = getLlmProvider(environment)
   const maxOutputTokens = getRequiredPositiveIntegerEnvironmentVariable(
     environment,
     "LLM_MAX_OUTPUT_TOKENS"
   )
 
-  if (provider === "openai") {
+  if (preset.provider === "openai") {
     return {
       apiKey: getRequiredEnvironmentVariable(environment, "OPENAI_API_KEY"),
       maxOutputTokens,
-      model: getRequiredEnvironmentVariable(environment, "OPENAI_MODEL"),
-      provider,
-      reasoningEffort: getRequiredReasoningEffort(
-        environment,
-        "OPENAI_REASONING_EFFORT"
-      ),
+      model: preset.model,
+      modelPresetId: preset.id,
+      provider: preset.provider,
+      reasoningEffort: preset.reasoningEffort,
     }
   }
 
-  if (provider === "llamacpp") {
+  if (preset.provider === "llamacpp") {
     return {
       apiKey:
         getOptionalEnvironmentVariable(environment, "LLAMACPP_API_KEY") ??
         "not-needed",
       baseUrl: getRequiredEnvironmentVariable(environment, "LLAMACPP_BASE_URL"),
       maxOutputTokens,
-      model: getRequiredEnvironmentVariable(environment, "LLAMACPP_MODEL"),
-      provider,
+      model: preset.model,
+      modelPresetId: preset.id,
+      provider: preset.provider,
       reasoningEffort: null,
       stopWhenStepCount: getRequiredPositiveIntegerEnvironmentVariable(
         environment,
@@ -202,57 +213,16 @@ function getLlmRunConfig(
   return {
     apiKey: getRequiredEnvironmentVariable(environment, "OPENROUTER_API_KEY"),
     maxOutputTokens,
-    model: getRequiredEnvironmentVariable(environment, "OPENROUTER_MODEL"),
-    modelProvider: getOptionalEnvironmentVariable(
-      environment,
-      "OPENROUTER_MODEL_PROVIDER"
-    ),
-    provider,
-    reasoningEffort: getRequiredReasoningEffort(
-      environment,
-      "OPENROUTER_REASONING_EFFORT"
-    ),
+    model: preset.model,
+    modelPresetId: preset.id,
+    modelProvider: preset.openrouterModelProvider,
+    provider: preset.provider,
+    reasoningEffort: preset.reasoningEffort,
     stopWhenStepCount: getRequiredPositiveIntegerEnvironmentVariable(
       environment,
       "OPENROUTER_STOP_WHEN_STEP_COUNT"
     ),
   }
-}
-
-function getLlmProvider(environment: Environment): LlmProvider {
-  const rawProvider = getRequiredEnvironmentVariable(
-    environment,
-    "LLM_PROVIDER"
-  )
-  const parsedProvider = llmProviderSchema.safeParse(rawProvider)
-
-  if (!parsedProvider.success) {
-    throw new LlmConfigurationError(
-      "LLM_PROVIDER must be one of: openai, openrouter, llamacpp."
-    )
-  }
-
-  return parsedProvider.data
-}
-
-function getRequiredReasoningEffort(
-  environment: Environment,
-  environmentVariable: string
-) {
-  const rawReasoningEffort = getRequiredEnvironmentVariable(
-    environment,
-    environmentVariable
-  )
-  const parsedReasoningEffort =
-    reasoningEffortSchema.safeParse(rawReasoningEffort)
-
-  if (!parsedReasoningEffort.success) {
-    throw new LlmConfigurationError(
-      `${environmentVariable} must be one of: none, minimal, low, medium, high, xhigh.`
-    )
-  }
-
-  return parsedReasoningEffort.data
 }
 
 function getRequiredPositiveIntegerEnvironmentVariable(

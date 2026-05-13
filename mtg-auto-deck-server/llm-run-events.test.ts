@@ -52,7 +52,6 @@ import {
   estimateOpenAiTokenPriceCents,
 } from "./openai-pricing.js"
 import {
-  LlmConfigurationError,
   getEvaluationLlmRunConfig,
   getLlmRunQueueConfig,
   getOpeningHandLlmRunConfig,
@@ -459,6 +458,28 @@ test("uses OpenRouter reported usage cost when estimating LLM price", () => {
   assert.equal(estimate?.formattedCents, "0.1")
 })
 
+test("uses preset token costs before provider fallback pricing", () => {
+  const estimate = estimateLlmTokenPriceCents({
+    provider: "openrouter",
+    model: "openai/gpt-5-nano",
+    tokenCosts: {
+      inputDollarsPerMillion: 1,
+      cachedInputDollarsPerMillion: 0.1,
+      outputDollarsPerMillion: 10,
+    },
+    usage: {
+      inputTokens: 1000,
+      inputTokensDetails: {
+        cachedTokens: 400,
+      },
+      outputTokens: 2000,
+      cost: 999,
+    },
+  })
+
+  assert.equal(estimate?.formattedCents, "2.1")
+})
+
 test("does not estimate local llama.cpp inference prices", () => {
   const estimate = estimateLlmTokenPriceCents({
     provider: "llamacpp",
@@ -537,29 +558,13 @@ test("aggregates OpenRouter usage across agent turns", () => {
   )
 })
 
-test("requires LLM_PROVIDER for LLM config", () => {
-  assert.throws(
-    () =>
-      getOpeningHandLlmRunConfig({
-        OPENAI_API_KEY: "key",
-        OPENAI_MODEL: "gpt-5.4-mini",
-        OPENAI_REASONING_EFFORT: "medium",
-        OPENING_HAND_MCP_PUBLIC_URL: "https://example.com/mcp",
-      }),
-    LlmConfigurationError
-  )
-})
-
 test("requires a positive integer OpenRouter stop step count", () => {
   assert.throws(
     () =>
-      getOpeningHandLlmRunConfig({
-        LLM_PROVIDER: "openrouter",
+      getOpeningHandLlmRunConfig(createOpenRouterPreset(), {
         LLM_MAX_OUTPUT_TOKENS: "12000",
-        OPENROUTER_STOP_WHEN_STEP_COUNT: "0",
         OPENROUTER_API_KEY: "key",
-        OPENROUTER_MODEL: "openai/gpt-5-nano",
-        OPENROUTER_REASONING_EFFORT: "medium",
+        OPENROUTER_STOP_WHEN_STEP_COUNT: "0",
       }),
     /OPENROUTER_STOP_WHEN_STEP_COUNT must be a positive integer\./
   )
@@ -568,23 +573,17 @@ test("requires a positive integer OpenRouter stop step count", () => {
 test("requires a positive shared max output token count", () => {
   assert.throws(
     () =>
-      getOpeningHandLlmRunConfig({
-        LLM_PROVIDER: "openai",
+      getOpeningHandLlmRunConfig(createOpenAiPreset(), {
         OPENAI_API_KEY: "key",
-        OPENAI_MODEL: "gpt-5.4-mini",
-        OPENAI_REASONING_EFFORT: "medium",
         OPENING_HAND_MCP_PUBLIC_URL: "https://example.com/mcp",
       }),
     /LLM_MAX_OUTPUT_TOKENS/
   )
   assert.throws(
     () =>
-      getOpeningHandLlmRunConfig({
-        LLM_PROVIDER: "openai",
+      getOpeningHandLlmRunConfig(createOpenAiPreset(), {
         LLM_MAX_OUTPUT_TOKENS: "0",
         OPENAI_API_KEY: "key",
-        OPENAI_MODEL: "gpt-5.4-mini",
-        OPENAI_REASONING_EFFORT: "medium",
         OPENING_HAND_MCP_PUBLIC_URL: "https://example.com/mcp",
       }),
     /LLM_MAX_OUTPUT_TOKENS must be a positive integer\./
@@ -670,109 +669,65 @@ test("checks LLM run queue capacity before claiming", () => {
   )
 })
 
-test("rejects invalid provider and reasoning effort config", () => {
+test("validates provider-specific LLM config requirements with presets", () => {
   assert.throws(
     () =>
-      getOpeningHandLlmRunConfig({
-        LLM_PROVIDER: "anthropic",
-      }),
-    /LLM_PROVIDER must be one of: openai, openrouter, llamacpp\./
-  )
-  assert.throws(
-    () =>
-      getOpeningHandLlmRunConfig({
-        LLM_PROVIDER: "openrouter",
-        LLM_MAX_OUTPUT_TOKENS: "12000",
-        OPENROUTER_STOP_WHEN_STEP_COUNT: "3",
-        OPENROUTER_API_KEY: "key",
-        OPENROUTER_MODEL: "openai/gpt-5-nano",
-        OPENROUTER_REASONING_EFFORT: "maximum",
-      }),
-    /OPENROUTER_REASONING_EFFORT must be one of: none, minimal, low, medium, high, xhigh\./
-  )
-})
-
-test("validates provider-specific LLM config requirements", () => {
-  assert.throws(
-    () =>
-      getTurnSimulationLlmRunConfig({
-        LLM_PROVIDER: "openai",
+      getTurnSimulationLlmRunConfig(createOpenAiPreset(), {
         LLM_MAX_OUTPUT_TOKENS: "12000",
         OPENAI_API_KEY: "key",
-        OPENAI_MODEL: "gpt-5.4-mini",
-        OPENAI_REASONING_EFFORT: "medium",
       }),
     /TURN_SIMULATION_MCP_PUBLIC_URL/
   )
 
-  const config = getOpeningHandLlmRunConfig({
-    LLM_PROVIDER: "openrouter",
+  const config = getOpeningHandLlmRunConfig(createOpenRouterPreset(), {
     LLM_MAX_OUTPUT_TOKENS: "12000",
-    OPENROUTER_STOP_WHEN_STEP_COUNT: "7",
     OPENROUTER_API_KEY: "key",
-    OPENROUTER_MODEL: "openai/gpt-5-nano",
-    OPENROUTER_REASONING_EFFORT: "high",
+    OPENROUTER_STOP_WHEN_STEP_COUNT: "7",
   })
 
   assert.equal(config.provider, "openrouter")
   assert.equal(config.model, "openai/gpt-5-nano")
+  assert.equal(config.modelPresetId, "preset-openrouter")
   assert.equal(config.maxOutputTokens, 12000)
-  assert.equal(config.modelProvider, null)
+  assert.equal(config.modelProvider, "openai")
   assert.equal(config.reasoningEffort, "high")
   assert.equal(config.stopWhenStepCount, 7)
 })
 
-test("evaluation config reuses OpenAI model settings without requiring MCP URLs", () => {
-  const config = getEvaluationLlmRunConfig({
-    LLM_PROVIDER: "openai",
+test("evaluation config uses the preset without requiring MCP URLs", () => {
+  const config = getEvaluationLlmRunConfig(createOpenAiPreset(), {
     LLM_MAX_OUTPUT_TOKENS: "12000",
     OPENAI_API_KEY: "key",
-    OPENAI_MODEL: "gpt-5.4-mini",
-    OPENAI_REASONING_EFFORT: "medium",
   })
 
   assert.equal(config.provider, "openai")
   assert.equal(config.model, "gpt-5.4-mini")
+  assert.equal(config.modelPresetId, "preset-openai")
   assert.equal(config.maxOutputTokens, 12000)
 })
 
 test("validates llama.cpp LLM config requirements", () => {
   assert.throws(
     () =>
-      getOpeningHandLlmRunConfig({
-        LLM_PROVIDER: "llamacpp",
+      getOpeningHandLlmRunConfig(createLlamaCppPreset(), {
         LLM_MAX_OUTPUT_TOKENS: "12000",
         LLAMACPP_BASE_URL: "http://127.0.0.1:8080/v1",
-        LLAMACPP_MODEL: "qwen3-8b-q4_k_m.gguf",
         LLAMACPP_STOP_WHEN_STEP_COUNT: "0",
       }),
     /LLAMACPP_STOP_WHEN_STEP_COUNT must be a positive integer\./
   )
   assert.throws(
     () =>
-      getOpeningHandLlmRunConfig({
-        LLM_PROVIDER: "llamacpp",
+      getOpeningHandLlmRunConfig(createLlamaCppPreset(), {
         LLM_MAX_OUTPUT_TOKENS: "12000",
         LLAMACPP_STOP_WHEN_STEP_COUNT: "7",
       }),
     /LLAMACPP_BASE_URL/
   )
-  assert.throws(
-    () =>
-      getOpeningHandLlmRunConfig({
-        LLM_PROVIDER: "llamacpp",
-        LLM_MAX_OUTPUT_TOKENS: "12000",
-        LLAMACPP_BASE_URL: "http://127.0.0.1:8080/v1",
-        LLAMACPP_STOP_WHEN_STEP_COUNT: "7",
-      }),
-    /LLAMACPP_MODEL/
-  )
 
-  const config = getTurnSimulationLlmRunConfig({
-    LLM_PROVIDER: "llamacpp",
+  const config = getTurnSimulationLlmRunConfig(createLlamaCppPreset(), {
     LLM_MAX_OUTPUT_TOKENS: "12000",
     LLAMACPP_BASE_URL: "http://127.0.0.1:8080/v1",
-    LLAMACPP_MODEL: "qwen3-8b-q4_k_m.gguf",
     LLAMACPP_STOP_WHEN_STEP_COUNT: "7",
   })
 
@@ -781,17 +736,16 @@ test("validates llama.cpp LLM config requirements", () => {
   assert.equal(config.baseUrl, "http://127.0.0.1:8080/v1")
   assert.equal(config.maxOutputTokens, 12000)
   assert.equal(config.model, "qwen3-8b-q4_k_m.gguf")
+  assert.equal(config.modelPresetId, "preset-llamacpp")
   assert.equal(config.reasoningEffort, null)
   assert.equal(config.stopWhenStepCount, 7)
 })
 
 test("reads optional llama.cpp API key config", () => {
-  const config = getOpeningHandLlmRunConfig({
-    LLM_PROVIDER: "llamacpp",
+  const config = getOpeningHandLlmRunConfig(createLlamaCppPreset(), {
     LLM_MAX_OUTPUT_TOKENS: "12000",
     LLAMACPP_API_KEY: "local-secret",
     LLAMACPP_BASE_URL: "http://127.0.0.1:8080/v1",
-    LLAMACPP_MODEL: "qwen3-8b-q4_k_m.gguf",
     LLAMACPP_STOP_WHEN_STEP_COUNT: "7",
   })
 
@@ -799,20 +753,35 @@ test("reads optional llama.cpp API key config", () => {
   assert.equal(config.apiKey, "local-secret")
 })
 
-test("reads optional OpenRouter model provider config", () => {
-  const config = getOpeningHandLlmRunConfig({
-    LLM_PROVIDER: "openrouter",
-    LLM_MAX_OUTPUT_TOKENS: "12000",
-    OPENROUTER_API_KEY: "key",
-    OPENROUTER_MODEL: "openai/gpt-5-nano",
-    OPENROUTER_MODEL_PROVIDER: "openai",
-    OPENROUTER_REASONING_EFFORT: "high",
-    OPENROUTER_STOP_WHEN_STEP_COUNT: "7",
-  })
+function createOpenAiPreset() {
+  return {
+    id: "preset-openai",
+    provider: "openai" as const,
+    model: "gpt-5.4-mini",
+    reasoningEffort: "medium" as const,
+    openrouterModelProvider: null,
+  }
+}
 
-  assert.equal(config.provider, "openrouter")
-  assert.equal(config.modelProvider, "openai")
-})
+function createOpenRouterPreset() {
+  return {
+    id: "preset-openrouter",
+    provider: "openrouter" as const,
+    model: "openai/gpt-5-nano",
+    reasoningEffort: "high" as const,
+    openrouterModelProvider: "openai",
+  }
+}
+
+function createLlamaCppPreset() {
+  return {
+    id: "preset-llamacpp",
+    provider: "llamacpp" as const,
+    model: "qwen3-8b-q4_k_m.gguf",
+    reasoningEffort: "none" as const,
+    openrouterModelProvider: null,
+  }
+}
 
 test("normalizes MCP tool errors from completed output items", () => {
   const chunk = normalizeOpenAiStreamEvent({
