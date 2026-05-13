@@ -159,7 +159,6 @@ import {
 import {
   collectLlamaCppChatCompletion,
   createLlamaCppChatCompletionTools,
-  getLlamaCppServerModelName,
   type LlamaCppChatCompletionRequestPayload,
   type LlamaCppToolDefinition,
 } from "./llamacpp-chat.js"
@@ -2596,20 +2595,7 @@ async function resolveLlmRunConfigModel(
   | ResolvedOpeningHandLlmRunConfig
   | ResolvedTurnSimulationLlmRunConfig
 > {
-  if (config.provider !== "llamacpp") {
-    return config
-  }
-
-  const client = new OpenAI({
-    apiKey: config.apiKey,
-    baseURL: config.baseUrl,
-  })
-  const model = getLlamaCppServerModelName(await client.models.list())
-
-  return {
-    ...config,
-    model,
-  }
+  return config
 }
 
 async function prepareAndStartOpeningHandLlmRun({

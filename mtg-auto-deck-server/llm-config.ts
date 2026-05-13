@@ -42,14 +42,12 @@ export type OpenRouterRunConfig = ConfiguredModelLlmRunConfig & {
 export type LlamaCppRunConfig = BaseLlmRunConfig & {
   provider: "llamacpp"
   baseUrl: string
-  model: string | null
+  model: string
   reasoningEffort: null
   stopWhenStepCount: number
 }
 
-export type ResolvedLlamaCppRunConfig = LlamaCppRunConfig & {
-  model: string
-}
+export type ResolvedLlamaCppRunConfig = LlamaCppRunConfig
 
 export type OpeningHandOpenAiRunConfig = OpenAiRunConfig & {
   openingHandMcpPublicUrl: string
@@ -191,7 +189,7 @@ function getLlmRunConfig(
         "not-needed",
       baseUrl: getRequiredEnvironmentVariable(environment, "LLAMACPP_BASE_URL"),
       maxOutputTokens,
-      model: null,
+      model: getRequiredEnvironmentVariable(environment, "LLAMACPP_MODEL"),
       provider,
       reasoningEffort: null,
       stopWhenStepCount: getRequiredPositiveIntegerEnvironmentVariable(

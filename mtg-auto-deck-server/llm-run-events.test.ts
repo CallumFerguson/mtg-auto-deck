@@ -743,6 +743,7 @@ test("validates llama.cpp LLM config requirements", () => {
         LLM_PROVIDER: "llamacpp",
         LLM_MAX_OUTPUT_TOKENS: "12000",
         LLAMACPP_BASE_URL: "http://127.0.0.1:8080/v1",
+        LLAMACPP_MODEL: "qwen3-8b-q4_k_m.gguf",
         LLAMACPP_STOP_WHEN_STEP_COUNT: "0",
       }),
     /LLAMACPP_STOP_WHEN_STEP_COUNT must be a positive integer\./
@@ -756,11 +757,22 @@ test("validates llama.cpp LLM config requirements", () => {
       }),
     /LLAMACPP_BASE_URL/
   )
+  assert.throws(
+    () =>
+      getOpeningHandLlmRunConfig({
+        LLM_PROVIDER: "llamacpp",
+        LLM_MAX_OUTPUT_TOKENS: "12000",
+        LLAMACPP_BASE_URL: "http://127.0.0.1:8080/v1",
+        LLAMACPP_STOP_WHEN_STEP_COUNT: "7",
+      }),
+    /LLAMACPP_MODEL/
+  )
 
   const config = getTurnSimulationLlmRunConfig({
     LLM_PROVIDER: "llamacpp",
     LLM_MAX_OUTPUT_TOKENS: "12000",
     LLAMACPP_BASE_URL: "http://127.0.0.1:8080/v1",
+    LLAMACPP_MODEL: "qwen3-8b-q4_k_m.gguf",
     LLAMACPP_STOP_WHEN_STEP_COUNT: "7",
   })
 
@@ -768,7 +780,7 @@ test("validates llama.cpp LLM config requirements", () => {
   assert.equal(config.apiKey, "not-needed")
   assert.equal(config.baseUrl, "http://127.0.0.1:8080/v1")
   assert.equal(config.maxOutputTokens, 12000)
-  assert.equal(config.model, null)
+  assert.equal(config.model, "qwen3-8b-q4_k_m.gguf")
   assert.equal(config.reasoningEffort, null)
   assert.equal(config.stopWhenStepCount, 7)
 })
@@ -779,6 +791,7 @@ test("reads optional llama.cpp API key config", () => {
     LLM_MAX_OUTPUT_TOKENS: "12000",
     LLAMACPP_API_KEY: "local-secret",
     LLAMACPP_BASE_URL: "http://127.0.0.1:8080/v1",
+    LLAMACPP_MODEL: "qwen3-8b-q4_k_m.gguf",
     LLAMACPP_STOP_WHEN_STEP_COUNT: "7",
   })
 
