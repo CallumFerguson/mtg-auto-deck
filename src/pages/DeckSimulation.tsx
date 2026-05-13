@@ -12,6 +12,7 @@ import {
   type UIEvent,
 } from "react"
 import ReactMarkdown from "react-markdown"
+import { useNavigate } from "react-router-dom"
 import {
   BookCopy,
   Bug,
@@ -71,7 +72,7 @@ import type {
   TurnEvaluation,
   TurnEvaluationResponse,
 } from "@/lib/deck-types"
-import { getDeckSimulationPath, navigateTo } from "@/lib/navigation"
+import { getDeckSimulationPath } from "@/lib/navigation"
 import {
   getSimulationFinalParsedOutput,
   getSimulationFinalParsedOutputFromPayload,
@@ -500,6 +501,7 @@ export function DeckSimulation({
   isAdmin: boolean
   selectedSimulationIdFromUrl: string | null
 }) {
+  const navigate = useNavigate()
   const [simulations, setSimulations] = useState<Simulation[]>([])
   const [isLoadingSimulations, setIsLoadingSimulations] = useState(true)
   const [startingHands, setStartingHands] = useState<StartingHand[]>([])
@@ -880,7 +882,7 @@ export function DeckSimulation({
 
       setIsNewSimulationSelected(false)
       resetCreateSimulationForm()
-      navigateTo(getDeckSimulationPath(deckId, data.simulation.id))
+      navigate(getDeckSimulationPath(deckId, data.simulation.id))
     } catch {
       setCreateSimulationError("Simulation could not be sent to the server.")
     } finally {
@@ -925,7 +927,7 @@ export function DeckSimulation({
       if (!isNewSimulationSelected && selectedSimulationId === simulationId) {
         setSelectedSimulationId("")
         setIsNewSimulationSelected(true)
-        navigateTo(getDeckSimulationPath(deckId))
+        navigate(getDeckSimulationPath(deckId))
       }
     } catch {
       setDeleteSimulationError("Simulation could not be deleted.")
@@ -957,7 +959,7 @@ export function DeckSimulation({
                 onClick={() => {
                   setIsNewSimulationSelected(true)
                   setSelectedSimulationId("")
-                  navigateTo(getDeckSimulationPath(deckId))
+                  navigate(getDeckSimulationPath(deckId))
                 }}
               >
                 <Plus className="size-4" data-icon="inline-start" />
@@ -1008,9 +1010,7 @@ export function DeckSimulation({
                         onClick={() => {
                           setSelectedSimulationId(simulation.id)
                           setIsNewSimulationSelected(false)
-                          navigateTo(
-                            getDeckSimulationPath(deckId, simulation.id)
-                          )
+                          navigate(getDeckSimulationPath(deckId, simulation.id))
                         }}
                       >
                         {getSimulationLabel(simulation)}

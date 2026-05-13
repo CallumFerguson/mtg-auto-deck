@@ -19,6 +19,7 @@ import {
   X,
   XCircle,
 } from "lucide-react"
+import { useNavigate } from "react-router-dom"
 
 import { AccountMenu } from "@/components/AccountMenu"
 import { Button } from "@/components/ui/button"
@@ -26,7 +27,7 @@ import { API_BASE_URL, apiFetch } from "@/lib/api"
 import { readApiError } from "@/lib/api-error"
 import type { AdminUser, AdminUsersResponse } from "@/lib/admin-types"
 import type { AuthUser } from "@/lib/auth-client"
-import { navigateTo, type AdminDashboardSectionId } from "@/lib/navigation"
+import type { AdminDashboardSectionId } from "@/lib/navigation"
 
 type AdminDashboardProps = {
   activeSectionId: AdminDashboardSectionId | null
@@ -61,6 +62,7 @@ export function AdminDashboardPage({
   onSignedOut,
   user,
 }: AdminDashboardProps) {
+  const navigate = useNavigate()
   const activeSection = ADMIN_SECTIONS.find(
     (section) => section.id === activeSectionId
   )
@@ -70,6 +72,7 @@ export function AdminDashboardPage({
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
         <AdminDashboardHeader
           adminOptionsEnabled={adminOptionsEnabled}
+          navigate={navigate}
           onAdminOptionsEnabledChange={onAdminOptionsEnabledChange}
           onSignedOut={onSignedOut}
           user={user}
@@ -77,13 +80,20 @@ export function AdminDashboardPage({
 
         <div className="grid gap-6 lg:grid-cols-[16rem_minmax(0,1fr)]">
           <aside className="hidden rounded-lg border border-border bg-card/70 p-2 lg:block">
-            <AdminSectionNav activeSectionId={activeSectionId} />
+            <AdminSectionNav
+              activeSectionId={activeSectionId}
+              navigate={navigate}
+            />
           </aside>
 
           <div className="min-w-0 space-y-4">
             <div className="debug-scrollbar-neutral overflow-x-auto lg:hidden">
               <div className="flex min-w-max gap-2 rounded-lg border border-border bg-card/70 p-2">
-                <AdminSectionNav activeSectionId={activeSectionId} compact />
+                <AdminSectionNav
+                  activeSectionId={activeSectionId}
+                  compact
+                  navigate={navigate}
+                />
               </div>
             </div>
 
@@ -105,6 +115,8 @@ export function AdminAccessDeniedPage({
   onSignedOut,
   user,
 }: Omit<AdminDashboardProps, "activeSectionId">) {
+  const navigate = useNavigate()
+
   return (
     <main className="min-h-svh bg-background text-foreground">
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
@@ -113,7 +125,7 @@ export function AdminAccessDeniedPage({
             type="button"
             variant="ghost"
             size="default"
-            onClick={() => navigateTo("/")}
+            onClick={() => navigate("/")}
           >
             <ArrowLeft data-icon="inline-start" />
             Decks
@@ -140,7 +152,7 @@ export function AdminAccessDeniedPage({
                   Your account does not have permission to view this dashboard.
                 </p>
               </div>
-              <Button type="button" onClick={() => navigateTo("/")}>
+              <Button type="button" onClick={() => navigate("/")}>
                 <ArrowLeft data-icon="inline-start" />
                 Back to decks
               </Button>
@@ -154,10 +166,13 @@ export function AdminAccessDeniedPage({
 
 function AdminDashboardHeader({
   adminOptionsEnabled,
+  navigate,
   onAdminOptionsEnabledChange,
   onSignedOut,
   user,
-}: Omit<AdminDashboardProps, "activeSectionId">) {
+}: Omit<AdminDashboardProps, "activeSectionId"> & {
+  navigate: (path: string) => void
+}) {
   return (
     <header className="flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-end sm:justify-between">
       <div className="space-y-3">
@@ -166,7 +181,7 @@ function AdminDashboardHeader({
           variant="ghost"
           size="default"
           className="w-fit"
-          onClick={() => navigateTo("/")}
+          onClick={() => navigate("/")}
         >
           <ArrowLeft data-icon="inline-start" />
           Decks
@@ -195,9 +210,11 @@ function AdminDashboardHeader({
 function AdminSectionNav({
   activeSectionId,
   compact = false,
+  navigate,
 }: {
   activeSectionId: AdminDashboardSectionId | null
   compact?: boolean
+  navigate: (path: string) => void
 }) {
   return (
     <>
@@ -216,7 +233,7 @@ function AdminSectionNav({
             }`}
             key={section.id}
             type="button"
-            onClick={() => navigateTo(section.path)}
+            onClick={() => navigate(section.path)}
           >
             <Icon
               className={`size-4 shrink-0 ${
@@ -479,6 +496,8 @@ function AdminUsersSection({ currentUserId }: { currentUserId: string }) {
 }
 
 function UnknownAdminSection() {
+  const navigate = useNavigate()
+
   return (
     <section className="rounded-lg border border-border bg-card/70 px-5 py-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
@@ -492,7 +511,7 @@ function UnknownAdminSection() {
               This admin section is not available.
             </p>
           </div>
-          <Button type="button" onClick={() => navigateTo("/admin/users")}>
+          <Button type="button" onClick={() => navigate("/admin/users")}>
             <UsersRound data-icon="inline-start" />
             Users
           </Button>

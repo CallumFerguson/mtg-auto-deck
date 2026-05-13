@@ -1,12 +1,17 @@
-import { useEffect, useState } from "react"
+import { useState, type ReactNode } from "react"
+import {
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useParams,
+  useSearchParams,
+} from "react-router-dom"
 
 import {
   getAdminDashboardSectionIdFromPathname,
-  getDeckIdFromPathname,
-  getDeckPageTabFromSearch,
-  getDeckSimulationIdFromSearch,
-  isAdminPathname,
-  navigateTo,
+  getDeckPageTabFromSearchParams,
+  getDeckSimulationIdFromSearchParams,
 } from "@/lib/navigation"
 import { authClient, type AuthUser } from "@/lib/auth-client"
 import {
@@ -20,21 +25,46 @@ import { SettingsPage } from "@/pages/SettingsPage"
 
 const ADMIN_OPTIONS_ENABLED_STORAGE_KEY = "mtg-auto-deck.admin-options-enabled"
 
+type SessionUser = {
+  email: string
+  emailVerified: boolean
+  id: string
+  name?: string | null
+  role?: string | null
+}
+
+type VerifiedPageProps = {
+  adminOptionsEnabled: boolean
+  onAdminOptionsEnabledChange: (isEnabled: boolean) => void
+  onSignedOut: () => void
+  user: AuthUser
+}
+
 export function App() {
-  const location = useLocation()
   const session = authClient.useSession()
   const [adminOptionsEnabled, setAdminOptionsEnabled] = useState(
     getStoredAdminOptionsEnabled
   )
-  const authMode = getAuthModeFromLocation(location.pathname)
-  const deckId = getDeckIdFromPathname(location.pathname)
+  const sessionUser = session.data?.user ?? null
+  const user = sessionUser ? toAuthUser(sessionUser) : null
   const handleAuthenticated = async () => {
     await session.refetch()
-    navigateTo("/")
   }
   const handleSignedOut = () => {
     void session.refetch()
   }
+  const handleAdminOptionsEnabledChange = (isEnabled: boolean) => {
+    setAdminOptionsEnabled(isEnabled)
+    storeAdminOptionsEnabled(isEnabled)
+  }
+  const verifiedPageProps = user
+    ? {
+        adminOptionsEnabled,
+        onAdminOptionsEnabledChange: handleAdminOptionsEnabledChange,
+        onSignedOut: handleSignedOut,
+        user,
+      }
+    : null
 
   if (session.isPending) {
     return (
@@ -44,94 +74,281 @@ export function App() {
     )
   }
 
-  if (authMode === "reset-password" && !session.data?.user) {
-    return (
-      <AuthPage initialMode={authMode} onAuthenticated={handleAuthenticated} />
-    )
-  }
-
-  if (!session.data?.user) {
-    return (
-      <AuthPage
-        initialMode={authMode ?? "sign-in"}
-        onAuthenticated={handleAuthenticated}
+  return (
+    <Routes>
+      <Route
+        path="/sign-in"
+        element={
+          <AuthRoute
+            mode="sign-in"
+            sessionUser={sessionUser}
+            onAuthenticated={handleAuthenticated}
+          />
+        }
       />
-    )
-  }
-
-  if (!session.data.user.emailVerified) {
-    return (
-      <AuthPage
-        initialEmail={session.data.user.email}
-        initialMode="verify-email"
-        initialNotice="Enter the verification code we emailed you."
-        isVerificationWall
-        onAuthenticated={handleAuthenticated}
-        onSignedOut={handleSignedOut}
+      <Route
+        path="/sign-up"
+        element={
+          <AuthRoute
+            mode="sign-up"
+            sessionUser={sessionUser}
+            onAuthenticated={handleAuthenticated}
+          />
+        }
       />
-    )
-  }
-
-  const user = toAuthUser(session.data.user)
-  const handleAdminOptionsEnabledChange = (isEnabled: boolean) => {
-    setAdminOptionsEnabled(isEnabled)
-    storeAdminOptionsEnabled(isEnabled)
-  }
-
-  if (location.pathname === "/settings") {
-    return (
-      <SettingsPage
-        adminOptionsEnabled={adminOptionsEnabled}
-        onAdminOptionsEnabledChange={handleAdminOptionsEnabledChange}
-        onSignedOut={handleSignedOut}
-        user={user}
+      <Route
+        path="/forgot-password"
+        element={
+          <AuthRoute
+            mode="forgot-password"
+            sessionUser={sessionUser}
+            onAuthenticated={handleAuthenticated}
+          />
+        }
       />
-    )
-  }
-
-  if (isAdminPathname(location.pathname)) {
-    if (user.role !== "admin") {
-      return (
-        <AdminAccessDeniedPage
-          adminOptionsEnabled={adminOptionsEnabled}
-          onAdminOptionsEnabledChange={handleAdminOptionsEnabledChange}
-          user={user}
-          onSignedOut={handleSignedOut}
-        />
-      )
-    }
-
-    return (
-      <AdminDashboardPage
-        activeSectionId={getAdminDashboardSectionIdFromPathname(
-          location.pathname
-        )}
-        adminOptionsEnabled={adminOptionsEnabled}
-        onAdminOptionsEnabledChange={handleAdminOptionsEnabledChange}
-        user={user}
-        onSignedOut={handleSignedOut}
+      <Route
+        path="/reset-password"
+        element={
+          <AuthRoute
+            mode="reset-password"
+            sessionUser={sessionUser}
+            onAuthenticated={handleAuthenticated}
+          />
+        }
       />
-    )
+      <Route
+        path="/verify-email"
+        element={
+          <VerifyEmailRoute
+            sessionUser={sessionUser}
+            onAuthenticated={handleAuthenticated}
+            onSignedOut={handleSignedOut}
+          />
+        }
+      />
+      <Route
+        path="/"
+        element={
+          <RequireVerifiedUser sessionUser={sessionUser}>
+            {verifiedPageProps ? <DeckListPage {...verifiedPageProps} /> : null}
+          </RequireVerifiedUser>
+        }
+      />
+      <Route
+        path="/decks/:deckId"
+        element={
+          <RequireVerifiedUser sessionUser={sessionUser}>
+            {verifiedPageProps ? (
+              <DeckPageRoute {...verifiedPageProps} />
+            ) : null}
+          </RequireVerifiedUser>
+        }
+      />
+      <Route
+        path="/settings"
+        element={
+          <RequireVerifiedUser sessionUser={sessionUser}>
+            {verifiedPageProps ? <SettingsPage {...verifiedPageProps} /> : null}
+          </RequireVerifiedUser>
+        }
+      />
+      <Route
+        path="/admin"
+        element={
+          <RequireVerifiedUser sessionUser={sessionUser}>
+            {verifiedPageProps ? (
+              <AdminDashboardRoute {...verifiedPageProps} />
+            ) : null}
+          </RequireVerifiedUser>
+        }
+      />
+      <Route
+        path="/admin/users"
+        element={
+          <RequireVerifiedUser sessionUser={sessionUser}>
+            {verifiedPageProps ? (
+              <AdminDashboardRoute {...verifiedPageProps} />
+            ) : null}
+          </RequireVerifiedUser>
+        }
+      />
+      <Route path="*" element={<UnknownRoute sessionUser={sessionUser} />} />
+    </Routes>
+  )
+}
+
+function AuthRoute({
+  mode,
+  onAuthenticated,
+  sessionUser,
+}: {
+  mode: AuthMode
+  onAuthenticated: () => Promise<void> | void
+  sessionUser: SessionUser | null
+}) {
+  const location = useLocation()
+
+  if (sessionUser?.emailVerified) {
+    return <Navigate to="/" replace />
   }
 
-  return deckId ? (
+  if (sessionUser) {
+    return <Navigate to="/verify-email" replace />
+  }
+
+  return (
+    <AuthPage
+      key={`${mode}:${location.search}`}
+      initialMode={mode}
+      onAuthenticated={onAuthenticated}
+    />
+  )
+}
+
+function VerifyEmailRoute({
+  onAuthenticated,
+  onSignedOut,
+  sessionUser,
+}: {
+  onAuthenticated: () => Promise<void> | void
+  onSignedOut: () => Promise<void> | void
+  sessionUser: SessionUser | null
+}) {
+  const location = useLocation()
+  const routeState = getVerifyEmailRouteState(location.state)
+
+  if (sessionUser?.emailVerified) {
+    return <Navigate to="/" replace />
+  }
+
+  if (!sessionUser && !routeState.verificationEmail) {
+    return <Navigate to="/sign-in" replace />
+  }
+
+  const initialEmail = sessionUser?.email ?? routeState.verificationEmail
+
+  return (
+    <AuthPage
+      key={`verify-email:${initialEmail}`}
+      initialEmail={initialEmail}
+      initialMode="verify-email"
+      initialNotice={
+        routeState.notice ?? "Enter the verification code we emailed you."
+      }
+      isVerificationWall={Boolean(sessionUser)}
+      onAuthenticated={onAuthenticated}
+      onSignedOut={onSignedOut}
+    />
+  )
+}
+
+function RequireVerifiedUser({
+  children,
+  sessionUser,
+}: {
+  children: ReactNode
+  sessionUser: SessionUser | null
+}) {
+  if (!sessionUser) {
+    return <Navigate to="/sign-in" replace />
+  }
+
+  if (!sessionUser.emailVerified) {
+    return <Navigate to="/verify-email" replace />
+  }
+
+  return <>{children}</>
+}
+
+function UnknownRoute({ sessionUser }: { sessionUser: SessionUser | null }) {
+  if (!sessionUser) {
+    return <Navigate to="/sign-in" replace />
+  }
+
+  if (!sessionUser.emailVerified) {
+    return <Navigate to="/verify-email" replace />
+  }
+
+  return <Navigate to="/" replace />
+}
+
+function DeckPageRoute({
+  adminOptionsEnabled,
+  onAdminOptionsEnabledChange,
+  onSignedOut,
+  user,
+}: VerifiedPageProps) {
+  const { deckId } = useParams()
+  const [searchParams] = useSearchParams()
+
+  if (!deckId) {
+    return <Navigate to="/" replace />
+  }
+
+  return (
     <DeckPage
       adminOptionsEnabled={adminOptionsEnabled}
       deckId={deckId}
-      initialTab={getDeckPageTabFromSearch(location.search)}
-      initialSimulationId={getDeckSimulationIdFromSearch(location.search)}
-      onAdminOptionsEnabledChange={handleAdminOptionsEnabledChange}
+      initialTab={getDeckPageTabFromSearchParams(searchParams)}
+      initialSimulationId={getDeckSimulationIdFromSearchParams(searchParams)}
+      onAdminOptionsEnabledChange={onAdminOptionsEnabledChange}
       user={user}
-      onSignedOut={handleSignedOut}
-    />
-  ) : (
-    <DeckListPage
-      adminOptionsEnabled={adminOptionsEnabled}
-      onAdminOptionsEnabledChange={handleAdminOptionsEnabledChange}
-      user={user}
-      onSignedOut={handleSignedOut}
+      onSignedOut={onSignedOut}
     />
   )
+}
+
+function AdminDashboardRoute({
+  adminOptionsEnabled,
+  onAdminOptionsEnabledChange,
+  onSignedOut,
+  user,
+}: VerifiedPageProps) {
+  const location = useLocation()
+
+  if (user.role !== "admin") {
+    return (
+      <AdminAccessDeniedPage
+        adminOptionsEnabled={adminOptionsEnabled}
+        onAdminOptionsEnabledChange={onAdminOptionsEnabledChange}
+        user={user}
+        onSignedOut={onSignedOut}
+      />
+    )
+  }
+
+  return (
+    <AdminDashboardPage
+      activeSectionId={getAdminDashboardSectionIdFromPathname(
+        location.pathname
+      )}
+      adminOptionsEnabled={adminOptionsEnabled}
+      onAdminOptionsEnabledChange={onAdminOptionsEnabledChange}
+      user={user}
+      onSignedOut={onSignedOut}
+    />
+  )
+}
+
+function getVerifyEmailRouteState(state: unknown) {
+  if (!state || typeof state !== "object") {
+    return {
+      notice: null,
+      verificationEmail: "",
+    }
+  }
+
+  const record = state as Record<string, unknown>
+  const notice = typeof record.notice === "string" ? record.notice.trim() : ""
+  const verificationEmail =
+    typeof record.verificationEmail === "string"
+      ? record.verificationEmail.trim()
+      : ""
+
+  return {
+    notice: notice || null,
+    verificationEmail,
+  }
 }
 
 function getStoredAdminOptionsEnabled() {
@@ -155,59 +372,7 @@ function storeAdminOptionsEnabled(isEnabled: boolean) {
   }
 }
 
-function useLocation() {
-  const [location, setLocation] = useState({
-    pathname: window.location.pathname,
-    search: window.location.search,
-  })
-
-  useEffect(() => {
-    function handleLocationChange() {
-      setLocation({
-        pathname: window.location.pathname,
-        search: window.location.search,
-      })
-    }
-
-    window.addEventListener("popstate", handleLocationChange)
-    window.addEventListener("app:navigate", handleLocationChange)
-
-    return () => {
-      window.removeEventListener("popstate", handleLocationChange)
-      window.removeEventListener("app:navigate", handleLocationChange)
-    }
-  }, [])
-
-  return location
-}
-
-function getAuthModeFromLocation(pathname: string): AuthMode | null {
-  if (pathname === "/sign-up") {
-    return "sign-up"
-  }
-
-  if (pathname === "/forgot-password") {
-    return "forgot-password"
-  }
-
-  if (pathname === "/reset-password") {
-    return "reset-password"
-  }
-
-  if (pathname === "/sign-in") {
-    return "sign-in"
-  }
-
-  return null
-}
-
-function toAuthUser(user: {
-  email: string
-  emailVerified: boolean
-  id: string
-  name?: string | null
-  role?: string | null
-}) {
+function toAuthUser(user: SessionUser) {
   return {
     email: user.email,
     emailVerified: user.emailVerified,

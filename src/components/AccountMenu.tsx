@@ -6,11 +6,11 @@ import {
   ShieldCheck,
   UserRound,
 } from "lucide-react"
+import { useNavigate } from "react-router-dom"
 
 import { Button } from "@/components/ui/button"
 import { SignOutConfirmModal } from "@/components/SignOutConfirmModal"
 import { authClient, type AuthUser } from "@/lib/auth-client"
-import { navigateTo } from "@/lib/navigation"
 
 export function AccountMenu({
   adminOptionsEnabled,
@@ -23,6 +23,7 @@ export function AccountMenu({
   onSignedOut: () => void
   user: AuthUser
 }) {
+  const navigate = useNavigate()
   const [isOpen, setIsOpen] = useState(false)
   const [isSignOutConfirmOpen, setIsSignOutConfirmOpen] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
@@ -77,7 +78,7 @@ export function AccountMenu({
                   type="button"
                   onClick={() => {
                     setIsOpen(false)
-                    navigateTo("/admin")
+                    navigate("/admin")
                   }}
                 >
                   <LayoutDashboard data-icon="inline-start" />
@@ -131,7 +132,7 @@ export function AccountMenu({
               type="button"
               onClick={() => {
                 setIsOpen(false)
-                navigateTo("/settings")
+                navigate("/settings")
               }}
             >
               <Settings data-icon="inline-start" />

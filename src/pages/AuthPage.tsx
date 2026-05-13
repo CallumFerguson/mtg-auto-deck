@@ -7,11 +7,11 @@ import {
   RotateCcw,
   UserPlus,
 } from "lucide-react"
+import { useNavigate } from "react-router-dom"
 
 import { Button } from "@/components/ui/button"
 import { API_BASE_URL, apiFetch } from "@/lib/api"
 import { authClient } from "@/lib/auth-client"
-import { navigateTo } from "@/lib/navigation"
 import { clearPasswordInputs } from "@/lib/password-form"
 import { getPasswordRangeError } from "@/lib/password-validation"
 
@@ -42,8 +42,9 @@ export function AuthPage({
   onAuthenticated: () => Promise<void> | void
   onSignedOut?: () => Promise<void> | void
 }) {
+  const navigate = useNavigate()
   const initialResetLinkStatus = getInitialResetLinkStatus(initialMode)
-  const [mode, setMode] = useState<AuthMode>(initialMode)
+  const mode = initialMode
   const [error, setError] = useState<string | null>(
     getInitialError(initialMode, initialResetLinkStatus)
   )
@@ -53,10 +54,24 @@ export function AuthPage({
   const [resetLinkStatus, setResetLinkStatus] = useState<ResetLinkStatus>(
     initialResetLinkStatus
   )
-  const [verificationEmail, setVerificationEmail] = useState(initialEmail)
+  const [verificationEmail] = useState(initialEmail)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isResendingCode, setIsResendingCode] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
+
+  function navigateToAuthMode(nextMode: AuthMode) {
+    navigate(getAuthModePath(nextMode))
+  }
+
+  function navigateToVerifyEmail(email: string, notice: string) {
+    navigate("/verify-email", {
+      replace: true,
+      state: {
+        notice,
+        verificationEmail: email,
+      },
+    })
+  }
 
   useEffect(() => {
     if (mode !== "reset-password") {
@@ -153,13 +168,18 @@ export function AuthPage({
 
         if (result.error) {
           if (isEmailNotVerifiedError(result.error)) {
-            setVerificationEmail(email)
-            setMode("verify-email")
-            await sendVerificationCodeIfNeeded(
+            const verificationCodeResult = await prepareVerificationCodeIfNeeded(
               email,
               "A verification code has been sent to your email.",
               "Enter the verification code we emailed you, or resend the code."
             )
+
+            if (!verificationCodeResult.ok) {
+              setError(verificationCodeResult.error)
+              return
+            }
+
+            navigateToVerifyEmail(email, verificationCodeResult.notice)
             return
           }
 
@@ -178,14 +198,18 @@ export function AuthPage({
 
         if (!session.user.emailVerified) {
           const emailToVerify = session.user.email || email
-
-          setVerificationEmail(emailToVerify)
-          setMode("verify-email")
-          await sendVerificationCodeIfNeeded(
+          const verificationCodeResult = await prepareVerificationCodeIfNeeded(
             emailToVerify,
             "A verification code has been sent to your email.",
             "Enter the verification code we emailed you."
           )
+
+          if (!verificationCodeResult.ok) {
+            setError(verificationCodeResult.error)
+            return
+          }
+
+          navigateToVerifyEmail(emailToVerify, verificationCodeResult.notice)
         }
 
         await onAuthenticated()
@@ -210,9 +234,8 @@ export function AuthPage({
         }
 
         if (!session.user.emailVerified) {
-          setVerificationEmail(session.user.email || email)
-          setMode("verify-email")
-          setNotice(
+          navigateToVerifyEmail(
+            session.user.email || email,
             "Account created. Enter the verification code we emailed you."
           )
         }
@@ -245,7 +268,7 @@ export function AuthPage({
           setError(
             "Email verified, but the browser did not keep the session cookie. Open the app using the same host as APP_PUBLIC_URL, then sign in."
           )
-          setMode("sign-in")
+          navigate("/sign-in", { replace: true })
           return
         }
 
@@ -294,8 +317,7 @@ export function AuthPage({
         return
       }
 
-      setMode("sign-in")
-      navigateTo("/sign-in?reset=success")
+      navigate("/sign-in?reset=success", { replace: true })
     } catch {
       setError("Authentication request failed.")
     } finally {
@@ -332,7 +354,7 @@ export function AuthPage({
     try {
       await authClient.signOut()
       await onSignedOut?.()
-      navigateTo("/sign-in")
+      navigate("/sign-in", { replace: true })
     } catch {
       setError("Sign out failed.")
     } finally {
@@ -341,6 +363,18 @@ export function AuthPage({
   }
 
   async function sendVerificationCode(email: string, successMessage: string) {
+    const result = await requestVerificationCode(email)
+
+    if (!result.ok) {
+      setError(result.error)
+      return false
+    }
+
+    setNotice(successMessage)
+    return true
+  }
+
+  async function requestVerificationCode(email: string) {
     try {
       const result = await authClient.emailOtp.sendVerificationOtp({
         email,
@@ -348,24 +382,27 @@ export function AuthPage({
       })
 
       if (result.error) {
-        setError(
-          getAuthErrorMessage(
+        return {
+          error: getAuthErrorMessage(
             result.error,
             "Verification code could not be sent."
-          )
-        )
-        return false
+          ),
+          ok: false,
+        } as const
       }
 
-      setNotice(successMessage)
-      return true
+      return {
+        ok: true,
+      } as const
     } catch {
-      setError("Verification code could not be sent.")
-      return false
+      return {
+        error: "Verification code could not be sent.",
+        ok: false,
+      } as const
     }
   }
 
-  async function sendVerificationCodeIfNeeded(
+  async function prepareVerificationCodeIfNeeded(
     email: string,
     sentMessage: string,
     existingCodeMessage: string
@@ -373,18 +410,30 @@ export function AuthPage({
     const codeStatus = await getEmailVerificationCodeStatus()
 
     if (codeStatus?.hasValidCode) {
-      setNotice(existingCodeMessage)
-      return true
+      return {
+        notice: existingCodeMessage,
+        ok: true,
+      } as const
     }
 
     if (!codeStatus) {
-      setNotice(
-        "Enter the verification code we emailed you, or resend the code."
-      )
-      return false
+      return {
+        notice:
+          "Enter the verification code we emailed you, or resend the code.",
+        ok: true,
+      } as const
     }
 
-    return sendVerificationCode(email, sentMessage)
+    const result = await requestVerificationCode(email)
+
+    if (!result.ok) {
+      return result
+    }
+
+    return {
+      notice: sentMessage,
+      ok: true,
+    } as const
   }
 
   const isSignIn = mode === "sign-in"
@@ -545,7 +594,7 @@ export function AuthPage({
 
                   setError(null)
                   setNotice(null)
-                  setMode(isSignIn ? "sign-up" : "sign-in")
+                  navigateToAuthMode(isSignIn ? "sign-up" : "sign-in")
                 }}
               >
                 {isSignIn ? "Create account" : "Sign in"}
@@ -587,7 +636,9 @@ export function AuthPage({
 
                   setError(null)
                   setNotice(null)
-                  setMode(isForgotPassword ? "sign-in" : "forgot-password")
+                  navigateToAuthMode(
+                    isForgotPassword ? "sign-in" : "forgot-password"
+                  )
                 }}
               >
                 {isForgotPassword ? "Back to sign in" : "Forgot password"}
@@ -687,6 +738,26 @@ async function getApiErrorMessage(response: Response, fallbackMessage: string) {
   }
 
   return fallbackMessage
+}
+
+function getAuthModePath(mode: AuthMode) {
+  if (mode === "sign-up") {
+    return "/sign-up"
+  }
+
+  if (mode === "forgot-password") {
+    return "/forgot-password"
+  }
+
+  if (mode === "reset-password") {
+    return "/reset-password"
+  }
+
+  if (mode === "verify-email") {
+    return "/verify-email"
+  }
+
+  return "/sign-in"
 }
 
 function getInitialResetLinkStatus(initialMode: AuthMode): ResetLinkStatus {

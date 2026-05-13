@@ -1,11 +1,11 @@
 import { useState, type FormEvent } from "react"
 import { ArrowLeft, KeyRound, LogOut, Mail, Settings, X } from "lucide-react"
+import { useNavigate } from "react-router-dom"
 
 import { AccountMenu } from "@/components/AccountMenu"
 import { SignOutConfirmModal } from "@/components/SignOutConfirmModal"
 import { Button } from "@/components/ui/button"
 import { authClient, type AuthUser } from "@/lib/auth-client"
-import { navigateTo } from "@/lib/navigation"
 import { clearPasswordInputs } from "@/lib/password-form"
 import { getPasswordRangeError } from "@/lib/password-validation"
 
@@ -22,6 +22,7 @@ export function SettingsPage({
   onSignedOut,
   user,
 }: SettingsPageProps) {
+  const navigate = useNavigate()
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false)
   const [passwordNotice, setPasswordNotice] = useState<string | null>(null)
   const [isSignOutConfirmOpen, setIsSignOutConfirmOpen] = useState(false)
@@ -49,7 +50,7 @@ export function SettingsPage({
               variant="ghost"
               size="default"
               className="w-fit"
-              onClick={() => navigateTo("/")}
+              onClick={() => navigate("/")}
             >
               <ArrowLeft data-icon="inline-start" />
               Decks

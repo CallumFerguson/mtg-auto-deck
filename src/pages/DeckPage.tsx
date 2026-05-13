@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react"
 import { ArrowLeft, Edit3, MoreVertical, Trash2 } from "lucide-react"
+import { useNavigate } from "react-router-dom"
 
 import { AccountMenu } from "@/components/AccountMenu"
 import { DeleteDeckModal } from "@/components/DeleteDeckModal"
@@ -9,11 +10,7 @@ import { API_BASE_URL, apiFetch } from "@/lib/api"
 import { readApiError } from "@/lib/api-error"
 import type { AuthUser } from "@/lib/auth-client"
 import type { DeckDetails, DeckResponse } from "@/lib/deck-types"
-import {
-  getDeckSimulationPath,
-  navigateTo,
-  type DeckPageTab,
-} from "@/lib/navigation"
+import { getDeckSimulationPath, type DeckPageTab } from "@/lib/navigation"
 import { DeckSimulation } from "@/pages/DeckSimulation"
 import { ViewDeckCards } from "@/pages/ViewDeckCards"
 
@@ -34,6 +31,7 @@ export function DeckPage({
   onSignedOut: () => void
   user: AuthUser
 }) {
+  const navigate = useNavigate()
   const [deck, setDeck] = useState<DeckDetails | null>(null)
   const [activeTab, setActiveTab] = useState<DeckPageTab>(initialTab)
   const [isLoadingDeck, setIsLoadingDeck] = useState(true)
@@ -77,10 +75,10 @@ export function DeckPage({
 
   function selectTab(tab: DeckPageTab) {
     setActiveTab(tab)
-    navigateTo(
+    navigate(
       tab === "simulation"
         ? getDeckSimulationPath(deckId, initialSimulationId ?? undefined)
-        : `/decks/${deckId}?tab=${tab}`
+        : `/decks/${encodeURIComponent(deckId)}?tab=${tab}`
     )
   }
 
@@ -100,7 +98,7 @@ export function DeckPage({
         return
       }
 
-      navigateTo("/")
+      navigate("/")
     } catch {
       setDeleteDeckError("Deck could not be deleted.")
     } finally {
@@ -120,7 +118,7 @@ export function DeckPage({
             variant="ghost"
             size="default"
             className="w-fit"
-            onClick={() => navigateTo("/")}
+            onClick={() => navigate("/")}
           >
             <ArrowLeft data-icon="inline-start" />
             Decks

@@ -8,6 +8,7 @@ import {
   RefreshCw,
   Trash2,
 } from "lucide-react"
+import { useNavigate } from "react-router-dom"
 
 import { DeleteDeckModal } from "@/components/DeleteDeckModal"
 import { EditDeckDetailsModal } from "@/components/EditDeckDetailsModal"
@@ -17,7 +18,6 @@ import { API_BASE_URL, apiFetch } from "@/lib/api"
 import { readApiError } from "@/lib/api-error"
 import type { AuthUser } from "@/lib/auth-client"
 import type { Deck, DecksResponse } from "@/lib/deck-types"
-import { navigateTo } from "@/lib/navigation"
 import { CreateDeckModal } from "@/pages/CreateDeckModal"
 
 export function DeckListPage({
@@ -31,6 +31,7 @@ export function DeckListPage({
   onAdminOptionsEnabledChange: (isEnabled: boolean) => void
   onSignedOut: () => void
 }) {
+  const navigate = useNavigate()
   const [decks, setDecks] = useState<Deck[]>([])
   const [isLoadingDecks, setIsLoadingDecks] = useState(true)
   const [deckLoadError, setDeckLoadError] = useState<string | null>(null)
@@ -69,7 +70,9 @@ export function DeckListPage({
   }, [])
 
   function openDeck(deck: Deck, tab?: "details" | "simulation") {
-    navigateTo(`/decks/${deck.id}${tab ? `?tab=${tab}` : ""}`)
+    navigate(
+      `/decks/${encodeURIComponent(deck.id)}${tab ? `?tab=${tab}` : ""}`
+    )
   }
 
   async function handleDeleteDeck() {
