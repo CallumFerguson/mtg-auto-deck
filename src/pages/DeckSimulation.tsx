@@ -1595,6 +1595,7 @@ export function DeckSimulation({
               isAdmin={isAdmin}
               isLoadingStartingHand={isLoadingStartingHands}
               modelPresets={modelPresets}
+              onOpenDetails={() => setDetailsSimulationId(selectedSimulation.id)}
               onSimulationUpdated={updateSimulation}
               simulation={selectedSimulation}
               startingHand={selectedSimulationStartingHand}
@@ -2001,6 +2002,7 @@ function SimulationDetails({
   isAdmin,
   isLoadingStartingHand,
   modelPresets,
+  onOpenDetails,
   onSimulationUpdated,
   simulation,
   startingHand,
@@ -2010,6 +2012,7 @@ function SimulationDetails({
   isAdmin: boolean
   isLoadingStartingHand: boolean
   modelPresets: LlmModelPreset[]
+  onOpenDetails: () => void
   onSimulationUpdated: (simulation: Simulation) => void
   simulation: Simulation
   startingHand: StartingHand | null
@@ -2634,16 +2637,6 @@ function SimulationDetails({
         onScroll={handleResultsScroll}
       >
         <section className="mx-auto grid w-full max-w-5xl gap-4">
-          <div className="rounded-lg border border-border bg-card/70 p-4">
-            <SimulationModelPresetSelector
-              deckId={deckId}
-              modelPresets={modelPresets}
-              onSimulationUpdated={onSimulationUpdated}
-              selectedModelPreset={selectedModelPreset}
-              simulation={simulation}
-            />
-          </div>
-
           {resultsError ? (
             <p
               className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
@@ -2672,6 +2665,7 @@ function SimulationDetails({
               onStartOpeningHandRun={() => void handleStartOpeningHandRun()}
               onStartReportRun={() => void handleStartReportRun()}
               onKeepResultsScrolledToBottom={keepResultsScrolledToBottom}
+              onModelPresetRequired={onOpenDetails}
               onScrollResultsToBottomIfKept={scrollResultsToBottomIfKept}
               onSelectActivityRun={toggleActivityRun}
               onStartTurnRun={(turnNumber) =>
@@ -2942,6 +2936,7 @@ function SimulationResultsPanel({
   isStoppingSimulation,
   onStartOpeningHandRun,
   onKeepResultsScrolledToBottom,
+  onModelPresetRequired,
   onScrollResultsToBottomIfKept,
   onSelectActivityRun,
   onStartTurnRun,
@@ -2969,6 +2964,7 @@ function SimulationResultsPanel({
   isStoppingSimulation: boolean
   onStartOpeningHandRun: () => void
   onKeepResultsScrolledToBottom: () => void
+  onModelPresetRequired: () => void
   onScrollResultsToBottomIfKept: () => void
   onSelectActivityRun: (llmRunId: string) => void
   onStartTurnRun: (turnNumber: number) => void
@@ -3012,7 +3008,6 @@ function SimulationResultsPanel({
     isStoppingSimulation
   const isSimulationActionBlocked =
     isStartingSimulationRun ||
-    !hasUsableModelPreset ||
     isOpeningHandRunning ||
     isTurnRunning ||
     isReportRunning ||
@@ -3178,17 +3173,24 @@ function SimulationResultsPanel({
   }, [onScrollResultsToBottomIfKept, renderedSimulationAction])
 
   const actionError = openingHandRunError ?? turnRunError ?? reportRunError
+  function canContinueWithModelPreset() {
+    if (hasUsableModelPreset) {
+      return true
+    }
+
+    onModelPresetRequired()
+    return false
+  }
+
   const runs = [
     ...resultsInfo.openingHandLlmRuns.map((run) => ({
       ...run,
       canEvaluate:
         isAdmin &&
-        hasUsableModelPreset &&
         run.status === "completed" &&
         run.openingHandIsValid === true &&
         !run.chunks.some((chunk) => chunk.kind === "error"),
-      canRerun:
-        hasUsableModelPreset && canStartOpeningHandRun && !isOpeningHandRunning,
+      canRerun: canStartOpeningHandRun && !isOpeningHandRunning,
       isActive: isActiveLlmRunStatus(run.status),
       resultKind: "opening_hand" as const,
       resultLabel: `Opening hand attempt ${run.attemptNumber}`,
@@ -3202,12 +3204,10 @@ function SimulationResultsPanel({
       ...run,
       canEvaluate:
         isAdmin &&
-        hasUsableModelPreset &&
         run.status === "completed" &&
         !run.chunks.some((chunk) => chunk.kind === "error"),
       canRerun:
         typeof run.turnNumber === "number" &&
-        hasUsableModelPreset &&
         !activeTurnNumbers.has(run.turnNumber),
       isActive: isActiveLlmRunStatus(run.status),
       resultKind: "turn" as const,
@@ -3324,7 +3324,11 @@ function SimulationResultsPanel({
                           ? `Evaluate opening hand attempt ${run.attemptNumber}`
                           : `Evaluate turn ${run.turnNumber}`
                       }
-                      onClick={() =>
+                      onClick={() => {
+                        if (!canContinueWithModelPreset()) {
+                          return
+                        }
+
                         setEvaluationRunSelection({
                           llmRunId: run.llmRunId,
                           resultKind:
@@ -3332,7 +3336,7 @@ function SimulationResultsPanel({
                               ? "opening_hand"
                               : "turn",
                         })
-                      }
+                      }}
                     >
                       <ClipboardCheck />
                     </Button>
@@ -3358,6 +3362,10 @@ function SimulationResultsPanel({
                             : `Rerun turn ${run.turnNumber}`
                       }
                       onClick={() => {
+                        if (!canContinueWithModelPreset()) {
+                          return
+                        }
+
                         onKeepResultsScrolledToBottom()
 
                         if (run.resultKind === "opening_hand") {
@@ -3442,6 +3450,10 @@ function SimulationResultsPanel({
               variant="outline"
               type="button"
               onClick={() => {
+                if (!canContinueWithModelPreset()) {
+                  return
+                }
+
                 if (renderedSimulationAction.kind === "opening_hand") {
                   onStartOpeningHandRun()
                   return
@@ -3464,6 +3476,10 @@ function SimulationResultsPanel({
               type="button"
               disabled={isStartingSimulationRun}
               onClick={() => {
+                if (!canContinueWithModelPreset()) {
+                  return
+                }
+
                 onKeepResultsScrolledToBottom()
                 onStartReportRun()
               }}
