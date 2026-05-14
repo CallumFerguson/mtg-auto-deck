@@ -6,7 +6,7 @@
 
 ## Setup
 
-1. Copy the example environment file:
+1. Copy the server example environment file:
 
    ```sh
    cp mtg-auto-deck-server/.env.example mtg-auto-deck-server/.env
@@ -22,7 +22,31 @@
    default; set `SIMULATION_MCP_SERVER_ENABLED=true` only when intentionally
    testing that endpoint.
 
-3. Install dependencies:
+3. Configure the frontend API URL for each Vite mode.
+
+   Use localhost for development:
+
+   ```sh
+   cp .env.example .env.development
+   ```
+
+   Create the production env file from the same example:
+
+   ```sh
+   cp .env.example .env.production
+   ```
+
+   Then update `.env.production` with your deployed API URL:
+
+   ```env
+   VITE_API_BASE_URL=https://api.example.com
+   ```
+
+   Vite automatically loads `.env.development` for `npm run dev` and
+   `.env.production` for `npm run build`. `VITE_API_BASE_URL` is exposed to the
+   browser, so use it only for public configuration like the API origin.
+
+4. Install dependencies:
 
    ```sh
    npm install

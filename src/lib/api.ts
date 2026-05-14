@@ -8,13 +8,19 @@ export function apiFetch(input: RequestInfo | URL, init: RequestInit = {}) {
 }
 
 function getApiBaseUrl() {
-  if (typeof window !== "undefined" && isLoopbackHost(window.location.hostname)) {
-    return `http://${window.location.hostname}:3001`
+  const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL
+
+  if (configuredApiBaseUrl) {
+    return stripTrailingSlash(configuredApiBaseUrl)
   }
 
-  return "http://127.0.0.1:3001"
+  if (import.meta.env.DEV) {
+    return "http://localhost:3001"
+  }
+
+  throw new Error("Missing VITE_API_BASE_URL for production builds.")
 }
 
-function isLoopbackHost(hostname: string) {
-  return hostname === "localhost" || hostname === "127.0.0.1"
+function stripTrailingSlash(url: string) {
+  return url.replace(/\/$/, "")
 }
