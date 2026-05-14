@@ -1,11 +1,15 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
+  useRef,
   useState,
+  type CSSProperties,
   type Dispatch,
   type ReactNode,
   type SetStateAction,
 } from "react"
+import { createPortal } from "react-dom"
 import {
   ArrowLeft,
   BrainCircuit,
@@ -78,6 +82,16 @@ const ADMIN_SECTIONS: readonly AdminSection[] = [
     Icon: BrainCircuit,
   },
 ]
+
+const ADMIN_USER_ACTIONS_MENU_WIDTH = 208
+const ADMIN_USER_ACTIONS_MENU_GAP = 6
+const ADMIN_USER_ACTIONS_MENU_VIEWPORT_MARGIN = 8
+
+type FloatingMenuPosition = {
+  left: number
+  maxHeight: number
+  top: number
+}
 
 const REASONING_EFFORT_OPTIONS: readonly ReasoningEffort[] = [
   "none",
@@ -527,6 +541,7 @@ function AdminUsersSection({
                         currentUserId={currentUserId}
                         deletingUserId={deletingUserId}
                         impersonatingUserId={impersonatingUserId}
+                        menuId={`desktop-${user.id}`}
                         openUserMenuId={openUserMenuId}
                         setOpenUserMenuId={setOpenUserMenuId}
                         user={user}
@@ -566,6 +581,7 @@ function AdminUsersSection({
                       currentUserId={currentUserId}
                       deletingUserId={deletingUserId}
                       impersonatingUserId={impersonatingUserId}
+                      menuId={`mobile-${user.id}`}
                       openUserMenuId={openUserMenuId}
                       setOpenUserMenuId={setOpenUserMenuId}
                       user={user}
@@ -1364,6 +1380,7 @@ function AdminUserActionsMenu({
   currentUserId,
   deletingUserId,
   impersonatingUserId,
+  menuId,
   onDeleteUser,
   onImpersonateUser,
   openUserMenuId,
@@ -1373,88 +1390,213 @@ function AdminUserActionsMenu({
   currentUserId: string
   deletingUserId: string | null
   impersonatingUserId: string | null
+  menuId: string
   onDeleteUser: (user: AdminUser) => void
   onImpersonateUser: (user: AdminUser) => void
   openUserMenuId: string | null
   setOpenUserMenuId: Dispatch<SetStateAction<string | null>>
   user: AdminUser
 }) {
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [menuPosition, setMenuPosition] = useState<FloatingMenuPosition | null>(
+    null
+  )
   const isCurrentUser = user.id === currentUserId
   const isDeleting = deletingUserId === user.id
   const isImpersonatingUser = impersonatingUserId === user.id
-  const isOpen = openUserMenuId === user.id
+  const isOpen = openUserMenuId === menuId
   const canImpersonate = canImpersonateUser(user, currentUserId)
 
+  const updateMenuPosition = useCallback(() => {
+    const trigger = triggerRef.current
+
+    if (!trigger || trigger.getClientRects().length === 0) {
+      setOpenUserMenuId(null)
+      return
+    }
+
+    const triggerRect = trigger.getBoundingClientRect()
+    const menuWidth =
+      menuRef.current?.offsetWidth ?? ADMIN_USER_ACTIONS_MENU_WIDTH
+    const menuHeight = menuRef.current?.offsetHeight ?? 0
+    const viewportWidth = window.innerWidth
+    const viewportHeight = window.innerHeight
+    const minimumLeft = ADMIN_USER_ACTIONS_MENU_VIEWPORT_MARGIN
+    const maximumLeft = Math.max(
+      minimumLeft,
+      viewportWidth - menuWidth - ADMIN_USER_ACTIONS_MENU_VIEWPORT_MARGIN
+    )
+    const left = Math.min(
+      Math.max(triggerRect.right - menuWidth, minimumLeft),
+      maximumLeft
+    )
+    const belowTop = triggerRect.bottom + ADMIN_USER_ACTIONS_MENU_GAP
+    const aboveTop = triggerRect.top - menuHeight - ADMIN_USER_ACTIONS_MENU_GAP
+    const shouldOpenBelow =
+      belowTop + menuHeight <=
+      viewportHeight - ADMIN_USER_ACTIONS_MENU_VIEWPORT_MARGIN
+    const preferredTop = shouldOpenBelow ? belowTop : aboveTop
+    const maximumTop = Math.max(
+      ADMIN_USER_ACTIONS_MENU_VIEWPORT_MARGIN,
+      viewportHeight - menuHeight - ADMIN_USER_ACTIONS_MENU_VIEWPORT_MARGIN
+    )
+    const top = Math.min(
+      Math.max(preferredTop, ADMIN_USER_ACTIONS_MENU_VIEWPORT_MARGIN),
+      maximumTop
+    )
+    const maxHeight = Math.max(
+      80,
+      Math.floor(viewportHeight - top - ADMIN_USER_ACTIONS_MENU_VIEWPORT_MARGIN)
+    )
+    const nextPosition = {
+      left: Math.round(left),
+      maxHeight,
+      top: Math.round(top),
+    }
+
+    setMenuPosition((currentPosition) =>
+      currentPosition?.left === nextPosition.left &&
+      currentPosition.maxHeight === nextPosition.maxHeight &&
+      currentPosition.top === nextPosition.top
+        ? currentPosition
+        : nextPosition
+    )
+  }, [setOpenUserMenuId])
+
+  useLayoutEffect(() => {
+    if (isOpen) {
+      updateMenuPosition()
+    }
+  }, [isOpen, updateMenuPosition])
+
+  useEffect(() => {
+    if (!isOpen) {
+      return
+    }
+
+    window.addEventListener("resize", updateMenuPosition)
+    window.addEventListener("scroll", updateMenuPosition, true)
+
+    return () => {
+      window.removeEventListener("resize", updateMenuPosition)
+      window.removeEventListener("scroll", updateMenuPosition, true)
+    }
+  }, [isOpen, updateMenuPosition])
+
+  useEffect(() => {
+    if (!isOpen) {
+      return
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpenUserMenuId(null)
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [isOpen, setOpenUserMenuId])
+
+  const menuStyle: CSSProperties = menuPosition
+    ? {
+        left: menuPosition.left,
+        maxHeight: menuPosition.maxHeight,
+        top: menuPosition.top,
+      }
+    : {
+        left: 0,
+        top: 0,
+        visibility: "hidden",
+      }
+
   return (
-    <div className="relative flex justify-end">
+    <div className="flex justify-end">
       <Button
+        ref={triggerRef}
         type="button"
         variant="ghost"
         size="icon-sm"
         aria-label={`Open actions for ${user.email}`}
         aria-expanded={isOpen}
+        aria-haspopup="menu"
         title="User actions"
         disabled={isDeleting || isImpersonatingUser}
         onClick={() =>
           setOpenUserMenuId((currentUserMenuId) =>
-            currentUserMenuId === user.id ? null : user.id
+            currentUserMenuId === menuId ? null : menuId
           )
         }
       >
         <MoreVertical />
       </Button>
 
-      {isOpen ? (
-        <>
-          <button
-            className="fixed inset-0 z-10 cursor-default"
-            type="button"
-            aria-label="Close user actions"
-            onClick={() => setOpenUserMenuId(null)}
-          />
-          <div className="absolute top-9 right-0 z-20 w-52 overflow-hidden rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-2xl shadow-black/40">
-            {isCurrentUser ? (
+      {isOpen && typeof document !== "undefined"
+        ? createPortal(
+            <>
               <button
-                className="flex w-full cursor-not-allowed items-center gap-2 px-3 py-2 text-left text-sm text-muted-foreground opacity-70"
+                className="fixed inset-0 z-10 cursor-default"
                 type="button"
-                disabled
+                aria-label="Close user actions"
+                onClick={() => setOpenUserMenuId(null)}
+              />
+              <div
+                ref={menuRef}
+                className="fixed z-20 w-52 max-w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-2xl shadow-black/40"
+                role="menu"
+                style={menuStyle}
               >
-                <UserRound data-icon="inline-start" />
-                Current account
-              </button>
-            ) : (
-              <>
-                {canImpersonate ? (
+                {isCurrentUser ? (
                   <button
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-sky-100 transition-colors hover:bg-sky-400/10 hover:text-sky-100 focus:bg-sky-400/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                    className="flex w-full cursor-not-allowed items-center gap-2 px-3 py-2 text-left text-sm text-muted-foreground opacity-70"
                     type="button"
-                    disabled={isDeleting || isImpersonatingUser}
-                    onClick={() => {
-                      setOpenUserMenuId(null)
-                      onImpersonateUser(user)
-                    }}
+                    role="menuitem"
+                    disabled
                   >
-                    <LogIn data-icon="inline-start" />
-                    {isImpersonatingUser ? "Impersonating..." : "Impersonate"}
+                    <UserRound data-icon="inline-start" />
+                    Current account
                   </button>
-                ) : null}
-                <button
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
-                  type="button"
-                  disabled={isDeleting || isImpersonatingUser}
-                  onClick={() => {
-                    setOpenUserMenuId(null)
-                    onDeleteUser(user)
-                  }}
-                >
-                  <Trash2 data-icon="inline-start" />
-                  Delete user
-                </button>
-              </>
-            )}
-          </div>
-        </>
-      ) : null}
+                ) : (
+                  <>
+                    {canImpersonate ? (
+                      <button
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-sky-100 transition-colors hover:bg-sky-400/10 hover:text-sky-100 focus:bg-sky-400/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                        type="button"
+                        role="menuitem"
+                        disabled={isDeleting || isImpersonatingUser}
+                        onClick={() => {
+                          setOpenUserMenuId(null)
+                          onImpersonateUser(user)
+                        }}
+                      >
+                        <LogIn data-icon="inline-start" />
+                        {isImpersonatingUser
+                          ? "Impersonating..."
+                          : "Impersonate"}
+                      </button>
+                    ) : null}
+                    <button
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                      type="button"
+                      role="menuitem"
+                      disabled={isDeleting || isImpersonatingUser}
+                      onClick={() => {
+                        setOpenUserMenuId(null)
+                        onDeleteUser(user)
+                      }}
+                    >
+                      <Trash2 data-icon="inline-start" />
+                      Delete user
+                    </button>
+                  </>
+                )}
+              </div>
+            </>,
+            document.body
+          )
+        : null}
     </div>
   )
 }
