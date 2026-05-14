@@ -1,0 +1,16 @@
+{
+  "name": "mtg-auto-deck-landing",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "deploy": "npm run build && wrangler deploy"
+  },
+  "devDependencies": {
+    "astro": "^6.3.3",
+    "wrangler": "^4.91.0"
+  }
+}
