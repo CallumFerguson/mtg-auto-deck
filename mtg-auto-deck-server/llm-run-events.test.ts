@@ -63,6 +63,7 @@ import { canClaimQueuedLlmRunWithCapacity } from "./llm-run-queue.js"
 import {
   buildOpeningHandEvaluationInputText,
   buildTurnEvaluationInputText,
+  evaluationLlmRunRequestSchema,
   getOpeningHandEvaluationIneligibilityMessage,
   getTurnEvaluationIneligibilityMessage,
   parseOpeningHandEvaluationResponseText,
@@ -1313,6 +1314,29 @@ test("parses opening-hand evaluation JSON", () => {
   )
 })
 
+test("validates evaluation request model preset payload", () => {
+  assert.equal(
+    evaluationLlmRunRequestSchema.safeParse({
+      llmModelPresetId: "11111111-1111-4111-8111-111111111111",
+    }).success,
+    true
+  )
+  assert.equal(evaluationLlmRunRequestSchema.safeParse({}).success, false)
+  assert.equal(
+    evaluationLlmRunRequestSchema.safeParse({
+      llmModelPresetId: "not-a-uuid",
+    }).success,
+    false
+  )
+  assert.equal(
+    evaluationLlmRunRequestSchema.safeParse({
+      llmModelPresetId: "11111111-1111-4111-8111-111111111111",
+      extra: true,
+    }).success,
+    false
+  )
+})
+
 test("rejects invalid opening-hand evaluation JSON", () => {
   assert.throws(
     () => parseOpeningHandEvaluationResponseText("{"),
@@ -1463,6 +1487,7 @@ test("opening-hand evaluation upsert overwrites existing evaluation columns", ()
   )
 
   for (const column of [
+    "llm_model_preset_id",
     "legal_simulation_pass",
     "reasoning_pass",
     "simulation_quality_score",
@@ -1638,6 +1663,7 @@ test("turn evaluation upsert overwrites existing evaluation columns", () => {
   assert.match(normalizedSql, /ON CONFLICT \(turn_llm_run_id\) DO UPDATE/)
 
   for (const column of [
+    "llm_model_preset_id",
     "legal_turn_pass",
     "reasoning_pass",
     "simulation_quality_score",

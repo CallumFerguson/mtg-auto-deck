@@ -50,6 +50,7 @@ import { readApiError } from "@/lib/api-error"
 import type {
   CreateSavedSeedResponse,
   CreateSimulationResponse,
+  EvaluationLlmRunRequest,
   UpdateSimulationResponse,
   CreateStartingHandResponse,
   DeckCard,
@@ -1591,6 +1592,7 @@ export function DeckSimulation({
             </div>
           ) : selectedSimulation ? (
             <SimulationDetails
+              defaultModelPresetId={defaultModelPresetId}
               deckId={deckId}
               isAdmin={isAdmin}
               isLoadingStartingHand={isLoadingStartingHands}
@@ -1998,6 +2000,7 @@ function SimulationDetailsModal({
 }
 
 function SimulationDetails({
+  defaultModelPresetId,
   deckId,
   isAdmin,
   isLoadingStartingHand,
@@ -2008,6 +2011,7 @@ function SimulationDetails({
   startingHand,
   startingHandLoadError,
 }: {
+  defaultModelPresetId: string | null
   deckId: string
   isAdmin: boolean
   isLoadingStartingHand: boolean
@@ -2654,6 +2658,7 @@ function SimulationDetails({
 
           {resultsInfo ? (
             <SimulationResultsPanel
+              defaultModelPresetId={defaultModelPresetId}
               deckId={deckId}
               hasUsableModelPreset={selectedModelPreset !== null}
               isAdmin={isAdmin}
@@ -2661,6 +2666,7 @@ function SimulationDetails({
               isStartingReportRun={isStartingReportRun}
               isStartingTurnRun={isStartingTurnRun}
               isLoadingStartingHand={isLoadingStartingHand}
+              modelPresets={modelPresets}
               isStoppingSimulation={isStoppingSimulation}
               onStartOpeningHandRun={() => void handleStartOpeningHandRun()}
               onStartReportRun={() => void handleStartReportRun()}
@@ -2926,6 +2932,7 @@ function SimulationDebugModal({
 }
 
 function SimulationResultsPanel({
+  defaultModelPresetId,
   deckId,
   hasUsableModelPreset,
   isAdmin,
@@ -2934,6 +2941,7 @@ function SimulationResultsPanel({
   isStartingTurnRun,
   isLoadingStartingHand,
   isStoppingSimulation,
+  modelPresets,
   onStartOpeningHandRun,
   onKeepResultsScrolledToBottom,
   onModelPresetRequired,
@@ -2954,6 +2962,7 @@ function SimulationResultsPanel({
   stopSimulationError,
   turnRunError,
 }: {
+  defaultModelPresetId: string | null
   deckId: string
   hasUsableModelPreset: boolean
   isAdmin: boolean
@@ -2962,6 +2971,7 @@ function SimulationResultsPanel({
   isStartingTurnRun: boolean
   isLoadingStartingHand: boolean
   isStoppingSimulation: boolean
+  modelPresets: LlmModelPreset[]
   onStartOpeningHandRun: () => void
   onKeepResultsScrolledToBottom: () => void
   onModelPresetRequired: () => void
@@ -3492,7 +3502,9 @@ function SimulationResultsPanel({
       </div>
       {isAdmin && evaluationRun?.resultKind === "opening_hand" ? (
         <OpeningHandEvaluationModal
+          defaultModelPresetId={defaultModelPresetId}
           deckId={deckId}
+          modelPresets={modelPresets}
           onClose={() => setEvaluationRunSelection(null)}
           onSaved={onOpeningHandEvaluationSaved}
           run={evaluationRun.run}
@@ -3500,7 +3512,9 @@ function SimulationResultsPanel({
         />
       ) : isAdmin && evaluationRun?.resultKind === "turn" ? (
         <TurnEvaluationModal
+          defaultModelPresetId={defaultModelPresetId}
           deckId={deckId}
+          modelPresets={modelPresets}
           onClose={() => setEvaluationRunSelection(null)}
           onSaved={onTurnEvaluationSaved}
           run={evaluationRun.run}
@@ -3512,31 +3526,50 @@ function SimulationResultsPanel({
 }
 
 function OpeningHandEvaluationModal({
+  defaultModelPresetId,
   deckId,
+  modelPresets,
   onClose,
   onSaved,
   run,
   simulationId,
 }: {
+  defaultModelPresetId: string | null
   deckId: string
+  modelPresets: LlmModelPreset[]
   onClose: () => void
   onSaved: (evaluation: OpeningHandEvaluation) => void
   run: SimulationResultsInfo["openingHandLlmRuns"][number]
   simulationId: string
 }) {
+  const defaultEvaluationModelPresetId = useMemo(
+    () => getDefaultEvaluationModelPresetId(modelPresets, defaultModelPresetId),
+    [defaultModelPresetId, modelPresets]
+  )
   const [evaluation, setEvaluation] = useState<OpeningHandEvaluation | null>(
     run.openingHandEvaluation ?? null
   )
+  const [selectedEvaluationModelPresetId, setSelectedEvaluationModelPresetId] =
+    useState(defaultEvaluationModelPresetId)
   const [error, setError] = useState<string | null>(null)
   const [isEvaluating, setIsEvaluating] = useState(false)
 
   useEffect(() => {
     setEvaluation(run.openingHandEvaluation ?? null)
+  }, [run.openingHandEvaluation])
+
+  useEffect(() => {
     setError(null)
-  }, [run.llmRunId, run.openingHandEvaluation])
+    setSelectedEvaluationModelPresetId(defaultEvaluationModelPresetId)
+  }, [defaultEvaluationModelPresetId, run.llmRunId])
 
   async function handleEvaluate() {
     if (isEvaluating) {
+      return
+    }
+
+    if (!selectedEvaluationModelPresetId) {
+      setError("Choose an evaluation model preset.")
       return
     }
 
@@ -3544,10 +3577,17 @@ function OpeningHandEvaluationModal({
     setError(null)
 
     try {
+      const requestBody: EvaluationLlmRunRequest = {
+        llmModelPresetId: selectedEvaluationModelPresetId,
+      }
       const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/simulations/${simulationId}/opening-hand-llm-runs/${run.llmRunId}/evaluation`,
         {
           method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(requestBody),
         }
       )
 
@@ -3593,6 +3633,14 @@ function OpeningHandEvaluationModal({
             <p className="text-sm text-muted-foreground">
               Attempt {run.attemptNumber} / {run.model}
             </p>
+            {evaluation ? (
+              <p className="text-sm text-muted-foreground">
+                Evaluation model preset:{" "}
+                <span className="text-foreground">
+                  {getEvaluationModelPresetLabel(evaluation)}
+                </span>
+              </p>
+            ) : null}
           </div>
           <Button
             type="button"
@@ -3608,6 +3656,34 @@ function OpeningHandEvaluationModal({
         </header>
 
         <div className="simulation-scrollbar grid min-h-0 flex-1 gap-4 overflow-y-auto px-5 py-5">
+          <div className="grid gap-2 rounded-md border border-border bg-background/35 p-3">
+            <label
+              className="text-sm font-medium text-foreground"
+              htmlFor={`opening-hand-evaluation-model-preset-${run.llmRunId}`}
+            >
+              Evaluation model preset
+            </label>
+            <select
+              id={`opening-hand-evaluation-model-preset-${run.llmRunId}`}
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground transition-colors outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
+              value={selectedEvaluationModelPresetId}
+              disabled={isEvaluating || modelPresets.length === 0}
+              onChange={(event) =>
+                setSelectedEvaluationModelPresetId(event.target.value)
+              }
+            >
+              {modelPresets.length === 0 ? (
+                <option value="">No enabled model presets</option>
+              ) : null}
+              {modelPresets.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {getLlmModelPresetLabel(preset)}
+                  {preset.isDefault ? " (default)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+
           {evaluation ? (
             <div className="grid gap-4">
               <div className="grid gap-3 sm:grid-cols-3">
@@ -3674,7 +3750,7 @@ function OpeningHandEvaluationModal({
           <Button
             type="button"
             onClick={() => void handleEvaluate()}
-            disabled={isEvaluating}
+            disabled={isEvaluating || !selectedEvaluationModelPresetId}
           >
             {isEvaluating ? (
               <LoaderCircle className="animate-spin" data-icon="inline-start" />
@@ -3694,21 +3770,31 @@ function OpeningHandEvaluationModal({
 }
 
 function TurnEvaluationModal({
+  defaultModelPresetId,
   deckId,
+  modelPresets,
   onClose,
   onSaved,
   run,
   simulationId,
 }: {
+  defaultModelPresetId: string | null
   deckId: string
+  modelPresets: LlmModelPreset[]
   onClose: () => void
   onSaved: (evaluation: TurnEvaluation) => void
   run: SimulationResultsInfo["turnLlmRuns"][number]
   simulationId: string
 }) {
+  const defaultEvaluationModelPresetId = useMemo(
+    () => getDefaultEvaluationModelPresetId(modelPresets, defaultModelPresetId),
+    [defaultModelPresetId, modelPresets]
+  )
   const [evaluation, setEvaluation] = useState<TurnEvaluation | null>(
     run.turnEvaluation ?? null
   )
+  const [selectedEvaluationModelPresetId, setSelectedEvaluationModelPresetId] =
+    useState(defaultEvaluationModelPresetId)
   const [error, setError] = useState<string | null>(null)
   const [isEvaluating, setIsEvaluating] = useState(false)
   const turnNumberText =
@@ -3716,11 +3802,20 @@ function TurnEvaluationModal({
 
   useEffect(() => {
     setEvaluation(run.turnEvaluation ?? null)
+  }, [run.turnEvaluation])
+
+  useEffect(() => {
     setError(null)
-  }, [run.llmRunId, run.turnEvaluation])
+    setSelectedEvaluationModelPresetId(defaultEvaluationModelPresetId)
+  }, [defaultEvaluationModelPresetId, run.llmRunId])
 
   async function handleEvaluate() {
     if (isEvaluating) {
+      return
+    }
+
+    if (!selectedEvaluationModelPresetId) {
+      setError("Choose an evaluation model preset.")
       return
     }
 
@@ -3728,10 +3823,17 @@ function TurnEvaluationModal({
     setError(null)
 
     try {
+      const requestBody: EvaluationLlmRunRequest = {
+        llmModelPresetId: selectedEvaluationModelPresetId,
+      }
       const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/simulations/${simulationId}/turn-llm-runs/${run.llmRunId}/evaluation`,
         {
           method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(requestBody),
         }
       )
 
@@ -3772,6 +3874,14 @@ function TurnEvaluationModal({
             <p className="text-sm text-muted-foreground">
               Attempt {run.attemptNumber} / {run.model}
             </p>
+            {evaluation ? (
+              <p className="text-sm text-muted-foreground">
+                Evaluation model preset:{" "}
+                <span className="text-foreground">
+                  {getEvaluationModelPresetLabel(evaluation)}
+                </span>
+              </p>
+            ) : null}
           </div>
           <Button
             type="button"
@@ -3787,6 +3897,34 @@ function TurnEvaluationModal({
         </header>
 
         <div className="simulation-scrollbar grid min-h-0 flex-1 gap-4 overflow-y-auto px-5 py-5">
+          <div className="grid gap-2 rounded-md border border-border bg-background/35 p-3">
+            <label
+              className="text-sm font-medium text-foreground"
+              htmlFor={`turn-evaluation-model-preset-${run.llmRunId}`}
+            >
+              Evaluation model preset
+            </label>
+            <select
+              id={`turn-evaluation-model-preset-${run.llmRunId}`}
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground transition-colors outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
+              value={selectedEvaluationModelPresetId}
+              disabled={isEvaluating || modelPresets.length === 0}
+              onChange={(event) =>
+                setSelectedEvaluationModelPresetId(event.target.value)
+              }
+            >
+              {modelPresets.length === 0 ? (
+                <option value="">No enabled model presets</option>
+              ) : null}
+              {modelPresets.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {getLlmModelPresetLabel(preset)}
+                  {preset.isDefault ? " (default)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+
           {evaluation ? (
             <div className="grid gap-4">
               <div className="grid gap-3 sm:grid-cols-3">
@@ -3853,7 +3991,7 @@ function TurnEvaluationModal({
           <Button
             type="button"
             onClick={() => void handleEvaluate()}
-            disabled={isEvaluating}
+            disabled={isEvaluating || !selectedEvaluationModelPresetId}
           >
             {isEvaluating ? (
               <LoaderCircle className="animate-spin" data-icon="inline-start" />
@@ -3870,6 +4008,32 @@ function TurnEvaluationModal({
       </section>
     </div>
   )
+}
+
+function getDefaultEvaluationModelPresetId(
+  modelPresets: readonly LlmModelPreset[],
+  defaultModelPresetId: string | null
+) {
+  if (
+    defaultModelPresetId &&
+    modelPresets.some((preset) => preset.id === defaultModelPresetId)
+  ) {
+    return defaultModelPresetId
+  }
+
+  return modelPresets[0]?.id ?? ""
+}
+
+function getEvaluationModelPresetLabel(
+  evaluation: OpeningHandEvaluation | TurnEvaluation
+) {
+  if (!evaluation.llmModelPreset) {
+    return "Evaluation model preset unavailable"
+  }
+
+  return `${getLlmModelPresetLabel(evaluation.llmModelPreset)}${
+    evaluation.llmModelPreset.isEnabled ? "" : " (disabled)"
+  }`
 }
 
 function TurnEvaluationMetric({

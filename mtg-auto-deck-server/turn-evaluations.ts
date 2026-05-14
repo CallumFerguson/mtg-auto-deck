@@ -31,6 +31,12 @@ const openingHandEvaluationJsonSchema = z
   })
   .strict()
 
+export const evaluationLlmRunRequestSchema = z
+  .object({
+    llmModelPresetId: z.uuid(),
+  })
+  .strict()
+
 export function buildOpeningHandEvaluationInputText({
   chunks,
   fullPrompt,

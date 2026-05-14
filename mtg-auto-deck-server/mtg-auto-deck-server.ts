@@ -226,6 +226,7 @@ import {
   buildOpeningHandEvaluationPrompt,
   buildTurnEvaluationInputText,
   buildTurnEvaluationPrompt,
+  evaluationLlmRunRequestSchema,
   getOpeningHandEvaluationIneligibilityMessage,
   getTurnEvaluationIneligibilityMessage,
   parseOpeningHandEvaluationResponseText,
@@ -2666,6 +2667,20 @@ async function getRequiredEnabledSimulationLlmModelPreset(
   if (!preset) {
     throw new SimulationValidationError(
       "The selected model preset is disabled. Choose an enabled model preset before starting LLM runs."
+    )
+  }
+
+  return preset
+}
+
+async function getRequiredEnabledEvaluationLlmModelPreset(
+  llmModelPresetId: string
+) {
+  const preset = await getEnabledLlmModelPreset(llmModelPresetId)
+
+  if (!preset) {
+    throw new SimulationValidationError(
+      "Choose an enabled model preset for this evaluation."
     )
   }
 
@@ -5473,6 +5488,16 @@ async function main() {
       const deckId = String(req.params.deckId)
       const simulationId = String(req.params.simulationId)
       const llmRunId = String(req.params.llmRunId)
+      const parsedEvaluationRequest = evaluationLlmRunRequestSchema.safeParse(
+        req.body
+      )
+
+      if (!parsedEvaluationRequest.success) {
+        res.status(400).json({
+          error: "Evaluation payload is not in the expected format.",
+        })
+        return
+      }
 
       try {
         const run = await getOpeningHandLlmRunEvaluationData(
@@ -5504,9 +5529,8 @@ async function main() {
           attemptNumber: run.attemptNumber,
           openingHandEvaluationInputText,
         })
-        const modelPreset = await getRequiredEnabledSimulationLlmModelPreset(
-          deckId,
-          simulationId
+        const modelPreset = await getRequiredEnabledEvaluationLlmModelPreset(
+          parsedEvaluationRequest.data.llmModelPresetId
         )
         const config = await resolveLlmRunConfigModel(
           getEvaluationLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
@@ -5519,6 +5543,7 @@ async function main() {
             phase: "opening_hand_evaluation",
             openingHandLlmRunId: llmRunId,
             attemptNumber: String(run.attemptNumber),
+            modelPresetId: config.modelPresetId,
           },
           prompt,
         })
@@ -5636,6 +5661,16 @@ async function main() {
       const deckId = String(req.params.deckId)
       const simulationId = String(req.params.simulationId)
       const llmRunId = String(req.params.llmRunId)
+      const parsedEvaluationRequest = evaluationLlmRunRequestSchema.safeParse(
+        req.body
+      )
+
+      if (!parsedEvaluationRequest.success) {
+        res.status(400).json({
+          error: "Evaluation payload is not in the expected format.",
+        })
+        return
+      }
 
       try {
         const run = await getTurnLlmRunEvaluationData(
@@ -5666,9 +5701,8 @@ async function main() {
           turnEvaluationInputText,
           turnNumber: run.turnNumber,
         })
-        const modelPreset = await getRequiredEnabledSimulationLlmModelPreset(
-          deckId,
-          simulationId
+        const modelPreset = await getRequiredEnabledEvaluationLlmModelPreset(
+          parsedEvaluationRequest.data.llmModelPresetId
         )
         const config = await resolveLlmRunConfigModel(
           getEvaluationLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
@@ -5681,6 +5715,7 @@ async function main() {
             phase: "turn_evaluation",
             turnLlmRunId: llmRunId,
             turnNumber: String(run.turnNumber),
+            modelPresetId: config.modelPresetId,
           },
           prompt,
         })

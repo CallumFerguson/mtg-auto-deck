@@ -1,3 +1,8 @@
+import type {
+  LlmProvider,
+  ReasoningEffort,
+} from "./llm-model-preset-types"
+
 export type Deck = {
   id: string
   name: string
@@ -126,11 +131,25 @@ export type TurnEvaluationJson = {
   strategicMistakes: string[]
 }
 
+export type EvaluationLlmModelPreset = {
+  id: string
+  provider: LlmProvider
+  model: string
+  reasoningEffort: ReasoningEffort
+  openrouterModelProvider: string | null
+  isEnabled: boolean
+}
+
+export type EvaluationLlmRunRequest = {
+  llmModelPresetId: string
+}
+
 export type TurnEvaluation = {
   id: number
   simulationId: string
   turnLlmRunId: string
   llmModelPresetId: string | null
+  llmModelPreset: EvaluationLlmModelPreset | null
   legalTurnPass: boolean
   reasoningPass: boolean
   simulationQualityScore: number
@@ -153,6 +172,7 @@ export type OpeningHandEvaluation = {
   simulationId: string
   openingHandLlmRunId: string
   llmModelPresetId: string | null
+  llmModelPreset: EvaluationLlmModelPreset | null
   legalSimulationPass: boolean
   reasoningPass: boolean
   simulationQualityScore: number

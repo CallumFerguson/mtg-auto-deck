@@ -5,6 +5,7 @@ import {
   getOpenRouterReportedCostUsd,
 } from "./llm-pricing.js"
 import { normalizeScryfallCardNameForExactMatch } from "./scryfall-postgres.js"
+import type { LlmProvider, ReasoningEffort } from "./llm-config.js"
 
 type DatabaseTransactionClient = Parameters<
   Parameters<typeof withDatabaseTransaction>[0]
@@ -218,11 +219,21 @@ export type TurnEvaluationJson = {
   strategicMistakes: string[]
 }
 
+export type EvaluationLlmModelPreset = {
+  id: string
+  provider: LlmProvider
+  model: string
+  reasoningEffort: ReasoningEffort
+  openrouterModelProvider: string | null
+  isEnabled: boolean
+}
+
 export type TurnEvaluation = {
   id: number
   simulationId: string
   turnLlmRunId: string
   llmModelPresetId: string | null
+  llmModelPreset: EvaluationLlmModelPreset | null
   legalTurnPass: boolean
   reasoningPass: boolean
   simulationQualityScore: number
@@ -245,6 +256,7 @@ export type OpeningHandEvaluation = {
   simulationId: string
   openingHandLlmRunId: string
   llmModelPresetId: string | null
+  llmModelPreset: EvaluationLlmModelPreset | null
   legalSimulationPass: boolean
   reasoningPass: boolean
   simulationQualityScore: number
@@ -254,67 +266,109 @@ export type OpeningHandEvaluation = {
 }
 
 export const TURN_EVALUATION_UPSERT_SQL = `
-  INSERT INTO simulation_turn_evaluations (
-    simulation_id,
-    turn_llm_run_id,
-    llm_model_preset_id,
-    legal_turn_pass,
-    reasoning_pass,
-    simulation_quality_score,
-    evaluation_json
+  WITH upserted AS (
+    INSERT INTO simulation_turn_evaluations (
+      simulation_id,
+      turn_llm_run_id,
+      llm_model_preset_id,
+      legal_turn_pass,
+      reasoning_pass,
+      simulation_quality_score,
+      evaluation_json
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+    ON CONFLICT (turn_llm_run_id)
+    DO UPDATE
+    SET llm_model_preset_id = EXCLUDED.llm_model_preset_id,
+        legal_turn_pass = EXCLUDED.legal_turn_pass,
+        reasoning_pass = EXCLUDED.reasoning_pass,
+        simulation_quality_score = EXCLUDED.simulation_quality_score,
+        evaluation_json = EXCLUDED.evaluation_json,
+        updated_at = now()
+    RETURNING
+      id,
+      simulation_id,
+      turn_llm_run_id,
+      llm_model_preset_id,
+      legal_turn_pass,
+      reasoning_pass,
+      simulation_quality_score::float8 AS simulation_quality_score,
+      evaluation_json,
+      created_at,
+      updated_at
   )
-  VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
-  ON CONFLICT (turn_llm_run_id)
-  DO UPDATE
-  SET llm_model_preset_id = EXCLUDED.llm_model_preset_id,
-      legal_turn_pass = EXCLUDED.legal_turn_pass,
-      reasoning_pass = EXCLUDED.reasoning_pass,
-      simulation_quality_score = EXCLUDED.simulation_quality_score,
-      evaluation_json = EXCLUDED.evaluation_json,
-      updated_at = now()
-  RETURNING
-    id,
-    simulation_id,
-    turn_llm_run_id,
-    llm_model_preset_id,
-    legal_turn_pass,
-    reasoning_pass,
-    simulation_quality_score::float8 AS simulation_quality_score,
-    evaluation_json,
-    created_at,
-    updated_at
+  SELECT
+    upserted.id,
+    upserted.simulation_id,
+    upserted.turn_llm_run_id,
+    upserted.llm_model_preset_id,
+    preset.provider AS llm_model_preset_provider,
+    preset.model AS llm_model_preset_model,
+    preset.reasoning_effort AS llm_model_preset_reasoning_effort,
+    preset.openrouter_model_provider AS llm_model_preset_openrouter_model_provider,
+    preset.is_enabled AS llm_model_preset_is_enabled,
+    upserted.legal_turn_pass,
+    upserted.reasoning_pass,
+    upserted.simulation_quality_score,
+    upserted.evaluation_json,
+    upserted.created_at,
+    upserted.updated_at
+  FROM upserted
+  LEFT JOIN llm_model_presets preset
+    ON preset.id = upserted.llm_model_preset_id
 `
 
 export const OPENING_HAND_EVALUATION_UPSERT_SQL = `
-  INSERT INTO simulation_opening_hand_evaluations (
-    simulation_id,
-    opening_hand_llm_run_id,
-    llm_model_preset_id,
-    legal_simulation_pass,
-    reasoning_pass,
-    simulation_quality_score,
-    evaluation_json
+  WITH upserted AS (
+    INSERT INTO simulation_opening_hand_evaluations (
+      simulation_id,
+      opening_hand_llm_run_id,
+      llm_model_preset_id,
+      legal_simulation_pass,
+      reasoning_pass,
+      simulation_quality_score,
+      evaluation_json
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+    ON CONFLICT (opening_hand_llm_run_id)
+    DO UPDATE
+    SET llm_model_preset_id = EXCLUDED.llm_model_preset_id,
+        legal_simulation_pass = EXCLUDED.legal_simulation_pass,
+        reasoning_pass = EXCLUDED.reasoning_pass,
+        simulation_quality_score = EXCLUDED.simulation_quality_score,
+        evaluation_json = EXCLUDED.evaluation_json,
+        updated_at = now()
+    RETURNING
+      id,
+      simulation_id,
+      opening_hand_llm_run_id,
+      llm_model_preset_id,
+      legal_simulation_pass,
+      reasoning_pass,
+      simulation_quality_score::float8 AS simulation_quality_score,
+      evaluation_json,
+      created_at,
+      updated_at
   )
-  VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
-  ON CONFLICT (opening_hand_llm_run_id)
-  DO UPDATE
-  SET llm_model_preset_id = EXCLUDED.llm_model_preset_id,
-      legal_simulation_pass = EXCLUDED.legal_simulation_pass,
-      reasoning_pass = EXCLUDED.reasoning_pass,
-      simulation_quality_score = EXCLUDED.simulation_quality_score,
-      evaluation_json = EXCLUDED.evaluation_json,
-      updated_at = now()
-  RETURNING
-    id,
-    simulation_id,
-    opening_hand_llm_run_id,
-    llm_model_preset_id,
-    legal_simulation_pass,
-    reasoning_pass,
-    simulation_quality_score::float8 AS simulation_quality_score,
-    evaluation_json,
-    created_at,
-    updated_at
+  SELECT
+    upserted.id,
+    upserted.simulation_id,
+    upserted.opening_hand_llm_run_id,
+    upserted.llm_model_preset_id,
+    preset.provider AS llm_model_preset_provider,
+    preset.model AS llm_model_preset_model,
+    preset.reasoning_effort AS llm_model_preset_reasoning_effort,
+    preset.openrouter_model_provider AS llm_model_preset_openrouter_model_provider,
+    preset.is_enabled AS llm_model_preset_is_enabled,
+    upserted.legal_simulation_pass,
+    upserted.reasoning_pass,
+    upserted.simulation_quality_score,
+    upserted.evaluation_json,
+    upserted.created_at,
+    upserted.updated_at
+  FROM upserted
+  LEFT JOIN llm_model_presets preset
+    ON preset.id = upserted.llm_model_preset_id
 `
 
 export type SimulationDebugLlmRun = {
@@ -5519,6 +5573,11 @@ type OpeningHandEvaluationRow = {
   simulation_id: string
   opening_hand_llm_run_id: string
   llm_model_preset_id: string | null
+  llm_model_preset_provider: LlmProvider | null
+  llm_model_preset_model: string | null
+  llm_model_preset_reasoning_effort: ReasoningEffort | null
+  llm_model_preset_openrouter_model_provider: string | null
+  llm_model_preset_is_enabled: boolean | null
   legal_simulation_pass: boolean
   reasoning_pass: boolean
   simulation_quality_score: number
@@ -5532,6 +5591,11 @@ type TurnEvaluationRow = {
   simulation_id: string
   turn_llm_run_id: string
   llm_model_preset_id: string | null
+  llm_model_preset_provider: LlmProvider | null
+  llm_model_preset_model: string | null
+  llm_model_preset_reasoning_effort: ReasoningEffort | null
+  llm_model_preset_openrouter_model_provider: string | null
+  llm_model_preset_is_enabled: boolean | null
   legal_turn_pass: boolean
   reasoning_pass: boolean
   simulation_quality_score: number
@@ -5723,19 +5787,26 @@ async function getOpeningHandEvaluationsByLlmRunIds(
   const result = await queryDatabase<OpeningHandEvaluationRow>(
     `
       SELECT
-        id,
-        simulation_id,
-        opening_hand_llm_run_id,
-        llm_model_preset_id,
-        legal_simulation_pass,
-        reasoning_pass,
-        simulation_quality_score::float8 AS simulation_quality_score,
-        evaluation_json,
-        created_at,
-        updated_at
-      FROM simulation_opening_hand_evaluations
-      WHERE opening_hand_llm_run_id = ANY($1::uuid[])
-      ORDER BY opening_hand_llm_run_id ASC
+        evaluation.id,
+        evaluation.simulation_id,
+        evaluation.opening_hand_llm_run_id,
+        evaluation.llm_model_preset_id,
+        preset.provider AS llm_model_preset_provider,
+        preset.model AS llm_model_preset_model,
+        preset.reasoning_effort AS llm_model_preset_reasoning_effort,
+        preset.openrouter_model_provider AS llm_model_preset_openrouter_model_provider,
+        preset.is_enabled AS llm_model_preset_is_enabled,
+        evaluation.legal_simulation_pass,
+        evaluation.reasoning_pass,
+        evaluation.simulation_quality_score::float8 AS simulation_quality_score,
+        evaluation.evaluation_json,
+        evaluation.created_at,
+        evaluation.updated_at
+      FROM simulation_opening_hand_evaluations evaluation
+      LEFT JOIN llm_model_presets preset
+        ON preset.id = evaluation.llm_model_preset_id
+      WHERE evaluation.opening_hand_llm_run_id = ANY($1::uuid[])
+      ORDER BY evaluation.opening_hand_llm_run_id ASC
     `,
     [llmRunIds]
   )
@@ -5758,6 +5829,7 @@ function mapOpeningHandEvaluationRow(
     simulationId: row.simulation_id,
     openingHandLlmRunId: row.opening_hand_llm_run_id,
     llmModelPresetId: row.llm_model_preset_id,
+    llmModelPreset: mapEvaluationLlmModelPresetRow(row),
     legalSimulationPass: row.legal_simulation_pass,
     reasoningPass: row.reasoning_pass,
     simulationQualityScore: Number(row.simulation_quality_score),
@@ -5876,19 +5948,26 @@ async function getTurnEvaluationsByLlmRunIds(llmRunIds: readonly string[]) {
   const result = await queryDatabase<TurnEvaluationRow>(
     `
       SELECT
-        id,
-        simulation_id,
-        turn_llm_run_id,
-        llm_model_preset_id,
-        legal_turn_pass,
-        reasoning_pass,
-        simulation_quality_score::float8 AS simulation_quality_score,
-        evaluation_json,
-        created_at,
-        updated_at
-      FROM simulation_turn_evaluations
-      WHERE turn_llm_run_id = ANY($1::uuid[])
-      ORDER BY turn_llm_run_id ASC
+        evaluation.id,
+        evaluation.simulation_id,
+        evaluation.turn_llm_run_id,
+        evaluation.llm_model_preset_id,
+        preset.provider AS llm_model_preset_provider,
+        preset.model AS llm_model_preset_model,
+        preset.reasoning_effort AS llm_model_preset_reasoning_effort,
+        preset.openrouter_model_provider AS llm_model_preset_openrouter_model_provider,
+        preset.is_enabled AS llm_model_preset_is_enabled,
+        evaluation.legal_turn_pass,
+        evaluation.reasoning_pass,
+        evaluation.simulation_quality_score::float8 AS simulation_quality_score,
+        evaluation.evaluation_json,
+        evaluation.created_at,
+        evaluation.updated_at
+      FROM simulation_turn_evaluations evaluation
+      LEFT JOIN llm_model_presets preset
+        ON preset.id = evaluation.llm_model_preset_id
+      WHERE evaluation.turn_llm_run_id = ANY($1::uuid[])
+      ORDER BY evaluation.turn_llm_run_id ASC
     `,
     [llmRunIds]
   )
@@ -5906,12 +5985,44 @@ function mapTurnEvaluationRow(row: TurnEvaluationRow): TurnEvaluation {
     simulationId: row.simulation_id,
     turnLlmRunId: row.turn_llm_run_id,
     llmModelPresetId: row.llm_model_preset_id,
+    llmModelPreset: mapEvaluationLlmModelPresetRow(row),
     legalTurnPass: row.legal_turn_pass,
     reasoningPass: row.reasoning_pass,
     simulationQualityScore: Number(row.simulation_quality_score),
     evaluationJson: row.evaluation_json as TurnEvaluationJson,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
+  }
+}
+
+function mapEvaluationLlmModelPresetRow(
+  row: Pick<
+    OpeningHandEvaluationRow | TurnEvaluationRow,
+    | "llm_model_preset_id"
+    | "llm_model_preset_provider"
+    | "llm_model_preset_model"
+    | "llm_model_preset_reasoning_effort"
+    | "llm_model_preset_openrouter_model_provider"
+    | "llm_model_preset_is_enabled"
+  >
+): EvaluationLlmModelPreset | null {
+  if (
+    !row.llm_model_preset_id ||
+    !row.llm_model_preset_provider ||
+    !row.llm_model_preset_model ||
+    !row.llm_model_preset_reasoning_effort ||
+    row.llm_model_preset_is_enabled === null
+  ) {
+    return null
+  }
+
+  return {
+    id: row.llm_model_preset_id,
+    provider: row.llm_model_preset_provider,
+    model: row.llm_model_preset_model,
+    reasoningEffort: row.llm_model_preset_reasoning_effort,
+    openrouterModelProvider: row.llm_model_preset_openrouter_model_provider,
+    isEnabled: row.llm_model_preset_is_enabled,
   }
 }
 
