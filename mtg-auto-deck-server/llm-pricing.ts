@@ -12,9 +12,7 @@ export function estimatePresetTokenCostUsd({
   usage: unknown
 }) {
   const inputRate = getCostValue(tokenCosts.inputDollarsPerMillion)
-  const cachedInputRate = getCostValue(
-    tokenCosts.cachedInputDollarsPerMillion
-  )
+  const cachedInputRate = getCostValue(tokenCosts.cachedInputDollarsPerMillion)
   const outputRate = getCostValue(tokenCosts.outputDollarsPerMillion)
 
   if (inputRate === null || cachedInputRate === null || outputRate === null) {
@@ -57,6 +55,44 @@ export function estimatePresetTokenCostUsd({
 
   return (
     (standardInputTokens * inputRate) / 1_000_000 +
+    (cachedInputTokens * cachedInputRate) / 1_000_000 +
+    (outputTokens * outputRate) / 1_000_000
+  )
+}
+
+export function estimatePartialLlmRunCostUsd({
+  fullPromptCharCount,
+  outputDeltaCharCount,
+  reasoningDeltaCharCount,
+  tokenCosts,
+}: {
+  fullPromptCharCount: number
+  outputDeltaCharCount: number
+  reasoningDeltaCharCount: number
+  tokenCosts: Pick<
+    TokenPrice,
+    "cachedInputDollarsPerMillion" | "outputDollarsPerMillion"
+  >
+}) {
+  const cachedInputRate = getCostValue(
+    tokenCosts.cachedInputDollarsPerMillion
+  )
+  const outputRate = getCostValue(tokenCosts.outputDollarsPerMillion)
+
+  if (cachedInputRate === null || outputRate === null) {
+    return null
+  }
+
+  const cachedInputTokens = estimateTokensFromCharCount(fullPromptCharCount)
+  const outputTokens = estimateTokensFromCharCount(
+    reasoningDeltaCharCount + outputDeltaCharCount
+  )
+
+  if (cachedInputTokens === null || outputTokens === null) {
+    return null
+  }
+
+  return (
     (cachedInputTokens * cachedInputRate) / 1_000_000 +
     (outputTokens * outputRate) / 1_000_000
   )
@@ -179,6 +215,14 @@ function getCostValue(value: number | null) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0
     ? value
     : null
+}
+
+function estimateTokensFromCharCount(charCount: number) {
+  if (!Number.isFinite(charCount) || charCount < 0) {
+    return null
+  }
+
+  return Math.floor(charCount / 4)
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

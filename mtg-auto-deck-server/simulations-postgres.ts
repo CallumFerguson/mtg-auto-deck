@@ -1,5 +1,6 @@
 import { queryDatabase, withDatabaseTransaction } from "./db.js"
 import {
+  estimatePartialLlmRunCostUsd,
   estimatePresetTokenCostUsd,
   formatPreferredLlmRunCostAsCents,
   getOpenRouterReportedCostUsd,
@@ -3974,6 +3975,71 @@ function getCompletedLlmRunCostValues(
   }
 }
 
+type PartialLlmRunCostSnapshotRow = {
+  full_prompt_character_count: string | number
+  reasoning_delta_character_count: string | number
+  output_delta_character_count: string | number
+  cached_input_token_cost_usd_per_million: string | number | null
+  output_token_cost_usd_per_million: string | number | null
+}
+
+export function buildPartialLlmRunCostSnapshotQuery(llmRunId: string) {
+  return {
+    text: `
+      SELECT
+        length(llm_run.full_prompt) AS full_prompt_character_count,
+        COALESCE(SUM(length(COALESCE(chunk.reasoning_delta, ''))), 0) AS reasoning_delta_character_count,
+        COALESCE(SUM(length(COALESCE(chunk.output_delta, ''))), 0) AS output_delta_character_count,
+        preset.cached_input_token_cost_usd_per_million,
+        preset.output_token_cost_usd_per_million
+      FROM llm_runs llm_run
+      LEFT JOIN llm_model_presets preset
+        ON preset.id = llm_run.llm_model_preset_id
+      LEFT JOIN llm_run_chunks chunk
+        ON chunk.llm_run_id = llm_run.id
+      WHERE llm_run.id = $1
+      GROUP BY
+        llm_run.id,
+        preset.cached_input_token_cost_usd_per_million,
+        preset.output_token_cost_usd_per_million
+    `,
+    values: [llmRunId],
+  }
+}
+
+async function estimatePartialLlmRunCostUsdWithClient(
+  client: DatabaseTransactionClient,
+  llmRunId: string
+) {
+  const query = buildPartialLlmRunCostSnapshotQuery(llmRunId)
+  const result = await client.query<PartialLlmRunCostSnapshotRow>(
+    query.text,
+    query.values
+  )
+  const snapshot = result.rows[0]
+
+  if (!snapshot) {
+    return null
+  }
+
+  return estimatePartialLlmRunCostUsd({
+    fullPromptCharCount:
+      toOptionalNumber(snapshot.full_prompt_character_count) ?? 0,
+    reasoningDeltaCharCount:
+      toOptionalNumber(snapshot.reasoning_delta_character_count) ?? 0,
+    outputDeltaCharCount:
+      toOptionalNumber(snapshot.output_delta_character_count) ?? 0,
+    tokenCosts: {
+      cachedInputDollarsPerMillion: toOptionalNumber(
+        snapshot.cached_input_token_cost_usd_per_million
+      ),
+      outputDollarsPerMillion: toOptionalNumber(
+        snapshot.output_token_cost_usd_per_million
+      ),
+    },
+  })
+}
+
 export async function recordOpenRouterLlmRunGeneration({
   generationId,
   llmRunId,
@@ -4103,17 +4169,23 @@ export async function getOpenRouterGenerationForSimulation(
 
 export async function failLlmRun(llmRunId: string, failureMessage: string) {
   await withDatabaseTransaction(async (client) => {
+    const estimatedCostUsd = await estimatePartialLlmRunCostUsdWithClient(
+      client,
+      llmRunId
+    )
+
     await client.query(
       `
         UPDATE llm_runs
         SET status = 'failed',
+            estimated_cost_usd = $3,
             failed_at = now(),
             failure_message = $2,
             updated_at = now()
         WHERE id = $1
           AND status IN ('pending', 'streaming')
       `,
-      [llmRunId, failureMessage]
+      [llmRunId, failureMessage, estimatedCostUsd]
     )
 
     await client.query(
@@ -4150,34 +4222,48 @@ export async function failReportLlmRun(
   llmRunId: string,
   failureMessage: string
 ) {
-  await queryDatabase(
-    `
-      UPDATE llm_runs
-      SET status = 'failed',
-          failed_at = now(),
-          failure_message = $2,
-          updated_at = now()
-      WHERE id = $1
-        AND status IN ('pending', 'streaming')
-        AND phase = 'report'
-    `,
-    [llmRunId, failureMessage]
-  )
+  await withDatabaseTransaction(async (client) => {
+    const estimatedCostUsd = await estimatePartialLlmRunCostUsdWithClient(
+      client,
+      llmRunId
+    )
+
+    await client.query(
+      `
+        UPDATE llm_runs
+        SET status = 'failed',
+            estimated_cost_usd = $3,
+            failed_at = now(),
+            failure_message = $2,
+            updated_at = now()
+        WHERE id = $1
+          AND status IN ('pending', 'streaming')
+          AND phase = 'report'
+      `,
+      [llmRunId, failureMessage, estimatedCostUsd]
+    )
+  })
 }
 
 export async function cancelLlmRun(llmRunId: string, failureMessage?: string) {
   await withDatabaseTransaction(async (client) => {
+    const estimatedCostUsd = await estimatePartialLlmRunCostUsdWithClient(
+      client,
+      llmRunId
+    )
+
     await client.query(
       `
         UPDATE llm_runs
         SET status = 'cancelled',
+            estimated_cost_usd = $3,
             cancelled_at = now(),
             failure_message = COALESCE($2, failure_message),
             updated_at = now()
         WHERE id = $1
           AND status IN ('pending', 'streaming', 'cancel_requested')
       `,
-      [llmRunId, failureMessage ?? null]
+      [llmRunId, failureMessage ?? null, estimatedCostUsd]
     )
 
     await client.query(
@@ -4213,19 +4299,27 @@ export async function cancelReportLlmRun(
   llmRunId: string,
   failureMessage?: string
 ) {
-  await queryDatabase(
-    `
-      UPDATE llm_runs
-      SET status = 'cancelled',
-          cancelled_at = now(),
-          failure_message = COALESCE($2, failure_message),
-          updated_at = now()
-      WHERE id = $1
-        AND status IN ('pending', 'streaming', 'cancel_requested')
-        AND phase = 'report'
-    `,
-    [llmRunId, failureMessage ?? null]
-  )
+  await withDatabaseTransaction(async (client) => {
+    const estimatedCostUsd = await estimatePartialLlmRunCostUsdWithClient(
+      client,
+      llmRunId
+    )
+
+    await client.query(
+      `
+        UPDATE llm_runs
+        SET status = 'cancelled',
+            estimated_cost_usd = $3,
+            cancelled_at = now(),
+            failure_message = COALESCE($2, failure_message),
+            updated_at = now()
+        WHERE id = $1
+          AND status IN ('pending', 'streaming', 'cancel_requested')
+          AND phase = 'report'
+      `,
+      [llmRunId, failureMessage ?? null, estimatedCostUsd]
+    )
+  })
 }
 
 export async function cancelStaleInFlightLlmRuns(): Promise<StaleInFlightLlmRunCleanupResult> {
@@ -4292,10 +4386,15 @@ export async function cancelStaleInFlightLlmRuns(): Promise<StaleInFlightLlmRunC
 
       await client.query(insertChunkQuery.text, insertChunkQuery.values)
 
+      const estimatedCostUsd = await estimatePartialLlmRunCostUsdWithClient(
+        client,
+        run.id
+      )
       const cancelledRunResult = await client.query(
         `
           UPDATE llm_runs
           SET status = 'cancelled',
+              estimated_cost_usd = $3,
               cancelled_at = now(),
               failure_message = $2,
               updated_at = now()
@@ -4308,7 +4407,7 @@ export async function cancelStaleInFlightLlmRuns(): Promise<StaleInFlightLlmRunC
               )
             )
         `,
-        [run.id, STALE_IN_FLIGHT_LLM_RUN_CANCELLATION_MESSAGE]
+        [run.id, STALE_IN_FLIGHT_LLM_RUN_CANCELLATION_MESSAGE, estimatedCostUsd]
       )
 
       if ((cancelledRunResult.rowCount ?? 0) > 0) {

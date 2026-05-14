@@ -28,6 +28,7 @@ import {
   STALE_RUNNING_SIMULATION_CANCELLATION_MESSAGE,
   TURN_EVALUATION_UPSERT_SQL,
   buildAppendLlmRunChunksQuery,
+  buildPartialLlmRunCostSnapshotQuery,
   canApplyLateLlmRunTerminalUpdate,
   extractLlmRunChunkCardMentionRequests,
   getInitialSimulationStatus,
@@ -48,6 +49,7 @@ import {
 } from "./llm-runtime-cancellation.js"
 import {
   aggregateOpenRouterUsage,
+  estimatePartialLlmRunCostUsd,
   estimatePresetTokenCostUsd,
   formatPreferredLlmRunCostAsCents,
   formatUsdCostAsCentLabel,
@@ -168,6 +170,20 @@ test("builds chunk inserts with extracted MCP function reason", () => {
 
   assert.match(query.text, /mcp_function_reason/)
   assert.equal(query.values[5], "Bottoming after mulligan")
+})
+
+test("builds partial LLM run cost snapshot query", () => {
+  const llmRunId = "00000000-0000-0000-0000-000000000001"
+  const query = buildPartialLlmRunCostSnapshotQuery(llmRunId)
+  const normalizedSql = query.text.replace(/\s+/g, " ")
+
+  assert.deepEqual(query.values, [llmRunId])
+  assert.match(normalizedSql, /length\(llm_run\.full_prompt\)/)
+  assert.match(normalizedSql, /chunk\.reasoning_delta/)
+  assert.match(normalizedSql, /chunk\.output_delta/)
+  assert.match(normalizedSql, /cached_input_token_cost_usd_per_million/)
+  assert.match(normalizedSql, /output_token_cost_usd_per_million/)
+  assert.doesNotMatch(normalizedSql, /openrouter_reported_cost_usd/)
 })
 
 test("normalizes OpenAI reasoning and output item lifecycle events", () => {
@@ -464,6 +480,47 @@ test("handles token usage aliases and clamps cached input tokens", () => {
   })
 
   assert.equal(costUsd?.toFixed(4), "0.0003")
+})
+
+test("estimates partial LLM run cost from cached prompt and streamed output chars", () => {
+  const costUsd = estimatePartialLlmRunCostUsd({
+    fullPromptCharCount: 401,
+    reasoningDeltaCharCount: 121,
+    outputDeltaCharCount: 83,
+    tokenCosts: {
+      cachedInputDollarsPerMillion: 0.5,
+      outputDollarsPerMillion: 5,
+    },
+  })
+
+  assert.equal(costUsd?.toFixed(6), "0.000305")
+})
+
+test("requires partial LLM run cached input and output costs", () => {
+  assert.equal(
+    estimatePartialLlmRunCostUsd({
+      fullPromptCharCount: 400,
+      reasoningDeltaCharCount: 100,
+      outputDeltaCharCount: 100,
+      tokenCosts: {
+        cachedInputDollarsPerMillion: null,
+        outputDollarsPerMillion: 5,
+      },
+    }),
+    null
+  )
+  assert.equal(
+    estimatePartialLlmRunCostUsd({
+      fullPromptCharCount: 400,
+      reasoningDeltaCharCount: 100,
+      outputDeltaCharCount: 100,
+      tokenCosts: {
+        cachedInputDollarsPerMillion: 0.5,
+        outputDollarsPerMillion: null,
+      },
+    }),
+    null
+  )
 })
 
 test("extracts OpenRouter reported cost separately from preset estimates", () => {
