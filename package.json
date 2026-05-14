@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:client": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit && vite build",
+    "deploy": "npm run build:client && wrangler deploy",
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
     "ngrok": "ngrok http 3001 --host-header=rewrite",
@@ -16,7 +18,8 @@
     "test:openrouter-agent": "node tests/openrouter-agent-square-root.mjs",
     "test": "npm run server:build && node dist-server/llm-run-events.test.js && node dist-server/llamacpp-chat.test.js && node dist-server/simulation-results-stream.test.js && tsc -p tsconfig.stream-test.json && node node_modules/.tmp/stream-test/tests/simulation-results-stream.test.js",
     "typecheck": "tsc -b --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "preview:cloudflare": "npm run build:client && wrangler dev"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",
@@ -62,6 +65,7 @@
     "tsx": "^4.21.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.57.1",
-    "vite": "^7.3.1"
+    "vite": "^7.3.1",
+    "wrangler": "^4.91.0"
   }
 }

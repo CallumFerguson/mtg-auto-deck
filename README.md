@@ -69,3 +69,31 @@ Optionally start ngrok when using openai and locally running mcp server:
 ```sh
 npm run ngrok
 ```
+
+## Deploying the frontend to Cloudflare Workers
+
+This deploys the Vite React frontend as Cloudflare Workers Static Assets. The
+Node/Express server in `mtg-auto-deck-server` still needs to be hosted
+separately or ported to a Worker-compatible API.
+
+Before deploying, make sure the production frontend API URL is configured:
+
+```env
+VITE_API_BASE_URL=https://api.example.com
+```
+
+For Cloudflare Git builds, set `VITE_API_BASE_URL` as a build environment
+variable in the Cloudflare dashboard, since local `.env.production` files are
+not committed.
+
+Then deploy:
+
+```sh
+npm run deploy
+```
+
+To preview the Cloudflare Workers build locally:
+
+```sh
+npm run preview:cloudflare
+```
