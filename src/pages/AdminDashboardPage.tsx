@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   CircleOff,
   LayoutDashboard,
+  LogIn,
   MoreVertical,
   Plus,
   Power,
@@ -31,7 +32,7 @@ import { Button } from "@/components/ui/button"
 import { API_BASE_URL, apiFetch } from "@/lib/api"
 import { readApiError } from "@/lib/api-error"
 import type { AdminUser, AdminUsersResponse } from "@/lib/admin-types"
-import type { AuthUser } from "@/lib/auth-client"
+import { authClient, type AuthUser } from "@/lib/auth-client"
 import {
   formatProviderLabel,
   getLlmModelPresetLabel,
@@ -45,8 +46,11 @@ import type { AdminDashboardSectionId } from "@/lib/navigation"
 type AdminDashboardProps = {
   activeSectionId: AdminDashboardSectionId | null
   adminOptionsEnabled: boolean
+  isImpersonating: boolean
   onAdminOptionsEnabledChange: (isEnabled: boolean) => void
+  onSessionChanged: () => Promise<void> | void
   onSignedOut: () => void
+  onStopImpersonating: () => Promise<void> | void
   user: AuthUser
 }
 
@@ -87,8 +91,11 @@ const REASONING_EFFORT_OPTIONS: readonly ReasoningEffort[] = [
 export function AdminDashboardPage({
   activeSectionId,
   adminOptionsEnabled,
+  isImpersonating,
   onAdminOptionsEnabledChange,
+  onSessionChanged,
   onSignedOut,
+  onStopImpersonating,
   user,
 }: AdminDashboardProps) {
   const navigate = useNavigate()
@@ -101,9 +108,11 @@ export function AdminDashboardPage({
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
         <AdminDashboardHeader
           adminOptionsEnabled={adminOptionsEnabled}
+          isImpersonating={isImpersonating}
           navigate={navigate}
           onAdminOptionsEnabledChange={onAdminOptionsEnabledChange}
           onSignedOut={onSignedOut}
+          onStopImpersonating={onStopImpersonating}
           user={user}
         />
 
@@ -127,7 +136,10 @@ export function AdminDashboardPage({
             </div>
 
             {activeSection?.id === "users" ? (
-              <AdminUsersSection currentUserId={user.id} />
+              <AdminUsersSection
+                currentUserId={user.id}
+                onSessionChanged={onSessionChanged}
+              />
             ) : activeSection?.id === "model-presets" ? (
               <AdminModelPresetsSection />
             ) : (
@@ -142,10 +154,15 @@ export function AdminDashboardPage({
 
 export function AdminAccessDeniedPage({
   adminOptionsEnabled,
+  isImpersonating,
   onAdminOptionsEnabledChange,
   onSignedOut,
+  onStopImpersonating,
   user,
-}: Omit<AdminDashboardProps, "activeSectionId">) {
+}: Omit<
+  AdminDashboardProps,
+  "activeSectionId" | "onSessionChanged"
+>) {
   const navigate = useNavigate()
 
   return (
@@ -163,8 +180,10 @@ export function AdminAccessDeniedPage({
           </Button>
           <AccountMenu
             adminOptionsEnabled={adminOptionsEnabled}
+            isImpersonating={isImpersonating}
             onAdminOptionsEnabledChange={onAdminOptionsEnabledChange}
             onSignedOut={onSignedOut}
+            onStopImpersonating={onStopImpersonating}
             user={user}
           />
         </header>
@@ -197,11 +216,16 @@ export function AdminAccessDeniedPage({
 
 function AdminDashboardHeader({
   adminOptionsEnabled,
+  isImpersonating,
   navigate,
   onAdminOptionsEnabledChange,
   onSignedOut,
+  onStopImpersonating,
   user,
-}: Omit<AdminDashboardProps, "activeSectionId"> & {
+}: Omit<
+  AdminDashboardProps,
+  "activeSectionId" | "onSessionChanged"
+> & {
   navigate: (path: string) => void
 }) {
   return (
@@ -230,8 +254,10 @@ function AdminDashboardHeader({
 
       <AccountMenu
         adminOptionsEnabled={adminOptionsEnabled}
+        isImpersonating={isImpersonating}
         onAdminOptionsEnabledChange={onAdminOptionsEnabledChange}
         onSignedOut={onSignedOut}
+        onStopImpersonating={onStopImpersonating}
         user={user}
       />
     </header>
@@ -287,7 +313,14 @@ function AdminSectionNav({
   )
 }
 
-function AdminUsersSection({ currentUserId }: { currentUserId: string }) {
+function AdminUsersSection({
+  currentUserId,
+  onSessionChanged,
+}: {
+  currentUserId: string
+  onSessionChanged: () => Promise<void> | void
+}) {
+  const navigate = useNavigate()
   const [users, setUsers] = useState<AdminUser[]>([])
   const [total, setTotal] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
@@ -296,10 +329,17 @@ function AdminUsersSection({ currentUserId }: { currentUserId: string }) {
   const [userToDelete, setUserToDelete] = useState<AdminUser | null>(null)
   const [deleteUserError, setDeleteUserError] = useState<string | null>(null)
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null)
+  const [impersonateUserError, setImpersonateUserError] = useState<
+    string | null
+  >(null)
+  const [impersonatingUserId, setImpersonatingUserId] = useState<string | null>(
+    null
+  )
 
   const loadUsers = useCallback(async () => {
     setIsLoading(true)
     setLoadError(null)
+    setImpersonateUserError(null)
 
     try {
       const response = await apiFetch(`${API_BASE_URL}/admin/users`)
@@ -358,6 +398,38 @@ function AdminUsersSection({ currentUserId }: { currentUserId: string }) {
     }
   }
 
+  async function handleImpersonateUser(user: AdminUser) {
+    if (!canImpersonateUser(user, currentUserId)) {
+      return
+    }
+
+    setImpersonatingUserId(user.id)
+    setImpersonateUserError(null)
+
+    try {
+      const result = await authClient.admin.impersonateUser({
+        userId: user.id,
+      })
+
+      if (result.error) {
+        setImpersonateUserError(
+          getAuthClientErrorMessage(
+            result.error,
+            `Could not impersonate ${user.email}.`
+          )
+        )
+        return
+      }
+
+      await onSessionChanged()
+      navigate("/")
+    } catch {
+      setImpersonateUserError(`Could not impersonate ${user.email}.`)
+    } finally {
+      setImpersonatingUserId(null)
+    }
+  }
+
   return (
     <section className="min-w-0 space-y-4">
       <div className="flex flex-col gap-3 rounded-lg border border-border bg-card/70 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
@@ -385,6 +457,15 @@ function AdminUsersSection({ currentUserId }: { currentUserId: string }) {
           Refresh
         </Button>
       </div>
+
+      {impersonateUserError ? (
+        <p
+          className="rounded-lg border border-destructive/35 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+          role="alert"
+        >
+          {impersonateUserError}
+        </p>
+      ) : null}
 
       {isLoading ? (
         <AdminPanelMessage>Loading users...</AdminPanelMessage>
@@ -445,6 +526,7 @@ function AdminUsersSection({ currentUserId }: { currentUserId: string }) {
                       <AdminUserActionsMenu
                         currentUserId={currentUserId}
                         deletingUserId={deletingUserId}
+                        impersonatingUserId={impersonatingUserId}
                         openUserMenuId={openUserMenuId}
                         setOpenUserMenuId={setOpenUserMenuId}
                         user={user}
@@ -452,6 +534,9 @@ function AdminUsersSection({ currentUserId }: { currentUserId: string }) {
                           setDeleteUserError(null)
                           setUserToDelete(selectedUser)
                         }}
+                        onImpersonateUser={(selectedUser) =>
+                          void handleImpersonateUser(selectedUser)
+                        }
                       />
                     </TableCell>
                   </tr>
@@ -480,6 +565,7 @@ function AdminUsersSection({ currentUserId }: { currentUserId: string }) {
                     <AdminUserActionsMenu
                       currentUserId={currentUserId}
                       deletingUserId={deletingUserId}
+                      impersonatingUserId={impersonatingUserId}
                       openUserMenuId={openUserMenuId}
                       setOpenUserMenuId={setOpenUserMenuId}
                       user={user}
@@ -487,6 +573,9 @@ function AdminUsersSection({ currentUserId }: { currentUserId: string }) {
                         setDeleteUserError(null)
                         setUserToDelete(selectedUser)
                       }}
+                      onImpersonateUser={(selectedUser) =>
+                        void handleImpersonateUser(selectedUser)
+                      }
                     />
                   </div>
                 </div>
@@ -1274,21 +1363,27 @@ function DeleteLlmModelPresetModal({
 function AdminUserActionsMenu({
   currentUserId,
   deletingUserId,
+  impersonatingUserId,
   onDeleteUser,
+  onImpersonateUser,
   openUserMenuId,
   setOpenUserMenuId,
   user,
 }: {
   currentUserId: string
   deletingUserId: string | null
+  impersonatingUserId: string | null
   onDeleteUser: (user: AdminUser) => void
+  onImpersonateUser: (user: AdminUser) => void
   openUserMenuId: string | null
   setOpenUserMenuId: Dispatch<SetStateAction<string | null>>
   user: AdminUser
 }) {
   const isCurrentUser = user.id === currentUserId
   const isDeleting = deletingUserId === user.id
+  const isImpersonatingUser = impersonatingUserId === user.id
   const isOpen = openUserMenuId === user.id
+  const canImpersonate = canImpersonateUser(user, currentUserId)
 
   return (
     <div className="relative flex justify-end">
@@ -1299,7 +1394,7 @@ function AdminUserActionsMenu({
         aria-label={`Open actions for ${user.email}`}
         aria-expanded={isOpen}
         title="User actions"
-        disabled={isDeleting}
+        disabled={isDeleting || isImpersonatingUser}
         onClick={() =>
           setOpenUserMenuId((currentUserMenuId) =>
             currentUserMenuId === user.id ? null : user.id
@@ -1328,18 +1423,34 @@ function AdminUserActionsMenu({
                 Current account
               </button>
             ) : (
-              <button
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
-                type="button"
-                disabled={isDeleting}
-                onClick={() => {
-                  setOpenUserMenuId(null)
-                  onDeleteUser(user)
-                }}
-              >
-                <Trash2 data-icon="inline-start" />
-                Delete user
-              </button>
+              <>
+                {canImpersonate ? (
+                  <button
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-sky-100 transition-colors hover:bg-sky-400/10 hover:text-sky-100 focus:bg-sky-400/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                    type="button"
+                    disabled={isDeleting || isImpersonatingUser}
+                    onClick={() => {
+                      setOpenUserMenuId(null)
+                      onImpersonateUser(user)
+                    }}
+                  >
+                    <LogIn data-icon="inline-start" />
+                    {isImpersonatingUser ? "Impersonating..." : "Impersonate"}
+                  </button>
+                ) : null}
+                <button
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                  type="button"
+                  disabled={isDeleting || isImpersonatingUser}
+                  onClick={() => {
+                    setOpenUserMenuId(null)
+                    onDeleteUser(user)
+                  }}
+                >
+                  <Trash2 data-icon="inline-start" />
+                  Delete user
+                </button>
+              </>
             )}
           </div>
         </>
@@ -1564,10 +1675,7 @@ function VerificationBadge({ isVerified }: { isVerified: boolean }) {
 
 function RoleBadge({ role }: { role: string | null }) {
   const roleLabel = getRoleLabel(role)
-  const isAdmin = roleLabel
-    .split(",")
-    .map((rolePart) => rolePart.trim().toLowerCase())
-    .includes("admin")
+  const isAdmin = isAdminRole(role)
 
   return (
     <StatusBadge
@@ -1608,6 +1716,29 @@ function getDisplayName(user: AdminUser) {
 
 function getRoleLabel(role: string | null) {
   return role?.trim() || "user"
+}
+
+function isAdminRole(role: string | null) {
+  return getRoleLabel(role)
+    .split(",")
+    .map((rolePart) => rolePart.trim().toLowerCase())
+    .includes("admin")
+}
+
+function canImpersonateUser(user: AdminUser, currentUserId: string) {
+  return user.id !== currentUserId && !isAdminRole(user.role)
+}
+
+function getAuthClientErrorMessage(error: unknown, fallbackMessage: string) {
+  if (!error || typeof error !== "object") {
+    return fallbackMessage
+  }
+
+  const message = (error as Record<string, unknown>).message
+
+  return typeof message === "string" && message.trim()
+    ? message
+    : fallbackMessage
 }
 
 function formatDateTime(value: string) {

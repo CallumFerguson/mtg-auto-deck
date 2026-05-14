@@ -32,6 +32,26 @@ const passwordChangeNotificationPlugin = {
   },
 } satisfies BetterAuthPlugin
 
+const impersonationAuditLogPlugin = {
+  id: "impersonation-audit-log",
+  hooks: {
+    after: [
+      {
+        matcher: (context) => context.path === "/admin/impersonate-user",
+        handler: createAuthMiddleware(async (ctx) => {
+          logImpersonationStarted(ctx.context.returned)
+        }),
+      },
+      {
+        matcher: (context) => context.path === "/admin/stop-impersonating",
+        handler: createAuthMiddleware(async (ctx) => {
+          logImpersonationStopped(ctx.context, ctx.context.returned)
+        }),
+      },
+    ],
+  },
+} satisfies BetterAuthPlugin
+
 export const auth = betterAuth({
   appName: "MTG Auto Deck",
   baseURL: getRequiredEnvironmentVariable("BETTER_AUTH_URL"),
@@ -80,6 +100,7 @@ export const auth = betterAuth({
       adminRoles: ["admin"],
       defaultRole: "user",
     }),
+    impersonationAuditLogPlugin,
     passwordChangeNotificationPlugin,
   ],
   secret: getRequiredEnvironmentVariable("BETTER_AUTH_SECRET"),
@@ -162,6 +183,83 @@ function getPasswordChangeResponseUser(
     email,
     name: typeof name === "string" ? name : null,
   }
+}
+
+function logImpersonationStarted(response: unknown) {
+  const user = getAuthResponseUser(response)
+  const session = getAuthResponseSession(response)
+
+  console.info("Admin impersonation started:", {
+    adminUserId: session?.impersonatedBy ?? "unknown",
+    targetUserEmail: user?.email ?? null,
+    targetUserId: user?.id ?? session?.userId ?? "unknown",
+  })
+}
+
+function logImpersonationStopped(context: unknown, response: unknown) {
+  const contextSession = getAuthResponseSession(getRecordProperty(context, "session"))
+  const contextUser = getAuthResponseUser(getRecordProperty(context, "session"))
+  const restoredAdmin = getAuthResponseUser(response)
+
+  console.info("Admin impersonation stopped:", {
+    adminUserId:
+      restoredAdmin?.id ?? contextSession?.impersonatedBy ?? "unknown",
+    targetUserEmail: contextUser?.email ?? null,
+    targetUserId: contextUser?.id ?? contextSession?.userId ?? "unknown",
+  })
+}
+
+function getAuthResponseUser(response: unknown) {
+  const user = getRecordProperty(response, "user")
+  const id = getStringProperty(user, "id")
+
+  if (!id) {
+    return null
+  }
+
+  return {
+    email: getStringProperty(user, "email"),
+    id,
+  }
+}
+
+function getAuthResponseSession(response: unknown) {
+  const session = getRecordProperty(response, "session")
+  const impersonatedBy = getStringProperty(session, "impersonatedBy")
+  const userId = getStringProperty(session, "userId")
+
+  if (!impersonatedBy && !userId) {
+    return null
+  }
+
+  return {
+    impersonatedBy,
+    userId,
+  }
+}
+
+function getRecordProperty(value: unknown, property: string) {
+  if (!value || typeof value !== "object") {
+    return null
+  }
+
+  const propertyValue = (value as Record<string, unknown>)[property]
+
+  return propertyValue && typeof propertyValue === "object"
+    ? propertyValue
+    : null
+}
+
+function getStringProperty(value: unknown, property: string) {
+  if (!value || typeof value !== "object") {
+    return null
+  }
+
+  const propertyValue = (value as Record<string, unknown>)[property]
+
+  return typeof propertyValue === "string" && propertyValue.trim()
+    ? propertyValue
+    : null
 }
 
 function getTrustedOrigins() {

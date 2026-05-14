@@ -5,6 +5,7 @@ import {
   LogOut,
   MailCheck,
   RotateCcw,
+  ShieldCheck,
   UserPlus,
 } from "lucide-react"
 import { useNavigate } from "react-router-dom"
@@ -31,16 +32,22 @@ export function AuthPage({
   initialEmail = "",
   initialMode = "sign-in",
   initialNotice,
+  impersonatedUserLabel = "this user",
   isVerificationWall = false,
+  isImpersonating = false,
   onAuthenticated,
   onSignedOut,
+  onStopImpersonating,
 }: {
   initialEmail?: string
   initialMode?: AuthMode
   initialNotice?: string
+  impersonatedUserLabel?: string
   isVerificationWall?: boolean
+  isImpersonating?: boolean
   onAuthenticated: () => Promise<void> | void
   onSignedOut?: () => Promise<void> | void
+  onStopImpersonating?: () => Promise<void> | void
 }) {
   const navigate = useNavigate()
   const initialResetLinkStatus = getInitialResetLinkStatus(initialMode)
@@ -352,11 +359,19 @@ export function AuthPage({
     setIsSigningOut(true)
 
     try {
-      await authClient.signOut()
-      await onSignedOut?.()
-      navigate("/sign-in", { replace: true })
+      if (isImpersonating && onStopImpersonating) {
+        await onStopImpersonating()
+      } else {
+        await authClient.signOut()
+        await onSignedOut?.()
+        navigate("/sign-in", { replace: true })
+      }
     } catch {
-      setError("Sign out failed.")
+      setError(
+        isImpersonating
+          ? `Could not stop impersonating ${impersonatedUserLabel}.`
+          : "Sign out failed."
+      )
     } finally {
       setIsSigningOut(false)
     }
@@ -614,12 +629,27 @@ export function AuthPage({
                 {isVerificationWall ? (
                   <Button
                     type="button"
-                    variant="destructive"
+                    variant={isImpersonating ? "outline" : "destructive"}
+                    className={
+                      isImpersonating
+                        ? "border-sky-300/35 bg-sky-400/10 text-sky-50 hover:bg-sky-400/20"
+                        : undefined
+                    }
                     onClick={() => void handleSignOut()}
                     disabled={isSubmitting || isResendingCode || isSigningOut}
                   >
-                    <LogOut data-icon="inline-start" />
-                    {isSigningOut ? "Signing out..." : "Sign out"}
+                    {isImpersonating ? (
+                      <ShieldCheck data-icon="inline-start" />
+                    ) : (
+                      <LogOut data-icon="inline-start" />
+                    )}
+                    {isSigningOut
+                      ? isImpersonating
+                        ? "Restoring..."
+                        : "Signing out..."
+                      : isImpersonating
+                        ? "Stop impersonating"
+                        : "Sign out"}
                   </Button>
                 ) : null}
               </div>

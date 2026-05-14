@@ -1,5 +1,13 @@
 import { useState, type FormEvent } from "react"
-import { ArrowLeft, KeyRound, LogOut, Mail, Settings, X } from "lucide-react"
+import {
+  ArrowLeft,
+  KeyRound,
+  LogOut,
+  Mail,
+  Settings,
+  ShieldCheck,
+  X,
+} from "lucide-react"
 import { useNavigate } from "react-router-dom"
 
 import { AccountMenu } from "@/components/AccountMenu"
@@ -11,15 +19,19 @@ import { getPasswordRangeError } from "@/lib/password-validation"
 
 type SettingsPageProps = {
   adminOptionsEnabled: boolean
+  isImpersonating: boolean
   onAdminOptionsEnabledChange: (isEnabled: boolean) => void
   onSignedOut: () => void
+  onStopImpersonating: () => Promise<void> | void
   user: AuthUser
 }
 
 export function SettingsPage({
   adminOptionsEnabled,
+  isImpersonating,
   onAdminOptionsEnabledChange,
   onSignedOut,
+  onStopImpersonating,
   user,
 }: SettingsPageProps) {
   const navigate = useNavigate()
@@ -32,8 +44,13 @@ export function SettingsPage({
     setIsSigningOut(true)
 
     try {
-      await authClient.signOut()
-      onSignedOut()
+      if (isImpersonating) {
+        await onStopImpersonating()
+      } else {
+        await authClient.signOut()
+        onSignedOut()
+      }
+
       setIsSignOutConfirmOpen(false)
     } finally {
       setIsSigningOut(false)
@@ -68,8 +85,10 @@ export function SettingsPage({
 
           <AccountMenu
             adminOptionsEnabled={adminOptionsEnabled}
+            isImpersonating={isImpersonating}
             onAdminOptionsEnabledChange={onAdminOptionsEnabledChange}
             onSignedOut={onSignedOut}
+            onStopImpersonating={onStopImpersonating}
             user={user}
           />
         </header>
@@ -131,12 +150,21 @@ export function SettingsPage({
           <div>
             <Button
               type="button"
-              variant="destructive"
+              variant={isImpersonating ? "outline" : "destructive"}
+              className={
+                isImpersonating
+                  ? "border-sky-300/35 bg-sky-400/10 text-sky-50 hover:bg-sky-400/20"
+                  : undefined
+              }
               onClick={() => setIsSignOutConfirmOpen(true)}
               disabled={isSigningOut}
             >
-              <LogOut data-icon="inline-start" />
-              Sign out
+              {isImpersonating ? (
+                <ShieldCheck data-icon="inline-start" />
+              ) : (
+                <LogOut data-icon="inline-start" />
+              )}
+              {isImpersonating ? "Stop impersonating" : "Sign out"}
             </Button>
           </div>
         </div>
@@ -154,6 +182,7 @@ export function SettingsPage({
       {isSignOutConfirmOpen ? (
         <SignOutConfirmModal
           isSigningOut={isSigningOut}
+          mode={isImpersonating ? "stop-impersonating" : "sign-out"}
           onClose={() => setIsSignOutConfirmOpen(false)}
           onConfirm={() => void handleSignOut()}
         />

@@ -14,13 +14,17 @@ import { authClient, type AuthUser } from "@/lib/auth-client"
 
 export function AccountMenu({
   adminOptionsEnabled,
+  isImpersonating,
   onAdminOptionsEnabledChange,
   onSignedOut,
+  onStopImpersonating,
   user,
 }: {
   adminOptionsEnabled: boolean
+  isImpersonating: boolean
   onAdminOptionsEnabledChange: (isEnabled: boolean) => void
   onSignedOut: () => void
+  onStopImpersonating: () => Promise<void> | void
   user: AuthUser
 }) {
   const navigate = useNavigate()
@@ -34,8 +38,13 @@ export function AccountMenu({
     setIsSigningOut(true)
 
     try {
-      await authClient.signOut()
-      onSignedOut()
+      if (isImpersonating) {
+        await onStopImpersonating()
+      } else {
+        await authClient.signOut()
+        onSignedOut()
+      }
+
       setIsSignOutConfirmOpen(false)
     } finally {
       setIsSigningOut(false)
@@ -139,7 +148,11 @@ export function AccountMenu({
               Settings
             </button>
             <button
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
+              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors focus:outline-none disabled:cursor-not-allowed disabled:opacity-70 ${
+                isImpersonating
+                  ? "text-sky-100 hover:bg-sky-400/10 hover:text-sky-100 focus:bg-sky-400/10"
+                  : "text-destructive hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10"
+              }`}
               type="button"
               onClick={() => {
                 setIsOpen(false)
@@ -148,7 +161,7 @@ export function AccountMenu({
               disabled={isSigningOut}
             >
               <LogOut data-icon="inline-start" />
-              Sign out
+              {isImpersonating ? "Stop impersonating" : "Sign out"}
             </button>
           </div>
         </>
@@ -156,6 +169,7 @@ export function AccountMenu({
       {isSignOutConfirmOpen ? (
         <SignOutConfirmModal
           isSigningOut={isSigningOut}
+          mode={isImpersonating ? "stop-impersonating" : "sign-out"}
           onClose={() => setIsSignOutConfirmOpen(false)}
           onConfirm={() => void handleSignOut()}
         />

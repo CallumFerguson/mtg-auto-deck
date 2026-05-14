@@ -1,16 +1,28 @@
-import { LogOut, X } from "lucide-react"
+import { LogOut, ShieldCheck, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 
+type SignOutConfirmMode = "sign-out" | "stop-impersonating"
+
 export function SignOutConfirmModal({
   isSigningOut,
+  mode = "sign-out",
   onClose,
   onConfirm,
 }: {
   isSigningOut: boolean
+  mode?: SignOutConfirmMode
   onClose: () => void
   onConfirm: () => void
 }) {
+  const isStoppingImpersonation = mode === "stop-impersonating"
+  const Icon = isStoppingImpersonation ? ShieldCheck : LogOut
+  const title = isStoppingImpersonation ? "Stop impersonating?" : "Sign out?"
+  const confirmLabel = isStoppingImpersonation
+    ? "Stop impersonating"
+    : "Sign out"
+  const workingLabel = isStoppingImpersonation ? "Restoring..." : "Signing out..."
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 py-6 backdrop-blur-sm"
@@ -26,12 +38,18 @@ export function SignOutConfirmModal({
       >
         <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-destructive/30 bg-destructive/10 text-destructive">
-              <LogOut className="size-4" aria-hidden />
+            <div
+              className={
+                isStoppingImpersonation
+                  ? "flex size-9 shrink-0 items-center justify-center rounded-lg border border-sky-300/35 bg-sky-400/10 text-sky-200"
+                  : "flex size-9 shrink-0 items-center justify-center rounded-lg border border-destructive/30 bg-destructive/10 text-destructive"
+              }
+            >
+              <Icon className="size-4" aria-hidden />
             </div>
             <div className="min-w-0">
               <h2 id="sign-out-title" className="text-xl font-semibold">
-                Sign out?
+                {title}
               </h2>
             </div>
           </div>
@@ -59,12 +77,12 @@ export function SignOutConfirmModal({
           </Button>
           <Button
             type="button"
-            variant="destructive"
+            variant={isStoppingImpersonation ? "default" : "destructive"}
             onClick={onConfirm}
             disabled={isSigningOut}
           >
-            <LogOut data-icon="inline-start" />
-            {isSigningOut ? "Signing out..." : "Sign out"}
+            <Icon data-icon="inline-start" />
+            {isSigningOut ? workingLabel : confirmLabel}
           </Button>
         </div>
       </section>

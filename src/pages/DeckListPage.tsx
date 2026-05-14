@@ -22,14 +22,18 @@ import { CreateDeckModal } from "@/pages/CreateDeckModal"
 
 export function DeckListPage({
   adminOptionsEnabled,
-  user,
+  isImpersonating,
   onAdminOptionsEnabledChange,
   onSignedOut,
+  onStopImpersonating,
+  user,
 }: {
   adminOptionsEnabled: boolean
+  isImpersonating: boolean
   user: AuthUser
   onAdminOptionsEnabledChange: (isEnabled: boolean) => void
   onSignedOut: () => void
+  onStopImpersonating: () => Promise<void> | void
 }) {
   const navigate = useNavigate()
   const [decks, setDecks] = useState<Deck[]>([])
@@ -125,9 +129,11 @@ export function DeckListPage({
           <div className="flex items-center gap-2">
             <AccountMenu
               adminOptionsEnabled={adminOptionsEnabled}
+              isImpersonating={isImpersonating}
               onAdminOptionsEnabledChange={onAdminOptionsEnabledChange}
-              user={user}
               onSignedOut={onSignedOut}
+              onStopImpersonating={onStopImpersonating}
+              user={user}
             />
             <Button
               type="button"

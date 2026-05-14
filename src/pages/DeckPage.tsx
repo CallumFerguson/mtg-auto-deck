@@ -17,18 +17,22 @@ import { ViewDeckCards } from "@/pages/ViewDeckCards"
 export function DeckPage({
   adminOptionsEnabled,
   deckId,
+  isImpersonating,
   initialTab,
   initialSimulationId,
   onAdminOptionsEnabledChange,
   onSignedOut,
+  onStopImpersonating,
   user,
 }: {
   adminOptionsEnabled: boolean
   deckId: string
+  isImpersonating: boolean
   initialTab: DeckPageTab
   initialSimulationId: string | null
   onAdminOptionsEnabledChange: (isEnabled: boolean) => void
   onSignedOut: () => void
+  onStopImpersonating: () => Promise<void> | void
   user: AuthUser
 }) {
   const navigate = useNavigate()
@@ -197,9 +201,11 @@ export function DeckPage({
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <AccountMenu
                 adminOptionsEnabled={adminOptionsEnabled}
+                isImpersonating={isImpersonating}
                 onAdminOptionsEnabledChange={onAdminOptionsEnabledChange}
-                user={user}
                 onSignedOut={onSignedOut}
+                onStopImpersonating={onStopImpersonating}
+                user={user}
               />
               <div className="inline-grid w-full grid-cols-2 rounded-lg border border-border bg-card/70 p-1 sm:w-auto">
                 <TabButton

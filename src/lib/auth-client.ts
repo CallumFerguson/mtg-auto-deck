@@ -15,3 +15,7 @@ export type AuthUser = {
   name: string
   role?: string | null
 }
+
+export type AuthSession = {
+  impersonatedBy?: string | null
+}
