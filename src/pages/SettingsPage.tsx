@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   CreditCard,
   ExternalLink,
+  Gauge,
   KeyRound,
   LogOut,
   Mail,
@@ -15,6 +16,7 @@ import { useNavigate, useSearchParams } from "react-router-dom"
 
 import { AccountMenu } from "@/components/AccountMenu"
 import { SignOutConfirmModal } from "@/components/SignOutConfirmModal"
+import { UsageLimitRows } from "@/components/UsageLimitRows"
 import { Button } from "@/components/ui/button"
 import { authClient, type AuthUser } from "@/lib/auth-client"
 import { clearPasswordInputs } from "@/lib/password-form"
@@ -26,6 +28,7 @@ import {
   isPaidBillingTier,
   type BillingTier,
 } from "@/lib/subscription-tiers"
+import { useUsageLimitsPolling } from "@/lib/usage-limits"
 
 type SettingsPageProps = {
   adminOptionsEnabled: boolean
@@ -108,6 +111,8 @@ export function SettingsPage({
   const [pendingBillingAction, setPendingBillingAction] = useState<
     BillingTier | "portal" | null
   >(null)
+
+  useUsageLimitsPolling(true)
 
   useEffect(() => {
     const billingResult = searchParams.get("billing")
@@ -359,6 +364,21 @@ export function SettingsPage({
                 onOpenUpgradeModal={handleOpenUpgradeModal}
                 pendingBillingAction={pendingBillingAction}
               />
+            </div>
+
+            <div className="border-t border-border px-5 py-5">
+              <div className="flex min-w-0 items-start gap-4">
+                <Gauge
+                  className="mt-1 size-6 shrink-0 text-foreground"
+                  aria-hidden
+                />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-foreground">
+                    Usage limits
+                  </p>
+                  <UsageLimitRows />
+                </div>
+              </div>
             </div>
 
             {isImpersonating ? (

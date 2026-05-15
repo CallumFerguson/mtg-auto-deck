@@ -112,6 +112,7 @@ import {
   getKnownSimulationResultToolLabelForChunk,
   getSimulationResultToolReasonForChunk,
 } from "@/lib/simulation-result-tool-labels"
+import { useUsageLimits } from "@/lib/usage-limits"
 
 type OpeningHandCardOption = {
   id: string
@@ -288,6 +289,57 @@ function isActiveLlmRunStatus(status: string) {
     status === "streaming" ||
     status === "cancel_requested"
   )
+}
+
+function isTerminalLlmRunStatus(status: string) {
+  return status === "completed" || status === "failed" || status === "cancelled"
+}
+
+function findSimulationResultsRun(
+  resultsInfo: SimulationResultsInfo | null,
+  llmRunId: string
+) {
+  if (!resultsInfo) {
+    return null
+  }
+
+  return (
+    [
+      ...resultsInfo.openingHandLlmRuns,
+      ...resultsInfo.turnLlmRuns,
+      ...resultsInfo.reportLlmRuns,
+    ].find((run) => run.llmRunId === llmRunId) ?? null
+  )
+}
+
+function shouldRefreshUsageLimitsForFinishedStreamRun(
+  streamEvent: SimulationResultsStreamEvent,
+  previousResultsInfo: SimulationResultsInfo | null,
+  refreshedRunIds: Set<string>
+) {
+  if (streamEvent.type !== "llm_run_updated") {
+    return false
+  }
+
+  if (!isTerminalLlmRunStatus(streamEvent.run.status)) {
+    return false
+  }
+
+  if (refreshedRunIds.has(streamEvent.run.llmRunId)) {
+    return false
+  }
+
+  const previousRun = findSimulationResultsRun(
+    previousResultsInfo,
+    streamEvent.run.llmRunId
+  )
+
+  if (previousRun && isTerminalLlmRunStatus(previousRun.status)) {
+    return false
+  }
+
+  refreshedRunIds.add(streamEvent.run.llmRunId)
+  return true
 }
 
 function getSimulationRunFinishedTimeMs(run: SimulationDebugLlmRun) {
@@ -2022,6 +2074,7 @@ function SimulationDetails({
   startingHand: StartingHand | null
   startingHandLoadError: string | null
 }) {
+  const { refreshUsageLimits } = useUsageLimits()
   const [isStartingOpeningHandRun, setIsStartingOpeningHandRun] =
     useState(false)
   const [openingHandRunError, setOpeningHandRunError] = useState<string | null>(
@@ -2043,6 +2096,7 @@ function SimulationDetails({
   const resultsInfoRef = useRef<SimulationResultsInfo | null>(null)
   const resultsEventSourceRef = useRef<EventSource | null>(null)
   const resultsStreamErrorTimeoutRef = useRef<number | null>(null)
+  const usageLimitRefreshRunIdsRef = useRef<Set<string>>(new Set())
   const simulationRef = useRef(simulation)
   const resultsPanelRef = useRef<HTMLElement | null>(null)
   const keepResultsScrolledDownRef = useRef(true)
@@ -2094,6 +2148,10 @@ function SimulationDetails({
   useEffect(() => {
     simulationRef.current = simulation
   }, [simulation])
+
+  useEffect(() => {
+    usageLimitRefreshRunIdsRef.current.clear()
+  }, [simulation.id])
 
   const clearOpenActivityPanelFrame = useCallback(() => {
     if (openActivityPanelFrameRef.current === null) {
@@ -2573,12 +2631,23 @@ function SimulationDetails({
           return
         }
 
+        const previousResultsInfo = resultsInfoRef.current
         const updatedResultsInfo = applySimulationResultsStreamEvent(
-          resultsInfoRef.current,
+          previousResultsInfo,
           streamEvent
         )
         resultsInfoRef.current = updatedResultsInfo
         setResultsInfo(updatedResultsInfo)
+
+        if (
+          shouldRefreshUsageLimitsForFinishedStreamRun(
+            streamEvent,
+            previousResultsInfo,
+            usageLimitRefreshRunIdsRef.current
+          )
+        ) {
+          void refreshUsageLimits()
+        }
 
         if (
           streamEvent.type === "snapshot" ||
@@ -2631,7 +2700,13 @@ function SimulationDetails({
     return () => {
       closeStream()
     }
-  }, [deckId, onSimulationUpdated, resultsStreamRestartKey, simulation.id])
+  }, [
+    deckId,
+    onSimulationUpdated,
+    refreshUsageLimits,
+    resultsStreamRestartKey,
+    simulation.id,
+  ])
 
   return (
     <div className="flex h-full min-h-0 min-w-0 overflow-hidden">

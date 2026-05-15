@@ -10,8 +10,7 @@ import { useNavigate } from "react-router-dom"
 
 import { Button } from "@/components/ui/button"
 import { SignOutConfirmModal } from "@/components/SignOutConfirmModal"
-import { API_BASE_URL, apiFetch } from "@/lib/api"
-import { readApiError } from "@/lib/api-error"
+import { UsageLimitRows } from "@/components/UsageLimitRows"
 import { authClient, type AuthUser } from "@/lib/auth-client"
 import {
   BILLING_TIER_LABELS,
@@ -19,12 +18,7 @@ import {
   getBillingTierFromSubscription,
   type BillingTier,
 } from "@/lib/subscription-tiers"
-import type {
-  UsageLimitsResponse,
-  UsageLimitWindow,
-} from "@/lib/usage-limit-types"
-
-const USAGE_LIMIT_REFRESH_INTERVAL_MS = 5000
+import { useUsageLimitsPolling } from "@/lib/usage-limits"
 
 export function AccountMenu({
   adminOptionsEnabled,
@@ -46,9 +40,6 @@ export function AccountMenu({
   const [billingTier, setBillingTier] = useState<BillingTier>("free")
   const [isBillingTierLoading, setIsBillingTierLoading] = useState(false)
   const [billingTierError, setBillingTierError] = useState(false)
-  const [usageLimits, setUsageLimits] = useState<UsageLimitWindow[]>([])
-  const [isUsageLimitsLoading, setIsUsageLimitsLoading] = useState(false)
-  const [usageLimitsError, setUsageLimitsError] = useState<string | null>(null)
   const [isSignOutConfirmOpen, setIsSignOutConfirmOpen] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
   const billingTierLabel = isBillingTierLoading
@@ -56,6 +47,8 @@ export function AccountMenu({
     : billingTierError
       ? "Unavailable"
       : `${BILLING_TIER_LABELS[billingTier]} tier`
+
+  useUsageLimitsPolling(isOpen)
 
   useEffect(() => {
     if (!isOpen) {
@@ -104,57 +97,6 @@ export function AccountMenu({
     }
   }, [isOpen, user.id])
 
-  useEffect(() => {
-    if (!isOpen) {
-      return
-    }
-
-    let isMounted = true
-    setIsUsageLimitsLoading(true)
-    setUsageLimitsError(null)
-
-    async function loadUsageLimits() {
-      try {
-        const response = await apiFetch(`${API_BASE_URL}/usage-limits`)
-
-        if (!response.ok) {
-          throw new Error(
-            await readApiError(response, "Usage limits could not be loaded.")
-          )
-        }
-
-        const data = (await response.json()) as UsageLimitsResponse
-
-        if (isMounted) {
-          setUsageLimits(data.usageLimits)
-          setUsageLimitsError(null)
-        }
-      } catch (error) {
-        if (isMounted) {
-          setUsageLimitsError(
-            error instanceof Error
-              ? error.message
-              : "Usage limits could not be loaded."
-          )
-        }
-      } finally {
-        if (isMounted) {
-          setIsUsageLimitsLoading(false)
-        }
-      }
-    }
-
-    void loadUsageLimits()
-    const refreshInterval = window.setInterval(() => {
-      void loadUsageLimits()
-    }, USAGE_LIMIT_REFRESH_INTERVAL_MS)
-
-    return () => {
-      isMounted = false
-      window.clearInterval(refreshInterval)
-    }
-  }, [isOpen, user.id])
-
   async function handleSignOut() {
     setIsSigningOut(true)
 
@@ -200,11 +142,7 @@ export function AccountMenu({
               <p className="truncate text-xs text-muted-foreground">
                 {billingTierLabel}
               </p>
-              <UsageLimitRows
-                error={usageLimitsError}
-                isLoading={isUsageLimitsLoading}
-                usageLimits={usageLimits}
-              />
+              <UsageLimitRows />
             </div>
             {user.role === "admin" ? (
               <div className="border-b border-border py-1">
@@ -302,87 +240,4 @@ export function AccountMenu({
       ) : null}
     </div>
   )
-}
-
-function UsageLimitRows({
-  error,
-  isLoading,
-  usageLimits,
-}: {
-  error: string | null
-  isLoading: boolean
-  usageLimits: readonly UsageLimitWindow[]
-}) {
-  if (error) {
-    return (
-      <p className="mt-2 text-xs text-destructive" role="alert">
-        Usage unavailable
-      </p>
-    )
-  }
-
-  if (isLoading && usageLimits.length === 0) {
-    return (
-      <p className="mt-2 text-xs text-muted-foreground">Loading usage...</p>
-    )
-  }
-
-  if (usageLimits.length === 0) {
-    return null
-  }
-
-  return (
-    <div className="mt-2 grid gap-1">
-      {usageLimits.map((usageLimit) => (
-        <p
-          key={usageLimit.kind}
-          className="truncate text-xs text-muted-foreground"
-        >
-          {formatUsageLimitLabel(usageLimit)}
-        </p>
-      ))}
-    </div>
-  )
-}
-
-function formatUsageLimitLabel(usageLimit: UsageLimitWindow) {
-  const resetLabel =
-    usageLimit.kind === "weekly"
-      ? formatWeeklyResetDate(usageLimit.resetAt)
-      : formatFiveHourResetTime(usageLimit.resetAt)
-  const resetText =
-    usageLimit.kind === "weekly"
-      ? `resets ${resetLabel}`
-      : `resets at ${resetLabel}`
-
-  return `${usageLimit.label} - ${usageLimit.remainingPercent}% remaining, ${resetText}`
-}
-
-function formatFiveHourResetTime(resetAt: string) {
-  const resetDate = new Date(resetAt)
-
-  if (Number.isNaN(resetDate.getTime())) {
-    return "unknown"
-  }
-
-  return resetDate.toLocaleTimeString(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-  })
-}
-
-function formatWeeklyResetDate(resetAt: string) {
-  const resetDate = new Date(resetAt)
-
-  if (Number.isNaN(resetDate.getTime())) {
-    return "unknown"
-  }
-
-  const currentYear = new Date().getFullYear()
-
-  return resetDate.toLocaleDateString(undefined, {
-    day: "numeric",
-    month: "short",
-    year: resetDate.getFullYear() === currentYear ? undefined : "numeric",
-  })
 }

@@ -21,6 +21,7 @@ import {
   AdminAccessDeniedPage,
   AdminDashboardPage,
 } from "@/pages/AdminDashboardPage"
+import { UsageLimitsProvider } from "@/lib/usage-limits"
 import { AuthPage, type AuthMode } from "@/pages/AuthPage"
 import { DeckListPage } from "@/pages/DeckListPage"
 import { DeckPage } from "@/pages/DeckPage"
@@ -111,7 +112,7 @@ export function App() {
   }
 
   return (
-    <>
+    <UsageLimitsProvider userId={user?.id ?? null}>
       {isImpersonating && user ? (
         <ImpersonationBanner
           impersonatedUserLabel={impersonatedUserLabel}
@@ -253,7 +254,7 @@ export function App() {
         />
         <Route path="*" element={<UnknownRoute sessionUser={sessionUser} />} />
       </Routes>
-    </>
+    </UsageLimitsProvider>
   )
 }
 
@@ -418,7 +419,7 @@ function AdminDashboardRoute({
   }
 
   return (
-      <AdminDashboardPage
+    <AdminDashboardPage
       activeSectionId={getAdminDashboardSectionIdFromPathname(
         location.pathname
       )}
