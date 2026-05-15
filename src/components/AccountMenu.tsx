@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import {
   LayoutDashboard,
   LogOut,
@@ -11,6 +11,12 @@ import { useNavigate } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { SignOutConfirmModal } from "@/components/SignOutConfirmModal"
 import { authClient, type AuthUser } from "@/lib/auth-client"
+import {
+  BILLING_TIER_LABELS,
+  getActiveBillingSubscription,
+  getBillingTierFromSubscription,
+  type BillingTier,
+} from "@/lib/subscription-tiers"
 
 export function AccountMenu({
   adminOptionsEnabled,
@@ -29,10 +35,63 @@ export function AccountMenu({
 }) {
   const navigate = useNavigate()
   const [isOpen, setIsOpen] = useState(false)
+  const [billingTier, setBillingTier] = useState<BillingTier>("free")
+  const [isBillingTierLoading, setIsBillingTierLoading] = useState(false)
+  const [billingTierError, setBillingTierError] = useState(false)
   const [isSignOutConfirmOpen, setIsSignOutConfirmOpen] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
-  const accountLabel =
-    user.name && user.name !== user.email ? user.name : "MTG Auto Deck"
+  const billingTierLabel = isBillingTierLoading
+    ? "Loading..."
+    : billingTierError
+      ? "Unavailable"
+      : `${BILLING_TIER_LABELS[billingTier]} tier`
+
+  useEffect(() => {
+    if (!isOpen) {
+      return
+    }
+
+    let isMounted = true
+
+    async function loadBillingTier() {
+      setIsBillingTierLoading(true)
+      setBillingTierError(false)
+
+      try {
+        const result = await authClient.subscription.list({
+          query: {},
+        })
+
+        if (result.error) {
+          if (isMounted) {
+            setBillingTierError(true)
+          }
+          return
+        }
+
+        const subscriptions = Array.isArray(result.data) ? result.data : []
+        const activeSubscription = getActiveBillingSubscription(subscriptions)
+
+        if (isMounted) {
+          setBillingTier(getBillingTierFromSubscription(activeSubscription))
+        }
+      } catch {
+        if (isMounted) {
+          setBillingTierError(true)
+        }
+      } finally {
+        if (isMounted) {
+          setIsBillingTierLoading(false)
+        }
+      }
+    }
+
+    void loadBillingTier()
+
+    return () => {
+      isMounted = false
+    }
+  }, [isOpen, user.id])
 
   async function handleSignOut() {
     setIsSigningOut(true)
@@ -77,7 +136,7 @@ export function AccountMenu({
             <div className="border-b border-border px-3 py-2">
               <p className="truncate text-sm font-medium">{user.email}</p>
               <p className="truncate text-xs text-muted-foreground">
-                {accountLabel}
+                {billingTierLabel}
               </p>
             </div>
             {user.role === "admin" ? (

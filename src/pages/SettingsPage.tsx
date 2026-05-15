@@ -21,6 +21,8 @@ import { clearPasswordInputs } from "@/lib/password-form"
 import { getPasswordRangeError } from "@/lib/password-validation"
 import {
   BILLING_TIER_LABELS,
+  getActiveBillingSubscription,
+  getBillingTierFromSubscription,
   isPaidBillingTier,
   type BillingTier,
 } from "@/lib/subscription-tiers"
@@ -34,14 +36,6 @@ type SettingsPageProps = {
   user: AuthUser
 }
 
-type BillingSubscription = {
-  id: string
-  plan: string
-  status: string
-  cancelAtPeriodEnd?: boolean
-  stripeSubscriptionId?: string
-}
-
 type PricingPlan = {
   cadence: string
   cta: string
@@ -52,7 +46,6 @@ type PricingPlan = {
   tier: BillingTier
 }
 
-const ACTIVE_BILLING_SUBSCRIPTION_STATUSES = new Set(["active", "trialing"])
 const PRICING_PLANS = [
   {
     name: "Free",
@@ -863,28 +856,6 @@ function ErrorMessage({ error }: { error: string | null }) {
       {error}
     </p>
   ) : null
-}
-
-function getActiveBillingSubscription(
-  subscriptions: readonly BillingSubscription[]
-) {
-  return (
-    subscriptions.find((subscription) =>
-      ACTIVE_BILLING_SUBSCRIPTION_STATUSES.has(subscription.status)
-    ) ?? null
-  )
-}
-
-function getBillingTierFromSubscription(
-  subscription: BillingSubscription | null
-): BillingTier {
-  const plan = subscription?.plan.trim().toLowerCase()
-
-  if (plan === "plus" || plan === "pro") {
-    return plan
-  }
-
-  return "free"
 }
 
 function getBillingReturnUrl(result: string) {
