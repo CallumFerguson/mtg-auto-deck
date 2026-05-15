@@ -103,7 +103,6 @@ export type ResolvedEvaluationLlmRunConfig =
 
 export type LlmRunQueueConfig = {
   maxConcurrentRuns: number
-  maxConcurrentRunsPerUser: number
 }
 
 export class LlmConfigurationError extends Error {
@@ -169,10 +168,6 @@ export function getLlmRunQueueConfig(
     maxConcurrentRuns: getRequiredPositiveIntegerEnvironmentVariable(
       environment,
       "LLM_RUN_QUEUE_MAX_CONCURRENT_RUNS"
-    ),
-    maxConcurrentRunsPerUser: getRequiredPositiveIntegerEnvironmentVariable(
-      environment,
-      "LLM_RUN_QUEUE_MAX_CONCURRENT_RUNS_PER_USER"
     ),
   }
 }

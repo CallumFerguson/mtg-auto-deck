@@ -1,17 +1,17 @@
 export type LlmRunQueueCapacityInput = {
   activeOwnerUserIds: readonly (string | null)[]
+  candidateMaxConcurrentRuns: number
   candidateOwnerUserId: string | null
   candidateQueuedAt: string | null
   maxConcurrentRuns: number
-  maxConcurrentRunsPerUser: number
 }
 
 export function canClaimQueuedLlmRunWithCapacity({
   activeOwnerUserIds,
+  candidateMaxConcurrentRuns,
   candidateOwnerUserId,
   candidateQueuedAt,
   maxConcurrentRuns,
-  maxConcurrentRunsPerUser,
 }: LlmRunQueueCapacityInput) {
   if (candidateQueuedAt === null) {
     return false
@@ -25,5 +25,5 @@ export function canClaimQueuedLlmRunWithCapacity({
     (ownerUserId) => ownerUserId === candidateOwnerUserId
   ).length
 
-  return activeRunsForOwner < maxConcurrentRunsPerUser
+  return activeRunsForOwner < candidateMaxConcurrentRuns
 }

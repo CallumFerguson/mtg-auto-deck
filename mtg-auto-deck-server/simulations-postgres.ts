@@ -7,6 +7,7 @@ import {
 } from "./llm-pricing.js"
 import { normalizeScryfallCardNameForExactMatch } from "./scryfall-postgres.js"
 import type { LlmProvider, ReasoningEffort } from "./llm-config.js"
+import { BILLING_TIER_LIMITS } from "./subscription-tiers.js"
 
 type DatabaseTransactionClient = Parameters<
   Parameters<typeof withDatabaseTransaction>[0]
@@ -3407,10 +3408,8 @@ const LLM_RUN_QUEUE_ADVISORY_LOCK_ID = 836_417_052
 
 export async function claimNextQueuedLlmRun({
   maxConcurrentRuns,
-  maxConcurrentRunsPerUser,
 }: {
   maxConcurrentRuns: number
-  maxConcurrentRunsPerUser: number
 }): Promise<ClaimedQueuedLlmRun | null> {
   return withDatabaseTransaction(async (client) => {
     const lockResult = await client.query<{ acquired: boolean }>(
@@ -3487,13 +3486,31 @@ export async function claimNextQueuedLlmRun({
               SELECT COUNT(*)::integer
               FROM llm_runs active_run
               WHERE active_run.status = 'streaming'
-            ) < $1
+            ) < $1::integer
             AND (
               SELECT COUNT(*)::integer
               FROM llm_runs active_run
               WHERE active_run.status = 'streaming'
                 AND active_run.owner_user_id IS NOT DISTINCT FROM llm_run.owner_user_id
-            ) < $2
+            ) < (
+              CASE
+                WHEN EXISTS (
+                  SELECT 1
+                  FROM "subscription" active_subscription
+                  WHERE active_subscription."referenceId" = llm_run.owner_user_id
+                    AND active_subscription.status IN ('active', 'trialing')
+                    AND lower(active_subscription.plan) = 'pro'
+                ) THEN $4::integer
+                WHEN EXISTS (
+                  SELECT 1
+                  FROM "subscription" active_subscription
+                  WHERE active_subscription."referenceId" = llm_run.owner_user_id
+                    AND active_subscription.status IN ('active', 'trialing')
+                    AND lower(active_subscription.plan) = 'plus'
+                ) THEN $3::integer
+                ELSE $2::integer
+              END
+            )
           ORDER BY llm_run.queued_at ASC, llm_run.id ASC
           LIMIT 1
           FOR UPDATE OF llm_run SKIP LOCKED
@@ -3522,7 +3539,12 @@ export async function claimNextQueuedLlmRun({
           llm_run.full_prompt,
           candidate.turn_number
       `,
-      [maxConcurrentRuns, maxConcurrentRunsPerUser]
+      [
+        maxConcurrentRuns,
+        BILLING_TIER_LIMITS.free.maxConcurrentLlmRuns,
+        BILLING_TIER_LIMITS.plus.maxConcurrentLlmRuns,
+        BILLING_TIER_LIMITS.pro.maxConcurrentLlmRuns,
+      ]
     )
     const run = result.rows[0]
 

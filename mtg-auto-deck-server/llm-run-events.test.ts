@@ -63,6 +63,7 @@ import {
   getTurnSimulationLlmRunConfig,
 } from "./llm-config.js"
 import { canClaimQueuedLlmRunWithCapacity } from "./llm-run-queue.js"
+import { BILLING_TIER_LIMITS } from "./subscription-tiers.js"
 import {
   buildOpeningHandEvaluationInputText,
   buildTurnEvaluationInputText,
@@ -678,7 +679,7 @@ test("requires a positive shared max output token count", () => {
   )
 })
 
-test("requires positive LLM run queue concurrency limits", () => {
+test("requires a positive LLM run queue global concurrency limit", () => {
   assert.throws(
     () => getLlmRunQueueConfig({}),
     /LLM_RUN_QUEUE_MAX_CONCURRENT_RUNS/
@@ -686,20 +687,17 @@ test("requires positive LLM run queue concurrency limits", () => {
   assert.throws(
     () =>
       getLlmRunQueueConfig({
-        LLM_RUN_QUEUE_MAX_CONCURRENT_RUNS: "50",
-        LLM_RUN_QUEUE_MAX_CONCURRENT_RUNS_PER_USER: "0",
+        LLM_RUN_QUEUE_MAX_CONCURRENT_RUNS: "0",
       }),
-    /LLM_RUN_QUEUE_MAX_CONCURRENT_RUNS_PER_USER must be a positive integer\./
+    /LLM_RUN_QUEUE_MAX_CONCURRENT_RUNS must be a positive integer\./
   )
 
   assert.deepEqual(
     getLlmRunQueueConfig({
       LLM_RUN_QUEUE_MAX_CONCURRENT_RUNS: "50",
-      LLM_RUN_QUEUE_MAX_CONCURRENT_RUNS_PER_USER: "5",
     }),
     {
       maxConcurrentRuns: 50,
-      maxConcurrentRunsPerUser: 5,
     }
   )
 })
@@ -708,50 +706,76 @@ test("checks LLM run queue capacity before claiming", () => {
   assert.equal(
     canClaimQueuedLlmRunWithCapacity({
       activeOwnerUserIds: ["user-1", "user-2"],
+      candidateMaxConcurrentRuns: BILLING_TIER_LIMITS.pro.maxConcurrentLlmRuns,
       candidateOwnerUserId: "user-1",
       candidateQueuedAt: "2026-01-01T00:00:00.000Z",
       maxConcurrentRuns: 2,
-      maxConcurrentRunsPerUser: 5,
     }),
     false
   )
   assert.equal(
     canClaimQueuedLlmRunWithCapacity({
-      activeOwnerUserIds: ["user-1", "user-1"],
+      activeOwnerUserIds: ["user-1"],
+      candidateMaxConcurrentRuns: BILLING_TIER_LIMITS.free.maxConcurrentLlmRuns,
       candidateOwnerUserId: "user-1",
       candidateQueuedAt: "2026-01-01T00:00:00.000Z",
       maxConcurrentRuns: 50,
-      maxConcurrentRunsPerUser: 2,
     }),
     false
   )
   assert.equal(
     canClaimQueuedLlmRunWithCapacity({
-      activeOwnerUserIds: [null, null],
-      candidateOwnerUserId: null,
+      activeOwnerUserIds: ["user-1"],
+      candidateMaxConcurrentRuns: BILLING_TIER_LIMITS.plus.maxConcurrentLlmRuns,
+      candidateOwnerUserId: "user-1",
       candidateQueuedAt: "2026-01-01T00:00:00.000Z",
       maxConcurrentRuns: 50,
-      maxConcurrentRunsPerUser: 2,
     }),
     false
   )
   assert.equal(
     canClaimQueuedLlmRunWithCapacity({
-      activeOwnerUserIds: ["user-1", "user-1"],
-      candidateOwnerUserId: "user-2",
+      activeOwnerUserIds: ["user-1", "user-1", "user-1", "user-1"],
+      candidateMaxConcurrentRuns: BILLING_TIER_LIMITS.pro.maxConcurrentLlmRuns,
+      candidateOwnerUserId: "user-1",
       candidateQueuedAt: "2026-01-01T00:00:00.000Z",
       maxConcurrentRuns: 50,
-      maxConcurrentRunsPerUser: 2,
     }),
     true
   )
   assert.equal(
     canClaimQueuedLlmRunWithCapacity({
+      activeOwnerUserIds: [
+        "user-1",
+        "user-1",
+        "user-1",
+        "user-1",
+        "user-1",
+      ],
+      candidateMaxConcurrentRuns: BILLING_TIER_LIMITS.pro.maxConcurrentLlmRuns,
+      candidateOwnerUserId: "user-1",
+      candidateQueuedAt: "2026-01-01T00:00:00.000Z",
+      maxConcurrentRuns: 50,
+    }),
+    false
+  )
+  assert.equal(
+    canClaimQueuedLlmRunWithCapacity({
+      activeOwnerUserIds: [null],
+      candidateMaxConcurrentRuns: BILLING_TIER_LIMITS.free.maxConcurrentLlmRuns,
+      candidateOwnerUserId: null,
+      candidateQueuedAt: "2026-01-01T00:00:00.000Z",
+      maxConcurrentRuns: 50,
+    }),
+    false
+  )
+  assert.equal(
+    canClaimQueuedLlmRunWithCapacity({
       activeOwnerUserIds: [],
+      candidateMaxConcurrentRuns: BILLING_TIER_LIMITS.pro.maxConcurrentLlmRuns,
       candidateOwnerUserId: "user-1",
       candidateQueuedAt: null,
       maxConcurrentRuns: 50,
-      maxConcurrentRunsPerUser: 5,
     }),
     false
   )

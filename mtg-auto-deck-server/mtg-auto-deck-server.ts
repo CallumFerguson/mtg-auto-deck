@@ -3078,7 +3078,6 @@ async function drainLlmRunQueue(config: LlmRunQueueConfig) {
   while (true) {
     const claimedRun = await claimNextQueuedLlmRun({
       maxConcurrentRuns: config.maxConcurrentRuns,
-      maxConcurrentRunsPerUser: config.maxConcurrentRunsPerUser,
     })
 
     if (!claimedRun) {

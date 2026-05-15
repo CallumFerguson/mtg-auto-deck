@@ -1,11 +1,14 @@
 export const BILLING_TIER_LIMITS = {
   free: {
+    maxConcurrentLlmRuns: 1,
     maxTurnSimulationsPerDay: 3,
   },
   plus: {
+    maxConcurrentLlmRuns: 1,
     maxTurnSimulationsPerDay: 25,
   },
   pro: {
+    maxConcurrentLlmRuns: 5,
     maxTurnSimulationsPerDay: 100,
   },
 } as const

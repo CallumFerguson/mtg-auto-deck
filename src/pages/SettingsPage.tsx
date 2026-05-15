@@ -59,7 +59,10 @@ const PRICING_PLANS = [
     price: "$0",
     cadence: "/mo",
     description: "A simple way to try AI-driven goldfishing.",
-    features: ["Limited access to basic simulations"],
+    features: [
+      "Limited access to basic simulations",
+      "Run 1 simulation at a time",
+    ],
     cta: "Current tier",
     tier: "free",
   },
