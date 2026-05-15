@@ -18,6 +18,6 @@ export const BILLING_TIER_LABELS = {
   pro: "Pro",
 } satisfies Record<BillingTier, string>
 
-export function isPaidBillingTier(tier: BillingTier) {
+export function isPaidBillingTier(tier: BillingTier): tier is "plus" | "pro" {
   return tier === "plus" || tier === "pro"
 }
