@@ -1,7 +1,4 @@
-import type {
-  LlmProvider,
-  ReasoningEffort,
-} from "./llm-model-preset-types"
+import type { LlmProvider, ReasoningEffort } from "./llm-model-preset-types"
 
 export type Deck = {
   id: string
@@ -192,6 +189,7 @@ export type SimulationDebugLlmRun = {
   status: string
   runtimeStreamKey: string | null
   attemptNumber: number
+  failureMessage: string | null
   createdAt: string
   startedAt: string | null
   completedAt: string | null

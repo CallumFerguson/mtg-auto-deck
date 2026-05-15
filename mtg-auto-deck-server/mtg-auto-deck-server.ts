@@ -124,6 +124,7 @@ import type {
   LlmRunPhase,
   LlmRunStatus,
   ClaimedQueuedLlmRun,
+  LlmRunQueueClaimResult,
   OpenRouterGeneration,
   SimulationDebugLlmRunChunk,
   SimulationDebugLlmRun,
@@ -139,6 +140,10 @@ import type {
   TurnPhaseChange,
   TurnEvaluationJson,
 } from "./simulations-postgres.js"
+import {
+  ensureUsageLimitsSchema,
+  getUserUsageLimitStatus,
+} from "./usage-limits-postgres.js"
 import {
   createStartingHand,
   ensureStartingHandsSchema,
@@ -528,6 +533,7 @@ function createStreamRunFromRuntime(
     status: runtime.status,
     runtimeStreamKey: runtime.runtimeStreamKey,
     attemptNumber: runtime.attemptNumber,
+    failureMessage: null,
     createdAt: runtime.createdAt,
     startedAt: runtime.startedAt,
     completedAt: null,
@@ -3084,8 +3090,32 @@ async function drainLlmRunQueue(config: LlmRunQueueConfig) {
       return
     }
 
+    if (isUsageLimitedQueuedLlmRun(claimedRun)) {
+      await handleUsageLimitedQueuedLlmRun(claimedRun)
+      continue
+    }
+
     await startClaimedQueuedLlmRun(claimedRun)
   }
+}
+
+function isUsageLimitedQueuedLlmRun(
+  run: LlmRunQueueClaimResult
+): run is Extract<LlmRunQueueClaimResult, { usageLimitExceeded: true }> {
+  return "usageLimitExceeded" in run
+}
+
+async function handleUsageLimitedQueuedLlmRun(
+  run: Extract<LlmRunQueueClaimResult, { usageLimitExceeded: true }>
+) {
+  console.log(
+    `Queued LLM run failed usage limit check: phase=${run.phase} llmRunId=${run.llmRunId}`
+  )
+  await publishSimulationResultsState({
+    deckId: run.deckId,
+    llmRunId: run.llmRunId,
+    simulationId: run.simulationId,
+  })
 }
 
 async function startClaimedQueuedLlmRun(run: ClaimedQueuedLlmRun) {
@@ -4842,6 +4872,7 @@ async function main() {
   await ensureSavedSeedsSchema()
   await ensureLlmModelPresetsSchema()
   await ensureSimulationsSchema()
+  await ensureUsageLimitsSchema({ query: queryDatabase })
   const staleLlmRunCleanup = await cancelStaleInFlightLlmRuns()
 
   if (staleLlmRunCleanup.cancelledLlmRunIds.length > 0) {
@@ -5131,6 +5162,24 @@ async function main() {
       console.error("Failed to list model presets:", error)
       res.status(500).json({
         error: "Failed to list model presets.",
+      })
+    }
+  })
+
+  app.get("/usage-limits", async (req: Request, res: Response) => {
+    const user = getAuthenticatedUser(req)
+
+    try {
+      res.status(200).json({
+        usageLimits: await getUserUsageLimitStatus(
+          { query: queryDatabase },
+          user.id
+        ),
+      })
+    } catch (error) {
+      console.error("Failed to load usage limits:", error)
+      res.status(500).json({
+        error: "Usage limits could not be loaded.",
       })
     }
   })

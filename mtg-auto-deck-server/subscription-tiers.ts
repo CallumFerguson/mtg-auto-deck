@@ -13,6 +13,25 @@ export const BILLING_TIER_LIMITS = {
 } as const
 
 export type BillingTier = keyof typeof BILLING_TIER_LIMITS
+export type BillingUsageLimitWindowKind = "five_hour" | "weekly"
+
+export const BILLING_TIER_USAGE_LIMITS_USD = {
+  free: {
+    five_hour: 0.1,
+    weekly: 0.5,
+  },
+  plus: {
+    five_hour: 1,
+    weekly: 5,
+  },
+  pro: {
+    five_hour: 3,
+    weekly: 15,
+  },
+} as const satisfies Record<
+  BillingTier,
+  Record<BillingUsageLimitWindowKind, number>
+>
 
 export function getStripeSubscriptionPlans(): StripePlan[] {
   return [

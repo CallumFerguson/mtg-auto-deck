@@ -8,6 +8,10 @@ import {
 import { normalizeScryfallCardNameForExactMatch } from "./scryfall-postgres.js"
 import type { LlmProvider, ReasoningEffort } from "./llm-config.js"
 import { BILLING_TIER_LIMITS } from "./subscription-tiers.js"
+import {
+  USAGE_LIMIT_OUT_OF_USAGE_MESSAGE,
+  ensureUserUsageLimitWindowsForRunStartWithClient,
+} from "./usage-limits-postgres.js"
 
 type DatabaseTransactionClient = Parameters<
   Parameters<typeof withDatabaseTransaction>[0]
@@ -137,6 +141,19 @@ export type ClaimedQueuedLlmRun = {
   fullPrompt: string
   turnNumber?: number
 }
+
+export type UsageLimitedQueuedLlmRun = {
+  usageLimitExceeded: true
+  simulationId: string
+  deckId: string
+  llmRunId: string
+  phase: Extract<LlmRunPhase, "opening_hand" | "turn" | "report">
+  failureMessage: string
+}
+
+export type LlmRunQueueClaimResult =
+  | ClaimedQueuedLlmRun
+  | UsageLimitedQueuedLlmRun
 
 export type UpdateLlmRunRequestDataInput = {
   llmRunId: string
@@ -384,6 +401,7 @@ export type SimulationDebugLlmRun = {
   status: LlmRunStatus
   runtimeStreamKey: string | null
   attemptNumber: number
+  failureMessage: string | null
   createdAt: string
   startedAt: string | null
   completedAt: string | null
@@ -3410,7 +3428,7 @@ export async function claimNextQueuedLlmRun({
   maxConcurrentRuns,
 }: {
   maxConcurrentRuns: number
-}): Promise<ClaimedQueuedLlmRun | null> {
+}): Promise<LlmRunQueueClaimResult | null> {
   return withDatabaseTransaction(async (client) => {
     const lockResult = await client.query<{ acquired: boolean }>(
       "SELECT pg_try_advisory_xact_lock($1) AS acquired",
@@ -3434,9 +3452,9 @@ export async function claimNextQueuedLlmRun({
       runtime_stream_key: string
       attempt_number: number
       created_at: Date
-      started_at: Date
       full_prompt: string
       turn_number: number | null
+      owner_user_id: string | null
     }>(
       `
         WITH linked_run AS (
@@ -3515,14 +3533,7 @@ export async function claimNextQueuedLlmRun({
           LIMIT 1
           FOR UPDATE OF llm_run SKIP LOCKED
         )
-        UPDATE llm_runs llm_run
-        SET status = 'streaming',
-            started_at = COALESCE(started_at, now()),
-            updated_at = now()
-        FROM candidate
-        WHERE llm_run.id = candidate.id
-          AND llm_run.status = 'pending'
-        RETURNING
+        SELECT
           candidate.simulation_id,
           candidate.deck_id,
           llm_run.id AS llm_run_id,
@@ -3535,9 +3546,12 @@ export async function claimNextQueuedLlmRun({
           llm_run.runtime_stream_key,
           candidate.attempt_number,
           llm_run.created_at,
-          llm_run.started_at,
           llm_run.full_prompt,
-          candidate.turn_number
+          candidate.turn_number,
+          llm_run.owner_user_id
+        FROM candidate
+        JOIN llm_runs llm_run
+          ON llm_run.id = candidate.id
       `,
       [
         maxConcurrentRuns,
@@ -3549,6 +3563,67 @@ export async function claimNextQueuedLlmRun({
     const run = result.rows[0]
 
     if (!run) {
+      return null
+    }
+
+    if (run.owner_user_id !== null) {
+      const usageDecision =
+        await ensureUserUsageLimitWindowsForRunStartWithClient(
+          client,
+          run.owner_user_id
+        )
+
+      if (!usageDecision.allowed) {
+        const failRunQuery = buildFailQueuedLlmRunUsageLimitQuery(
+          run.llm_run_id,
+          USAGE_LIMIT_OUT_OF_USAGE_MESSAGE
+        )
+        await client.query(failRunQuery.text, failRunQuery.values)
+
+        if (run.phase !== "report") {
+          await client.query(
+            `
+              UPDATE simulations
+              SET status = 'failed',
+                  auto_simulate_next_step = false,
+                  failed_at = now(),
+                  failure_message = $2,
+                  updated_at = now()
+              WHERE id = $1
+                AND status NOT IN ('completed', 'cancelled')
+            `,
+            [run.simulation_id, USAGE_LIMIT_OUT_OF_USAGE_MESSAGE]
+          )
+        }
+
+        return {
+          usageLimitExceeded: true,
+          simulationId: run.simulation_id,
+          deckId: run.deck_id,
+          llmRunId: run.llm_run_id,
+          phase: run.phase,
+          failureMessage: USAGE_LIMIT_OUT_OF_USAGE_MESSAGE,
+        }
+      }
+    }
+
+    const claimedResult = await client.query<{
+      started_at: Date
+    }>(
+      `
+        UPDATE llm_runs
+        SET status = 'streaming',
+            started_at = COALESCE(started_at, now()),
+            updated_at = now()
+        WHERE id = $1
+          AND status = 'pending'
+        RETURNING started_at
+      `,
+      [run.llm_run_id]
+    )
+    const claimed = claimedResult.rows[0]
+
+    if (!claimed) {
       return null
     }
 
@@ -3565,7 +3640,7 @@ export async function claimNextQueuedLlmRun({
       runtimeStreamKey: run.runtime_stream_key,
       attemptNumber: run.attempt_number,
       createdAt: run.created_at.toISOString(),
-      startedAt: run.started_at.toISOString(),
+      startedAt: claimed.started_at.toISOString(),
       fullPrompt: run.full_prompt,
     }
 
@@ -3575,6 +3650,27 @@ export async function claimNextQueuedLlmRun({
 
     return claimedRun
   })
+}
+
+export function buildFailQueuedLlmRunUsageLimitQuery(
+  llmRunId: string,
+  failureMessage: string
+) {
+  return {
+    text: `
+      UPDATE llm_runs
+      SET status = 'failed',
+          estimated_cost_usd = NULL,
+          openrouter_reported_cost_usd = NULL,
+          failed_at = now(),
+          failure_message = $2,
+          updated_at = now()
+      WHERE id = $1
+        AND status = 'pending'
+      RETURNING id
+    `,
+    values: [llmRunId, failureMessage],
+  }
 }
 
 export async function markLlmRunStreaming(llmRunId: string) {
@@ -5659,6 +5755,7 @@ type SimulationDebugLlmRunRow = {
   reasoning_effort: string | null
   status: LlmRunStatus
   runtime_stream_key: string | null
+  failure_message: string | null
   created_at: Date
   started_at: Date | null
   completed_at: Date | null
@@ -5756,6 +5853,7 @@ async function getSimulationDebugLlmRuns({
         COALESCE(preset.reasoning_effort, llm_run.reasoning_effort) AS reasoning_effort,
         llm_run.status,
         llm_run.runtime_stream_key,
+        llm_run.failure_message,
         llm_run.created_at,
         llm_run.started_at,
         llm_run.completed_at,
@@ -5811,6 +5909,7 @@ async function getSimulationDebugLlmRuns({
         status: row.status,
         runtimeStreamKey: row.runtime_stream_key,
         attemptNumber: row.attempt_number,
+        failureMessage: row.failure_message,
         createdAt: row.created_at.toISOString(),
         startedAt: row.started_at?.toISOString() ?? null,
         completedAt: row.completed_at?.toISOString() ?? null,

@@ -10,6 +10,7 @@ lerna-debug.log*
 node_modules
 .npm-cache
 .cache/
+.tmp/
 .wrangler/
 dist
 dist-ssr

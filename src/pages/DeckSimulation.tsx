@@ -1414,9 +1414,7 @@ export function DeckSimulation({
                         aria-label="Auto-generate report after final turn"
                         disabled={!canAutoGenerateReport}
                         onClick={() =>
-                          setAutoGenerateReport(
-                            (currentValue) => !currentValue
-                          )
+                          setAutoGenerateReport((currentValue) => !currentValue)
                         }
                       >
                         <span
@@ -1597,7 +1595,9 @@ export function DeckSimulation({
               isAdmin={isAdmin}
               isLoadingStartingHand={isLoadingStartingHands}
               modelPresets={modelPresets}
-              onOpenDetails={() => setDetailsSimulationId(selectedSimulation.id)}
+              onOpenDetails={() =>
+                setDetailsSimulationId(selectedSimulation.id)
+              }
               onSimulationUpdated={updateSimulation}
               simulation={selectedSimulation}
               startingHand={selectedSimulationStartingHand}
@@ -3286,6 +3286,7 @@ function SimulationResultsPanel({
             run.model,
             run.estimatedPriceCents ? `${run.estimatedPriceCents} cents` : null,
             finishedDurationText ? `took ${finishedDurationText}` : null,
+            run.failureMessage ? run.failureMessage : null,
             run.outdated ? "outdated" : null,
           ].filter(Boolean)
           const hasLiveReport =
@@ -4262,9 +4263,9 @@ function SimulationResultThinkingStatus({
       : "Thought"
     : isPending
       ? "Pending"
-    : activeToolCallName
-      ? (activeToolCallLabel ?? `Calling tool: ${activeToolCallName}`)
-      : "Thinking"
+      : activeToolCallName
+        ? (activeToolCallLabel ?? `Calling tool: ${activeToolCallName}`)
+        : "Thinking"
 
   return (
     <div className="grid gap-2 py-1 select-none">
@@ -4388,8 +4389,13 @@ function SimulationRunActivityPanel({
           (runFinishedTimeMs ?? currentTimeMs) - runStartTimeMs
         )
   const terminalActivityStatus = useMemo(
-    () => getSimulationRunTerminalActivityStatus(run.status, durationText),
-    [durationText, run.status]
+    () =>
+      getSimulationRunTerminalActivityStatus({
+        durationText,
+        failureMessage: run.failureMessage,
+        runStatus: run.status,
+      }),
+    [durationText, run.failureMessage, run.status]
   )
 
   const clearExitTimeout = useCallback(() => {
@@ -4695,10 +4701,15 @@ type SimulationRunTerminalActivityStatus = {
   tone: "error" | "muted" | "success"
 }
 
-function getSimulationRunTerminalActivityStatus(
-  runStatus: string,
+function getSimulationRunTerminalActivityStatus({
+  durationText,
+  failureMessage,
+  runStatus,
+}: {
   durationText: string | null
-): SimulationRunTerminalActivityStatus | null {
+  failureMessage: string | null
+  runStatus: string
+}): SimulationRunTerminalActivityStatus | null {
   const title = durationText ? `Thought for ${durationText}` : "Thought"
 
   if (runStatus === "completed") {
@@ -4711,7 +4722,7 @@ function getSimulationRunTerminalActivityStatus(
 
   if (runStatus === "failed") {
     return {
-      detail: "Error",
+      detail: failureMessage?.trim() || "Error",
       title,
       tone: "error",
     }

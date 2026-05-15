@@ -1856,6 +1856,7 @@ function createRun(overrides: {
   completedAt?: string | null
   createdAt?: string
   failedAt?: string | null
+  failureMessage?: string | null
   openrouterGenerations?: SimulationDebugLlmRun["openrouterGenerations"]
   provider?: string
   report?: string
@@ -1874,6 +1875,7 @@ function createRun(overrides: {
     status: overrides.status ?? "streaming",
     runtimeStreamKey: null,
     attemptNumber: overrides.attemptNumber ?? 1,
+    failureMessage: overrides.failureMessage ?? null,
     createdAt: overrides.createdAt ?? "2026-01-01T00:00:00.000Z",
     startedAt:
       "startedAt" in overrides

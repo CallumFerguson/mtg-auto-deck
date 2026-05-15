@@ -28,6 +28,7 @@ import {
   STALE_RUNNING_SIMULATION_CANCELLATION_MESSAGE,
   TURN_EVALUATION_UPSERT_SQL,
   buildAppendLlmRunChunksQuery,
+  buildFailQueuedLlmRunUsageLimitQuery,
   buildPartialLlmRunCostSnapshotQuery,
   canApplyLateLlmRunTerminalUpdate,
   extractLlmRunChunkCardMentionRequests,
@@ -64,6 +65,14 @@ import {
 } from "./llm-config.js"
 import { canClaimQueuedLlmRunWithCapacity } from "./llm-run-queue.js"
 import { BILLING_TIER_LIMITS } from "./subscription-tiers.js"
+import {
+  buildUsageWindowSpentUsdQuery,
+  getPreferredUsageCostUsd,
+  getStartedUsageLimitWindowBounds,
+  getUsageLimitGateDecision,
+  getUsageLimitWindowBounds,
+  roundUsageRemainingPercent,
+} from "./usage-limits-postgres.js"
 import {
   buildOpeningHandEvaluationInputText,
   buildTurnEvaluationInputText,
@@ -645,6 +654,172 @@ test("returns null display price when stored costs are absent", () => {
     }),
     null
   )
+})
+
+test("rounds usage remaining percentage with protected endpoints", () => {
+  assert.equal(roundUsageRemainingPercent({ limitUsd: 1, spentUsd: 0 }), 100)
+  assert.equal(
+    roundUsageRemainingPercent({ limitUsd: 1, spentUsd: 0.0001 }),
+    99
+  )
+  assert.equal(roundUsageRemainingPercent({ limitUsd: 1, spentUsd: 1 }), 0)
+  assert.equal(
+    roundUsageRemainingPercent({ limitUsd: 1, spentUsd: 0.9999 }),
+    1
+  )
+  assert.equal(roundUsageRemainingPercent({ limitUsd: 1, spentUsd: 0.37 }), 63)
+})
+
+test("resolves first-spend usage window reset behavior", () => {
+  const now = new Date("2026-05-15T12:00:00.000Z")
+  const durationMs = 5 * 60 * 60 * 1000
+  const inactiveWindow = getUsageLimitWindowBounds({
+    durationMs,
+    existingWindow: null,
+    now,
+  })
+
+  assert.equal(inactiveWindow.isActive, false)
+  assert.equal(inactiveWindow.startedAt, null)
+  assert.equal(inactiveWindow.resetAt.toISOString(), "2026-05-15T17:00:00.000Z")
+
+  const lockedWindow = getStartedUsageLimitWindowBounds({
+    durationMs,
+    existingWindow: null,
+    now,
+  })
+
+  assert.equal(lockedWindow.isActive, true)
+  assert.equal(lockedWindow.startedAt.toISOString(), now.toISOString())
+  assert.equal(lockedWindow.resetAt.toISOString(), "2026-05-15T17:00:00.000Z")
+
+  const existingWindow = {
+    started_at: new Date("2026-05-15T10:00:00.000Z"),
+    reset_at: new Date("2026-05-15T15:00:00.000Z"),
+  }
+  const activeWindow = getStartedUsageLimitWindowBounds({
+    durationMs,
+    existingWindow,
+    now,
+  })
+
+  assert.equal(activeWindow.startedAt.toISOString(), "2026-05-15T10:00:00.000Z")
+  assert.equal(activeWindow.resetAt.toISOString(), "2026-05-15T15:00:00.000Z")
+
+  const expiredWindow = getStartedUsageLimitWindowBounds({
+    durationMs,
+    existingWindow: {
+      started_at: new Date("2026-05-15T00:00:00.000Z"),
+      reset_at: new Date("2026-05-15T05:00:00.000Z"),
+    },
+    now,
+  })
+
+  assert.equal(expiredWindow.startedAt.toISOString(), now.toISOString())
+  assert.equal(expiredWindow.resetAt.toISOString(), "2026-05-15T17:00:00.000Z")
+})
+
+test("selects preferred usage cost source", () => {
+  assert.equal(
+    getPreferredUsageCostUsd({
+      estimatedCostUsd: 0.05,
+      openrouterReportedCostUsd: 0.00125,
+    }),
+    0.00125
+  )
+  assert.equal(
+    getPreferredUsageCostUsd({
+      estimatedCostUsd: 0.02,
+      openrouterReportedCostUsd: null,
+    }),
+    0.02
+  )
+  assert.equal(
+    getPreferredUsageCostUsd({
+      estimatedCostUsd: null,
+      openrouterReportedCostUsd: null,
+    }),
+    null
+  )
+})
+
+test("builds usage spend query for terminal started runs", () => {
+  const query = buildUsageWindowSpentUsdQuery({
+    ownerUserId: "user-1",
+    startedAt: new Date("2026-05-15T12:00:00.000Z"),
+    resetAt: new Date("2026-05-15T17:00:00.000Z"),
+  })
+  const normalizedSql = query.text.replace(/\s+/g, " ")
+
+  assert.deepEqual(query.values, [
+    "user-1",
+    new Date("2026-05-15T12:00:00.000Z"),
+    new Date("2026-05-15T17:00:00.000Z"),
+  ])
+  assert.match(normalizedSql, /status IN \('completed', 'failed', 'cancelled'\)/)
+  assert.match(
+    normalizedSql,
+    /SUM\(COALESCE\(openrouter_reported_cost_usd, estimated_cost_usd\)\)/
+  )
+  assert.match(
+    normalizedSql,
+    /COALESCE\(openrouter_reported_cost_usd, estimated_cost_usd\) IS NOT NULL/
+  )
+})
+
+test("checks usage limit gate before starting queued runs", () => {
+  assert.deepEqual(
+    getUsageLimitGateDecision([
+      {
+        kind: "five_hour",
+        limitUsd: 0.1,
+        spentUsd: 0.099,
+      },
+      {
+        kind: "weekly",
+        limitUsd: 0.5,
+        spentUsd: 0.25,
+      },
+    ]),
+    {
+      allowed: true,
+      exhaustedWindowKinds: [],
+    }
+  )
+  assert.deepEqual(
+    getUsageLimitGateDecision([
+      {
+        kind: "five_hour",
+        limitUsd: 0.1,
+        spentUsd: 0.1,
+      },
+      {
+        kind: "weekly",
+        limitUsd: 0.5,
+        spentUsd: 0.49,
+      },
+    ]),
+    {
+      allowed: false,
+      exhaustedWindowKinds: ["five_hour"],
+    }
+  )
+})
+
+test("builds usage-limit queue failure query with null stored costs", () => {
+  const query = buildFailQueuedLlmRunUsageLimitQuery(
+    "00000000-0000-0000-0000-000000000001",
+    "Out of usage limits."
+  )
+  const normalizedSql = query.text.replace(/\s+/g, " ")
+
+  assert.deepEqual(query.values, [
+    "00000000-0000-0000-0000-000000000001",
+    "Out of usage limits.",
+  ])
+  assert.match(normalizedSql, /estimated_cost_usd = NULL/)
+  assert.match(normalizedSql, /openrouter_reported_cost_usd = NULL/)
+  assert.match(normalizedSql, /status = 'failed'/)
 })
 
 test("requires a positive integer OpenRouter stop step count", () => {
