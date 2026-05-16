@@ -3368,6 +3368,10 @@ function SimulationResultsPanel({
             run.resultKind === "report" &&
             !run.hasFinalParsedOutputChunk &&
             getReportTextFromChunks(run.chunks) !== null
+          const emptyRunFailureMessage =
+            run.status === "failed"
+              ? run.failureMessage?.trim() || null
+              : null
 
           return (
             <section
@@ -3512,8 +3516,15 @@ function SimulationResultsPanel({
                   stopSimulationError={stopSimulationError}
                 />
               ) : run.resultEntries.length === 0 && !run.gameState ? (
-                <p className="rounded-md border border-border bg-black/20 px-3 py-2 text-sm text-muted-foreground">
-                  No user-facing events have been saved for this run yet.
+                <p
+                  className={`rounded-md border px-3 py-2 text-sm ${
+                    emptyRunFailureMessage
+                      ? "border-destructive/40 bg-destructive/10 text-destructive"
+                      : "border-border bg-black/20 text-muted-foreground"
+                  }`}
+                >
+                  {emptyRunFailureMessage ??
+                    "No user-facing events have been saved for this run yet."}
                 </p>
               ) : null}
             </section>
