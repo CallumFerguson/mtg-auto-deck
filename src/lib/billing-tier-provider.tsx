@@ -30,6 +30,7 @@ export function BillingTierProvider({
   userId: string | null
 }) {
   const requestIdRef = useRef(0)
+  const prefetchedUserIdRef = useRef<string | null>(null)
   const [billingTier, setBillingTier] = useState<BillingTier>("free")
   const [billingTierError, setBillingTierError] = useState<string | null>(null)
   const [hasLoadedBillingTier, setHasLoadedBillingTier] = useState(false)
@@ -42,6 +43,10 @@ export function BillingTierProvider({
     setBillingTierError(null)
     setHasLoadedBillingTier(false)
     setIsBillingTierLoading(false)
+
+    if (!userId) {
+      prefetchedUserIdRef.current = null
+    }
   }, [userId])
 
   const refreshBillingTier = useCallback(async () => {
@@ -102,6 +107,15 @@ export function BillingTierProvider({
       }
     }
   }, [userId])
+
+  useEffect(() => {
+    if (!userId || prefetchedUserIdRef.current === userId) {
+      return
+    }
+
+    prefetchedUserIdRef.current = userId
+    void refreshBillingTier()
+  }, [refreshBillingTier, userId])
 
   const beginBillingTierPolling = useCallback(() => {
     setPollingRequestCount((currentCount) => currentCount + 1)

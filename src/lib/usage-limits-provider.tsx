@@ -28,6 +28,7 @@ export function UsageLimitsProvider({
   userId: string | null
 }) {
   const requestIdRef = useRef(0)
+  const prefetchedUserIdRef = useRef<string | null>(null)
   const [usageLimits, setUsageLimits] = useState<UsageLimitWindow[]>([])
   const [isUsageLimitsLoading, setIsUsageLimitsLoading] = useState(false)
   const [usageLimitsError, setUsageLimitsError] = useState<string | null>(null)
@@ -38,6 +39,10 @@ export function UsageLimitsProvider({
     setUsageLimits([])
     setUsageLimitsError(null)
     setIsUsageLimitsLoading(false)
+
+    if (!userId) {
+      prefetchedUserIdRef.current = null
+    }
   }, [userId])
 
   const refreshUsageLimits = useCallback(async () => {
@@ -89,6 +94,15 @@ export function UsageLimitsProvider({
       }
     }
   }, [userId])
+
+  useEffect(() => {
+    if (!userId || prefetchedUserIdRef.current === userId) {
+      return
+    }
+
+    prefetchedUserIdRef.current = userId
+    void refreshUsageLimits()
+  }, [refreshUsageLimits, userId])
 
   const beginUsageLimitsPolling = useCallback(() => {
     setPollingRequestCount((currentCount) => currentCount + 1)

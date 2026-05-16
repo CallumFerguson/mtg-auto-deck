@@ -66,6 +66,7 @@ export function App() {
   const sessionUser = sessionData?.user ?? null
   const sessionInfo = sessionData?.session ?? null
   const user = sessionUser ? toAuthUser(sessionUser) : null
+  const verifiedUserId = user?.emailVerified ? user.id : null
   const isImpersonating = Boolean(sessionInfo?.impersonatedBy)
   const impersonatedUserLabel = user ? getUserDisplayLabel(user) : "this user"
   const handleAuthenticated = async () => {
@@ -113,8 +114,8 @@ export function App() {
   }
 
   return (
-    <BillingTierProvider userId={user?.id ?? null}>
-      <UsageLimitsProvider userId={user?.id ?? null}>
+    <BillingTierProvider userId={verifiedUserId}>
+      <UsageLimitsProvider userId={verifiedUserId}>
         {isImpersonating && user ? (
           <ImpersonationBanner
             impersonatedUserLabel={impersonatedUserLabel}
