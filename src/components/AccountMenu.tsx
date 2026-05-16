@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import {
+  ExternalLink,
   Gauge,
   LayoutDashboard,
   LogOut,
@@ -11,8 +12,18 @@ import { useNavigate } from "react-router-dom"
 
 import { Button } from "@/components/ui/button"
 import { SignOutConfirmModal } from "@/components/SignOutConfirmModal"
+import {
+  type PendingBillingAction,
+  UpgradeSubscriptionModal,
+} from "@/components/UpgradeSubscriptionModal"
 import { UsageLimitRows } from "@/components/UsageLimitRows"
 import { authClient, type AuthUser } from "@/lib/auth-client"
+import {
+  getAuthErrorMessage,
+  getStripeRedirectUrl,
+  openStripeBillingPortal,
+  startStripeCheckout,
+} from "@/lib/billing"
 import {
   BILLING_TIER_LABELS,
   getActiveBillingSubscription,
@@ -42,12 +53,23 @@ export function AccountMenu({
   const [isBillingTierLoading, setIsBillingTierLoading] = useState(false)
   const [billingTierError, setBillingTierError] = useState(false)
   const [isSignOutConfirmOpen, setIsSignOutConfirmOpen] = useState(false)
+  const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
+  const [billingActionError, setBillingActionError] = useState<string | null>(
+    null
+  )
+  const [pendingBillingAction, setPendingBillingAction] =
+    useState<PendingBillingAction>(null)
   const billingTierLabel = isBillingTierLoading
     ? "Loading..."
     : billingTierError
       ? "Unavailable"
       : `${BILLING_TIER_LABELS[billingTier]} tier`
+  const shouldShowUsageUpgradeAction =
+    !isImpersonating &&
+    !isBillingTierLoading &&
+    !billingTierError &&
+    (billingTier === "free" || billingTier === "plus")
 
   useUsageLimitsPolling(isOpen)
 
@@ -115,6 +137,84 @@ export function AccountMenu({
     }
   }
 
+  async function handleStartSubscription(plan: "plus" | "pro") {
+    setPendingBillingAction(plan)
+    setBillingActionError(null)
+
+    try {
+      const result = await startStripeCheckout(plan)
+
+      if (result.error) {
+        setBillingActionError(
+          getAuthErrorMessage(
+            result.error,
+            "Stripe Checkout could not be started."
+          )
+        )
+        return
+      }
+
+      const redirectUrl = getStripeRedirectUrl(result.data)
+
+      if (!redirectUrl) {
+        setBillingActionError("Stripe Checkout could not be started.")
+        return
+      }
+
+      window.location.assign(redirectUrl)
+    } catch {
+      setBillingActionError("Stripe Checkout could not be started.")
+    } finally {
+      setPendingBillingAction(null)
+    }
+  }
+
+  async function handleOpenBillingPortal() {
+    setPendingBillingAction("portal")
+    setBillingActionError(null)
+
+    try {
+      const result = await openStripeBillingPortal()
+
+      if (result.error) {
+        setBillingActionError(
+          getAuthErrorMessage(
+            result.error,
+            "Stripe Billing Portal could not be opened."
+          )
+        )
+        return
+      }
+
+      const redirectUrl = getStripeRedirectUrl(result.data)
+
+      if (!redirectUrl) {
+        setBillingActionError("Stripe Billing Portal could not be opened.")
+        return
+      }
+
+      window.location.assign(redirectUrl)
+    } catch {
+      setBillingActionError("Stripe Billing Portal could not be opened.")
+    } finally {
+      setPendingBillingAction(null)
+    }
+  }
+
+  function handleUpgradeForMoreUsage() {
+    setBillingActionError(null)
+
+    if (billingTier === "free") {
+      setIsOpen(false)
+      setIsUpgradeModalOpen(true)
+      return
+    }
+
+    if (billingTier === "plus") {
+      void handleOpenBillingPortal()
+    }
+  }
+
   return (
     <div className="relative">
       <Button
@@ -154,6 +254,27 @@ export function AccountMenu({
                   <span className="truncate">Rate limits remaining</span>
                 </div>
                 <UsageLimitRows className="mt-1.5" />
+                {shouldShowUsageUpgradeAction ? (
+                  <button
+                    className="mt-0.5 grid h-7 w-[calc(100%+0.5rem)] grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-md pr-2 text-left text-xs font-bold text-foreground transition-colors hover:bg-muted/55 focus:bg-muted/55 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                    type="button"
+                    onClick={handleUpgradeForMoreUsage}
+                    disabled={pendingBillingAction !== null}
+                  >
+                    <span className="truncate pl-4">
+                      Upgrade for more usage
+                    </span>
+                    <ExternalLink
+                      className="size-3.5 shrink-0 justify-self-end"
+                      aria-hidden
+                    />
+                  </button>
+                ) : null}
+                {billingActionError ? (
+                  <p className="mt-2 text-xs text-destructive" role="alert">
+                    {billingActionError}
+                  </p>
+                ) : null}
               </div>
             </div>
             {user.role === "admin" ? (
@@ -248,6 +369,18 @@ export function AccountMenu({
           mode={isImpersonating ? "stop-impersonating" : "sign-out"}
           onClose={() => setIsSignOutConfirmOpen(false)}
           onConfirm={() => void handleSignOut()}
+        />
+      ) : null}
+      {isUpgradeModalOpen ? (
+        <UpgradeSubscriptionModal
+          currentTier={billingTier}
+          error={billingActionError}
+          isSaving={
+            pendingBillingAction === "plus" || pendingBillingAction === "pro"
+          }
+          onClose={() => setIsUpgradeModalOpen(false)}
+          onStartSubscription={handleStartSubscription}
+          pendingBillingAction={pendingBillingAction}
         />
       ) : null}
     </div>

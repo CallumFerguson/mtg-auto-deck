@@ -31,7 +31,7 @@ export function UsageLimitRows({
   }
 
   return (
-    <div className={cn("mt-2 grid gap-1", className)}>
+    <div className={cn("mt-2 grid gap-1.5", className)}>
       {usageLimits.map((usageLimit) => (
         <div
           key={usageLimit.kind}
