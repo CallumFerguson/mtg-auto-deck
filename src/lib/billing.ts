@@ -1,7 +1,8 @@
 import { authClient } from "@/lib/auth-client"
+import { APP_PUBLIC_URL } from "@/lib/app-url"
 
 export function getBillingReturnUrl(result: string) {
-  return `${window.location.origin}/settings?billing=${encodeURIComponent(
+  return `${APP_PUBLIC_URL}/settings?billing=${encodeURIComponent(
     result
   )}`
 }

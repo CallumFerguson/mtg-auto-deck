@@ -12,6 +12,7 @@ import { useNavigate } from "react-router-dom"
 
 import { Button } from "@/components/ui/button"
 import { API_BASE_URL, apiFetch } from "@/lib/api"
+import { APP_PUBLIC_URL } from "@/lib/app-url"
 import { authClient } from "@/lib/auth-client"
 import { clearPasswordInputs } from "@/lib/password-form"
 import { getPasswordRangeError } from "@/lib/password-validation"
@@ -286,7 +287,7 @@ export function AuthPage({
       if (mode === "forgot-password") {
         const result = await authClient.requestPasswordReset({
           email,
-          redirectTo: `${window.location.origin}/reset-password`,
+          redirectTo: `${APP_PUBLIC_URL}/reset-password`,
         })
 
         if (result.error) {

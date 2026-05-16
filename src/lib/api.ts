@@ -22,5 +22,5 @@ function getApiBaseUrl() {
 }
 
 function stripTrailingSlash(url: string) {
-  return url.replace(/\/$/, "")
+  return url.replace(/\/+$/, "")
 }

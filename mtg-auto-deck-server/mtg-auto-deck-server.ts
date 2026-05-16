@@ -3,7 +3,7 @@ import express, { type Express, type Request, type Response } from "express"
 import { fromNodeHeaders, toNodeHandler } from "better-auth/node"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
-import { localhostHostValidation } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js"
+import { hostHeaderValidation } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js"
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js"
 import { OpenRouter, stepCountIs, tool, type Tool } from "@openrouter/agent"
@@ -272,10 +272,12 @@ const OPENROUTER_PROVIDERS_ENDPOINT = "https://openrouter.ai/api/v1/providers"
 const OPENROUTER_CHAT_COMPLETIONS_ENDPOINT =
   "https://openrouter.ai/api/v1/chat/completions"
 const QUEUED_MCP_RUN_TOKEN_PLACEHOLDER = "queued"
-const DEFAULT_ALLOWED_ORIGINS = [
+const LOOPBACK_ALLOWED_ORIGINS = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
+  "http://[::1]:5173",
 ]
+const LOOPBACK_ALLOWED_HOSTNAMES = ["localhost", "127.0.0.1", "[::1]"]
 const DEFAULT_ALLOWED_HEADERS = [
   "Content-Type",
   "Accept",
@@ -4889,11 +4891,11 @@ async function main() {
 
   const host = DEFAULT_HOST
   const port = DEFAULT_PORT
-  const allowedOrigins = DEFAULT_ALLOWED_ORIGINS
+  const allowedOrigins = getAllowedCorsOrigins()
   const simulationMcpServerEnabled = getSimulationMcpServerEnabled()
   const app = express()
 
-  app.use(localhostHostValidation())
+  app.use(hostHeaderValidation(getAllowedHostnames()))
 
   app.use((req: Request, res: Response, next) => {
     applyCors(req, res, allowedOrigins)
@@ -6966,11 +6968,7 @@ function getSimulationMcpServerEnabled() {
 }
 
 function isAllowedOrigin(origin: string, allowedOrigins: readonly string[]) {
-  return (
-    origin === "null" ||
-    allowedOrigins.includes(origin) ||
-    isLoopbackOrigin(origin)
-  )
+  return allowedOrigins.includes(origin) || isLoopbackOrigin(origin)
 }
 
 function isLoopbackOrigin(origin: string) {
@@ -6978,14 +6976,57 @@ function isLoopbackOrigin(origin: string) {
     const parsedOrigin = new URL(origin)
 
     return (
-      parsedOrigin.protocol === "http:" &&
-      (parsedOrigin.hostname === "localhost" ||
-        parsedOrigin.hostname === "127.0.0.1" ||
-        parsedOrigin.hostname === "::1")
+        parsedOrigin.protocol === "http:" &&
+        (parsedOrigin.hostname === "localhost" ||
+          parsedOrigin.hostname === "127.0.0.1" ||
+        parsedOrigin.hostname === "[::1]")
     )
   } catch {
     return false
   }
+}
+
+function getAllowedCorsOrigins() {
+  return [
+    normalizeOrigin(getRequiredServerEnvironmentVariable("APP_PUBLIC_URL")),
+    ...LOOPBACK_ALLOWED_ORIGINS,
+  ]
+}
+
+function getAllowedHostnames() {
+  return Array.from(
+    new Set([
+      ...LOOPBACK_ALLOWED_HOSTNAMES,
+      getHostnameFromUrl(
+        getRequiredServerEnvironmentVariable("BETTER_AUTH_URL"),
+        "BETTER_AUTH_URL"
+      ),
+    ])
+  )
+}
+
+function normalizeOrigin(url: string) {
+  return new URL(url.trim()).origin
+}
+
+function getHostnameFromUrl(url: string, environmentVariable: string) {
+  try {
+    return new URL(url.trim()).hostname
+  } catch {
+    throw new Error(
+      `${environmentVariable} must be a valid absolute URL for host validation.`
+    )
+  }
+}
+
+function getRequiredServerEnvironmentVariable(environmentVariable: string) {
+  const value = process.env[environmentVariable]?.trim()
+
+  if (!value) {
+    throw new Error(`Missing server environment variable: ${environmentVariable}.`)
+  }
+
+  return value
 }
 
 function getAllowedRequestHeaders(

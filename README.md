@@ -22,7 +22,7 @@
    default; set `SIMULATION_MCP_SERVER_ENABLED=true` only when intentionally
    testing that endpoint.
 
-3. Configure the frontend API URL for each Vite mode.
+3. Configure the frontend public URLs for each Vite mode.
 
    Use localhost for development:
 
@@ -36,15 +36,16 @@
    cp .env.example .env.production
    ```
 
-   Then update `.env.production` with your deployed API URL:
+   Then update `.env.production` with your deployed API and app URLs:
 
    ```env
    VITE_API_BASE_URL=https://api.example.com
+   VITE_APP_PUBLIC_URL=https://app.example.com
    ```
 
    Vite automatically loads `.env.development` for `npm run dev` and
-   `.env.production` for `npm run build`. `VITE_API_BASE_URL` is exposed to the
-   browser, so use it only for public configuration like the API origin.
+   `.env.production` for `npm run build`. `VITE_*` values are exposed to the
+   browser, so use them only for public configuration like app and API origins.
 
 4. Install dependencies:
 
@@ -76,15 +77,22 @@ This deploys the Vite React frontend as Cloudflare Workers Static Assets. The
 Node/Express server in `mtg-auto-deck-server` still needs to be hosted
 separately or ported to a Worker-compatible API.
 
-Before deploying, make sure the production frontend API URL is configured:
+Before deploying, make sure the production frontend URLs are configured:
 
 ```env
 VITE_API_BASE_URL=https://api.example.com
+VITE_APP_PUBLIC_URL=https://app.example.com
 ```
 
-For Cloudflare Git builds, set `VITE_API_BASE_URL` as a build environment
-variable in the Cloudflare dashboard, since local `.env.production` files are
-not committed.
+For Cloudflare Git builds, set `VITE_API_BASE_URL` and `VITE_APP_PUBLIC_URL` as
+build environment variables in the Cloudflare dashboard, since local
+`.env.production` files are not committed.
+
+Production domains should come from environment variables and deployment
+configuration, not from application or server source code. On the hosted server,
+set `BETTER_AUTH_URL` to the public API origin and `APP_PUBLIC_URL` to the
+public React app origin. In local development, the example env files use
+`http://localhost:3001` for the API and `http://localhost:5173` for the app.
 
 Then deploy:
 

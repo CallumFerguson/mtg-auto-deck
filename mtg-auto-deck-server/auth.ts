@@ -143,11 +143,11 @@ export const auth = betterAuth({
     enabled: true,
     resetPasswordTokenExpiresIn: PASSWORD_RESET_TOKEN_EXPIRES_IN_SECONDS,
     revokeSessionsOnPasswordReset: true,
-    sendResetPassword: async ({ user, url }) => {
+    sendResetPassword: async ({ token, user }) => {
       void sendPasswordResetEmail({
         to: user.email,
         userName: user.name,
-        resetUrl: url,
+        resetUrl: createAppPasswordResetUrl(token),
       }).catch((error: unknown) => {
         console.error("Failed to send password reset email:", error)
       })
@@ -495,11 +495,26 @@ function getStringProperty(value: unknown, property: string) {
 
 function getTrustedOrigins() {
   return [
-    getRequiredEnvironmentVariable("APP_PUBLIC_URL"),
-    getRequiredEnvironmentVariable("BETTER_AUTH_URL"),
+    normalizeOrigin(getRequiredEnvironmentVariable("APP_PUBLIC_URL")),
+    normalizeOrigin(getRequiredEnvironmentVariable("BETTER_AUTH_URL")),
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://[::1]:5173",
   ]
+}
+
+function createAppPasswordResetUrl(token: string) {
+  const url = new URL(
+    "/reset-password",
+    normalizeOrigin(getRequiredEnvironmentVariable("APP_PUBLIC_URL"))
+  )
+  url.searchParams.set("token", token)
+
+  return url.toString()
+}
+
+function normalizeOrigin(url: string) {
+  return new URL(url.trim()).origin
 }
 
 function getRequiredEnvironmentVariable(environmentVariable: string) {
