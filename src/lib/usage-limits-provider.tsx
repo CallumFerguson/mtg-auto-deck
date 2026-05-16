@@ -1,7 +1,5 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -15,18 +13,12 @@ import type {
   UsageLimitsResponse,
   UsageLimitWindow,
 } from "@/lib/usage-limit-types"
+import {
+  UsageLimitsContext,
+  type UsageLimitsContextValue,
+} from "@/lib/usage-limits"
 
 const USAGE_LIMIT_REFRESH_INTERVAL_MS = 5000
-
-type UsageLimitsContextValue = {
-  beginUsageLimitsPolling: () => () => void
-  isUsageLimitsLoading: boolean
-  refreshUsageLimits: () => Promise<UsageLimitWindow[]>
-  usageLimits: UsageLimitWindow[]
-  usageLimitsError: string | null
-}
-
-const UsageLimitsContext = createContext<UsageLimitsContextValue | null>(null)
 
 export function UsageLimitsProvider({
   children,
@@ -121,7 +113,7 @@ export function UsageLimitsProvider({
     }
   }, [pollingRequestCount, refreshUsageLimits])
 
-  const contextValue = useMemo(
+  const contextValue = useMemo<UsageLimitsContextValue>(
     () => ({
       beginUsageLimitsPolling,
       isUsageLimitsLoading,
@@ -143,26 +135,4 @@ export function UsageLimitsProvider({
       {children}
     </UsageLimitsContext.Provider>
   )
-}
-
-export function useUsageLimits() {
-  const contextValue = useContext(UsageLimitsContext)
-
-  if (!contextValue) {
-    throw new Error("useUsageLimits must be used within UsageLimitsProvider.")
-  }
-
-  return contextValue
-}
-
-export function useUsageLimitsPolling(isActive: boolean) {
-  const { beginUsageLimitsPolling } = useUsageLimits()
-
-  useEffect(() => {
-    if (!isActive) {
-      return
-    }
-
-    return beginUsageLimitsPolling()
-  }, [beginUsageLimitsPolling, isActive])
 }

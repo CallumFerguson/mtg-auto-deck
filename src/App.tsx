@@ -21,7 +21,8 @@ import {
   AdminAccessDeniedPage,
   AdminDashboardPage,
 } from "@/pages/AdminDashboardPage"
-import { UsageLimitsProvider } from "@/lib/usage-limits"
+import { BillingTierProvider } from "@/lib/billing-tier-provider"
+import { UsageLimitsProvider } from "@/lib/usage-limits-provider"
 import { AuthPage, type AuthMode } from "@/pages/AuthPage"
 import { DeckListPage } from "@/pages/DeckListPage"
 import { DeckPage } from "@/pages/DeckPage"
@@ -112,149 +113,154 @@ export function App() {
   }
 
   return (
-    <UsageLimitsProvider userId={user?.id ?? null}>
-      {isImpersonating && user ? (
-        <ImpersonationBanner
-          impersonatedUserLabel={impersonatedUserLabel}
-          onStopImpersonating={handleStopImpersonating}
-        />
-      ) : null}
+    <BillingTierProvider userId={user?.id ?? null}>
+      <UsageLimitsProvider userId={user?.id ?? null}>
+        {isImpersonating && user ? (
+          <ImpersonationBanner
+            impersonatedUserLabel={impersonatedUserLabel}
+            onStopImpersonating={handleStopImpersonating}
+          />
+        ) : null}
 
-      <Routes>
-        <Route
-          path="/sign-in"
-          element={
-            <AuthRoute
-              mode="sign-in"
-              sessionUser={sessionUser}
-              onAuthenticated={handleAuthenticated}
-            />
-          }
-        />
-        <Route
-          path="/sign-up"
-          element={
-            <AuthRoute
-              mode="sign-up"
-              sessionUser={sessionUser}
-              onAuthenticated={handleAuthenticated}
-            />
-          }
-        />
-        <Route
-          path="/forgot-password"
-          element={
-            <AuthRoute
-              mode="forgot-password"
-              sessionUser={sessionUser}
-              onAuthenticated={handleAuthenticated}
-            />
-          }
-        />
-        <Route
-          path="/reset-password"
-          element={
-            <AuthRoute
-              mode="reset-password"
-              sessionUser={sessionUser}
-              onAuthenticated={handleAuthenticated}
-            />
-          }
-        />
-        <Route
-          path="/verify-email"
-          element={
-            <VerifyEmailRoute
-              impersonatedUserLabel={impersonatedUserLabel}
-              isImpersonating={isImpersonating}
-              sessionUser={sessionUser}
-              onAuthenticated={handleAuthenticated}
-              onSignedOut={handleSignedOut}
-              onStopImpersonating={handleStopImpersonating}
-            />
-          }
-        />
-        <Route
-          path="/"
-          element={
-            <RequireVerifiedUser sessionUser={sessionUser}>
-              {verifiedPageProps ? (
-                <DeckListPage {...verifiedPageProps} />
-              ) : null}
-            </RequireVerifiedUser>
-          }
-        />
-        <Route
-          path="/decks/:deckId"
-          element={
-            <RequireVerifiedUser sessionUser={sessionUser}>
-              {verifiedPageProps ? (
-                <DeckPageRoute {...verifiedPageProps} />
-              ) : null}
-            </RequireVerifiedUser>
-          }
-        />
-        <Route
-          path="/settings"
-          element={
-            <RequireVerifiedUser sessionUser={sessionUser}>
-              {verifiedPageProps ? (
-                <SettingsPage {...verifiedPageProps} />
-              ) : null}
-            </RequireVerifiedUser>
-          }
-        />
-        <Route
-          path="/admin"
-          element={
-            <RequireVerifiedUser sessionUser={sessionUser}>
-              {verifiedPageProps ? (
-                <AdminDashboardRoute
-                  {...verifiedPageProps}
-                  onSessionChanged={async () => {
-                    await session.refetch()
-                    navigate("/")
-                  }}
-                />
-              ) : null}
-            </RequireVerifiedUser>
-          }
-        />
-        <Route
-          path="/admin/users"
-          element={
-            <RequireVerifiedUser sessionUser={sessionUser}>
-              {verifiedPageProps ? (
-                <AdminDashboardRoute
-                  {...verifiedPageProps}
-                  onSessionChanged={async () => {
-                    await session.refetch()
-                    navigate("/")
-                  }}
-                />
-              ) : null}
-            </RequireVerifiedUser>
-          }
-        />
-        <Route
-          path="/admin/model-presets"
-          element={
-            <RequireVerifiedUser sessionUser={sessionUser}>
-              {verifiedPageProps ? (
-                <AdminDashboardRoute
-                  {...verifiedPageProps}
-                  onSessionChanged={async () => {
-                    await session.refetch()
-                    navigate("/")
-                  }}
-                />
-              ) : null}
-            </RequireVerifiedUser>
-          }
-        />
-        <Route path="*" element={<UnknownRoute sessionUser={sessionUser} />} />
-      </Routes>
-    </UsageLimitsProvider>
+        <Routes>
+          <Route
+            path="/sign-in"
+            element={
+              <AuthRoute
+                mode="sign-in"
+                sessionUser={sessionUser}
+                onAuthenticated={handleAuthenticated}
+              />
+            }
+          />
+          <Route
+            path="/sign-up"
+            element={
+              <AuthRoute
+                mode="sign-up"
+                sessionUser={sessionUser}
+                onAuthenticated={handleAuthenticated}
+              />
+            }
+          />
+          <Route
+            path="/forgot-password"
+            element={
+              <AuthRoute
+                mode="forgot-password"
+                sessionUser={sessionUser}
+                onAuthenticated={handleAuthenticated}
+              />
+            }
+          />
+          <Route
+            path="/reset-password"
+            element={
+              <AuthRoute
+                mode="reset-password"
+                sessionUser={sessionUser}
+                onAuthenticated={handleAuthenticated}
+              />
+            }
+          />
+          <Route
+            path="/verify-email"
+            element={
+              <VerifyEmailRoute
+                impersonatedUserLabel={impersonatedUserLabel}
+                isImpersonating={isImpersonating}
+                sessionUser={sessionUser}
+                onAuthenticated={handleAuthenticated}
+                onSignedOut={handleSignedOut}
+                onStopImpersonating={handleStopImpersonating}
+              />
+            }
+          />
+          <Route
+            path="/"
+            element={
+              <RequireVerifiedUser sessionUser={sessionUser}>
+                {verifiedPageProps ? (
+                  <DeckListPage {...verifiedPageProps} />
+                ) : null}
+              </RequireVerifiedUser>
+            }
+          />
+          <Route
+            path="/decks/:deckId"
+            element={
+              <RequireVerifiedUser sessionUser={sessionUser}>
+                {verifiedPageProps ? (
+                  <DeckPageRoute {...verifiedPageProps} />
+                ) : null}
+              </RequireVerifiedUser>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <RequireVerifiedUser sessionUser={sessionUser}>
+                {verifiedPageProps ? (
+                  <SettingsPage {...verifiedPageProps} />
+                ) : null}
+              </RequireVerifiedUser>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <RequireVerifiedUser sessionUser={sessionUser}>
+                {verifiedPageProps ? (
+                  <AdminDashboardRoute
+                    {...verifiedPageProps}
+                    onSessionChanged={async () => {
+                      await session.refetch()
+                      navigate("/")
+                    }}
+                  />
+                ) : null}
+              </RequireVerifiedUser>
+            }
+          />
+          <Route
+            path="/admin/users"
+            element={
+              <RequireVerifiedUser sessionUser={sessionUser}>
+                {verifiedPageProps ? (
+                  <AdminDashboardRoute
+                    {...verifiedPageProps}
+                    onSessionChanged={async () => {
+                      await session.refetch()
+                      navigate("/")
+                    }}
+                  />
+                ) : null}
+              </RequireVerifiedUser>
+            }
+          />
+          <Route
+            path="/admin/model-presets"
+            element={
+              <RequireVerifiedUser sessionUser={sessionUser}>
+                {verifiedPageProps ? (
+                  <AdminDashboardRoute
+                    {...verifiedPageProps}
+                    onSessionChanged={async () => {
+                      await session.refetch()
+                      navigate("/")
+                    }}
+                  />
+                ) : null}
+              </RequireVerifiedUser>
+            }
+          />
+          <Route
+            path="*"
+            element={<UnknownRoute sessionUser={sessionUser} />}
+          />
+        </Routes>
+      </UsageLimitsProvider>
+    </BillingTierProvider>
   )
 }
 

@@ -31,12 +31,11 @@ import {
   openStripeBillingPortal,
   startStripeCheckout,
 } from "@/lib/billing"
+import { useBillingTier, useBillingTierPolling } from "@/lib/billing-tier-state"
 import { clearPasswordInputs } from "@/lib/password-form"
 import { getPasswordRangeError } from "@/lib/password-validation"
 import {
   BILLING_TIER_LABELS,
-  getActiveBillingSubscription,
-  getBillingTierFromSubscription,
   isPaidBillingTier,
   type BillingTier,
 } from "@/lib/subscription-tiers"
@@ -66,13 +65,22 @@ export function SettingsPage({
   const [isSignOutConfirmOpen, setIsSignOutConfirmOpen] = useState(false)
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
-  const [billingTier, setBillingTier] = useState<BillingTier>("free")
   const [billingNotice, setBillingNotice] = useState<string | null>(null)
-  const [billingError, setBillingError] = useState<string | null>(null)
-  const [isBillingLoading, setIsBillingLoading] = useState(true)
+  const [billingActionError, setBillingActionError] = useState<string | null>(
+    null
+  )
   const [pendingBillingAction, setPendingBillingAction] =
     useState<PendingBillingAction>(null)
+  const { billingTier, billingTierError, hasLoadedBillingTier } =
+    useBillingTier()
+  const billingTierLabel =
+    !hasLoadedBillingTier && !billingTierError
+      ? "Loading..."
+      : !hasLoadedBillingTier && billingTierError
+        ? "Unavailable"
+        : BILLING_TIER_LABELS[billingTier]
 
+  useBillingTierPolling(true)
   useUsageLimitsPolling(true)
 
   useEffect(() => {
@@ -87,10 +95,6 @@ export function SettingsPage({
     nextSearchParams.delete("billing")
     setSearchParams(nextSearchParams, { replace: true })
   }, [searchParams, setSearchParams])
-
-  useEffect(() => {
-    void loadBillingState()
-  }, [])
 
   async function handleSignOut() {
     setIsSigningOut(true)
@@ -109,43 +113,16 @@ export function SettingsPage({
     }
   }
 
-  async function loadBillingState() {
-    setIsBillingLoading(true)
-    setBillingError(null)
-
-    try {
-      const result = await authClient.subscription.list({
-        query: {},
-      })
-
-      if (result.error) {
-        setBillingError(
-          getAuthErrorMessage(result.error, "Subscription could not be loaded.")
-        )
-        return
-      }
-
-      const subscriptions = Array.isArray(result.data) ? result.data : []
-      const activeSubscription = getActiveBillingSubscription(subscriptions)
-
-      setBillingTier(getBillingTierFromSubscription(activeSubscription))
-    } catch {
-      setBillingError("Subscription could not be loaded.")
-    } finally {
-      setIsBillingLoading(false)
-    }
-  }
-
   async function handleStartSubscription(plan: "plus" | "pro") {
     setPendingBillingAction(plan)
-    setBillingError(null)
+    setBillingActionError(null)
     setBillingNotice(null)
 
     try {
       const result = await startStripeCheckout(plan)
 
       if (result.error) {
-        setBillingError(
+        setBillingActionError(
           getAuthErrorMessage(
             result.error,
             "Stripe Checkout could not be started."
@@ -157,34 +134,34 @@ export function SettingsPage({
       const redirectUrl = getStripeRedirectUrl(result.data)
 
       if (!redirectUrl) {
-        setBillingError("Stripe Checkout could not be started.")
+        setBillingActionError("Stripe Checkout could not be started.")
         return
       }
 
       window.location.assign(redirectUrl)
     } catch {
-      setBillingError("Stripe Checkout could not be started.")
+      setBillingActionError("Stripe Checkout could not be started.")
     } finally {
       setPendingBillingAction(null)
     }
   }
 
   function handleOpenUpgradeModal() {
-    setBillingError(null)
+    setBillingActionError(null)
     setBillingNotice(null)
     setIsUpgradeModalOpen(true)
   }
 
   async function handleManageSubscription() {
     setPendingBillingAction("portal")
-    setBillingError(null)
+    setBillingActionError(null)
     setBillingNotice(null)
 
     try {
       const result = await openStripeBillingPortal()
 
       if (result.error) {
-        setBillingError(
+        setBillingActionError(
           getAuthErrorMessage(
             result.error,
             "Stripe Billing Portal could not be opened."
@@ -196,13 +173,13 @@ export function SettingsPage({
       const redirectUrl = getStripeRedirectUrl(result.data)
 
       if (!redirectUrl) {
-        setBillingError("Stripe Billing Portal could not be opened.")
+        setBillingActionError("Stripe Billing Portal could not be opened.")
         return
       }
 
       window.location.assign(redirectUrl)
     } catch {
-      setBillingError("Stripe Billing Portal could not be opened.")
+      setBillingActionError("Stripe Billing Portal could not be opened.")
     } finally {
       setPendingBillingAction(null)
     }
@@ -306,9 +283,7 @@ export function SettingsPage({
                   <p className="mt-1 text-xs text-sky-100">
                     Current tier:{" "}
                     <span className="font-semibold text-foreground">
-                      {isBillingLoading
-                        ? "Loading..."
-                        : BILLING_TIER_LABELS[billingTier]}
+                      {billingTierLabel}
                     </span>
                   </p>
                 </div>
@@ -316,7 +291,7 @@ export function SettingsPage({
 
               <BillingActions
                 billingTier={billingTier}
-                isBillingLoading={isBillingLoading}
+                isBillingTierReady={hasLoadedBillingTier}
                 isImpersonating={isImpersonating}
                 onManageSubscription={handleManageSubscription}
                 onOpenUpgradeModal={handleOpenUpgradeModal}
@@ -354,12 +329,21 @@ export function SettingsPage({
               </p>
             ) : null}
 
-            {billingError ? (
+            {billingTierError ? (
               <p
                 className="border-t border-destructive/40 bg-destructive/10 px-5 py-3 text-sm text-destructive"
                 role="alert"
               >
-                {billingError}
+                {billingTierError}
+              </p>
+            ) : null}
+
+            {billingActionError ? (
+              <p
+                className="border-t border-destructive/40 bg-destructive/10 px-5 py-3 text-sm text-destructive"
+                role="alert"
+              >
+                {billingActionError}
               </p>
             ) : null}
           </section>
@@ -415,7 +399,7 @@ export function SettingsPage({
       ) : null}
       {isUpgradeModalOpen ? (
         <UpgradeSubscriptionModal
-          error={billingError}
+          error={billingActionError}
           currentTier={billingTier}
           isSaving={
             pendingBillingAction === "plus" || pendingBillingAction === "pro"
@@ -431,21 +415,21 @@ export function SettingsPage({
 
 function BillingActions({
   billingTier,
-  isBillingLoading,
+  isBillingTierReady,
   isImpersonating,
   onManageSubscription,
   onOpenUpgradeModal,
   pendingBillingAction,
 }: {
   billingTier: BillingTier
-  isBillingLoading: boolean
+  isBillingTierReady: boolean
   isImpersonating: boolean
   onManageSubscription: () => void
   onOpenUpgradeModal: () => void
   pendingBillingAction: PendingBillingAction
 }) {
   const isDisabled =
-    isBillingLoading || isImpersonating || pendingBillingAction !== null
+    !isBillingTierReady || isImpersonating || pendingBillingAction !== null
 
   if (isPaidBillingTier(billingTier)) {
     return (

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import {
   ExternalLink,
   Gauge,
@@ -24,12 +24,8 @@ import {
   openStripeBillingPortal,
   startStripeCheckout,
 } from "@/lib/billing"
-import {
-  BILLING_TIER_LABELS,
-  getActiveBillingSubscription,
-  getBillingTierFromSubscription,
-  type BillingTier,
-} from "@/lib/subscription-tiers"
+import { useBillingTier, useBillingTierPolling } from "@/lib/billing-tier-state"
+import { BILLING_TIER_LABELS } from "@/lib/subscription-tiers"
 import { useUsageLimitsPolling } from "@/lib/usage-limits"
 
 export function AccountMenu({
@@ -49,9 +45,6 @@ export function AccountMenu({
 }) {
   const navigate = useNavigate()
   const [isOpen, setIsOpen] = useState(false)
-  const [billingTier, setBillingTier] = useState<BillingTier>("free")
-  const [isBillingTierLoading, setIsBillingTierLoading] = useState(false)
-  const [billingTierError, setBillingTierError] = useState(false)
   const [isSignOutConfirmOpen, setIsSignOutConfirmOpen] = useState(false)
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
@@ -60,65 +53,33 @@ export function AccountMenu({
   )
   const [pendingBillingAction, setPendingBillingAction] =
     useState<PendingBillingAction>(null)
-  const billingTierLabel = isBillingTierLoading
-    ? "Loading..."
-    : billingTierError
-      ? "Unavailable"
-      : `${BILLING_TIER_LABELS[billingTier]} tier`
+  const {
+    billingTier,
+    billingTierError,
+    hasLoadedBillingTier,
+    isBillingTierLoading,
+  } = useBillingTier()
+  const billingTierLabel =
+    !hasLoadedBillingTier && !billingTierError
+      ? "Loading..."
+      : !hasLoadedBillingTier && billingTierError
+        ? "Unavailable"
+        : `${BILLING_TIER_LABELS[billingTier]} tier`
   const shouldShowUsageUpgradeAction =
     !isImpersonating &&
-    !isBillingTierLoading &&
-    !billingTierError &&
+    hasLoadedBillingTier &&
     (billingTier === "free" || billingTier === "plus")
 
+  useBillingTierPolling(isOpen)
   useUsageLimitsPolling(isOpen)
 
-  useEffect(() => {
-    if (!isOpen) {
-      return
-    }
+  const isUpgradeButtonDisabled =
+    pendingBillingAction !== null ||
+    (!hasLoadedBillingTier && isBillingTierLoading)
 
-    let isMounted = true
-
-    async function loadBillingTier() {
-      setIsBillingTierLoading(true)
-      setBillingTierError(false)
-
-      try {
-        const result = await authClient.subscription.list({
-          query: {},
-        })
-
-        if (result.error) {
-          if (isMounted) {
-            setBillingTierError(true)
-          }
-          return
-        }
-
-        const subscriptions = Array.isArray(result.data) ? result.data : []
-        const activeSubscription = getActiveBillingSubscription(subscriptions)
-
-        if (isMounted) {
-          setBillingTier(getBillingTierFromSubscription(activeSubscription))
-        }
-      } catch {
-        if (isMounted) {
-          setBillingTierError(true)
-        }
-      } finally {
-        if (isMounted) {
-          setIsBillingTierLoading(false)
-        }
-      }
-    }
-
-    void loadBillingTier()
-
-    return () => {
-      isMounted = false
-    }
-  }, [isOpen, user.id])
+  const upgradeModalError =
+    billingActionError ??
+    (!hasLoadedBillingTier && billingTierError ? billingTierError : null)
 
   async function handleSignOut() {
     setIsSigningOut(true)
@@ -259,7 +220,7 @@ export function AccountMenu({
                     className="mt-0.5 grid h-7 w-[calc(100%+0.5rem)] grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-md pr-2 text-left text-xs font-bold text-foreground transition-colors hover:bg-muted/55 focus:bg-muted/55 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
                     type="button"
                     onClick={handleUpgradeForMoreUsage}
-                    disabled={pendingBillingAction !== null}
+                    disabled={isUpgradeButtonDisabled}
                   >
                     <span className="truncate pl-4">
                       Upgrade for more usage
@@ -374,7 +335,7 @@ export function AccountMenu({
       {isUpgradeModalOpen ? (
         <UpgradeSubscriptionModal
           currentTier={billingTier}
-          error={billingActionError}
+          error={upgradeModalError}
           isSaving={
             pendingBillingAction === "plus" || pendingBillingAction === "pro"
           }
