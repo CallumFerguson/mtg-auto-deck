@@ -45,6 +45,8 @@ export function DeckPage({
   const [isDeleteDeckOpen, setIsDeleteDeckOpen] = useState(false)
   const [isDeletingDeck, setIsDeletingDeck] = useState(false)
   const [deleteDeckError, setDeleteDeckError] = useState<string | null>(null)
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false)
+  const [usageUpgradeRequestId, setUsageUpgradeRequestId] = useState(0)
 
   const loadDeck = useCallback(async () => {
     setIsLoadingDeck(true)
@@ -201,10 +203,13 @@ export function DeckPage({
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <AccountMenu
                 adminOptionsEnabled={adminOptionsEnabled}
+                isOpen={isAccountMenuOpen}
                 isImpersonating={isImpersonating}
                 onAdminOptionsEnabledChange={onAdminOptionsEnabledChange}
+                onOpenChange={setIsAccountMenuOpen}
                 onSignedOut={onSignedOut}
                 onStopImpersonating={onStopImpersonating}
+                usageUpgradeRequestId={usageUpgradeRequestId}
                 user={user}
               />
               <div className="inline-grid w-full grid-cols-2 rounded-lg border border-border bg-card/70 p-1 sm:w-auto">
@@ -244,9 +249,14 @@ export function DeckPage({
           ) : deck ? (
             <div className="simulation-scrollbar min-h-0 min-w-0 flex-1 overflow-x-auto">
               <DeckSimulation
+                canUpgradeUsage={!isImpersonating}
                 cards={deck.cards}
                 deckId={deck.id}
                 isAdmin={shouldShowAdminOptions}
+                onUpgradeUsage={() => {
+                  setUsageUpgradeRequestId((currentId) => currentId + 1)
+                }}
+                onViewUsage={() => setIsAccountMenuOpen(true)}
                 selectedSimulationIdFromUrl={initialSimulationId}
               />
             </div>

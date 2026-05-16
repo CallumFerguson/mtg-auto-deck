@@ -43,10 +43,7 @@ export function BillingTierProvider({
     setBillingTierError(null)
     setHasLoadedBillingTier(false)
     setIsBillingTierLoading(false)
-
-    if (!userId) {
-      prefetchedUserIdRef.current = null
-    }
+    prefetchedUserIdRef.current = null
   }, [userId])
 
   const refreshBillingTier = useCallback(async () => {

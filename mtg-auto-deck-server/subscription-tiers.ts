@@ -17,7 +17,7 @@ export type BillingUsageLimitWindowKind = "five_hour" | "weekly"
 
 export const BILLING_TIER_USAGE_LIMITS_USD = {
   free: {
-    five_hour: 0.1,
+    five_hour: 0.001,
     weekly: 0.5,
   },
   plus: {

@@ -307,7 +307,7 @@ export function SettingsPage({
                 />
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-foreground">
-                    Usage limits
+                    Usage remaining
                   </p>
                   <UsageLimitRows />
                 </div>

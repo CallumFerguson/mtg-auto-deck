@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   ExternalLink,
   Gauge,
@@ -30,21 +30,27 @@ import { useUsageLimitsPolling } from "@/lib/usage-limits"
 
 export function AccountMenu({
   adminOptionsEnabled,
+  isOpen: controlledIsOpen,
   isImpersonating,
   onAdminOptionsEnabledChange,
+  onOpenChange,
   onSignedOut,
   onStopImpersonating,
+  usageUpgradeRequestId = 0,
   user,
 }: {
   adminOptionsEnabled: boolean
+  isOpen?: boolean
   isImpersonating: boolean
   onAdminOptionsEnabledChange: (isEnabled: boolean) => void
+  onOpenChange?: (isOpen: boolean) => void
   onSignedOut: () => void
   onStopImpersonating: () => Promise<void> | void
+  usageUpgradeRequestId?: number
   user: AuthUser
 }) {
   const navigate = useNavigate()
-  const [isOpen, setIsOpen] = useState(false)
+  const [uncontrolledIsOpen, setUncontrolledIsOpen] = useState(false)
   const [isSignOutConfirmOpen, setIsSignOutConfirmOpen] = useState(false)
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
@@ -53,6 +59,7 @@ export function AccountMenu({
   )
   const [pendingBillingAction, setPendingBillingAction] =
     useState<PendingBillingAction>(null)
+  const lastHandledUsageUpgradeRequestIdRef = useRef(usageUpgradeRequestId)
   const {
     billingTier,
     billingTierError,
@@ -65,6 +72,17 @@ export function AccountMenu({
       : !hasLoadedBillingTier && billingTierError
         ? "Unavailable"
         : `${BILLING_TIER_LABELS[billingTier]} tier`
+  const isOpen = controlledIsOpen ?? uncontrolledIsOpen
+  const setIsOpen = useCallback(
+    (nextIsOpen: boolean) => {
+      if (controlledIsOpen === undefined) {
+        setUncontrolledIsOpen(nextIsOpen)
+      }
+
+      onOpenChange?.(nextIsOpen)
+    },
+    [controlledIsOpen, onOpenChange]
+  )
   const shouldShowUsageUpgradeAction =
     !isImpersonating &&
     hasLoadedBillingTier &&
@@ -130,7 +148,7 @@ export function AccountMenu({
     }
   }
 
-  async function handleOpenBillingPortal() {
+  const handleOpenBillingPortal = useCallback(async () => {
     setPendingBillingAction("portal")
     setBillingActionError(null)
 
@@ -160,9 +178,13 @@ export function AccountMenu({
     } finally {
       setPendingBillingAction(null)
     }
-  }
+  }, [])
 
-  function handleUpgradeForMoreUsage() {
+  const handleUpgradeForMoreUsage = useCallback(() => {
+    if (!shouldShowUsageUpgradeAction || isUpgradeButtonDisabled) {
+      return
+    }
+
     setBillingActionError(null)
 
     if (billingTier === "free") {
@@ -174,7 +196,25 @@ export function AccountMenu({
     if (billingTier === "plus") {
       void handleOpenBillingPortal()
     }
-  }
+  }, [
+    billingTier,
+    handleOpenBillingPortal,
+    isUpgradeButtonDisabled,
+    setIsOpen,
+    shouldShowUsageUpgradeAction,
+  ])
+
+  useEffect(() => {
+    if (usageUpgradeRequestId === lastHandledUsageUpgradeRequestIdRef.current) {
+      return
+    }
+
+    lastHandledUsageUpgradeRequestIdRef.current = usageUpgradeRequestId
+
+    if (usageUpgradeRequestId > 0) {
+      handleUpgradeForMoreUsage()
+    }
+  }, [handleUpgradeForMoreUsage, usageUpgradeRequestId])
 
   return (
     <div className="relative">
@@ -185,7 +225,7 @@ export function AccountMenu({
         aria-label={`Account menu for ${user.email}`}
         aria-expanded={isOpen}
         title={user.email}
-        onClick={() => setIsOpen((currentValue) => !currentValue)}
+        onClick={() => setIsOpen(!isOpen)}
       >
         <UserRound />
       </Button>
@@ -212,7 +252,7 @@ export function AccountMenu({
                     className="size-3.5 shrink-0 text-foreground"
                     aria-hidden
                   />
-                  <span className="truncate">Rate limits remaining</span>
+                  <span className="truncate">Usage remaining</span>
                 </div>
                 <UsageLimitRows className="mt-1.5" />
                 {shouldShowUsageUpgradeAction ? (

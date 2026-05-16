@@ -21,9 +21,11 @@ import {
   ClipboardCheck,
   ClipboardCopy,
   Dices,
+  ExternalLink,
   Eye,
   EyeOff,
   FileText,
+  Gauge,
   Hand,
   Hourglass,
   LoaderCircle,
@@ -47,6 +49,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { API_BASE_URL, apiFetch } from "@/lib/api"
 import { readApiError } from "@/lib/api-error"
+import { useBillingTier } from "@/lib/billing-tier-state"
 import type {
   CreateSavedSeedResponse,
   CreateSimulationResponse,
@@ -131,6 +134,7 @@ type SimulationResultsAction =
 
 const DEFAULT_TURNS_TO_SIMULATE = "1"
 const ACTIVITY_PANEL_EXIT_FALLBACK_MS = 350
+const USAGE_LIMIT_FAILURE_MESSAGE_PATTERN = /\bout of usage limits\b/i
 const MANA_SYMBOL_TEXT_PATTERN = /(\{[^{}\s]+\})/g
 const MANA_SYMBOL_CLASS_NAMES = new Set([
   "0",
@@ -533,6 +537,10 @@ function createRandomSimulationSeed() {
   return digits.join("")
 }
 
+function isUsageLimitFailureMessage(message: string | null) {
+  return Boolean(message && USAGE_LIMIT_FAILURE_MESSAGE_PATTERN.test(message))
+}
+
 function getOpeningHandCardOptions(
   cards: readonly DeckCard[]
 ): OpeningHandCardOption[] {
@@ -550,14 +558,20 @@ function getOpeningHandCardOptions(
 }
 
 export function DeckSimulation({
+  canUpgradeUsage,
   cards,
   deckId,
   isAdmin,
+  onUpgradeUsage,
+  onViewUsage,
   selectedSimulationIdFromUrl,
 }: {
+  canUpgradeUsage: boolean
   cards: DeckCard[]
   deckId: string
   isAdmin: boolean
+  onUpgradeUsage: () => void
+  onViewUsage: () => void
   selectedSimulationIdFromUrl: string | null
 }) {
   const navigate = useNavigate()
@@ -1642,6 +1656,7 @@ export function DeckSimulation({
             </div>
           ) : selectedSimulation ? (
             <SimulationDetails
+              canUpgradeUsage={canUpgradeUsage}
               defaultModelPresetId={defaultModelPresetId}
               deckId={deckId}
               isAdmin={isAdmin}
@@ -1651,6 +1666,8 @@ export function DeckSimulation({
                 setDetailsSimulationId(selectedSimulation.id)
               }
               onSimulationUpdated={updateSimulation}
+              onUpgradeUsage={onUpgradeUsage}
+              onViewUsage={onViewUsage}
               simulation={selectedSimulation}
               startingHand={selectedSimulationStartingHand}
               startingHandLoadError={startingHandLoadError}
@@ -2052,6 +2069,7 @@ function SimulationDetailsModal({
 }
 
 function SimulationDetails({
+  canUpgradeUsage,
   defaultModelPresetId,
   deckId,
   isAdmin,
@@ -2059,10 +2077,13 @@ function SimulationDetails({
   modelPresets,
   onOpenDetails,
   onSimulationUpdated,
+  onUpgradeUsage,
+  onViewUsage,
   simulation,
   startingHand,
   startingHandLoadError,
 }: {
+  canUpgradeUsage: boolean
   defaultModelPresetId: string | null
   deckId: string
   isAdmin: boolean
@@ -2070,6 +2091,8 @@ function SimulationDetails({
   modelPresets: LlmModelPreset[]
   onOpenDetails: () => void
   onSimulationUpdated: (simulation: Simulation) => void
+  onUpgradeUsage: () => void
+  onViewUsage: () => void
   simulation: Simulation
   startingHand: StartingHand | null
   startingHandLoadError: string | null
@@ -2733,6 +2756,7 @@ function SimulationDetails({
 
           {resultsInfo ? (
             <SimulationResultsPanel
+              canUpgradeUsage={canUpgradeUsage}
               defaultModelPresetId={defaultModelPresetId}
               deckId={deckId}
               hasUsableModelPreset={selectedModelPreset !== null}
@@ -2755,6 +2779,8 @@ function SimulationDetails({
               onStopSimulation={() => void handleStopSimulation()}
               onOpeningHandEvaluationSaved={handleOpeningHandEvaluationSaved}
               onTurnEvaluationSaved={handleTurnEvaluationSaved}
+              onUpgradeUsage={onUpgradeUsage}
+              onViewUsage={onViewUsage}
               openingHandRunError={openingHandRunError}
               reportRunError={reportRunError}
               resultsInfo={resultsInfo}
@@ -3007,6 +3033,7 @@ function SimulationDebugModal({
 }
 
 function SimulationResultsPanel({
+  canUpgradeUsage,
   defaultModelPresetId,
   deckId,
   hasUsableModelPreset,
@@ -3027,6 +3054,8 @@ function SimulationResultsPanel({
   onStopSimulation,
   onOpeningHandEvaluationSaved,
   onTurnEvaluationSaved,
+  onUpgradeUsage,
+  onViewUsage,
   openingHandRunError,
   reportRunError,
   resultsInfo,
@@ -3037,6 +3066,7 @@ function SimulationResultsPanel({
   stopSimulationError,
   turnRunError,
 }: {
+  canUpgradeUsage: boolean
   defaultModelPresetId: string | null
   deckId: string
   hasUsableModelPreset: boolean
@@ -3057,6 +3087,8 @@ function SimulationResultsPanel({
   onStopSimulation: () => void
   onOpeningHandEvaluationSaved: (evaluation: OpeningHandEvaluation) => void
   onTurnEvaluationSaved: (evaluation: TurnEvaluation) => void
+  onUpgradeUsage: () => void
+  onViewUsage: () => void
   openingHandRunError: string | null
   reportRunError: string | null
   resultsInfo: SimulationResultsInfo
@@ -3067,8 +3099,11 @@ function SimulationResultsPanel({
   stopSimulationError: string | null
   turnRunError: string | null
 }) {
+  const { billingTier, hasLoadedBillingTier } = useBillingTier()
   const canStartOpeningHandRun = simulation.startingHandId === null
   const hasPresetStartingHand = simulation.startingHandId !== null
+  const shouldShowUsageUpgradeAction =
+    canUpgradeUsage && hasLoadedBillingTier && billingTier !== "pro"
   const isOpeningHandRunning = resultsInfo.openingHandLlmRuns.some((run) =>
     isActiveLlmRunStatus(run.status)
   )
@@ -3369,9 +3404,10 @@ function SimulationResultsPanel({
             !run.hasFinalParsedOutputChunk &&
             getReportTextFromChunks(run.chunks) !== null
           const emptyRunFailureMessage =
-            run.status === "failed"
-              ? run.failureMessage?.trim() || null
-              : null
+            run.status === "failed" ? run.failureMessage?.trim() || null : null
+          const isUsageLimitFailure = isUsageLimitFailureMessage(
+            emptyRunFailureMessage
+          )
 
           return (
             <section
@@ -3516,16 +3552,43 @@ function SimulationResultsPanel({
                   stopSimulationError={stopSimulationError}
                 />
               ) : run.resultEntries.length === 0 && !run.gameState ? (
-                <p
+                <div
                   className={`rounded-md border px-3 py-2 text-sm ${
                     emptyRunFailureMessage
                       ? "border-destructive/40 bg-destructive/10 text-destructive"
                       : "border-border bg-black/20 text-muted-foreground"
                   }`}
+                  role={emptyRunFailureMessage ? "alert" : undefined}
                 >
-                  {emptyRunFailureMessage ??
-                    "No user-facing events have been saved for this run yet."}
-                </p>
+                  <p>
+                    {emptyRunFailureMessage ??
+                      "No user-facing events have been saved for this run yet."}
+                  </p>
+                  {isUsageLimitFailure ? (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="border-destructive/30 bg-background/35 text-foreground hover:bg-muted/45"
+                        onClick={onViewUsage}
+                      >
+                        <Gauge data-icon="inline-start" />
+                        View usage
+                      </Button>
+                      {shouldShowUsageUpgradeAction ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={onUpgradeUsage}
+                        >
+                          <ExternalLink data-icon="inline-start" />
+                          Upgrade for more usage
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
               ) : null}
             </section>
           )
