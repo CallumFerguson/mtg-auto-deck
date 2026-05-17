@@ -2929,6 +2929,11 @@ async function appendLlmRunChunksWithClient(
     cardMentions: [] as SimulationDebugLlmRunChunkCardMention[],
   }))
 
+  await incrementRunningLlmRunCostFromInsertedChunks(
+    client,
+    llmRunId,
+    insertedChunks
+  )
   await insertLlmRunChunkCardMentions(client, insertedChunks)
 
   return insertedChunks
@@ -2987,6 +2992,72 @@ export function buildAppendLlmRunChunksQuery(
         received_at
     `,
     values,
+  }
+}
+
+async function incrementRunningLlmRunCostFromInsertedChunks(
+  client: DatabaseTransactionClient,
+  llmRunId: string,
+  chunks: readonly {
+    reasoning_delta: string | null
+    output_delta: string | null
+  }[]
+) {
+  const generatedDeltaCharCount =
+    getInsertedLlmRunGeneratedDeltaCharCount(chunks)
+
+  if (generatedDeltaCharCount === 0) {
+    return
+  }
+
+  const query = buildIncrementRunningLlmRunCostQuery({
+    generatedDeltaCharCount,
+    llmRunId,
+  })
+
+  await client.query(query.text, query.values)
+}
+
+export function getInsertedLlmRunGeneratedDeltaCharCount(
+  chunks: readonly {
+    reasoning_delta: string | null
+    output_delta: string | null
+  }[]
+) {
+  return chunks.reduce(
+    (total, chunk) =>
+      total +
+      (chunk.reasoning_delta?.length ?? 0) +
+      (chunk.output_delta?.length ?? 0),
+    0
+  )
+}
+
+export function buildIncrementRunningLlmRunCostQuery({
+  generatedDeltaCharCount,
+  llmRunId,
+}: {
+  generatedDeltaCharCount: number
+  llmRunId: string
+}) {
+  return {
+    text: `
+      UPDATE llm_runs llm_run
+      SET estimated_cost_usd =
+            llm_run.estimated_cost_usd +
+            (($2::numeric / 4) *
+              preset.output_token_cost_usd_per_million /
+              1000000),
+          updated_at = now()
+      FROM llm_model_presets preset
+      WHERE llm_run.id = $1
+        AND preset.id = llm_run.llm_model_preset_id
+        AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
+        AND llm_run.estimated_cost_usd IS NOT NULL
+        AND preset.output_token_cost_usd_per_million IS NOT NULL
+        AND preset.output_token_cost_usd_per_million >= 0
+    `,
+    values: [llmRunId, generatedDeltaCharCount],
   }
 }
 
@@ -3661,16 +3732,35 @@ export function buildClaimQueuedLlmRunStreamingQuery(
 ) {
   return {
     text: `
-      UPDATE llm_runs
+      UPDATE llm_runs llm_run
       SET status = 'streaming',
           started_at = COALESCE(started_at, $2::timestamptz),
+          estimated_cost_usd = ${getRunningLlmRunInitialCostSql()},
           updated_at = $2::timestamptz
-      WHERE id = $1
-        AND status = 'pending'
+      WHERE llm_run.id = $1
+        AND llm_run.status = 'pending'
       RETURNING started_at
     `,
     values: [llmRunId, startedAt],
   }
+}
+
+function getRunningLlmRunInitialCostSql() {
+  return `(
+            SELECT CASE
+              WHEN preset.cached_input_token_cost_usd_per_million IS NOT NULL
+                AND preset.cached_input_token_cost_usd_per_million >= 0
+                AND preset.output_token_cost_usd_per_million IS NOT NULL
+                AND preset.output_token_cost_usd_per_million >= 0
+              THEN
+                (length(llm_run.full_prompt)::numeric / 4) *
+                preset.cached_input_token_cost_usd_per_million /
+                1000000
+              ELSE NULL
+            END
+            FROM llm_model_presets preset
+            WHERE preset.id = llm_run.llm_model_preset_id
+          )`
 }
 
 export function buildFailQueuedLlmRunUsageLimitQuery(
@@ -3697,12 +3787,13 @@ export function buildFailQueuedLlmRunUsageLimitQuery(
 export async function markLlmRunStreaming(llmRunId: string) {
   const result = await queryDatabase(
     `
-      UPDATE llm_runs
+      UPDATE llm_runs llm_run
       SET status = 'streaming',
           started_at = COALESCE(started_at, now()),
+          estimated_cost_usd = ${getRunningLlmRunInitialCostSql()},
           updated_at = now()
-      WHERE id = $1
-        AND status = 'pending'
+      WHERE llm_run.id = $1
+        AND llm_run.status = 'pending'
       RETURNING id
     `,
     [llmRunId]

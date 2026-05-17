@@ -98,6 +98,61 @@ export function estimatePartialLlmRunCostUsd({
   )
 }
 
+export function estimateRunningLlmRunInitialCostUsd({
+  fullPromptCharCount,
+  tokenCosts,
+}: {
+  fullPromptCharCount: number
+  tokenCosts: Pick<
+    TokenPrice,
+    "cachedInputDollarsPerMillion" | "outputDollarsPerMillion"
+  >
+}) {
+  const cachedInputRate = getCostValue(
+    tokenCosts.cachedInputDollarsPerMillion
+  )
+  const outputRate = getCostValue(tokenCosts.outputDollarsPerMillion)
+
+  if (cachedInputRate === null || outputRate === null) {
+    return null
+  }
+
+  const cachedInputTokens =
+    estimateFractionalTokensFromCharCount(fullPromptCharCount)
+
+  if (cachedInputTokens === null) {
+    return null
+  }
+
+  return (cachedInputTokens * cachedInputRate) / 1_000_000
+}
+
+export function estimateRunningLlmRunOutputDeltaCostUsd({
+  outputDeltaCharCount,
+  reasoningDeltaCharCount,
+  tokenCosts,
+}: {
+  outputDeltaCharCount: number
+  reasoningDeltaCharCount: number
+  tokenCosts: Pick<TokenPrice, "outputDollarsPerMillion">
+}) {
+  const outputRate = getCostValue(tokenCosts.outputDollarsPerMillion)
+
+  if (outputRate === null) {
+    return null
+  }
+
+  const outputTokens = estimateFractionalTokensFromCharCount(
+    reasoningDeltaCharCount + outputDeltaCharCount
+  )
+
+  if (outputTokens === null) {
+    return null
+  }
+
+  return (outputTokens * outputRate) / 1_000_000
+}
+
 export function getOpenRouterReportedCostUsd(usage: unknown) {
   const costUsd = getNumberProperty(asRecord(usage), "cost")
 
@@ -223,6 +278,14 @@ function estimateTokensFromCharCount(charCount: number) {
   }
 
   return Math.floor(charCount / 4)
+}
+
+function estimateFractionalTokensFromCharCount(charCount: number) {
+  if (!Number.isFinite(charCount) || charCount < 0) {
+    return null
+  }
+
+  return charCount / 4
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

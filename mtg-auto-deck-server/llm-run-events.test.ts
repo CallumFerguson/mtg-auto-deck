@@ -30,9 +30,11 @@ import {
   buildAppendLlmRunChunksQuery,
   buildClaimQueuedLlmRunStreamingQuery,
   buildFailQueuedLlmRunUsageLimitQuery,
+  buildIncrementRunningLlmRunCostQuery,
   buildPartialLlmRunCostSnapshotQuery,
   canApplyLateLlmRunTerminalUpdate,
   extractLlmRunChunkCardMentionRequests,
+  getInsertedLlmRunGeneratedDeltaCharCount,
   getInitialSimulationStatus,
   getOpeningHandCompletionDecision,
   getSimulationCreationDecision,
@@ -53,6 +55,8 @@ import {
   aggregateOpenRouterUsage,
   estimatePartialLlmRunCostUsd,
   estimatePresetTokenCostUsd,
+  estimateRunningLlmRunInitialCostUsd,
+  estimateRunningLlmRunOutputDeltaCostUsd,
   formatPreferredLlmRunCostAsCents,
   formatUsdCostAsCentLabel,
   formatUsdCostAsCents,
@@ -508,6 +512,63 @@ test("estimates partial LLM run cost from cached prompt and streamed output char
   assert.equal(costUsd?.toFixed(6), "0.000305")
 })
 
+test("estimates running LLM run initial cost from cached prompt chars", () => {
+  const costUsd = estimateRunningLlmRunInitialCostUsd({
+    fullPromptCharCount: 401,
+    tokenCosts: {
+      cachedInputDollarsPerMillion: 0.5,
+      outputDollarsPerMillion: 5,
+    },
+  })
+
+  assert.equal(costUsd?.toFixed(9), "0.000050125")
+})
+
+test("estimates running LLM run output delta cost from streamed chars", () => {
+  const costUsd = estimateRunningLlmRunOutputDeltaCostUsd({
+    reasoningDeltaCharCount: 121,
+    outputDeltaCharCount: 83,
+    tokenCosts: {
+      outputDollarsPerMillion: 5,
+    },
+  })
+
+  assert.equal(costUsd?.toFixed(6), "0.000255")
+})
+
+test("requires running LLM run initial cached input and output costs", () => {
+  assert.equal(
+    estimateRunningLlmRunInitialCostUsd({
+      fullPromptCharCount: 400,
+      tokenCosts: {
+        cachedInputDollarsPerMillion: null,
+        outputDollarsPerMillion: 5,
+      },
+    }),
+    null
+  )
+  assert.equal(
+    estimateRunningLlmRunInitialCostUsd({
+      fullPromptCharCount: 400,
+      tokenCosts: {
+        cachedInputDollarsPerMillion: 0.5,
+        outputDollarsPerMillion: null,
+      },
+    }),
+    null
+  )
+  assert.equal(
+    estimateRunningLlmRunOutputDeltaCostUsd({
+      reasoningDeltaCharCount: 100,
+      outputDeltaCharCount: 100,
+      tokenCosts: {
+        outputDollarsPerMillion: null,
+      },
+    }),
+    null
+  )
+})
+
 test("requires partial LLM run cached input and output costs", () => {
   assert.equal(
     estimatePartialLlmRunCostUsd({
@@ -847,11 +908,64 @@ test("builds queued LLM run claim query with explicit claim timestamp", () => {
     normalizedSql,
     /started_at = COALESCE\(started_at, \$2::timestamptz\)/
   )
+  assert.match(normalizedSql, /estimated_cost_usd =/)
+  assert.match(normalizedSql, /length\(llm_run\.full_prompt\)::numeric \/ 4/)
+  assert.match(normalizedSql, /cached_input_token_cost_usd_per_million/)
+  assert.match(normalizedSql, /output_token_cost_usd_per_million/)
+  assert.match(normalizedSql, /cached_input_token_cost_usd_per_million >= 0/)
+  assert.match(normalizedSql, /output_token_cost_usd_per_million >= 0/)
+  assert.match(normalizedSql, /ELSE NULL/)
   assert.match(normalizedSql, /updated_at = \$2::timestamptz/)
   assert.doesNotMatch(
     normalizedSql,
     /started_at = COALESCE\(started_at, now\(\)\)/
   )
+})
+
+test("counts only inserted LLM run generated delta chars", () => {
+  assert.equal(
+    getInsertedLlmRunGeneratedDeltaCharCount([
+      {
+        reasoning_delta: "thinking",
+        output_delta: null,
+      },
+      {
+        reasoning_delta: null,
+        output_delta: "answer",
+      },
+      {
+        reasoning_delta: null,
+        output_delta: null,
+      },
+    ]),
+    14
+  )
+})
+
+test("builds incremental running LLM run cost query", () => {
+  const query = buildIncrementRunningLlmRunCostQuery({
+    llmRunId: "00000000-0000-0000-0000-000000000001",
+    generatedDeltaCharCount: 204,
+  })
+  const normalizedSql = query.text.replace(/\s+/g, " ")
+
+  assert.deepEqual(query.values, [
+    "00000000-0000-0000-0000-000000000001",
+    204,
+  ])
+  assert.match(normalizedSql, /llm_run\.estimated_cost_usd \+/)
+  assert.match(normalizedSql, /\$2::numeric \/ 4/)
+  assert.match(normalizedSql, /preset\.output_token_cost_usd_per_million/)
+  assert.match(normalizedSql, /llm_run\.estimated_cost_usd IS NOT NULL/)
+  assert.match(
+    normalizedSql,
+    /llm_run\.status IN \('pending', 'streaming', 'cancel_requested'\)/
+  )
+  assert.match(
+    normalizedSql,
+    /preset\.output_token_cost_usd_per_million IS NOT NULL/
+  )
+  assert.match(normalizedSql, /preset\.output_token_cost_usd_per_million >= 0/)
 })
 
 test("uses the same claim timestamp for first usage window and queued run start", () => {
