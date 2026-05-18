@@ -174,17 +174,20 @@ Postgres                 -> same Droplet, localhost only
    flows. DigitalOcean Droplets block outbound SMTP traffic on ports 25, 465,
    and 587, so the common local SMTP default of `SMTP_PORT=587` will time out
    in production on the Droplet. Use a transactional email provider that
-   supports a non-blocked SMTP port such as 2525, then set:
+   supports a non-blocked SMTP port such as 2465, then set:
 
    ```env
-   SMTP_PORT=2525
-   SMTP_SECURE=false
+   SMTP_PORT=2465
+   SMTP_SECURE=true
    ```
+
+   `SMTP_SECURE=true` is for implicit TLS, the same mode normally used by
+   port 465. Resend documents port 2465 as implicit SSL/TLS.
 
    You can verify the port from the Droplet without exposing credentials:
 
    ```sh
-   nc -vz YOUR_SMTP_HOST 2525
+   nc -vz YOUR_SMTP_HOST 2465
    ```
 
    If your email provider only supports 25, 465, or 587, use a different SMTP

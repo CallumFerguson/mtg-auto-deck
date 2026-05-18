@@ -352,8 +352,8 @@ function createEmailSendError(error: unknown, smtpConfig: SmtpConfig) {
       `SMTP connection timed out to ${smtpConfig.host}:${smtpConfig.port}. ` +
       "If this server is hosted on DigitalOcean, outbound SMTP ports 25, " +
       "465, and 587 are blocked on Droplets. Configure an email provider " +
-      "that supports a non-blocked SMTP port such as 2525, or switch to an " +
-      "email API over HTTPS."
+      "that supports a non-blocked SMTP port such as 2465 with the " +
+      "provider's required TLS mode, or switch to an email API over HTTPS."
 
     return new Error(
       message,
