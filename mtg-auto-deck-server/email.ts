@@ -1,4 +1,6 @@
-import { createTransport } from "nodemailer"
+import { createTransport, type SendMailOptions } from "nodemailer"
+
+type SmtpConfig = ReturnType<typeof getSmtpConfig>
 
 type SendPasswordResetEmailInput = {
   resetUrl: string
@@ -21,11 +23,9 @@ export async function sendPasswordResetEmail({
   to,
   userName,
 }: SendPasswordResetEmailInput) {
-  const { from, transporter } = getEmailTransport()
   const displayName = userName.trim() || "there"
 
-  await transporter.sendMail({
-    from,
+  await sendEmail({
     to,
     subject: "Reset your MTG Auto Deck password",
     text: renderPasswordResetText({ displayName, resetUrl }),
@@ -37,11 +37,9 @@ export async function sendPasswordChangedEmail({
   to,
   userName,
 }: SendPasswordChangedEmailInput) {
-  const { from, transporter } = getEmailTransport()
   const displayName = userName.trim() || "there"
 
-  await transporter.sendMail({
-    from,
+  await sendEmail({
     to,
     subject: "Your MTG Auto Deck password was changed",
     text: renderPasswordChangedText({ displayName }),
@@ -53,10 +51,7 @@ export async function sendVerificationCodeEmail({
   code,
   to,
 }: SendVerificationCodeEmailInput) {
-  const { from, transporter } = getEmailTransport()
-
-  await transporter.sendMail({
-    from,
+  await sendEmail({
     to,
     subject: `Your MTG Auto Deck code is ${code}`,
     text: renderVerificationCodeText({ code }),
@@ -322,6 +317,7 @@ function getEmailTransport() {
 
   return {
     from: smtpConfig.from,
+    smtpConfig,
     transporter: createTransport({
       host: smtpConfig.host,
       port: smtpConfig.port,
@@ -335,6 +331,47 @@ function getEmailTransport() {
           : undefined,
     }),
   }
+}
+
+async function sendEmail(message: Omit<SendMailOptions, "from">) {
+  const { from, smtpConfig, transporter } = getEmailTransport()
+
+  try {
+    await transporter.sendMail({
+      ...message,
+      from,
+    })
+  } catch (error) {
+    throw createEmailSendError(error, smtpConfig)
+  }
+}
+
+function createEmailSendError(error: unknown, smtpConfig: SmtpConfig) {
+  if (isSmtpConnectionTimeoutError(error)) {
+    const message =
+      `SMTP connection timed out to ${smtpConfig.host}:${smtpConfig.port}. ` +
+      "If this server is hosted on DigitalOcean, outbound SMTP ports 25, " +
+      "465, and 587 are blocked on Droplets. Configure an email provider " +
+      "that supports a non-blocked SMTP port such as 2525, or switch to an " +
+      "email API over HTTPS."
+
+    return new Error(
+      message,
+      { cause: error }
+    )
+  }
+
+  return error
+}
+
+function isSmtpConnectionTimeoutError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false
+  }
+
+  const smtpError = error as { code?: unknown; command?: unknown }
+
+  return smtpError.code === "ETIMEDOUT" && smtpError.command === "CONN"
 }
 
 function getSmtpConfig() {

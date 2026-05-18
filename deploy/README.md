@@ -170,6 +170,27 @@ Postgres                 -> same Droplet, localhost only
    Use the resulting Stripe signing secret as `STRIPE_WEBHOOK_SECRET` in the
    server environment file.
 
+   Configure auth email before relying on sign-up, sign-in, or password reset
+   flows. DigitalOcean Droplets block outbound SMTP traffic on ports 25, 465,
+   and 587, so the common local SMTP default of `SMTP_PORT=587` will time out
+   in production on the Droplet. Use a transactional email provider that
+   supports a non-blocked SMTP port such as 2525, then set:
+
+   ```env
+   SMTP_PORT=2525
+   SMTP_SECURE=false
+   ```
+
+   You can verify the port from the Droplet without exposing credentials:
+
+   ```sh
+   nc -vz YOUR_SMTP_HOST 2525
+   ```
+
+   If your email provider only supports 25, 465, or 587, use a different SMTP
+   endpoint, add an email provider API integration over HTTPS, or host the API
+   server somewhere that allows outbound SMTP.
+
 8. Run the server once in the foreground to prime Scryfall data.
 
    On first startup, the server downloads Scryfall `oracle_cards` bulk data and
