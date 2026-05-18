@@ -1,0 +1,11 @@
+# Example Caddy config for the production API server.
+# Install as /etc/caddy/Caddyfile, then validate and reload Caddy.
+
+api.example.com {
+	encode zstd gzip
+
+	reverse_proxy 127.0.0.1:3001 {
+		# Keep server-sent event streams flowing without proxy buffering.
+		flush_interval -1
+	}
+}

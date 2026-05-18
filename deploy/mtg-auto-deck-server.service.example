@@ -1,0 +1,17 @@
+[Unit]
+Description=MTG Auto Deck API server
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mtgapp
+Group=mtgapp
+WorkingDirectory=/opt/mtg-auto-deck
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node dist-server/mtg-auto-deck-server.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
