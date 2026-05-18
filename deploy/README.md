@@ -199,6 +199,12 @@ Postgres                 -> same Droplet, localhost only
 
     ```sh
     sudo cp deploy/Caddyfile.example /etc/caddy/Caddyfile
+    ```
+
+    After copying the example, change the Caddyfile domain from
+    `api.example.com` to your production API domain.
+
+    ```sh
     sudo caddy validate --config /etc/caddy/Caddyfile
     sudo systemctl reload caddy
     ```
