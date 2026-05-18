@@ -160,7 +160,23 @@ Postgres                 -> same Droplet, localhost only
    Use the resulting Stripe signing secret as `STRIPE_WEBHOOK_SECRET` in the
    server environment file.
 
-8. Install and start the service:
+8. Run the server once in the foreground to prime Scryfall data.
+
+   On first startup, the server downloads Scryfall `oracle_cards` bulk data and
+   imports it into Postgres before the health endpoint starts responding. This
+   can take a while, so run it manually once before putting the process under
+   systemd:
+
+   ```sh
+   sudo -u mtgapp npm run server:start
+   ```
+
+   Wait until the logs show that `mtg-auto-deck-server` is listening at
+   `http://127.0.0.1:3001`, then stop the foreground process with `Ctrl+C`.
+   If the command exits before listening, fix the reported environment,
+   database, or Scryfall import issue and run it again.
+
+9. Install and start the service:
 
    ```sh
    sudo cp deploy/mtg-auto-deck-server.service.example /etc/systemd/system/mtg-auto-deck-server.service
@@ -169,7 +185,7 @@ Postgres                 -> same Droplet, localhost only
    sudo journalctl -u mtg-auto-deck-server -f
    ```
 
-9. Install and reload the Caddy config:
+10. Install and reload the Caddy config:
 
    ```sh
    sudo cp deploy/Caddyfile.example /etc/caddy/Caddyfile
@@ -177,14 +193,14 @@ Postgres                 -> same Droplet, localhost only
    sudo systemctl reload caddy
    ```
 
-10. Verify the API:
+11. Verify the API:
 
    ```sh
    curl -fsS http://127.0.0.1:3001/health
    curl -fsS https://api.example.com/health
    ```
 
-11. Bootstrap the first admin user.
+12. Bootstrap the first admin user.
 
     After signing up through the app, promote your user in Postgres:
 
