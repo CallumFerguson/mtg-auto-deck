@@ -22,6 +22,8 @@ import {
   Power,
   RefreshCw,
   ShieldAlert,
+  ShieldCheck,
+  ShieldMinus,
   Star,
   Trash2,
   UserRound,
@@ -343,8 +345,14 @@ function AdminUsersSection({
   const [loadError, setLoadError] = useState<string | null>(null)
   const [openUserMenuId, setOpenUserMenuId] = useState<string | null>(null)
   const [userToDelete, setUserToDelete] = useState<AdminUser | null>(null)
+  const [userToDemote, setUserToDemote] = useState<AdminUser | null>(null)
+  const [userToPromote, setUserToPromote] = useState<AdminUser | null>(null)
   const [deleteUserError, setDeleteUserError] = useState<string | null>(null)
+  const [demoteUserError, setDemoteUserError] = useState<string | null>(null)
+  const [promoteUserError, setPromoteUserError] = useState<string | null>(null)
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null)
+  const [demotingUserId, setDemotingUserId] = useState<string | null>(null)
+  const [promotingUserId, setPromotingUserId] = useState<string | null>(null)
   const [impersonateUserError, setImpersonateUserError] = useState<
     string | null
   >(null)
@@ -355,7 +363,9 @@ function AdminUsersSection({
   const loadUsers = useCallback(async () => {
     setIsLoading(true)
     setLoadError(null)
+    setDemoteUserError(null)
     setImpersonateUserError(null)
+    setPromoteUserError(null)
 
     try {
       const response = await apiFetch(`${API_BASE_URL}/admin/users`)
@@ -419,6 +429,85 @@ function AdminUsersSection({
       setDeleteUserError("User could not be deleted.")
     } finally {
       setDeletingUserId(null)
+    }
+  }
+
+  async function handleDemoteUser() {
+    if (!userToDemote || !canDemoteUser(userToDemote)) {
+      return
+    }
+
+    setDemotingUserId(userToDemote.id)
+    setDemoteUserError(null)
+
+    try {
+      const result = await authClient.admin.setRole({
+        userId: userToDemote.id,
+        role: "user",
+      })
+
+      if (result.error) {
+        setDemoteUserError(
+          getAuthClientErrorMessage(
+            result.error,
+            `Could not demote ${userToDemote.email}.`
+          )
+        )
+        return
+      }
+
+      setUsers((currentUsers) =>
+        currentUsers.map((user) =>
+          user.id === userToDemote.id ? { ...user, role: "user" } : user
+        )
+      )
+      setUserToDemote(null)
+
+      if (userToDemote.id === currentUserId) {
+        await onSessionChanged()
+        navigate("/")
+      }
+    } catch {
+      setDemoteUserError(`Could not demote ${userToDemote.email}.`)
+    } finally {
+      setDemotingUserId(null)
+    }
+  }
+
+  async function handlePromoteUser() {
+    if (!userToPromote || !canPromoteUser(userToPromote, currentUserId)) {
+      return
+    }
+
+    setPromotingUserId(userToPromote.id)
+    setPromoteUserError(null)
+
+    try {
+      const result = await authClient.admin.setRole({
+        userId: userToPromote.id,
+        role: "admin",
+      })
+
+      if (result.error) {
+        setPromoteUserError(
+          getAuthClientErrorMessage(
+            result.error,
+            `Could not promote ${userToPromote.email}.`
+          )
+        )
+        return
+      }
+
+      setUsers((currentUsers) =>
+        currentUsers.map((user) =>
+          user.id === userToPromote.id ? { ...user, role: "admin" } : user
+        )
+      )
+      setUserToPromote(null)
+    } catch {
+      setPromoteUserError(`Could not promote ${userToPromote.email}.`)
+    } finally {
+      setPromotingUserId(null)
     }
   }
 
@@ -568,18 +657,28 @@ function AdminUsersSection({
                       <AdminUserActionsMenu
                         currentUserId={currentUserId}
                         deletingUserId={deletingUserId}
+                        demotingUserId={demotingUserId}
                         impersonatingUserId={impersonatingUserId}
                         menuId={`desktop-${user.id}`}
                         openUserMenuId={openUserMenuId}
+                        promotingUserId={promotingUserId}
                         setOpenUserMenuId={setOpenUserMenuId}
                         user={user}
                         onDeleteUser={(selectedUser) => {
                           setDeleteUserError(null)
                           setUserToDelete(selectedUser)
                         }}
+                        onDemoteUser={(selectedUser) => {
+                          setDemoteUserError(null)
+                          setUserToDemote(selectedUser)
+                        }}
                         onImpersonateUser={(selectedUser) =>
                           void handleImpersonateUser(selectedUser)
                         }
+                        onPromoteUser={(selectedUser) => {
+                          setPromoteUserError(null)
+                          setUserToPromote(selectedUser)
+                        }}
                       />
                     </TableCell>
                   </tr>
@@ -608,18 +707,28 @@ function AdminUsersSection({
                     <AdminUserActionsMenu
                       currentUserId={currentUserId}
                       deletingUserId={deletingUserId}
+                      demotingUserId={demotingUserId}
                       impersonatingUserId={impersonatingUserId}
                       menuId={`mobile-${user.id}`}
                       openUserMenuId={openUserMenuId}
+                      promotingUserId={promotingUserId}
                       setOpenUserMenuId={setOpenUserMenuId}
                       user={user}
                       onDeleteUser={(selectedUser) => {
                         setDeleteUserError(null)
                         setUserToDelete(selectedUser)
                       }}
+                      onDemoteUser={(selectedUser) => {
+                        setDemoteUserError(null)
+                        setUserToDemote(selectedUser)
+                      }}
                       onImpersonateUser={(selectedUser) =>
                         void handleImpersonateUser(selectedUser)
                       }
+                      onPromoteUser={(selectedUser) => {
+                        setPromoteUserError(null)
+                        setUserToPromote(selectedUser)
+                      }}
                     />
                   </div>
                 </div>
@@ -657,6 +766,33 @@ function AdminUsersSection({
             setDeleteUserError(null)
           }}
           onConfirm={() => void handleDeleteUser()}
+        />
+      ) : null}
+
+      {userToDemote ? (
+        <DemoteAdminUserModal
+          currentUserId={currentUserId}
+          error={demoteUserError}
+          isDemoting={demotingUserId === userToDemote.id}
+          user={userToDemote}
+          onClose={() => {
+            setUserToDemote(null)
+            setDemoteUserError(null)
+          }}
+          onConfirm={() => void handleDemoteUser()}
+        />
+      ) : null}
+
+      {userToPromote ? (
+        <PromoteAdminUserModal
+          error={promoteUserError}
+          isPromoting={promotingUserId === userToPromote.id}
+          user={userToPromote}
+          onClose={() => {
+            setUserToPromote(null)
+            setPromoteUserError(null)
+          }}
+          onConfirm={() => void handlePromoteUser()}
         />
       ) : null}
     </section>
@@ -1411,21 +1547,29 @@ function DeleteLlmModelPresetModal({
 function AdminUserActionsMenu({
   currentUserId,
   deletingUserId,
+  demotingUserId,
   impersonatingUserId,
   menuId,
   onDeleteUser,
+  onDemoteUser,
   onImpersonateUser,
+  onPromoteUser,
   openUserMenuId,
+  promotingUserId,
   setOpenUserMenuId,
   user,
 }: {
   currentUserId: string
   deletingUserId: string | null
+  demotingUserId: string | null
   impersonatingUserId: string | null
   menuId: string
   onDeleteUser: (user: AdminUser) => void
+  onDemoteUser: (user: AdminUser) => void
   onImpersonateUser: (user: AdminUser) => void
+  onPromoteUser: (user: AdminUser) => void
   openUserMenuId: string | null
+  promotingUserId: string | null
   setOpenUserMenuId: Dispatch<SetStateAction<string | null>>
   user: AdminUser
 }) {
@@ -1436,9 +1580,15 @@ function AdminUserActionsMenu({
   )
   const isCurrentUser = user.id === currentUserId
   const isDeleting = deletingUserId === user.id
+  const isDemotingUser = demotingUserId === user.id
   const isImpersonatingUser = impersonatingUserId === user.id
+  const isPromotingUser = promotingUserId === user.id
   const isOpen = openUserMenuId === menuId
+  const canDemote = canDemoteUser(user)
   const canImpersonate = canImpersonateUser(user, currentUserId)
+  const canPromote = canPromoteUser(user, currentUserId)
+  const isWorking =
+    isDeleting || isDemotingUser || isImpersonatingUser || isPromotingUser
 
   const updateMenuPosition = useCallback(() => {
     const trigger = triggerRef.current
@@ -1555,7 +1705,7 @@ function AdminUserActionsMenu({
         aria-expanded={isOpen}
         aria-haspopup="menu"
         title="User actions"
-        disabled={isDeleting || isImpersonatingUser}
+        disabled={isWorking}
         onClick={() =>
           setOpenUserMenuId((currentUserMenuId) =>
             currentUserMenuId === menuId ? null : menuId
@@ -1590,40 +1740,67 @@ function AdminUserActionsMenu({
                     <UserRound data-icon="inline-start" />
                     Current account
                   </button>
-                ) : (
-                  <>
-                    {canImpersonate ? (
-                      <button
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-sky-100 transition-colors hover:bg-sky-400/10 hover:text-sky-100 focus:bg-sky-400/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
-                        type="button"
-                        role="menuitem"
-                        disabled={isDeleting || isImpersonatingUser}
-                        onClick={() => {
-                          setOpenUserMenuId(null)
-                          onImpersonateUser(user)
-                        }}
-                      >
-                        <LogIn data-icon="inline-start" />
-                        {isImpersonatingUser
-                          ? "Impersonating..."
-                          : "Impersonate"}
-                      </button>
-                    ) : null}
-                    <button
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
-                      type="button"
-                      role="menuitem"
-                      disabled={isDeleting || isImpersonatingUser}
-                      onClick={() => {
-                        setOpenUserMenuId(null)
-                        onDeleteUser(user)
-                      }}
-                    >
-                      <Trash2 data-icon="inline-start" />
-                      Delete user
-                    </button>
-                  </>
-                )}
+                ) : null}
+                {canImpersonate ? (
+                  <button
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-sky-100 transition-colors hover:bg-sky-400/10 hover:text-sky-100 focus:bg-sky-400/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                    type="button"
+                    role="menuitem"
+                    disabled={isWorking}
+                    onClick={() => {
+                      setOpenUserMenuId(null)
+                      onImpersonateUser(user)
+                    }}
+                  >
+                    <LogIn data-icon="inline-start" />
+                    {isImpersonatingUser ? "Impersonating..." : "Impersonate"}
+                  </button>
+                ) : null}
+                {canPromote ? (
+                  <button
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-emerald-100 transition-colors hover:bg-emerald-400/10 hover:text-emerald-100 focus:bg-emerald-400/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                    type="button"
+                    role="menuitem"
+                    disabled={isWorking}
+                    onClick={() => {
+                      setOpenUserMenuId(null)
+                      onPromoteUser(user)
+                    }}
+                  >
+                    <ShieldCheck data-icon="inline-start" />
+                    {isPromotingUser ? "Promoting..." : "Promote to admin"}
+                  </button>
+                ) : null}
+                {canDemote ? (
+                  <button
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-amber-100 transition-colors hover:bg-amber-400/10 hover:text-amber-100 focus:bg-amber-400/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                    type="button"
+                    role="menuitem"
+                    disabled={isWorking}
+                    onClick={() => {
+                      setOpenUserMenuId(null)
+                      onDemoteUser(user)
+                    }}
+                  >
+                    <ShieldMinus data-icon="inline-start" />
+                    {isDemotingUser ? "Demoting..." : "Demote to user"}
+                  </button>
+                ) : null}
+                {!isCurrentUser ? (
+                  <button
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                    type="button"
+                    role="menuitem"
+                    disabled={isWorking}
+                    onClick={() => {
+                      setOpenUserMenuId(null)
+                      onDeleteUser(user)
+                    }}
+                  >
+                    <Trash2 data-icon="inline-start" />
+                    Delete user
+                  </button>
+                ) : null}
               </div>
             </>,
             document.body
@@ -1718,6 +1895,192 @@ function DeleteAdminUserModal({
             >
               <Trash2 data-icon="inline-start" />
               {isDeleting ? "Deleting..." : "Delete user"}
+            </Button>
+          </div>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function DemoteAdminUserModal({
+  currentUserId,
+  error,
+  isDemoting,
+  onClose,
+  onConfirm,
+  user,
+}: {
+  currentUserId: string
+  error: string | null
+  isDemoting: boolean
+  onClose: () => void
+  onConfirm: () => void
+  user: AdminUser
+}) {
+  const isCurrentUser = user.id === currentUserId
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 py-6 backdrop-blur-sm"
+      role="presentation"
+      onMouseDown={isDemoting ? undefined : onClose}
+    >
+      <section
+        aria-labelledby="demote-user-title"
+        className="w-full max-w-md rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
+        role="alertdialog"
+        aria-modal="true"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-3">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-amber-300/35 bg-amber-400/10 text-amber-200">
+                <ShieldMinus className="size-4" aria-hidden="true" />
+              </div>
+              <h2 id="demote-user-title" className="text-xl font-semibold">
+                Demote to user
+              </h2>
+            </div>
+            <p className="text-sm break-words text-muted-foreground">
+              This will remove admin access from {user.email}.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Close"
+            title="Close"
+            onClick={onClose}
+            disabled={isDemoting}
+          >
+            <X />
+          </Button>
+        </header>
+
+        <div className="grid gap-4 px-5 py-5">
+          <p className="rounded-md border border-amber-300/35 bg-amber-400/10 px-3 py-2 text-sm leading-6 text-amber-100">
+            {isCurrentUser
+              ? "You will lose access to the admin dashboard after this change."
+              : "They will lose access to the admin dashboard and admin account controls."}
+          </p>
+
+          {error ? (
+            <p
+              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              role="alert"
+            >
+              {error}
+            </p>
+          ) : null}
+
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onClose}
+              disabled={isDemoting}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={onConfirm}
+              disabled={isDemoting}
+            >
+              <ShieldMinus data-icon="inline-start" />
+              {isDemoting ? "Demoting..." : "Demote user"}
+            </Button>
+          </div>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function PromoteAdminUserModal({
+  error,
+  isPromoting,
+  onClose,
+  onConfirm,
+  user,
+}: {
+  error: string | null
+  isPromoting: boolean
+  onClose: () => void
+  onConfirm: () => void
+  user: AdminUser
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 py-6 backdrop-blur-sm"
+      role="presentation"
+      onMouseDown={isPromoting ? undefined : onClose}
+    >
+      <section
+        aria-labelledby="promote-user-title"
+        className="w-full max-w-md rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
+        role="alertdialog"
+        aria-modal="true"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-3">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-emerald-300/30 bg-emerald-400/10 text-emerald-200">
+                <ShieldCheck className="size-4" aria-hidden="true" />
+              </div>
+              <h2 id="promote-user-title" className="text-xl font-semibold">
+                Promote to admin
+              </h2>
+            </div>
+            <p className="text-sm break-words text-muted-foreground">
+              This will give {user.email} full admin access.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Close"
+            title="Close"
+            onClick={onClose}
+            disabled={isPromoting}
+          >
+            <X />
+          </Button>
+        </header>
+
+        <div className="grid gap-4 px-5 py-5">
+          <p className="rounded-md border border-emerald-300/30 bg-emerald-400/10 px-3 py-2 text-sm leading-6 text-emerald-100">
+            Admins can view this dashboard, manage model presets, impersonate
+            eligible users, and manage accounts.
+          </p>
+
+          {error ? (
+            <p
+              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              role="alert"
+            >
+              {error}
+            </p>
+          ) : null}
+
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onClose}
+              disabled={isPromoting}
+            >
+              Cancel
+            </Button>
+            <Button type="button" onClick={onConfirm} disabled={isPromoting}>
+              <ShieldCheck data-icon="inline-start" />
+              {isPromoting ? "Promoting..." : "Promote user"}
             </Button>
           </div>
         </div>
@@ -1929,6 +2292,14 @@ function isAdminRole(role: string | null) {
 }
 
 function canImpersonateUser(user: AdminUser, currentUserId: string) {
+  return user.id !== currentUserId && !isAdminRole(user.role)
+}
+
+function canDemoteUser(user: AdminUser) {
+  return isAdminRole(user.role)
+}
+
+function canPromoteUser(user: AdminUser, currentUserId: string) {
   return user.id !== currentUserId && !isAdminRole(user.role)
 }
 
