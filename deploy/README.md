@@ -141,7 +141,9 @@ Postgres                 -> same Droplet, localhost only
    SIMULATION_MCP_SERVER_ENABLED=false
    ```
 
-   Fill the remaining secrets and provider settings from the example file.
+   This snippet only shows the deployment-specific values. Fill in every other
+   required variable from the example file too, including auth, billing, email,
+   and LLM provider settings.
    Generate `BETTER_AUTH_SECRET` with:
 
    ```sh
