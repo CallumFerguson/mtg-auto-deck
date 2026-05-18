@@ -123,7 +123,7 @@ Postgres                 -> same Droplet, localhost only
 
    ```sh
    sudo -u mtgapp cp mtg-auto-deck-server/.env.example mtg-auto-deck-server/.env
-   sudo -u mtgapp chmod 600 mtg-auto-deck-server/.env
+   sudo -u mtgapp chmod 666 mtg-auto-deck-server/.env
    ```
 
    Then update `mtg-auto-deck-server/.env` for production:
@@ -150,6 +150,12 @@ Postgres                 -> same Droplet, localhost only
 
    ```sh
    openssl rand -base64 48
+   ```
+
+   After editing the env file, lock it back down:
+
+   ```sh
+   sudo -u mtgapp chmod 600 mtg-auto-deck-server/.env
    ```
 
 7. Configure external services.
