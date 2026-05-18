@@ -978,28 +978,6 @@ export async function ensureSimulationsSchema() {
     ADD COLUMN IF NOT EXISTS queued_at timestamptz
   `)
   await queryDatabase(`
-    UPDATE llm_runs llm_run
-    SET owner_user_id = deck.owner_user_id,
-        updated_at = now()
-    FROM (
-      SELECT simulation_id, llm_run_id
-      FROM simulation_opening_hand_llm_runs
-      UNION
-      SELECT simulation_id, llm_run_id
-      FROM simulation_turn_llm_runs
-      UNION
-      SELECT simulation_id, llm_run_id
-      FROM simulation_report_llm_runs
-    ) linked_run
-    JOIN simulations simulation
-      ON simulation.id = linked_run.simulation_id
-    JOIN decks deck
-      ON deck.id = simulation.deck_id
-    WHERE llm_run.id = linked_run.llm_run_id
-      AND llm_run.owner_user_id IS NULL
-      AND deck.owner_user_id IS NOT NULL
-  `)
-  await queryDatabase(`
     ALTER TABLE llm_runs
     ALTER COLUMN reasoning_effort DROP NOT NULL
   `)
@@ -1221,6 +1199,28 @@ export async function ensureSimulationsSchema() {
       UNIQUE (simulation_id, attempt_number),
       UNIQUE (llm_run_id)
     )
+  `)
+  await queryDatabase(`
+    UPDATE llm_runs llm_run
+    SET owner_user_id = deck.owner_user_id,
+        updated_at = now()
+    FROM (
+      SELECT simulation_id, llm_run_id
+      FROM simulation_opening_hand_llm_runs
+      UNION
+      SELECT simulation_id, llm_run_id
+      FROM simulation_turn_llm_runs
+      UNION
+      SELECT simulation_id, llm_run_id
+      FROM simulation_report_llm_runs
+    ) linked_run
+    JOIN simulations simulation
+      ON simulation.id = linked_run.simulation_id
+    JOIN decks deck
+      ON deck.id = simulation.deck_id
+    WHERE llm_run.id = linked_run.llm_run_id
+      AND llm_run.owner_user_id IS NULL
+      AND deck.owner_user_id IS NOT NULL
   `)
   await queryDatabase(`
     CREATE TABLE IF NOT EXISTS llm_run_mcp_tokens (
