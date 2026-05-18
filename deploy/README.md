@@ -111,7 +111,7 @@ Postgres                 -> same Droplet, localhost only
    ```sh
    sudo adduser --system --group --home /opt/mtg-auto-deck --shell /bin/bash mtgapp
    sudo install -d -o mtgapp -g mtgapp /opt/mtg-auto-deck
-   sudo -u mtgapp git clone <YOUR_REPO_URL> /opt/mtg-auto-deck
+   sudo -u mtgapp git clone https://github.com/CallumFerguson/mtg-auto-deck.git /opt/mtg-auto-deck
    cd /opt/mtg-auto-deck
    sudo -u mtgapp npm ci
    sudo -u mtgapp npm run server:build
