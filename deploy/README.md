@@ -148,7 +148,19 @@ Postgres                 -> same Droplet, localhost only
    openssl rand -base64 48
    ```
 
-7. Install and start the service:
+7. Configure external services.
+
+   Configure Stripe before starting the service because the server requires
+   `STRIPE_WEBHOOK_SECRET` at startup. In Stripe, point the auth webhook at:
+
+   ```text
+   https://api.example.com/api/auth/stripe/webhook
+   ```
+
+   Use the resulting Stripe signing secret as `STRIPE_WEBHOOK_SECRET` in the
+   server environment file.
+
+8. Install and start the service:
 
    ```sh
    sudo cp deploy/mtg-auto-deck-server.service.example /etc/systemd/system/mtg-auto-deck-server.service
@@ -157,7 +169,7 @@ Postgres                 -> same Droplet, localhost only
    sudo journalctl -u mtg-auto-deck-server -f
    ```
 
-8. Install and reload the Caddy config:
+9. Install and reload the Caddy config:
 
    ```sh
    sudo cp deploy/Caddyfile.example /etc/caddy/Caddyfile
@@ -165,22 +177,12 @@ Postgres                 -> same Droplet, localhost only
    sudo systemctl reload caddy
    ```
 
-9. Verify the API:
+10. Verify the API:
 
    ```sh
    curl -fsS http://127.0.0.1:3001/health
    curl -fsS https://api.example.com/health
    ```
-
-10. Configure external services.
-
-    In Stripe, point the auth webhook at:
-
-    ```text
-    https://api.example.com/api/auth/stripe/webhook
-    ```
-
-    Use the resulting Stripe signing secret as `STRIPE_WEBHOOK_SECRET`.
 
 11. Bootstrap the first admin user.
 
