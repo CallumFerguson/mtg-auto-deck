@@ -256,16 +256,30 @@ Then deploy:
 npm run deploy
 ```
 
-For a local one-off deploy, you can provide the production URLs inline:
+After the Worker deploys, add the production app domain, such as
+`app.example.com`, to the `mtg-auto-deck` Worker in Cloudflare Workers Domains
+& Routes.
+
+## Deploying the Landing Page to Cloudflare Workers
+
+The landing page is a separate Astro app in `landing` and deploys to its own
+Cloudflare Worker, `mtg-auto-deck-landing`. Deploy it separately from the React
+app Worker.
+
+Before deploying a custom domain, make sure the landing page's app links point
+at the deployed React app URL. The current links are based on `appBaseUrl` in
+`landing/src/pages/index.astro`.
+
+From a local checkout:
 
 ```sh
-VITE_API_BASE_URL=https://api.example.com \
-VITE_APP_PUBLIC_URL=https://app.example.com \
+cd landing
+npm ci
 npm run deploy
 ```
 
-To preview the Cloudflare Workers build locally:
-
-```sh
-npm run preview:cloudflare
-```
+After the Worker deploys, add the production landing domain, such as
+`example.com`, to the `mtg-auto-deck-landing` Worker in Cloudflare Workers
+Domains & Routes. Keep the React app on its own app domain, such as
+`app.example.com`, and keep the API on the Droplet-backed API domain, such as
+`api.example.com`.
