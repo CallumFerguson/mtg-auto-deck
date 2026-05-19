@@ -378,6 +378,7 @@ const createLlmModelPresetSchema = z.object({
   model: z.string().trim().min(1),
   reasoningEffort: reasoningEffortSchema,
   openrouterModelProvider: z.string().trim().nullable().default(null),
+  serviceTier: z.string().trim().nullable().default(null),
   inputTokenCostUsdPerMillion: optionalTokenCostSchema,
   cachedInputTokenCostUsdPerMillion: optionalTokenCostSchema,
   outputTokenCostUsdPerMillion: optionalTokenCostSchema,
@@ -418,6 +419,7 @@ type ActiveLlmRunRuntime = {
   phase: LlmRunPhase
   provider: string
   reasoningEffort: string | null
+  serviceTier: string | null
   recentChunks: SimulationResultsStreamChunk[]
   resolveCompletion: () => void
   runtimeStreamKey: string
@@ -538,6 +540,7 @@ function createStreamRunFromRuntime(
     model: runtime.model,
     estimatedPriceCents: null,
     reasoningEffort: runtime.reasoningEffort,
+    serviceTier: runtime.serviceTier,
     status: runtime.status,
     runtimeStreamKey: runtime.runtimeStreamKey,
     attemptNumber: runtime.attemptNumber,
@@ -2196,6 +2199,7 @@ function buildOpeningHandOpenAiRequestPayload(
     input: fullPrompt,
     max_output_tokens: config.maxOutputTokens,
     stream: true as const,
+    ...(config.serviceTier ? { service_tier: config.serviceTier } : {}),
     metadata: {
       simulationId,
       phase: "opening_hand",
@@ -2232,6 +2236,7 @@ function buildTurnSimulationOpenAiRequestPayload(
     input: fullPrompt,
     max_output_tokens: config.maxOutputTokens,
     stream: true as const,
+    ...(config.serviceTier ? { service_tier: config.serviceTier } : {}),
     metadata: {
       simulationId,
       phase: "turn",
@@ -2267,6 +2272,7 @@ function buildReportOpenAiRequestPayload(
     input: fullPrompt,
     max_output_tokens: config.maxOutputTokens,
     stream: true as const,
+    ...(config.serviceTier ? { service_tier: config.serviceTier } : {}),
     metadata: {
       simulationId,
       phase: "report",
@@ -2318,6 +2324,7 @@ function buildOpeningHandOpenRouterRequestPayload(
     model: config.model,
     input: fullPrompt,
     maxOutputTokens: config.maxOutputTokens,
+    ...(config.serviceTier ? { serviceTier: config.serviceTier } : {}),
     metadata: {
       simulationId,
       phase: "opening_hand",
@@ -2342,6 +2349,7 @@ function buildReportOpenRouterRequestPayload(
     model: config.model,
     input: fullPrompt,
     maxOutputTokens: config.maxOutputTokens,
+    ...(config.serviceTier ? { serviceTier: config.serviceTier } : {}),
     metadata: {
       simulationId,
       phase: "report",
@@ -2417,6 +2425,7 @@ function buildTurnSimulationOpenRouterRequestPayload(
     model: config.model,
     input: fullPrompt,
     maxOutputTokens: config.maxOutputTokens,
+    ...(config.serviceTier ? { serviceTier: config.serviceTier } : {}),
     metadata: {
       simulationId,
       phase: "turn",
@@ -2474,6 +2483,15 @@ function getLlmRunOpenRouterModelProvider(
   config: ResolvedOpeningHandLlmRunConfig | ResolvedTurnSimulationLlmRunConfig
 ) {
   return config.provider === "openrouter" ? config.modelProvider : null
+}
+
+function getLlmRunServiceTier(
+  config:
+    | ResolvedEvaluationLlmRunConfig
+    | ResolvedOpeningHandLlmRunConfig
+    | ResolvedTurnSimulationLlmRunConfig
+) {
+  return config.provider === "llamacpp" ? null : config.serviceTier
 }
 
 function buildOpeningHandLlmRequestPayload(
@@ -2733,6 +2751,7 @@ function getLlmModelPresetRunConfig(preset: LlmModelPreset) {
     model: preset.model,
     reasoningEffort: preset.reasoningEffort,
     openrouterModelProvider: preset.openrouterModelProvider,
+    serviceTier: preset.serviceTier,
     inputTokenCostUsdPerMillion: preset.inputTokenCostUsdPerMillion,
     cachedInputTokenCostUsdPerMillion:
       preset.cachedInputTokenCostUsdPerMillion,
@@ -2770,6 +2789,7 @@ async function prepareAndStartOpeningHandLlmRun({
       provider: llmConfig.provider,
       model: llmConfig.model,
       openrouterModelProvider: getLlmRunOpenRouterModelProvider(llmConfig),
+      serviceTier: getLlmRunServiceTier(llmConfig),
       reasoningEffort: llmConfig.reasoningEffort,
       runtimeStreamKey: randomUUID(),
       fullPrompt: "",
@@ -2848,6 +2868,7 @@ async function prepareAndStartTurnLlmRun({
       provider: llmConfig.provider,
       model: llmConfig.model,
       openrouterModelProvider: getLlmRunOpenRouterModelProvider(llmConfig),
+      serviceTier: getLlmRunServiceTier(llmConfig),
       reasoningEffort: llmConfig.reasoningEffort,
       runtimeStreamKey: randomUUID(),
       requireAutoSimulateNextStep,
@@ -2933,6 +2954,7 @@ async function prepareAndStartReportLlmRun({
       provider: llmConfig.provider,
       model: llmConfig.model,
       openrouterModelProvider: getLlmRunOpenRouterModelProvider(llmConfig),
+      serviceTier: getLlmRunServiceTier(llmConfig),
       reasoningEffort: llmConfig.reasoningEffort,
       runtimeStreamKey: randomUUID(),
       fullPrompt,
@@ -3214,6 +3236,7 @@ function assertClaimedRunMatchesConfig(
     run.provider === config.provider &&
     run.model === config.model &&
     run.openrouterModelProvider === currentOpenRouterModelProvider &&
+    run.serviceTier === getLlmRunServiceTier(config) &&
     run.reasoningEffort === config.reasoningEffort
   ) {
     return
@@ -3230,6 +3253,7 @@ function formatQueuedRunConfig(run: ClaimedQueuedLlmRun) {
     openrouterModelProvider: run.openrouterModelProvider,
     provider: run.provider,
     reasoningEffort: run.reasoningEffort,
+    serviceTier: run.serviceTier,
   })
 }
 
@@ -3241,6 +3265,7 @@ function formatLlmRunConfig(
     openrouterModelProvider: getLlmRunOpenRouterModelProvider(config),
     provider: config.provider,
     reasoningEffort: config.reasoningEffort,
+    serviceTier: getLlmRunServiceTier(config),
   })
 }
 
@@ -3249,17 +3274,20 @@ function formatLlmRunConfigParts({
   openrouterModelProvider,
   provider,
   reasoningEffort,
+  serviceTier,
 }: {
   model: string
   openrouterModelProvider: string | null
   provider: string
   reasoningEffort: string | null
+  serviceTier: string | null
 }) {
   return [
     `provider=${provider}`,
     `model=${model}`,
     openrouterModelProvider ? `modelProvider=${openrouterModelProvider}` : null,
     reasoningEffort ? `reasoningEffort=${reasoningEffort}` : null,
+    serviceTier ? `serviceTier=${serviceTier}` : null,
   ]
     .filter(Boolean)
     .join(", ")
@@ -3404,9 +3432,12 @@ async function collectOpenAiLlmStream({
 
   throwIfRuntimeAborted(signal)
 
-  const stream = await client.responses.create(requestPayload, {
-    signal,
-  })
+  const stream = (await client.responses.create(
+    requestPayload as unknown as Parameters<typeof client.responses.create>[0],
+    {
+      signal,
+    }
+  )) as AsyncIterable<unknown>
 
   await forEachRuntimeAbortableAsync(stream, signal, async (event) => {
     const eventRecord = asRecord(event)
@@ -3526,6 +3557,9 @@ async function collectOpenRouterLlmStream({
         reasoning: requestPayload.reasoning,
         parallelToolCalls: requestPayload.parallelToolCalls,
         provider: requestPayload.provider,
+        ...(requestPayload.serviceTier
+          ? { serviceTier: requestPayload.serviceTier as never }
+          : {}),
         stopWhen: stepCountIs(requestPayload.stopWhenStepCount),
         tools: mcpClient && createTools ? createTools(mcpClient, signal) : [],
       },
@@ -3762,6 +3796,7 @@ async function collectRunEvaluationCompletion({
       model: config.model,
       input: prompt,
       max_output_tokens: config.maxOutputTokens,
+      ...(config.serviceTier ? { service_tier: config.serviceTier } : {}),
       metadata,
       reasoning: {
         effort: config.reasoningEffort,
@@ -3772,7 +3807,7 @@ async function collectRunEvaluationCompletion({
           type: "json_object",
         },
       },
-    })
+    } as unknown as Parameters<typeof client.responses.create>[0])
     const outputText = getCompletedResponseOutputText(response)
 
     logLlmApiCallFinished({
@@ -3793,6 +3828,7 @@ async function collectRunEvaluationCompletion({
       body: {
         model: config.model,
         max_completion_tokens: config.maxOutputTokens,
+        ...(config.serviceTier ? { service_tier: config.serviceTier } : {}),
         messages: [
           {
             role: "user",
@@ -4058,6 +4094,7 @@ async function runOpeningHandLlmRun({
     phase: "opening_hand",
     provider: config.provider,
     reasoningEffort: config.reasoningEffort,
+    serviceTier: getLlmRunServiceTier(config),
     recentChunks: [],
     resolveCompletion: completion.resolveCompletion,
     runtimeStreamKey,
@@ -4302,6 +4339,7 @@ async function runTurnLlmRun({
     phase: "turn",
     provider: config.provider,
     reasoningEffort: config.reasoningEffort,
+    serviceTier: getLlmRunServiceTier(config),
     recentChunks: [],
     resolveCompletion: completion.resolveCompletion,
     runtimeStreamKey,
@@ -4546,6 +4584,7 @@ async function runReportLlmRun({
     phase: "report",
     provider: config.provider,
     reasoningEffort: config.reasoningEffort,
+    serviceTier: getLlmRunServiceTier(config),
     recentChunks: [],
     resolveCompletion: completion.resolveCompletion,
     runtimeStreamKey,

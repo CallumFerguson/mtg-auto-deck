@@ -1872,6 +1872,7 @@ function createRun(overrides: {
     model: "gpt-test",
     estimatedPriceCents: null,
     reasoningEffort: "low",
+    serviceTier: "priority",
     status: overrides.status ?? "streaming",
     runtimeStreamKey: null,
     attemptNumber: overrides.attemptNumber ?? 1,

@@ -12,6 +12,7 @@ export type LlmModelPreset = {
   model: string
   reasoningEffort: ReasoningEffort
   openrouterModelProvider: string | null
+  serviceTier: string | null
   inputTokenCostUsdPerMillion: number | null
   cachedInputTokenCostUsdPerMillion: number | null
   outputTokenCostUsdPerMillion: number | null
@@ -33,11 +34,28 @@ export type CreateLlmModelPresetInput = {
   model: string
   reasoningEffort: ReasoningEffort
   openrouterModelProvider: string | null
+  serviceTier: string | null
   inputTokenCostUsdPerMillion: number | null
   cachedInputTokenCostUsdPerMillion: number | null
   outputTokenCostUsdPerMillion: number | null
   isEnabled: boolean
   isDefault: boolean
+}
+
+export type CreateLlmModelPresetInsertQuery = {
+  text: string
+  values: [
+    LlmProvider,
+    string,
+    ReasoningEffort,
+    string | null,
+    string | null,
+    number | null,
+    number | null,
+    number | null,
+    boolean,
+    boolean,
+  ]
 }
 
 type LlmModelPresetRow = {
@@ -46,6 +64,7 @@ type LlmModelPresetRow = {
   model: string
   reasoning_effort: ReasoningEffort
   openrouter_model_provider: string | null
+  service_tier: string | null
   input_token_cost_usd_per_million: string | number | null
   cached_input_token_cost_usd_per_million: string | number | null
   output_token_cost_usd_per_million: string | number | null
@@ -80,6 +99,7 @@ export async function ensureLlmModelPresetsSchema() {
       model text NOT NULL,
       reasoning_effort text NOT NULL,
       openrouter_model_provider text,
+      service_tier text,
 
       input_token_cost_usd_per_million numeric(12,6),
       cached_input_token_cost_usd_per_million numeric(12,6),
@@ -95,6 +115,10 @@ export async function ensureLlmModelPresetsSchema() {
   await queryDatabase(`
     ALTER TABLE llm_model_presets
     ADD COLUMN IF NOT EXISTS openrouter_model_provider text
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_model_presets
+    ADD COLUMN IF NOT EXISTS service_tier text
   `)
   await queryDatabase(`
     ALTER TABLE llm_model_presets
@@ -134,7 +158,7 @@ export async function listEnabledLlmModelPresets() {
     ${LLM_MODEL_PRESET_SELECT_SQL}
     FROM llm_model_presets
     WHERE is_enabled = true
-    ORDER BY is_default DESC, provider ASC, model ASC, reasoning_effort ASC, created_at ASC
+    ORDER BY is_default DESC, provider ASC, model ASC, service_tier ASC NULLS FIRST, reasoning_effort ASC, created_at ASC
   `)
 
   return result.rows.map(mapLlmModelPresetRow)
@@ -148,6 +172,7 @@ export async function listAdminLlmModelPresets() {
       preset.model,
       preset.reasoning_effort,
       preset.openrouter_model_provider,
+      preset.service_tier,
       preset.input_token_cost_usd_per_million,
       preset.cached_input_token_cost_usd_per_million,
       preset.output_token_cost_usd_per_million,
@@ -238,49 +263,71 @@ export async function createLlmModelPreset(input: CreateLlmModelPresetInput) {
       `)
     }
 
+    const insertQuery =
+      buildValidatedCreateLlmModelPresetInsertQuery(normalizedInput)
     const result = await client.query<LlmModelPresetRow>(
-      `
-        INSERT INTO llm_model_presets (
-          provider,
-          model,
-          reasoning_effort,
-          openrouter_model_provider,
-          input_token_cost_usd_per_million,
-          cached_input_token_cost_usd_per_million,
-          output_token_cost_usd_per_million,
-          is_enabled,
-          is_default
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        RETURNING
-          id,
-          provider,
-          model,
-          reasoning_effort,
-          openrouter_model_provider,
-          input_token_cost_usd_per_million,
-          cached_input_token_cost_usd_per_million,
-          output_token_cost_usd_per_million,
-          is_enabled,
-          is_default,
-          created_at,
-          updated_at
-      `,
-      [
-        normalizedInput.provider,
-        normalizedInput.model,
-        normalizedInput.reasoningEffort,
-        normalizedInput.openrouterModelProvider,
-        normalizedInput.inputTokenCostUsdPerMillion,
-        normalizedInput.cachedInputTokenCostUsdPerMillion,
-        normalizedInput.outputTokenCostUsdPerMillion,
-        normalizedInput.isEnabled,
-        normalizedInput.isDefault,
-      ]
+      insertQuery.text,
+      insertQuery.values
     )
 
     return mapLlmModelPresetRow(result.rows[0])
   })
+}
+
+export function buildCreateLlmModelPresetInsertQuery(
+  input: CreateLlmModelPresetInput
+): CreateLlmModelPresetInsertQuery {
+  return buildValidatedCreateLlmModelPresetInsertQuery(
+    validateCreateLlmModelPresetInput(input)
+  )
+}
+
+function buildValidatedCreateLlmModelPresetInsertQuery(
+  normalizedInput: CreateLlmModelPresetInput
+): CreateLlmModelPresetInsertQuery {
+  return {
+    text: `
+      INSERT INTO llm_model_presets (
+        provider,
+        model,
+        reasoning_effort,
+        openrouter_model_provider,
+        service_tier,
+        input_token_cost_usd_per_million,
+        cached_input_token_cost_usd_per_million,
+        output_token_cost_usd_per_million,
+        is_enabled,
+        is_default
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING
+        id,
+        provider,
+        model,
+        reasoning_effort,
+        openrouter_model_provider,
+        service_tier,
+        input_token_cost_usd_per_million,
+        cached_input_token_cost_usd_per_million,
+        output_token_cost_usd_per_million,
+        is_enabled,
+        is_default,
+        created_at,
+        updated_at
+    `,
+    values: [
+      normalizedInput.provider,
+      normalizedInput.model,
+      normalizedInput.reasoningEffort,
+      normalizedInput.openrouterModelProvider,
+      normalizedInput.serviceTier,
+      normalizedInput.inputTokenCostUsdPerMillion,
+      normalizedInput.cachedInputTokenCostUsdPerMillion,
+      normalizedInput.outputTokenCostUsdPerMillion,
+      normalizedInput.isEnabled,
+      normalizedInput.isDefault,
+    ],
+  }
 }
 
 export async function setLlmModelPresetEnabled(
@@ -300,6 +347,7 @@ export async function setLlmModelPresetEnabled(
         model,
         reasoning_effort,
         openrouter_model_provider,
+        service_tier,
         input_token_cost_usd_per_million,
         cached_input_token_cost_usd_per_million,
         output_token_cost_usd_per_million,
@@ -367,6 +415,7 @@ export async function setDefaultLlmModelPreset(presetId: string | null) {
           model,
           reasoning_effort,
           openrouter_model_provider,
+          service_tier,
           input_token_cost_usd_per_million,
           cached_input_token_cost_usd_per_million,
           output_token_cost_usd_per_million,
@@ -439,13 +488,18 @@ export async function deleteUnusedLlmModelPreset(presetId: string) {
 
 export function getLlmModelPresetLabel(preset: Pick<
   LlmModelPreset,
-  "model" | "openrouterModelProvider" | "provider" | "reasoningEffort"
+  | "model"
+  | "openrouterModelProvider"
+  | "provider"
+  | "reasoningEffort"
+  | "serviceTier"
 >) {
   return [
     preset.provider,
     preset.model,
     preset.openrouterModelProvider,
     preset.reasoningEffort,
+    preset.serviceTier,
   ]
     .filter(Boolean)
     .join(" / ")
@@ -458,6 +512,7 @@ const LLM_MODEL_PRESET_SELECT_SQL = `
     model,
     reasoning_effort,
     openrouter_model_provider,
+    service_tier,
     input_token_cost_usd_per_million,
     cached_input_token_cost_usd_per_million,
     output_token_cost_usd_per_million,
@@ -505,6 +560,21 @@ async function ensureLlmModelPresetConstraints() {
       CHECK (
         (provider = 'openrouter' AND (openrouter_model_provider IS NULL OR btrim(openrouter_model_provider) <> ''))
         OR (provider <> 'openrouter' AND openrouter_model_provider IS NULL)
+      )
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_model_presets
+    DROP CONSTRAINT IF EXISTS llm_model_presets_service_tier_provider_check
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_model_presets
+    ADD CONSTRAINT llm_model_presets_service_tier_provider_check
+      CHECK (
+        service_tier IS NULL
+        OR (
+          provider IN ('openai', 'openrouter')
+          AND btrim(service_tier) <> ''
+        )
       )
   `)
   await queryDatabase(`
@@ -569,10 +639,17 @@ function validateCreateLlmModelPresetInput(
   }
 
   const openrouterModelProvider = input.openrouterModelProvider?.trim() || null
+  const serviceTier = input.serviceTier?.trim() || null
 
   if (parsedProvider.data !== "openrouter" && openrouterModelProvider) {
     throw new LlmModelPresetValidationError(
       "OpenRouter model provider can only be set for OpenRouter presets."
+    )
+  }
+
+  if (parsedProvider.data === "llamacpp" && serviceTier) {
+    throw new LlmModelPresetValidationError(
+      "Service tier can only be set for OpenAI or OpenRouter presets."
     )
   }
 
@@ -583,6 +660,7 @@ function validateCreateLlmModelPresetInput(
     reasoningEffort: parsedReasoningEffort.data,
     openrouterModelProvider:
       parsedProvider.data === "openrouter" ? openrouterModelProvider : null,
+    serviceTier: parsedProvider.data === "llamacpp" ? null : serviceTier,
     inputTokenCostUsdPerMillion: validateOptionalCost(
       input.inputTokenCostUsdPerMillion,
       "Input token cost"
@@ -618,6 +696,7 @@ function mapLlmModelPresetRow(row: LlmModelPresetRow): LlmModelPreset {
     model: row.model,
     reasoningEffort: row.reasoning_effort,
     openrouterModelProvider: row.openrouter_model_provider,
+    serviceTier: row.service_tier,
     inputTokenCostUsdPerMillion: toOptionalNumber(
       row.input_token_cost_usd_per_million
     ),

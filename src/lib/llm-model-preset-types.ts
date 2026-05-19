@@ -14,6 +14,7 @@ export type LlmModelPreset = {
   model: string
   reasoningEffort: ReasoningEffort
   openrouterModelProvider: string | null
+  serviceTier: string | null
   inputTokenCostUsdPerMillion: number | null
   cachedInputTokenCostUsdPerMillion: number | null
   outputTokenCostUsdPerMillion: number | null
@@ -51,7 +52,11 @@ export type UpdateLlmModelPresetResponse = {
 export function getLlmModelPresetLabel(
   preset: Pick<
     LlmModelPreset,
-    "model" | "openrouterModelProvider" | "provider" | "reasoningEffort"
+    | "model"
+    | "openrouterModelProvider"
+    | "provider"
+    | "reasoningEffort"
+    | "serviceTier"
   >
 ) {
   return [
@@ -59,6 +64,7 @@ export function getLlmModelPresetLabel(
     preset.model,
     preset.openrouterModelProvider,
     preset.reasoningEffort,
+    preset.serviceTier,
   ]
     .filter(Boolean)
     .join(" / ")

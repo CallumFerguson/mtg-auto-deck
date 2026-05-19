@@ -88,6 +88,7 @@ type LlmRunRow = {
   provider: string
   model: string
   openrouter_model_provider: string | null
+  service_tier: string | null
   reasoning_effort: string | null
   llm_model_preset_id: string | null
   status: LlmRunStatus
@@ -891,6 +892,7 @@ async function listLinkedLlmRuns({
         llm_run.provider,
         llm_run.model,
         llm_run.openrouter_model_provider,
+        llm_run.service_tier,
         llm_run.reasoning_effort,
         llm_run.llm_model_preset_id,
         llm_run.status,
@@ -946,6 +948,7 @@ async function copyLlmRun({
         provider,
         model,
         openrouter_model_provider,
+        service_tier,
         reasoning_effort,
         llm_model_preset_id,
         owner_user_id,
@@ -976,22 +979,23 @@ async function copyLlmRun({
         $6,
         $7,
         $8,
-        NULL,
-        NULL,
         $9,
-        $10::jsonb,
+        NULL,
+        NULL,
+        $10,
         $11::jsonb,
         $12::jsonb,
+        $13::jsonb,
         NULL,
         NULL,
-        $13,
         $14,
         $15,
         $16,
         $17,
         $18,
         $19,
-        $20
+        $20,
+        $21
       )
       RETURNING id
     `,
@@ -1000,6 +1004,7 @@ async function copyLlmRun({
       sourceRun.provider,
       sourceRun.model,
       sourceRun.openrouter_model_provider,
+      sourceRun.service_tier,
       sourceRun.reasoning_effort,
       sourceRun.llm_model_preset_id,
       ownerUserId,

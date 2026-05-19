@@ -5882,6 +5882,12 @@ function SimulationDebugRunGroup({
                   {run.reasoningEffort || "N/A"}
                 </span>
               </p>
+              <p className="text-muted-foreground">
+                Service tier:{" "}
+                <span className="text-foreground">
+                  {run.serviceTier || "N/A"}
+                </span>
+              </p>
               <p className="break-all text-muted-foreground">
                 Runtime key:{" "}
                 <span className="text-foreground">

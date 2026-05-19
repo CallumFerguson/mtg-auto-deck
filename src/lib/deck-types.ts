@@ -134,6 +134,7 @@ export type EvaluationLlmModelPreset = {
   model: string
   reasoningEffort: ReasoningEffort
   openrouterModelProvider: string | null
+  serviceTier: string | null
   isEnabled: boolean
 }
 
@@ -186,6 +187,7 @@ export type SimulationDebugLlmRun = {
   model: string
   estimatedPriceCents: string | null
   reasoningEffort: string | null
+  serviceTier: string | null
   status: string
   runtimeStreamKey: string | null
   attemptNumber: number

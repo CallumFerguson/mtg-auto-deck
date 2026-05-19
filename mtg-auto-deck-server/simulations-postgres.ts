@@ -74,6 +74,7 @@ export type CreateOpeningHandLlmRunInput = {
   provider: string
   model: string
   openrouterModelProvider: string | null
+  serviceTier: string | null
   reasoningEffort: string | null
   runtimeStreamKey: string
   fullPrompt: string
@@ -87,6 +88,7 @@ export type CreateTurnLlmRunInput = {
   provider: string
   model: string
   openrouterModelProvider: string | null
+  serviceTier: string | null
   reasoningEffort: string | null
   runtimeStreamKey: string
   requireAutoSimulateNextStep?: boolean
@@ -98,6 +100,7 @@ export type CreateReportLlmRunInput = {
   provider: string
   model: string
   openrouterModelProvider: string | null
+  serviceTier: string | null
   reasoningEffort: string | null
   runtimeStreamKey: string
   fullPrompt: string
@@ -133,6 +136,7 @@ export type ClaimedQueuedLlmRun = {
   provider: string
   model: string
   openrouterModelProvider: string | null
+  serviceTier: string | null
   reasoningEffort: string | null
   runtimeStreamKey: string
   attemptNumber: number
@@ -244,6 +248,7 @@ export type EvaluationLlmModelPreset = {
   model: string
   reasoningEffort: ReasoningEffort
   openrouterModelProvider: string | null
+  serviceTier: string | null
   isEnabled: boolean
 }
 
@@ -325,6 +330,7 @@ export const TURN_EVALUATION_UPSERT_SQL = `
     preset.model AS llm_model_preset_model,
     preset.reasoning_effort AS llm_model_preset_reasoning_effort,
     preset.openrouter_model_provider AS llm_model_preset_openrouter_model_provider,
+    preset.service_tier AS llm_model_preset_service_tier,
     preset.is_enabled AS llm_model_preset_is_enabled,
     upserted.legal_turn_pass,
     upserted.reasoning_pass,
@@ -378,6 +384,7 @@ export const OPENING_HAND_EVALUATION_UPSERT_SQL = `
     preset.model AS llm_model_preset_model,
     preset.reasoning_effort AS llm_model_preset_reasoning_effort,
     preset.openrouter_model_provider AS llm_model_preset_openrouter_model_provider,
+    preset.service_tier AS llm_model_preset_service_tier,
     preset.is_enabled AS llm_model_preset_is_enabled,
     upserted.legal_simulation_pass,
     upserted.reasoning_pass,
@@ -398,6 +405,7 @@ export type SimulationDebugLlmRun = {
   model: string
   estimatedPriceCents: string | null
   reasoningEffort: string | null
+  serviceTier: string | null
   status: LlmRunStatus
   runtimeStreamKey: string | null
   attemptNumber: number
@@ -886,6 +894,7 @@ export async function ensureSimulationsSchema() {
       provider text NOT NULL,
       model text NOT NULL,
       openrouter_model_provider text,
+      service_tier text,
       reasoning_effort text,
       llm_model_preset_id uuid REFERENCES llm_model_presets(id) ON DELETE RESTRICT,
       owner_user_id text REFERENCES "user"(id) ON DELETE SET NULL,
@@ -938,6 +947,10 @@ export async function ensureSimulationsSchema() {
   `)
   await queryDatabase(`
     ALTER TABLE llm_runs
+    ADD COLUMN IF NOT EXISTS service_tier text
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_runs
     ADD COLUMN IF NOT EXISTS llm_model_preset_id uuid REFERENCES llm_model_presets(id) ON DELETE RESTRICT
   `)
   await queryDatabase(`
@@ -963,6 +976,21 @@ export async function ensureSimulationsSchema() {
       CHECK (
         openrouter_model_provider IS NULL
         OR provider = 'openrouter'
+      )
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_runs
+    DROP CONSTRAINT IF EXISTS llm_runs_service_tier_provider_check
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_runs
+    ADD CONSTRAINT llm_runs_service_tier_provider_check
+      CHECK (
+        service_tier IS NULL
+        OR (
+          provider IN ('openai', 'openrouter')
+          AND btrim(service_tier) <> ''
+        )
       )
   `)
   await queryDatabase(`
@@ -2277,6 +2305,7 @@ export async function createOpeningHandLlmRun(
           provider,
           model,
           openrouter_model_provider,
+          service_tier,
           reasoning_effort,
           owner_user_id,
           runtime_stream_key,
@@ -2293,7 +2322,8 @@ export async function createOpeningHandLlmRun(
           $6,
           $7,
           $8,
-          $9::jsonb
+          $9,
+          $10::jsonb
         )
         RETURNING id, status, runtime_stream_key, created_at
       `,
@@ -2302,6 +2332,7 @@ export async function createOpeningHandLlmRun(
         input.provider,
         input.model,
         openrouterModelProvider,
+        input.serviceTier,
         input.reasoningEffort,
         simulationResult.rows[0].owner_user_id,
         input.runtimeStreamKey,
@@ -2537,6 +2568,7 @@ export async function createTurnLlmRun(
           provider,
           model,
           openrouter_model_provider,
+          service_tier,
           reasoning_effort,
           owner_user_id,
           runtime_stream_key
@@ -2549,7 +2581,8 @@ export async function createTurnLlmRun(
           $4,
           $5,
           $6,
-          $7
+          $7,
+          $8
         )
         RETURNING id, status, runtime_stream_key, created_at
       `,
@@ -2558,6 +2591,7 @@ export async function createTurnLlmRun(
         input.provider,
         input.model,
         openrouterModelProvider,
+        input.serviceTier,
         input.reasoningEffort,
         simulation.owner_user_id,
         input.runtimeStreamKey,
@@ -2659,6 +2693,7 @@ export async function createReportLlmRun(
           provider,
           model,
           openrouter_model_provider,
+          service_tier,
           reasoning_effort,
           owner_user_id,
           runtime_stream_key,
@@ -2675,7 +2710,8 @@ export async function createReportLlmRun(
           $6,
           $7,
           $8,
-          $9::jsonb
+          $9,
+          $10::jsonb
         )
         RETURNING id, status, runtime_stream_key, created_at
       `,
@@ -2684,6 +2720,7 @@ export async function createReportLlmRun(
         input.provider,
         input.model,
         openrouterModelProvider,
+        input.serviceTier,
         input.reasoningEffort,
         simulation.owner_user_id,
         input.runtimeStreamKey,
@@ -3519,6 +3556,7 @@ export async function claimNextQueuedLlmRun({
       provider: string
       model: string
       openrouter_model_provider: string | null
+      service_tier: string | null
       reasoning_effort: string | null
       runtime_stream_key: string
       attempt_number: number
@@ -3613,6 +3651,7 @@ export async function claimNextQueuedLlmRun({
           llm_run.provider,
           llm_run.model,
           llm_run.openrouter_model_provider,
+          llm_run.service_tier,
           llm_run.reasoning_effort,
           llm_run.runtime_stream_key,
           candidate.attempt_number,
@@ -3710,6 +3749,7 @@ export async function claimNextQueuedLlmRun({
       provider: run.provider,
       model: run.model,
       openrouterModelProvider: run.openrouter_model_provider,
+      serviceTier: run.service_tier,
       reasoningEffort: run.reasoning_effort,
       runtimeStreamKey: run.runtime_stream_key,
       attemptNumber: run.attempt_number,
@@ -5865,6 +5905,7 @@ type SimulationDebugLlmRunRow = {
   estimated_cost_usd: string | number | null
   openrouter_reported_cost_usd: string | number | null
   reasoning_effort: string | null
+  service_tier: string | null
   status: LlmRunStatus
   runtime_stream_key: string | null
   failure_message: string | null
@@ -5907,6 +5948,7 @@ type OpeningHandEvaluationRow = {
   llm_model_preset_model: string | null
   llm_model_preset_reasoning_effort: ReasoningEffort | null
   llm_model_preset_openrouter_model_provider: string | null
+  llm_model_preset_service_tier: string | null
   llm_model_preset_is_enabled: boolean | null
   legal_simulation_pass: boolean
   reasoning_pass: boolean
@@ -5925,6 +5967,7 @@ type TurnEvaluationRow = {
   llm_model_preset_model: string | null
   llm_model_preset_reasoning_effort: ReasoningEffort | null
   llm_model_preset_openrouter_model_provider: string | null
+  llm_model_preset_service_tier: string | null
   llm_model_preset_is_enabled: boolean | null
   legal_turn_pass: boolean
   reasoning_pass: boolean
@@ -5963,6 +6006,7 @@ async function getSimulationDebugLlmRuns({
         llm_run.estimated_cost_usd,
         llm_run.openrouter_reported_cost_usd,
         COALESCE(preset.reasoning_effort, llm_run.reasoning_effort) AS reasoning_effort,
+        COALESCE(preset.service_tier, llm_run.service_tier) AS service_tier,
         llm_run.status,
         llm_run.runtime_stream_key,
         llm_run.failure_message,
@@ -6018,6 +6062,7 @@ async function getSimulationDebugLlmRuns({
           ),
         }),
         reasoningEffort: row.reasoning_effort || null,
+        serviceTier: row.service_tier || null,
         status: row.status,
         runtimeStreamKey: row.runtime_stream_key,
         attemptNumber: row.attempt_number,
@@ -6127,6 +6172,7 @@ async function getOpeningHandEvaluationsByLlmRunIds(
         preset.model AS llm_model_preset_model,
         preset.reasoning_effort AS llm_model_preset_reasoning_effort,
         preset.openrouter_model_provider AS llm_model_preset_openrouter_model_provider,
+        preset.service_tier AS llm_model_preset_service_tier,
         preset.is_enabled AS llm_model_preset_is_enabled,
         evaluation.legal_simulation_pass,
         evaluation.reasoning_pass,
@@ -6288,6 +6334,7 @@ async function getTurnEvaluationsByLlmRunIds(llmRunIds: readonly string[]) {
         preset.model AS llm_model_preset_model,
         preset.reasoning_effort AS llm_model_preset_reasoning_effort,
         preset.openrouter_model_provider AS llm_model_preset_openrouter_model_provider,
+        preset.service_tier AS llm_model_preset_service_tier,
         preset.is_enabled AS llm_model_preset_is_enabled,
         evaluation.legal_turn_pass,
         evaluation.reasoning_pass,
@@ -6335,6 +6382,7 @@ function mapEvaluationLlmModelPresetRow(
     | "llm_model_preset_model"
     | "llm_model_preset_reasoning_effort"
     | "llm_model_preset_openrouter_model_provider"
+    | "llm_model_preset_service_tier"
     | "llm_model_preset_is_enabled"
   >
 ): EvaluationLlmModelPreset | null {
@@ -6354,6 +6402,7 @@ function mapEvaluationLlmModelPresetRow(
     model: row.llm_model_preset_model,
     reasoningEffort: row.llm_model_preset_reasoning_effort,
     openrouterModelProvider: row.llm_model_preset_openrouter_model_provider,
+    serviceTier: row.llm_model_preset_service_tier,
     isEnabled: row.llm_model_preset_is_enabled,
   }
 }

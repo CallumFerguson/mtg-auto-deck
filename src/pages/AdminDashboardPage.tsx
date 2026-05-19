@@ -817,6 +817,7 @@ function AdminModelPresetsSection() {
     model: "",
     reasoningEffort: "medium" as ReasoningEffort,
     openrouterModelProvider: "",
+    serviceTier: "",
     inputTokenCostUsdPerMillion: "",
     cachedInputTokenCostUsdPerMillion: "",
     outputTokenCostUsdPerMillion: "",
@@ -878,6 +879,10 @@ function AdminModelPresetsSection() {
             form.provider === "openrouter"
               ? form.openrouterModelProvider.trim() || null
               : null,
+          serviceTier:
+            form.provider === "llamacpp"
+              ? null
+              : form.serviceTier.trim() || null,
           inputTokenCostUsdPerMillion: parseOptionalCost(
             form.inputTokenCostUsdPerMillion
           ),
@@ -904,6 +909,7 @@ function AdminModelPresetsSection() {
         ...currentForm,
         model: "",
         openrouterModelProvider: "",
+        serviceTier: "",
         inputTokenCostUsdPerMillion: "",
         cachedInputTokenCostUsdPerMillion: "",
         outputTokenCostUsdPerMillion: "",
@@ -1027,6 +1033,10 @@ function AdminModelPresetsSection() {
                   setForm((currentForm) => ({
                     ...currentForm,
                     provider: event.target.value as LlmProvider,
+                    serviceTier:
+                      event.target.value === "llamacpp"
+                        ? ""
+                        : currentForm.serviceTier,
                   }))
                 }
               >
@@ -1076,6 +1086,20 @@ function AdminModelPresetsSection() {
                   setForm((currentForm) => ({
                     ...currentForm,
                     openrouterModelProvider: event.target.value,
+                  }))
+                }
+              />
+            </AdminFormField>
+            <AdminFormField label="Service tier">
+              <input
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:opacity-50"
+                value={form.serviceTier}
+                placeholder="auto"
+                disabled={form.provider === "llamacpp"}
+                onChange={(event) =>
+                  setForm((currentForm) => ({
+                    ...currentForm,
+                    serviceTier: event.target.value,
                   }))
                 }
               />
@@ -1216,6 +1240,9 @@ function AdminModelPresetsSection() {
                         {formatProviderLabel(preset.provider)}
                         {preset.openrouterModelProvider
                           ? ` via ${preset.openrouterModelProvider}`
+                          : ""}
+                        {preset.serviceTier
+                          ? ` (${preset.serviceTier} tier)`
                           : ""}
                       </p>
                     </div>

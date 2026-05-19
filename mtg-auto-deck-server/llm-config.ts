@@ -21,6 +21,7 @@ type BaseLlmRunConfig = {
   modelPresetId: string
   maxOutputTokens: number
   provider: LlmProvider
+  serviceTier: string | null
   tokenCosts: TokenPrice
 }
 
@@ -38,6 +39,7 @@ export type LlmModelPresetRunConfig = {
   model: string
   reasoningEffort: ReasoningEffort
   openrouterModelProvider: string | null
+  serviceTier: string | null
   inputTokenCostUsdPerMillion: number | null
   cachedInputTokenCostUsdPerMillion: number | null
   outputTokenCostUsdPerMillion: number | null
@@ -58,6 +60,7 @@ export type LlamaCppRunConfig = BaseLlmRunConfig & {
   baseUrl: string
   model: string
   reasoningEffort: null
+  serviceTier: null
   stopWhenStepCount: number
 }
 
@@ -190,6 +193,7 @@ function getLlmRunConfig(
       modelPresetId: preset.id,
       provider: preset.provider,
       reasoningEffort: preset.reasoningEffort,
+      serviceTier: preset.serviceTier,
       tokenCosts,
     }
   }
@@ -205,6 +209,7 @@ function getLlmRunConfig(
       modelPresetId: preset.id,
       provider: preset.provider,
       reasoningEffort: null,
+      serviceTier: null,
       stopWhenStepCount: getRequiredPositiveIntegerEnvironmentVariable(
         environment,
         "LLAMACPP_STOP_WHEN_STEP_COUNT"
@@ -221,6 +226,7 @@ function getLlmRunConfig(
     modelProvider: preset.openrouterModelProvider,
     provider: preset.provider,
     reasoningEffort: preset.reasoningEffort,
+    serviceTier: preset.serviceTier,
     stopWhenStepCount: getRequiredPositiveIntegerEnvironmentVariable(
       environment,
       "OPENROUTER_STOP_WHEN_STEP_COUNT"

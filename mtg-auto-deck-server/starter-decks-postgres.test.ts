@@ -89,6 +89,7 @@ type FakeLlmRun = {
   provider: string
   model: string
   openrouter_model_provider: string | null
+  service_tier: string | null
   reasoning_effort: string | null
   llm_model_preset_id: string | null
   owner_user_id: string | null
@@ -574,31 +575,32 @@ class FakeStarterDeckCopyClient {
 
   copyLlmRun<T>(values: unknown[]) {
     const copiedRun: FakeLlmRun = {
-      cancel_requested_at: getDateOrNull(values[15]),
-      cancelled_at: getDateOrNull(values[16]),
-      completed_at: getDateOrNull(values[13]),
-      created_at: getDate(values[18]),
+      cancel_requested_at: getDateOrNull(values[16]),
+      cancelled_at: getDateOrNull(values[17]),
+      completed_at: getDateOrNull(values[14]),
+      created_at: getDate(values[19]),
       estimated_cost_usd: null,
-      failed_at: getDateOrNull(values[14]),
-      failure_message: getStringOrNull(values[17]),
-      full_prompt: getString(values[8]),
+      failed_at: getDateOrNull(values[15]),
+      failure_message: getStringOrNull(values[18]),
+      full_prompt: getString(values[9]),
       id: `copied-run-${this.llmRunIdSequence}`,
-      llm_model_preset_id: getStringOrNull(values[5]),
+      llm_model_preset_id: getStringOrNull(values[6]),
       model: getString(values[2]),
       openrouter_model_provider: getStringOrNull(values[3]),
       openrouter_reported_cost_usd: null,
-      owner_user_id: getString(values[6]),
+      owner_user_id: getString(values[7]),
       phase: getLlmRunPhase(values[0]),
       provider: getString(values[1]),
       queued_at: null,
-      reasoning_effort: getStringOrNull(values[4]),
-      request_payload: getJsonObject(values[9]),
-      response_metadata: getJsonObject(values[10]),
+      reasoning_effort: getStringOrNull(values[5]),
+      request_payload: getJsonObject(values[10]),
+      response_metadata: getJsonObject(values[11]),
       runtime_stream_key: null,
-      started_at: getDateOrNull(values[12]),
-      status: getLlmRunStatus(values[7]),
-      updated_at: getDate(values[19]),
-      usage: getJsonObject(values[11]),
+      service_tier: getStringOrNull(values[4]),
+      started_at: getDateOrNull(values[13]),
+      status: getLlmRunStatus(values[8]),
+      updated_at: getDate(values[20]),
+      usage: getJsonObject(values[12]),
     }
 
     this.llmRunIdSequence += 1
@@ -836,6 +838,7 @@ test("starter deck copy clones deck data, presets, terminal history, and remaps 
     assert.equal(run.queued_at, null)
     assert.equal(run.estimated_cost_usd, null)
     assert.equal(run.openrouter_reported_cost_usd, null)
+    assert.equal(run.service_tier, "priority")
     assert.equal(run.status, "completed")
   }
 
@@ -1279,6 +1282,7 @@ function createLlmRun({
     provider: "openai",
     queued_at: new Date("2026-01-01T00:01:00.000Z"),
     reasoning_effort: "medium",
+    service_tier: "priority",
     request_payload: { request: true },
     response_metadata: { metadata: true },
     runtime_stream_key: `stream-${id}`,
