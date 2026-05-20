@@ -7398,7 +7398,7 @@ function formatCardReference(cards: readonly SimulationPromptCard[]) {
 function formatCardText(card: SimulationPromptCard) {
   const lines = [
     formatCardLine("Mana Cost", card.manaCost),
-    formatCardLine("Converted Mana Cost", card.convertedManaCost),
+    formatCardLine("Mana Value", card.convertedManaCost),
     formatCardLine("Type", card.typeLine),
     formatCardLine("Rules Text", card.oracleText),
     formatPowerToughness(card),
