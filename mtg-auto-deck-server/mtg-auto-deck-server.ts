@@ -120,7 +120,7 @@ import {
   upsertOpeningHandEvaluation,
   upsertTurnEvaluation,
   updateLlmRunRequestData,
-  updateSimulationLlmModelPreset,
+  updateSimulation,
 } from "./simulations-postgres.js"
 import type {
   LlmRunChunkInput,
@@ -193,6 +193,7 @@ import {
   throwIfRuntimeAborted,
 } from "./llm-runtime-cancellation.js"
 import {
+  buildProviderReasoningOptions,
   getGenericGameRulesReferenceEnabled,
   LlmConfigurationError,
   getOpenRouterApiKey,
@@ -363,11 +364,19 @@ const createSimulationSchema = z.object({
   llmModelPresetId: z.uuid(),
   turnsToSimulate: z.number().int().nonnegative(),
   autoGenerateReport: z.boolean().default(false),
+  reasoningSummariesEnabled: z.boolean().default(false),
   startingHandId: z.uuid().nullable(),
 })
-const updateSimulationModelPresetSchema = z.object({
-  llmModelPresetId: z.uuid(),
-})
+const updateSimulationSchema = z
+  .object({
+    llmModelPresetId: z.uuid().optional(),
+    reasoningSummariesEnabled: z.boolean().optional(),
+  })
+  .refine(
+    (update) =>
+      update.llmModelPresetId !== undefined ||
+      update.reasoningSummariesEnabled !== undefined
+  )
 const optionalTokenCostSchema = z
   .number()
   .finite()
@@ -2193,7 +2202,8 @@ function buildOpeningHandOpenAiRequestPayload(
   config: OpeningHandOpenAiRunConfig,
   fullPrompt: string,
   mcpRunToken: string,
-  simulationId: string
+  simulationId: string,
+  reasoningSummariesEnabled: boolean
 ) {
   return {
     model: config.model,
@@ -2205,10 +2215,10 @@ function buildOpeningHandOpenAiRequestPayload(
       simulationId,
       phase: "opening_hand",
     },
-    reasoning: {
-      effort: config.reasoningEffort,
-      summary: "auto" as const,
-    },
+    reasoning: buildProviderReasoningOptions(
+      config.reasoningEffort,
+      reasoningSummariesEnabled
+    ),
     tools: [
       {
         type: "mcp" as const,
@@ -2230,7 +2240,8 @@ function buildTurnSimulationOpenAiRequestPayload(
   fullPrompt: string,
   mcpRunToken: string,
   simulationId: string,
-  turnNumber: number
+  turnNumber: number,
+  reasoningSummariesEnabled: boolean
 ) {
   return {
     model: config.model,
@@ -2243,10 +2254,10 @@ function buildTurnSimulationOpenAiRequestPayload(
       phase: "turn",
       turnNumber: String(turnNumber),
     },
-    reasoning: {
-      effort: config.reasoningEffort,
-      summary: "auto" as const,
-    },
+    reasoning: buildProviderReasoningOptions(
+      config.reasoningEffort,
+      reasoningSummariesEnabled
+    ),
     tools: [
       {
         type: "mcp" as const,
@@ -2266,7 +2277,8 @@ function buildTurnSimulationOpenAiRequestPayload(
 function buildReportOpenAiRequestPayload(
   config: OpenAiRunConfig,
   fullPrompt: string,
-  simulationId: string
+  simulationId: string,
+  reasoningSummariesEnabled: boolean
 ) {
   return {
     model: config.model,
@@ -2278,10 +2290,10 @@ function buildReportOpenAiRequestPayload(
       simulationId,
       phase: "report",
     },
-    reasoning: {
-      effort: config.reasoningEffort,
-      summary: "auto" as const,
-    },
+    reasoning: buildProviderReasoningOptions(
+      config.reasoningEffort,
+      reasoningSummariesEnabled
+    ),
   }
 }
 
@@ -2318,7 +2330,8 @@ function appendMcpRunTokenToPath(path: string, token: string) {
 function buildOpeningHandOpenRouterRequestPayload(
   config: OpenRouterRunConfig,
   fullPrompt: string,
-  simulationId: string
+  simulationId: string,
+  reasoningSummariesEnabled: boolean
 ) {
   return {
     providerType: "openrouter" as const,
@@ -2330,10 +2343,10 @@ function buildOpeningHandOpenRouterRequestPayload(
       simulationId,
       phase: "opening_hand",
     },
-    reasoning: {
-      effort: config.reasoningEffort,
-      summary: "auto" as const,
-    },
+    reasoning: buildProviderReasoningOptions(
+      config.reasoningEffort,
+      reasoningSummariesEnabled
+    ),
     parallelToolCalls: false as const,
     provider: getOpenRouterProviderPreferences(config.modelProvider),
     stopWhenStepCount: config.stopWhenStepCount,
@@ -2343,7 +2356,8 @@ function buildOpeningHandOpenRouterRequestPayload(
 function buildReportOpenRouterRequestPayload(
   config: OpenRouterRunConfig,
   fullPrompt: string,
-  simulationId: string
+  simulationId: string,
+  reasoningSummariesEnabled: boolean
 ) {
   return {
     providerType: "openrouter" as const,
@@ -2355,10 +2369,10 @@ function buildReportOpenRouterRequestPayload(
       simulationId,
       phase: "report",
     },
-    reasoning: {
-      effort: config.reasoningEffort,
-      summary: "auto" as const,
-    },
+    reasoning: buildProviderReasoningOptions(
+      config.reasoningEffort,
+      reasoningSummariesEnabled
+    ),
     parallelToolCalls: false as const,
     provider: getOpenRouterProviderPreferences(config.modelProvider),
     stopWhenStepCount: config.stopWhenStepCount,
@@ -2419,7 +2433,8 @@ function buildTurnSimulationOpenRouterRequestPayload(
   config: OpenRouterRunConfig,
   fullPrompt: string,
   simulationId: string,
-  turnNumber: number
+  turnNumber: number,
+  reasoningSummariesEnabled: boolean
 ) {
   return {
     providerType: "openrouter" as const,
@@ -2432,10 +2447,10 @@ function buildTurnSimulationOpenRouterRequestPayload(
       phase: "turn",
       turnNumber: String(turnNumber),
     },
-    reasoning: {
-      effort: config.reasoningEffort,
-      summary: "auto" as const,
-    },
+    reasoning: buildProviderReasoningOptions(
+      config.reasoningEffort,
+      reasoningSummariesEnabled
+    ),
     parallelToolCalls: false as const,
     provider: getOpenRouterProviderPreferences(config.modelProvider),
     stopWhenStepCount: config.stopWhenStepCount,
@@ -2499,14 +2514,16 @@ function buildOpeningHandLlmRequestPayload(
   config: ResolvedOpeningHandLlmRunConfig,
   fullPrompt: string,
   mcpRunToken: string,
-  simulationId: string
+  simulationId: string,
+  reasoningSummariesEnabled: boolean
 ) {
   if (config.provider === "openai") {
     return buildOpeningHandOpenAiRequestPayload(
       config,
       fullPrompt,
       mcpRunToken,
-      simulationId
+      simulationId,
+      reasoningSummariesEnabled
     )
   }
 
@@ -2521,7 +2538,8 @@ function buildOpeningHandLlmRequestPayload(
   return buildOpeningHandOpenRouterRequestPayload(
     config,
     fullPrompt,
-    simulationId
+    simulationId,
+    reasoningSummariesEnabled
   )
 }
 
@@ -2530,7 +2548,8 @@ function buildTurnSimulationLlmRequestPayload(
   fullPrompt: string,
   mcpRunToken: string,
   simulationId: string,
-  turnNumber: number
+  turnNumber: number,
+  reasoningSummariesEnabled: boolean
 ) {
   if (config.provider === "openai") {
     return buildTurnSimulationOpenAiRequestPayload(
@@ -2538,7 +2557,8 @@ function buildTurnSimulationLlmRequestPayload(
       fullPrompt,
       mcpRunToken,
       simulationId,
-      turnNumber
+      turnNumber,
+      reasoningSummariesEnabled
     )
   }
 
@@ -2555,24 +2575,36 @@ function buildTurnSimulationLlmRequestPayload(
     config,
     fullPrompt,
     simulationId,
-    turnNumber
+    turnNumber,
+    reasoningSummariesEnabled
   )
 }
 
 function buildReportLlmRequestPayload(
   config: ResolvedTurnSimulationLlmRunConfig,
   fullPrompt: string,
-  simulationId: string
+  simulationId: string,
+  reasoningSummariesEnabled: boolean
 ) {
   if (config.provider === "openai") {
-    return buildReportOpenAiRequestPayload(config, fullPrompt, simulationId)
+    return buildReportOpenAiRequestPayload(
+      config,
+      fullPrompt,
+      simulationId,
+      reasoningSummariesEnabled
+    )
   }
 
   if (config.provider === "llamacpp") {
     return buildReportLlamaCppRequestPayload(config, fullPrompt, simulationId)
   }
 
-  return buildReportOpenRouterRequestPayload(config, fullPrompt, simulationId)
+  return buildReportOpenRouterRequestPayload(
+    config,
+    fullPrompt,
+    simulationId,
+    reasoningSummariesEnabled
+  )
 }
 
 type OpeningHandLlmRequestPayload = ReturnType<
@@ -2805,7 +2837,8 @@ async function prepareAndStartOpeningHandLlmRun({
       llmConfig,
       fullPrompt,
       QUEUED_MCP_RUN_TOKEN_PLACEHOLDER,
-      simulationId
+      simulationId,
+      openingHandRun.reasoningSummariesEnabled
     )
 
     await updateLlmRunRequestData({
@@ -2888,7 +2921,8 @@ async function prepareAndStartTurnLlmRun({
       fullPrompt,
       QUEUED_MCP_RUN_TOKEN_PLACEHOLDER,
       simulationId,
-      turnNumber
+      turnNumber,
+      turnRun.reasoningSummariesEnabled
     )
 
     await updateLlmRunRequestData({
@@ -2944,11 +2978,6 @@ async function prepareAndStartReportLlmRun({
       deckId,
       simulationId,
     })
-    const requestPayload = buildReportLlmRequestPayload(
-      llmConfig,
-      fullPrompt,
-      simulationId
-    )
     const reportRun = await createReportLlmRun(deckId, {
       simulationId,
       llmModelPresetId: llmConfig.modelPresetId,
@@ -2959,10 +2988,23 @@ async function prepareAndStartReportLlmRun({
       reasoningEffort: llmConfig.reasoningEffort,
       runtimeStreamKey: randomUUID(),
       fullPrompt,
-      requestPayload: getPersistableLlmRequestPayload(requestPayload),
+      requestPayload: {},
       requireAutoSimulateNextStep,
     })
     createdLlmRunId = reportRun.llmRunId
+
+    const requestPayload = buildReportLlmRequestPayload(
+      llmConfig,
+      fullPrompt,
+      simulationId,
+      reportRun.reasoningSummariesEnabled
+    )
+
+    await updateLlmRunRequestData({
+      llmRunId: reportRun.llmRunId,
+      fullPrompt,
+      requestPayload: getPersistableLlmRequestPayload(requestPayload),
+    })
 
     if (!(await markLlmRunQueued(reportRun.llmRunId))) {
       throw new Error("Report LLM run could not be queued.")
@@ -3171,6 +3213,7 @@ async function startClaimedQueuedLlmRun(run: ClaimedQueuedLlmRun) {
         deckId: run.deckId,
         fullPrompt: run.fullPrompt,
         llmRunId: run.llmRunId,
+        reasoningSummariesEnabled: run.reasoningSummariesEnabled,
         runtimeStreamKey: run.runtimeStreamKey,
         simulationId: run.simulationId,
         startedAt: run.startedAt,
@@ -3200,6 +3243,7 @@ async function startClaimedQueuedLlmRun(run: ClaimedQueuedLlmRun) {
         deckId: run.deckId,
         fullPrompt: run.fullPrompt,
         llmRunId: run.llmRunId,
+        reasoningSummariesEnabled: run.reasoningSummariesEnabled,
         runtimeStreamKey: run.runtimeStreamKey,
         simulationId: run.simulationId,
         startedAt: run.startedAt,
@@ -3215,6 +3259,7 @@ async function startClaimedQueuedLlmRun(run: ClaimedQueuedLlmRun) {
       deckId: run.deckId,
       fullPrompt: run.fullPrompt,
       llmRunId: run.llmRunId,
+      reasoningSummariesEnabled: run.reasoningSummariesEnabled,
       runtimeStreamKey: run.runtimeStreamKey,
       simulationId: run.simulationId,
       startedAt: run.startedAt,
@@ -3776,11 +3821,13 @@ async function collectRunEvaluationCompletion({
   llmRunId,
   metadata,
   prompt,
+  reasoningSummariesEnabled,
 }: {
   config: ResolvedEvaluationLlmRunConfig
   llmRunId: string
   metadata: Record<string, string>
   prompt: string
+  reasoningSummariesEnabled: boolean
 }) {
   logLlmApiCallStarted({
     llmRunId,
@@ -3799,10 +3846,10 @@ async function collectRunEvaluationCompletion({
       max_output_tokens: config.maxOutputTokens,
       ...(config.serviceTier ? { service_tier: config.serviceTier } : {}),
       metadata,
-      reasoning: {
-        effort: config.reasoningEffort,
-        summary: "auto" as const,
-      },
+      reasoning: buildProviderReasoningOptions(
+        config.reasoningEffort,
+        reasoningSummariesEnabled
+      ),
       text: {
         format: {
           type: "json_object",
@@ -3838,10 +3885,10 @@ async function collectRunEvaluationCompletion({
         ],
         metadata,
         provider: getOpenRouterChatProviderPreferences(config.modelProvider),
-        reasoning: {
-          effort: config.reasoningEffort,
-          summary: "auto" as const,
-        },
+        reasoning: buildProviderReasoningOptions(
+          config.reasoningEffort,
+          reasoningSummariesEnabled
+        ),
         response_format: {
           type: "json_object",
         },
@@ -4028,6 +4075,7 @@ function startOpeningHandLlmRun({
   deckId,
   fullPrompt,
   llmRunId,
+  reasoningSummariesEnabled,
   runtimeStreamKey,
   simulationId,
   startedAt,
@@ -4038,6 +4086,7 @@ function startOpeningHandLlmRun({
   deckId: string
   fullPrompt: string
   llmRunId: string
+  reasoningSummariesEnabled: boolean
   runtimeStreamKey: string
   simulationId: string
   startedAt: string
@@ -4049,6 +4098,7 @@ function startOpeningHandLlmRun({
     deckId,
     fullPrompt,
     llmRunId,
+    reasoningSummariesEnabled,
     runtimeStreamKey,
     simulationId,
     startedAt,
@@ -4062,6 +4112,7 @@ async function runOpeningHandLlmRun({
   deckId,
   fullPrompt,
   llmRunId,
+  reasoningSummariesEnabled,
   runtimeStreamKey,
   simulationId,
   startedAt,
@@ -4072,6 +4123,7 @@ async function runOpeningHandLlmRun({
   deckId: string
   fullPrompt: string
   llmRunId: string
+  reasoningSummariesEnabled: boolean
   runtimeStreamKey: string
   simulationId: string
   startedAt: string
@@ -4128,7 +4180,8 @@ async function runOpeningHandLlmRun({
       config,
       fullPrompt,
       mcpRunToken.token,
-      simulationId
+      simulationId,
+      reasoningSummariesEnabled
     )
 
     await updateLlmRunRequestData({
@@ -4268,6 +4321,7 @@ function startTurnLlmRun({
   deckId,
   fullPrompt,
   llmRunId,
+  reasoningSummariesEnabled,
   runtimeStreamKey,
   simulationId,
   startedAt,
@@ -4279,6 +4333,7 @@ function startTurnLlmRun({
   deckId: string
   fullPrompt: string
   llmRunId: string
+  reasoningSummariesEnabled: boolean
   runtimeStreamKey: string
   simulationId: string
   startedAt: string
@@ -4291,6 +4346,7 @@ function startTurnLlmRun({
     deckId,
     fullPrompt,
     llmRunId,
+    reasoningSummariesEnabled,
     runtimeStreamKey,
     simulationId,
     startedAt,
@@ -4305,6 +4361,7 @@ async function runTurnLlmRun({
   deckId,
   fullPrompt,
   llmRunId,
+  reasoningSummariesEnabled,
   runtimeStreamKey,
   simulationId,
   startedAt,
@@ -4316,6 +4373,7 @@ async function runTurnLlmRun({
   deckId: string
   fullPrompt: string
   llmRunId: string
+  reasoningSummariesEnabled: boolean
   runtimeStreamKey: string
   simulationId: string
   startedAt: string
@@ -4375,7 +4433,8 @@ async function runTurnLlmRun({
       fullPrompt,
       mcpRunToken.token,
       simulationId,
-      turnNumber
+      turnNumber,
+      reasoningSummariesEnabled
     )
 
     await updateLlmRunRequestData({
@@ -4518,6 +4577,7 @@ function startReportLlmRun({
   deckId,
   fullPrompt,
   llmRunId,
+  reasoningSummariesEnabled,
   runtimeStreamKey,
   simulationId,
   startedAt,
@@ -4528,6 +4588,7 @@ function startReportLlmRun({
   deckId: string
   fullPrompt: string
   llmRunId: string
+  reasoningSummariesEnabled: boolean
   runtimeStreamKey: string
   simulationId: string
   startedAt: string
@@ -4539,6 +4600,7 @@ function startReportLlmRun({
     deckId,
     fullPrompt,
     llmRunId,
+    reasoningSummariesEnabled,
     runtimeStreamKey,
     simulationId,
     startedAt,
@@ -4552,6 +4614,7 @@ async function runReportLlmRun({
   deckId,
   fullPrompt,
   llmRunId,
+  reasoningSummariesEnabled,
   runtimeStreamKey,
   simulationId,
   startedAt,
@@ -4562,6 +4625,7 @@ async function runReportLlmRun({
   deckId: string
   fullPrompt: string
   llmRunId: string
+  reasoningSummariesEnabled: boolean
   runtimeStreamKey: string
   simulationId: string
   startedAt: string
@@ -4607,7 +4671,8 @@ async function runReportLlmRun({
     const requestPayload = buildReportLlmRequestPayload(
       config,
       fullPrompt,
-      simulationId
+      simulationId,
+      reasoningSummariesEnabled
     )
     await updateLlmRunRequestData({
       llmRunId,
@@ -5699,6 +5764,7 @@ async function main() {
             modelPresetId: config.modelPresetId,
           },
           prompt,
+          reasoningSummariesEnabled: run.reasoningSummariesEnabled,
         })
         const evaluationJson =
           parseOpeningHandEvaluationResponseText(responseText)
@@ -5871,6 +5937,7 @@ async function main() {
             modelPresetId: config.modelPresetId,
           },
           prompt,
+          reasoningSummariesEnabled: run.reasoningSummariesEnabled,
         })
         const evaluationJson = parseTurnEvaluationResponseText(responseText)
         const evaluation = await saveTurnEvaluation({
@@ -6321,7 +6388,7 @@ async function main() {
     async (req: Request, res: Response) => {
       const deckId = String(req.params.deckId)
       const simulationId = String(req.params.simulationId)
-      const parsedUpdate = updateSimulationModelPresetSchema.safeParse(req.body)
+      const parsedUpdate = updateSimulationSchema.safeParse(req.body)
 
       if (!parsedUpdate.success) {
         res.status(400).json({
@@ -6331,10 +6398,10 @@ async function main() {
       }
 
       try {
-        const simulation = await updateSimulationLlmModelPreset(
+        const simulation = await updateSimulation(
           deckId,
           simulationId,
-          parsedUpdate.data.llmModelPresetId
+          parsedUpdate.data
         )
 
         await publishSimulationResultsState({

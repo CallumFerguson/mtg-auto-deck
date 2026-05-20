@@ -111,6 +111,16 @@ export type LlmRunQueueConfig = {
   maxConcurrentRuns: number
 }
 
+export function buildProviderReasoningOptions(
+  reasoningEffort: ReasoningEffort,
+  reasoningSummariesEnabled: boolean
+) {
+  return {
+    effort: reasoningEffort,
+    ...(reasoningSummariesEnabled ? { summary: "auto" as const } : {}),
+  }
+}
+
 export class LlmConfigurationError extends Error {
   constructor(message: string) {
     super(message)

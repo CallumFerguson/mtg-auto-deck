@@ -126,12 +126,12 @@ type OpeningHandCardOption = {
 
 type SimulationResultsAction =
   | {
-    kind: "opening_hand"
-  }
+      kind: "opening_hand"
+    }
   | {
-    kind: "turn"
-    turnNumber: number
-  }
+      kind: "turn"
+      turnNumber: number
+    }
 
 const DEFAULT_TURNS_TO_SIMULATE = "1"
 const ACTIVITY_PANEL_EXIT_FALLBACK_MS = 350
@@ -660,6 +660,8 @@ export function DeckSimulation({
     DEFAULT_TURNS_TO_SIMULATE
   )
   const [autoGenerateReport, setAutoGenerateReport] = useState(false)
+  const [reasoningSummariesEnabled, setReasoningSummariesEnabled] =
+    useState(false)
   const [openingHandMode, setOpeningHandMode] = useState<
     "simulate" | "provide"
   >("simulate")
@@ -992,6 +994,7 @@ export function DeckSimulation({
     setSelectedModelPresetId(defaultModelPresetId ?? "")
     setTurnsToSimulate(DEFAULT_TURNS_TO_SIMULATE)
     setAutoGenerateReport(false)
+    setReasoningSummariesEnabled(false)
     setOpeningHandMode("simulate")
     setSelectedOpeningHandId(startingHands[0]?.id ?? "")
   }
@@ -1034,6 +1037,7 @@ export function DeckSimulation({
             llmModelPresetId: selectedModelPreset.id,
             turnsToSimulate: parsedTurnsToSimulate,
             autoGenerateReport: autoGenerateReport && canAutoGenerateReport,
+            reasoningSummariesEnabled,
             startingHandId:
               openingHandMode === "provide" && selectedOpeningHand
                 ? selectedOpeningHand.id
@@ -1136,10 +1140,11 @@ export function DeckSimulation({
           >
             <div className="simulation-sidebar-surface sticky top-0 z-10 px-2 pt-2 pb-1">
               <button
-                className={`flex h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm font-medium transition-colors ${isNewSimulationSelected
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
-                  }`}
+                className={`flex h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm font-medium transition-colors ${
+                  isNewSimulationSelected
+                    ? "bg-accent text-accent-foreground"
+                    : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+                }`}
                 type="button"
                 aria-pressed={isNewSimulationSelected}
                 onClick={() => {
@@ -1152,8 +1157,9 @@ export function DeckSimulation({
                 New simulation
               </button>
               <div
-                className={`absolute right-0 bottom-0 left-0 border-b border-border transition-opacity ${isSimulationListScrolled ? "opacity-100" : "opacity-0"
-                  }`}
+                className={`absolute right-0 bottom-0 left-0 border-b border-border transition-opacity ${
+                  isSimulationListScrolled ? "opacity-100" : "opacity-0"
+                }`}
               />
             </div>
 
@@ -1181,11 +1187,12 @@ export function DeckSimulation({
                   {simulations.map((simulation) => (
                     <li key={simulation.id} className="group relative">
                       <button
-                        className={`h-11 w-full rounded-md pr-11 pl-3 text-left text-sm font-medium transition-colors ${!isNewSimulationSelected &&
+                        className={`h-11 w-full rounded-md pr-11 pl-3 text-left text-sm font-medium transition-colors ${
+                          !isNewSimulationSelected &&
                           selectedSimulationId === simulation.id
-                          ? "bg-accent text-accent-foreground"
-                          : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
-                          }`}
+                            ? "bg-accent text-accent-foreground"
+                            : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+                        }`}
                         type="button"
                         aria-pressed={
                           !isNewSimulationSelected &&
@@ -1200,13 +1207,14 @@ export function DeckSimulation({
                         {getSimulationLabel(simulation)}
                       </button>
                       {simulation.activeLlmRunCount > 0 &&
-                        (isNewSimulationSelected ||
-                          selectedSimulationId !== simulation.id) ? (
+                      (isNewSimulationSelected ||
+                        selectedSimulationId !== simulation.id) ? (
                         <div
-                          className={`pointer-events-none absolute inset-y-0 right-1 flex items-center px-2 text-muted-foreground transition-opacity group-hover:opacity-0 ${openSimulationMenuId === simulation.id
-                            ? "opacity-0"
-                            : "opacity-100"
-                            }`}
+                          className={`pointer-events-none absolute inset-y-0 right-1 flex items-center px-2 text-muted-foreground transition-opacity group-hover:opacity-0 ${
+                            openSimulationMenuId === simulation.id
+                              ? "opacity-0"
+                              : "opacity-100"
+                          }`}
                           aria-hidden="true"
                         >
                           <svg
@@ -1228,10 +1236,11 @@ export function DeckSimulation({
                         </div>
                       ) : null}
                       <div
-                        className={`absolute inset-y-0 right-1 flex items-center opacity-0 transition-opacity group-hover:opacity-100 ${openSimulationMenuId === simulation.id
-                          ? "opacity-100"
-                          : ""
-                          }`}
+                        className={`absolute inset-y-0 right-1 flex items-center opacity-0 transition-opacity group-hover:opacity-100 ${
+                          openSimulationMenuId === simulation.id
+                            ? "opacity-100"
+                            : ""
+                        }`}
                       >
                         <Button
                           type="button"
@@ -1314,10 +1323,11 @@ export function DeckSimulation({
                       </legend>
                       <div className="grid gap-2 sm:grid-cols-2">
                         <label
-                          className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${seedMode === "random"
-                            ? "border-ring bg-accent text-accent-foreground"
-                            : "border-border bg-background/35 text-muted-foreground"
-                            }`}
+                          className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
+                            seedMode === "random"
+                              ? "border-ring bg-accent text-accent-foreground"
+                              : "border-border bg-background/35 text-muted-foreground"
+                          }`}
                         >
                           <input
                             className="size-4 accent-sky-300"
@@ -1329,10 +1339,11 @@ export function DeckSimulation({
                           Random seed
                         </label>
                         <label
-                          className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${seedMode === "set"
-                            ? "border-ring bg-accent text-accent-foreground"
-                            : "border-border bg-background/35 text-muted-foreground"
-                            }`}
+                          className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
+                            seedMode === "set"
+                              ? "border-ring bg-accent text-accent-foreground"
+                              : "border-border bg-background/35 text-muted-foreground"
+                          }`}
                         >
                           <input
                             className="size-4 accent-sky-300"
@@ -1502,19 +1513,22 @@ export function DeckSimulation({
                     </div>
 
                     <div
-                      className={`flex items-center gap-3 rounded-md border px-3 py-3 text-sm transition-colors ${canAutoGenerateReport && autoGenerateReport
-                        ? "border-ring bg-accent text-accent-foreground"
-                        : "border-border bg-background/35 text-muted-foreground"
-                        } ${canAutoGenerateReport
+                      className={`flex items-center gap-3 rounded-md border px-3 py-3 text-sm transition-colors ${
+                        canAutoGenerateReport && autoGenerateReport
+                          ? "border-ring bg-accent text-accent-foreground"
+                          : "border-border bg-background/35 text-muted-foreground"
+                      } ${
+                        canAutoGenerateReport
                           ? ""
                           : "cursor-not-allowed opacity-50"
-                        }`}
+                      }`}
                     >
                       <button
-                        className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus:ring-3 focus:ring-ring/25 focus:outline-none disabled:cursor-not-allowed ${canAutoGenerateReport && autoGenerateReport
-                          ? "border-sky-300/70 bg-sky-500/70"
-                          : "border-border bg-muted/55"
-                          }`}
+                        className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus:ring-3 focus:ring-ring/25 focus:outline-none disabled:cursor-not-allowed ${
+                          canAutoGenerateReport && autoGenerateReport
+                            ? "border-sky-300/70 bg-sky-500/70"
+                            : "border-border bg-muted/55"
+                        }`}
                         type="button"
                         role="switch"
                         aria-checked={
@@ -1527,10 +1541,11 @@ export function DeckSimulation({
                         }
                       >
                         <span
-                          className={`absolute top-1/2 left-1 size-4 -translate-y-1/2 rounded-full bg-foreground shadow-sm shadow-black/30 transition-transform ${canAutoGenerateReport && autoGenerateReport
-                            ? "translate-x-5"
-                            : "translate-x-0"
-                            }`}
+                          className={`absolute top-1/2 left-1 size-4 -translate-y-1/2 rounded-full bg-foreground shadow-sm shadow-black/30 transition-transform ${
+                            canAutoGenerateReport && autoGenerateReport
+                              ? "translate-x-5"
+                              : "translate-x-0"
+                          }`}
                         />
                       </button>
                       <span className="font-medium">
@@ -1538,16 +1553,22 @@ export function DeckSimulation({
                       </span>
                     </div>
 
+                    <ReasoningSummariesSwitch
+                      checked={reasoningSummariesEnabled}
+                      onCheckedChange={setReasoningSummariesEnabled}
+                    />
+
                     <fieldset className="grid gap-3">
                       <legend className="text-sm font-medium text-foreground">
                         Opening hand
                       </legend>
                       <div className="grid gap-2 sm:grid-cols-2">
                         <label
-                          className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${openingHandMode === "simulate"
-                            ? "border-ring bg-accent text-accent-foreground"
-                            : "border-border bg-background/35 text-muted-foreground"
-                            }`}
+                          className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
+                            openingHandMode === "simulate"
+                              ? "border-ring bg-accent text-accent-foreground"
+                              : "border-border bg-background/35 text-muted-foreground"
+                          }`}
                         >
                           <input
                             className="size-4 accent-sky-300"
@@ -1559,10 +1580,11 @@ export function DeckSimulation({
                           Simulate opening hand
                         </label>
                         <label
-                          className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${openingHandMode === "provide"
-                            ? "border-ring bg-accent text-accent-foreground"
-                            : "border-border bg-background/35 text-muted-foreground"
-                            }`}
+                          className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
+                            openingHandMode === "provide"
+                              ? "border-ring bg-accent text-accent-foreground"
+                              : "border-border bg-background/35 text-muted-foreground"
+                          }`}
                         >
                           <input
                             className="size-4 accent-sky-300"
@@ -1875,6 +1897,47 @@ function DeleteSimulationModal({
   )
 }
 
+function ReasoningSummariesSwitch({
+  checked,
+  disabled = false,
+  onCheckedChange,
+}: {
+  checked: boolean
+  disabled?: boolean
+  onCheckedChange: (checked: boolean) => void
+}) {
+  return (
+    <div
+      className={`flex items-center gap-3 rounded-md border px-3 py-3 text-sm transition-colors ${
+        checked
+          ? "border-ring bg-accent text-accent-foreground"
+          : "border-border bg-background/35 text-muted-foreground"
+      } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+    >
+      <button
+        className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus:ring-3 focus:ring-ring/25 focus:outline-none disabled:cursor-not-allowed ${
+          checked
+            ? "border-sky-300/70 bg-sky-500/70"
+            : "border-border bg-muted/55"
+        }`}
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label="Reasoning summaries"
+        disabled={disabled}
+        onClick={() => onCheckedChange(!checked)}
+      >
+        <span
+          className={`absolute top-1/2 left-1 size-4 -translate-y-1/2 rounded-full bg-foreground shadow-sm shadow-black/30 transition-transform ${
+            checked ? "translate-x-5" : "translate-x-0"
+          }`}
+        />
+      </button>
+      <span className="font-medium">Reasoning summaries</span>
+    </div>
+  )
+}
+
 function SimulationDetailsModal({
   deckId,
   isAdmin,
@@ -2024,6 +2087,16 @@ function SimulationDetailsModal({
                   </dt>
                   <dd className="mt-1 font-medium text-foreground">
                     {simulation.autoGenerateReport ? "Yes" : "No"}
+                  </dd>
+                </div>
+                <div className="rounded-md border border-border bg-background/35 p-3 sm:col-span-2">
+                  <dt className="text-muted-foreground">LLM options</dt>
+                  <dd className="mt-2">
+                    <SimulationReasoningSummariesSetting
+                      deckId={deckId}
+                      onSimulationUpdated={onSimulationUpdated}
+                      simulation={simulation}
+                    />
                   </dd>
                 </div>
                 <div className="rounded-md border border-border bg-background/35 p-3 sm:col-span-2">
@@ -2599,9 +2672,9 @@ function SimulationDetails({
         turnLlmRuns: currentResultsInfo.turnLlmRuns.map((run) =>
           run.llmRunId === evaluation.turnLlmRunId
             ? {
-              ...run,
-              turnEvaluation: evaluation,
-            }
+                ...run,
+                turnEvaluation: evaluation,
+              }
             : run
         ),
       }
@@ -2622,9 +2695,9 @@ function SimulationDetails({
         openingHandLlmRuns: currentResultsInfo.openingHandLlmRuns.map((run) =>
           run.llmRunId === evaluation.openingHandLlmRunId
             ? {
-              ...run,
-              openingHandEvaluation: evaluation,
-            }
+                ...run,
+                openingHandEvaluation: evaluation,
+              }
             : run
         ),
       }
@@ -2845,6 +2918,95 @@ function SimulationDetails({
           onClose={closeActivityPanel}
           onExited={handleActivityPanelExited}
         />
+      ) : null}
+    </div>
+  )
+}
+
+function SimulationReasoningSummariesSetting({
+  deckId,
+  onSimulationUpdated,
+  simulation,
+}: {
+  deckId: string
+  onSimulationUpdated: (simulation: Simulation) => void
+  simulation: Simulation
+}) {
+  const [selectedEnabled, setSelectedEnabled] = useState(
+    simulation.reasoningSummariesEnabled
+  )
+  const [isSaving, setIsSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setSelectedEnabled(simulation.reasoningSummariesEnabled)
+    setError(null)
+  }, [simulation.id, simulation.reasoningSummariesEnabled])
+
+  async function handleReasoningSummariesChange(nextEnabled: boolean) {
+    if (isSaving || nextEnabled === simulation.reasoningSummariesEnabled) {
+      setSelectedEnabled(nextEnabled)
+      return
+    }
+
+    setSelectedEnabled(nextEnabled)
+    setError(null)
+    setIsSaving(true)
+
+    try {
+      const response = await apiFetch(
+        `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            reasoningSummariesEnabled: nextEnabled,
+          }),
+        }
+      )
+
+      if (!response.ok) {
+        setSelectedEnabled(simulation.reasoningSummariesEnabled)
+        setError(
+          await readApiError(
+            response,
+            "Reasoning summaries could not be updated."
+          )
+        )
+        return
+      }
+
+      const data = (await response.json()) as UpdateSimulationResponse
+      onSimulationUpdated(data.simulation)
+    } catch {
+      setSelectedEnabled(simulation.reasoningSummariesEnabled)
+      setError("Reasoning summaries could not be updated.")
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  return (
+    <div className="grid gap-2">
+      <ReasoningSummariesSwitch
+        checked={selectedEnabled}
+        disabled={isSaving}
+        onCheckedChange={(nextEnabled) =>
+          void handleReasoningSummariesChange(nextEnabled)
+        }
+      />
+      {isSaving ? (
+        <p className="text-sm text-muted-foreground">Saving...</p>
+      ) : null}
+      {error ? (
+        <p
+          className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          role="alert"
+        >
+          {error}
+        </p>
       ) : null}
     </div>
   )
@@ -3277,9 +3439,9 @@ function SimulationResultsPanel({
 
       return run
         ? {
-          resultKind: "opening_hand" as const,
-          run,
-        }
+            resultKind: "opening_hand" as const,
+            run,
+          }
         : null
     }
 
@@ -3290,9 +3452,9 @@ function SimulationResultsPanel({
 
     return run
       ? {
-        resultKind: "turn" as const,
-        run,
-      }
+          resultKind: "turn" as const,
+          run,
+        }
       : null
   }, [
     evaluationRunSelection,
@@ -3446,8 +3608,9 @@ function SimulationResultsPanel({
           return (
             <section
               key={run.llmRunId}
-              className={`grid gap-3 rounded-md border border-border bg-background/35 p-3 ${run.resultKind === "report" ? "order-last" : ""
-                }`}
+              className={`grid gap-3 rounded-md border border-border bg-background/35 p-3 ${
+                run.resultKind === "report" ? "order-last" : ""
+              }`}
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="min-w-0">
@@ -3560,8 +3723,8 @@ function SimulationResultsPanel({
               ) : null}
 
               {run.resultEntries.length > 0 ||
-                finishedThinkingStatus ||
-                hasLiveReport ? (
+              finishedThinkingStatus ||
+              hasLiveReport ? (
                 <SimulationResultChunkCards
                   run={run}
                   entries={run.resultEntries}
@@ -3586,12 +3749,13 @@ function SimulationResultsPanel({
                 />
               ) : run.resultEntries.length === 0 && !run.gameState ? (
                 <div
-                  className={`rounded-md border px-3 py-2 text-sm ${isUsageLimitFailure
-                    ? "border-amber-300/30 bg-amber-400/10 text-amber-100"
-                    : emptyRunFailureMessage
-                      ? "border-destructive/40 bg-destructive/10 text-destructive"
-                      : "border-border bg-black/20 text-muted-foreground"
-                    }`}
+                  className={`rounded-md border px-3 py-2 text-sm ${
+                    isUsageLimitFailure
+                      ? "border-amber-300/30 bg-amber-400/10 text-amber-100"
+                      : emptyRunFailureMessage
+                        ? "border-destructive/40 bg-destructive/10 text-destructive"
+                        : "border-border bg-black/20 text-muted-foreground"
+                  }`}
                   role={
                     isUsageLimitFailure
                       ? "status"
@@ -4206,8 +4370,9 @@ function getEvaluationModelPresetLabel(
     return "Evaluation model preset unavailable"
   }
 
-  return `${getLlmModelPresetLabel(evaluation.llmModelPreset)}${evaluation.llmModelPreset.isEnabled ? "" : " (disabled)"
-    }`
+  return `${getLlmModelPresetLabel(evaluation.llmModelPreset)}${
+    evaluation.llmModelPreset.isEnabled ? "" : " (disabled)"
+  }`
 }
 
 function TurnEvaluationMetric({
@@ -4423,9 +4588,9 @@ function SimulationResultThinkingStatus({
     activeToolCallName === null
       ? null
       : getKnownSimulationResultToolLabel({
-        mcpFunctionName: activeToolCallName,
-        state: "active",
-      })
+          mcpFunctionName: activeToolCallName,
+          state: "active",
+        })
   const activeElapsedText =
     runStartTimeMs === null || isFinished || isPending
       ? null
@@ -4559,8 +4724,8 @@ function SimulationRunActivityPanel({
     runStartTimeMs === null
       ? null
       : formatMinutesSeconds(
-        (runFinishedTimeMs ?? currentTimeMs) - runStartTimeMs
-      )
+          (runFinishedTimeMs ?? currentTimeMs) - runStartTimeMs
+        )
   const terminalActivityStatus = useMemo(
     () =>
       getSimulationRunTerminalActivityStatus({
@@ -4753,8 +4918,9 @@ function SimulationRunActivityPanel({
 
   return (
     <div
-      className={`h-full min-h-0 shrink-0 overflow-hidden transition-[width] duration-300 ease-out motion-reduce:transition-none ${isOpen ? "w-[clamp(18rem,30vw,24rem)]" : "w-0"
-        }`}
+      className={`h-full min-h-0 shrink-0 overflow-hidden transition-[width] duration-300 ease-out motion-reduce:transition-none ${
+        isOpen ? "w-[clamp(18rem,30vw,24rem)]" : "w-0"
+      }`}
       onTransitionEnd={handlePanelTransitionEnd}
     >
       <aside
@@ -4936,15 +5102,15 @@ function SimulationRunActivityTerminalStatus({
 
 type SimulationRunActivityTimelineItem =
   | {
-    id: string
-    type: "reasoning"
-    block: Extract<SimulationRunActivityBlock, { type: "reasoning" }>
-  }
+      id: string
+      type: "reasoning"
+      block: Extract<SimulationRunActivityBlock, { type: "reasoning" }>
+    }
   | {
-    id: string
-    type: "tool_call_group"
-    blocks: Extract<SimulationRunActivityBlock, { type: "tool_call" }>[]
-  }
+      id: string
+      type: "tool_call_group"
+      blocks: Extract<SimulationRunActivityBlock, { type: "tool_call" }>[]
+    }
 
 function getSimulationRunActivityTimelineItems(
   blocks: readonly SimulationRunActivityBlock[]
@@ -5707,7 +5873,7 @@ function isMcpCallFailure(chunk: SimulationDebugLlmRunChunk) {
 
   return (
     getPayloadString(asPayloadRecord(chunk.payload).item, "status") ===
-    "failed" || getMcpCallErrorPayload(chunk) !== null
+      "failed" || getMcpCallErrorPayload(chunk) !== null
   )
 }
 
@@ -5898,7 +6064,7 @@ function SimulationDebugRunGroup({
             </div>
 
             {run.provider === "openrouter" &&
-              (run.openrouterGenerations?.length ?? 0) > 0 ? (
+            (run.openrouterGenerations?.length ?? 0) > 0 ? (
               <OpenRouterGenerationsTable
                 deckId={deckId}
                 generations={run.openrouterGenerations ?? []}
@@ -5959,19 +6125,19 @@ function SimulationDebugRunGroup({
 
 type OpenRouterGenerationLookupState =
   | {
-    status: "loading"
-  }
+      status: "loading"
+    }
   | {
-    status: "loaded"
-    providerName: string | null
-    providerEntry: unknown | null
-    providerSlug: string | null
-    result: unknown
-  }
+      status: "loaded"
+      providerName: string | null
+      providerEntry: unknown | null
+      providerSlug: string | null
+      result: unknown
+    }
   | {
-    status: "error"
-    error: string
-  }
+      status: "error"
+      error: string
+    }
 
 function OpenRouterGenerationsTable({
   deckId,
@@ -6694,12 +6860,13 @@ function CreateStartingHandModal({
                     return (
                       <li key={card.id}>
                         <label
-                          className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${isSelected
-                            ? "bg-accent text-accent-foreground"
-                            : isDisabled
-                              ? "text-muted-foreground/55"
-                              : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
-                            }`}
+                          className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
+                            isSelected
+                              ? "bg-accent text-accent-foreground"
+                              : isDisabled
+                                ? "text-muted-foreground/55"
+                                : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+                          }`}
                         >
                           <input
                             className="size-4 accent-sky-300"

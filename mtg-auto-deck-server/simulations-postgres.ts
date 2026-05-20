@@ -112,6 +112,7 @@ export type OpeningHandLlmRun = {
   simulationId: string
   llmRunId: string
   attemptNumber: number
+  reasoningSummariesEnabled: boolean
   runtimeStreamKey: string
   status: LlmRunStatus
   createdAt: string
@@ -138,6 +139,7 @@ export type ClaimedQueuedLlmRun = {
   openrouterModelProvider: string | null
   serviceTier: string | null
   reasoningEffort: string | null
+  reasoningSummariesEnabled: boolean
   runtimeStreamKey: string
   attemptNumber: number
   createdAt: string
@@ -493,6 +495,7 @@ export type SimulationSummary = {
   library: string[]
   turnsToSimulate: number
   autoGenerateReport: boolean
+  reasoningSummariesEnabled: boolean
   completedLlmRunCount: number
   activeLlmRunCount: number
   status: SimulationStatus
@@ -587,6 +590,7 @@ export type CreateSimulationInput = {
   llmModelPresetId: string | null
   turnsToSimulate: number
   autoGenerateReport: boolean
+  reasoningSummariesEnabled?: boolean
   startingHandId: string | null
   createdVia?: SimulationCreatedVia
 }
@@ -856,6 +860,7 @@ export async function ensureSimulationsSchema() {
       has_drawn_starting_hand boolean NOT NULL DEFAULT false,
       auto_simulate_next_step boolean NOT NULL DEFAULT true,
       auto_generate_report boolean NOT NULL DEFAULT false,
+      reasoning_summaries_enabled boolean NOT NULL DEFAULT false,
 
       status simulation_status NOT NULL DEFAULT 'pending',
       started_at timestamptz,
@@ -875,6 +880,10 @@ export async function ensureSimulationsSchema() {
   await queryDatabase(`
     ALTER TABLE simulations
     ADD COLUMN IF NOT EXISTS auto_generate_report boolean NOT NULL DEFAULT false
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulations
+    ADD COLUMN IF NOT EXISTS reasoning_summaries_enabled boolean NOT NULL DEFAULT false
   `)
   await queryDatabase(`
     ALTER TABLE simulations
@@ -901,6 +910,7 @@ export async function ensureSimulationsSchema() {
       openrouter_model_provider text,
       service_tier text,
       reasoning_effort text,
+      reasoning_summaries_enabled boolean NOT NULL DEFAULT false,
       llm_model_preset_id uuid REFERENCES llm_model_presets(id) ON DELETE RESTRICT,
       owner_user_id text REFERENCES "user"(id) ON DELETE SET NULL,
 
@@ -1001,6 +1011,10 @@ export async function ensureSimulationsSchema() {
   await queryDatabase(`
     ALTER TABLE llm_runs
     ADD COLUMN IF NOT EXISTS reasoning_effort text
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_runs
+    ADD COLUMN IF NOT EXISTS reasoning_summaries_enabled boolean NOT NULL DEFAULT false
   `)
   await queryDatabase(`
     ALTER TABLE llm_runs
@@ -1367,6 +1381,7 @@ type SimulationSummaryRow = {
   library: unknown
   turns_to_simulate: number
   auto_generate_report: boolean
+  reasoning_summaries_enabled: boolean
   completed_llm_run_count: number
   active_llm_run_count: number
   status: SimulationStatus
@@ -1467,6 +1482,7 @@ function mapSimulationSummaryRow(
     library: parseStringArray(simulation.library),
     turnsToSimulate: simulation.turns_to_simulate,
     autoGenerateReport: simulation.auto_generate_report,
+    reasoningSummariesEnabled: simulation.reasoning_summaries_enabled,
     completedLlmRunCount: simulation.completed_llm_run_count,
     activeLlmRunCount: simulation.active_llm_run_count,
     status: simulation.status,
@@ -1490,6 +1506,7 @@ export async function listSimulationsForDeck(
         library,
         turns_to_simulate,
         auto_generate_report,
+        reasoning_summaries_enabled,
         ${SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL} AS completed_llm_run_count,
         ${SIMULATION_SUMMARY_ACTIVE_RUN_COUNT_SQL} AS active_llm_run_count,
         status,
@@ -1595,12 +1612,13 @@ export async function createSimulation(
         random_state,
         turns_to_simulate,
         auto_generate_report,
+        reasoning_summaries_enabled,
         starting_hand_id,
         library,
         has_drawn_starting_hand,
         status
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12)
       RETURNING
         id,
         deck_id,
@@ -1611,6 +1629,7 @@ export async function createSimulation(
         library,
         turns_to_simulate,
         auto_generate_report,
+        reasoning_summaries_enabled,
         0::integer AS completed_llm_run_count,
         0::integer AS active_llm_run_count,
         status,
@@ -1625,6 +1644,7 @@ export async function createSimulation(
       shuffledLibrary.randomState,
       input.turnsToSimulate,
       input.autoGenerateReport,
+      input.reasoningSummariesEnabled ?? false,
       input.startingHandId,
       JSON.stringify(shuffledLibrary.library),
       input.startingHandId !== null,
@@ -1651,6 +1671,7 @@ export async function getSimulationSummary(
         library,
         turns_to_simulate,
         auto_generate_report,
+        reasoning_summaries_enabled,
         ${SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL} AS completed_llm_run_count,
         ${SIMULATION_SUMMARY_ACTIVE_RUN_COUNT_SQL} AS active_llm_run_count,
         status,
@@ -1671,35 +1692,50 @@ export async function getSimulationSummary(
   return mapSimulationSummaryRow(simulation)
 }
 
-export async function updateSimulationLlmModelPreset(
+export type UpdateSimulationInput = {
+  llmModelPresetId?: string
+  reasoningSummariesEnabled?: boolean
+}
+
+export async function updateSimulation(
   deckId: string,
   simulationId: string,
-  llmModelPresetId: string
+  input: UpdateSimulationInput
 ): Promise<SimulationSummary> {
-  const trimmedPresetId = llmModelPresetId.trim()
+  const trimmedPresetId = input.llmModelPresetId?.trim()
 
-  if (!trimmedPresetId) {
+  if (
+    trimmedPresetId === undefined &&
+    input.reasoningSummariesEnabled === undefined
+  ) {
+    throw new SimulationValidationError("Simulation update is required.")
+  }
+
+  if (input.llmModelPresetId !== undefined && !trimmedPresetId) {
     throw new SimulationValidationError("Model preset is required.")
   }
 
-  const presetResult = await queryDatabase(
-    `
-      SELECT id
-      FROM llm_model_presets
-      WHERE id = $1
-        AND is_enabled = true
-    `,
-    [trimmedPresetId]
-  )
+  if (trimmedPresetId !== undefined) {
+    const presetResult = await queryDatabase(
+      `
+        SELECT id
+        FROM llm_model_presets
+        WHERE id = $1
+          AND is_enabled = true
+      `,
+      [trimmedPresetId]
+    )
 
-  if (presetResult.rowCount === 0) {
-    throw new SimulationValidationError("Model preset not found or disabled.")
+    if (presetResult.rowCount === 0) {
+      throw new SimulationValidationError("Model preset not found or disabled.")
+    }
   }
 
   const result = await queryDatabase<SimulationSummaryRow>(
     `
       UPDATE simulations
-      SET llm_model_preset_id = $3,
+      SET llm_model_preset_id = COALESCE($3, llm_model_preset_id),
+          reasoning_summaries_enabled = COALESCE($4, reasoning_summaries_enabled),
           updated_at = now()
       WHERE id = $1
         AND deck_id = $2
@@ -1713,13 +1749,19 @@ export async function updateSimulationLlmModelPreset(
         library,
         turns_to_simulate,
         auto_generate_report,
+        reasoning_summaries_enabled,
         ${SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL} AS completed_llm_run_count,
         ${SIMULATION_SUMMARY_ACTIVE_RUN_COUNT_SQL} AS active_llm_run_count,
         status,
         created_at,
         updated_at
     `,
-    [simulationId, deckId, trimmedPresetId]
+    [
+      simulationId,
+      deckId,
+      trimmedPresetId ?? null,
+      input.reasoningSummariesEnabled ?? null,
+    ]
   )
 
   if (result.rowCount === 0) {
@@ -1727,6 +1769,14 @@ export async function updateSimulationLlmModelPreset(
   }
 
   return mapSimulationSummaryRow(result.rows[0])
+}
+
+export async function updateSimulationLlmModelPreset(
+  deckId: string,
+  simulationId: string,
+  llmModelPresetId: string
+): Promise<SimulationSummary> {
+  return updateSimulation(deckId, simulationId, { llmModelPresetId })
 }
 
 export async function markSimulationCompleted(simulationId: string) {
@@ -2282,12 +2332,14 @@ export async function createOpeningHandLlmRun(
     const simulationResult = await client.query<{
       id: string
       starting_hand_id: string | null
+      reasoning_summaries_enabled: boolean
       owner_user_id: string | null
     }>(
       `
         SELECT
           simulation.id,
           simulation.starting_hand_id,
+          simulation.reasoning_summaries_enabled,
           deck.owner_user_id
         FROM simulations simulation
         JOIN decks deck
@@ -2336,6 +2388,7 @@ export async function createOpeningHandLlmRun(
           openrouter_model_provider,
           service_tier,
           reasoning_effort,
+          reasoning_summaries_enabled,
           owner_user_id,
           runtime_stream_key,
           full_prompt,
@@ -2352,7 +2405,8 @@ export async function createOpeningHandLlmRun(
           $7,
           $8,
           $9,
-          $10::jsonb
+          $10,
+          $11::jsonb
         )
         RETURNING id, status, runtime_stream_key, created_at
       `,
@@ -2363,6 +2417,7 @@ export async function createOpeningHandLlmRun(
         openrouterModelProvider,
         input.serviceTier,
         input.reasoningEffort,
+        simulationResult.rows[0].reasoning_summaries_enabled,
         simulationResult.rows[0].owner_user_id,
         input.runtimeStreamKey,
         input.fullPrompt,
@@ -2389,6 +2444,8 @@ export async function createOpeningHandLlmRun(
       simulationId: input.simulationId,
       llmRunId: llmRun.id,
       attemptNumber,
+      reasoningSummariesEnabled:
+        simulationResult.rows[0].reasoning_summaries_enabled,
       runtimeStreamKey: llmRun.runtime_stream_key,
       status: llmRun.status,
       createdAt: llmRun.created_at.toISOString(),
@@ -2511,6 +2568,7 @@ export async function createTurnLlmRun(
       starting_hand_id: string | null
       status: SimulationStatus
       auto_simulate_next_step: boolean
+      reasoning_summaries_enabled: boolean
       owner_user_id: string | null
     }>(
       `
@@ -2521,6 +2579,7 @@ export async function createTurnLlmRun(
           simulation.starting_hand_id,
           simulation.status,
           simulation.auto_simulate_next_step,
+          simulation.reasoning_summaries_enabled,
           deck.owner_user_id
         FROM simulations simulation
         JOIN decks deck
@@ -2599,6 +2658,7 @@ export async function createTurnLlmRun(
           openrouter_model_provider,
           service_tier,
           reasoning_effort,
+          reasoning_summaries_enabled,
           owner_user_id,
           runtime_stream_key
         )
@@ -2611,7 +2671,8 @@ export async function createTurnLlmRun(
           $5,
           $6,
           $7,
-          $8
+          $8,
+          $9
         )
         RETURNING id, status, runtime_stream_key, created_at
       `,
@@ -2622,6 +2683,7 @@ export async function createTurnLlmRun(
         openrouterModelProvider,
         input.serviceTier,
         input.reasoningEffort,
+        simulation.reasoning_summaries_enabled,
         simulation.owner_user_id,
         input.runtimeStreamKey,
       ]
@@ -2648,6 +2710,7 @@ export async function createTurnLlmRun(
       llmRunId: llmRun.id,
       turnNumber: input.turnNumber,
       attemptNumber,
+      reasoningSummariesEnabled: simulation.reasoning_summaries_enabled,
       runtimeStreamKey: llmRun.runtime_stream_key,
       status: llmRun.status,
       createdAt: llmRun.created_at.toISOString(),
@@ -2664,12 +2727,14 @@ export async function createReportLlmRun(
     const simulationResult = await client.query<{
       id: string
       auto_simulate_next_step: boolean
+      reasoning_summaries_enabled: boolean
       owner_user_id: string | null
     }>(
       `
         SELECT
           simulation.id,
           simulation.auto_simulate_next_step,
+          simulation.reasoning_summaries_enabled,
           deck.owner_user_id
         FROM simulations simulation
         JOIN decks deck
@@ -2724,6 +2789,7 @@ export async function createReportLlmRun(
           openrouter_model_provider,
           service_tier,
           reasoning_effort,
+          reasoning_summaries_enabled,
           owner_user_id,
           runtime_stream_key,
           full_prompt,
@@ -2740,7 +2806,8 @@ export async function createReportLlmRun(
           $7,
           $8,
           $9,
-          $10::jsonb
+          $10,
+          $11::jsonb
         )
         RETURNING id, status, runtime_stream_key, created_at
       `,
@@ -2751,6 +2818,7 @@ export async function createReportLlmRun(
         openrouterModelProvider,
         input.serviceTier,
         input.reasoningEffort,
+        simulation.reasoning_summaries_enabled,
         simulation.owner_user_id,
         input.runtimeStreamKey,
         input.fullPrompt,
@@ -2775,6 +2843,7 @@ export async function createReportLlmRun(
       simulationId: input.simulationId,
       llmRunId: llmRun.id,
       attemptNumber,
+      reasoningSummariesEnabled: simulation.reasoning_summaries_enabled,
       runtimeStreamKey: llmRun.runtime_stream_key,
       status: llmRun.status,
       createdAt: llmRun.created_at.toISOString(),
@@ -3587,6 +3656,7 @@ export async function claimNextQueuedLlmRun({
       openrouter_model_provider: string | null
       service_tier: string | null
       reasoning_effort: string | null
+      reasoning_summaries_enabled: boolean
       runtime_stream_key: string
       attempt_number: number
       created_at: Date
@@ -3682,6 +3752,7 @@ export async function claimNextQueuedLlmRun({
           llm_run.openrouter_model_provider,
           llm_run.service_tier,
           llm_run.reasoning_effort,
+          llm_run.reasoning_summaries_enabled,
           llm_run.runtime_stream_key,
           candidate.attempt_number,
           llm_run.created_at,
@@ -3780,6 +3851,7 @@ export async function claimNextQueuedLlmRun({
       openrouterModelProvider: run.openrouter_model_provider,
       serviceTier: run.service_tier,
       reasoningEffort: run.reasoning_effort,
+      reasoningSummariesEnabled: run.reasoning_summaries_enabled,
       runtimeStreamKey: run.runtime_stream_key,
       attemptNumber: run.attempt_number,
       createdAt: run.created_at.toISOString(),
@@ -5064,6 +5136,7 @@ export async function getOpeningHandLlmRunEvaluationData(
     status: LlmRunStatus
     attempt_number: number
     opening_hand_is_valid: boolean
+    reasoning_summaries_enabled: boolean
   }>(
     `
       SELECT
@@ -5072,7 +5145,8 @@ export async function getOpeningHandLlmRunEvaluationData(
         llm_run.phase,
         llm_run.status,
         opening_run.attempt_number,
-        opening_run.opening_hand_is_valid
+        opening_run.opening_hand_is_valid,
+        simulation.reasoning_summaries_enabled
       FROM simulations simulation
       JOIN simulation_opening_hand_llm_runs opening_run
         ON opening_run.simulation_id = simulation.id
@@ -5100,6 +5174,7 @@ export async function getOpeningHandLlmRunEvaluationData(
     status: run.status,
     attemptNumber: run.attempt_number,
     openingHandIsValid: run.opening_hand_is_valid,
+    reasoningSummariesEnabled: run.reasoning_summaries_enabled,
     chunks,
   }
 }
@@ -5115,6 +5190,7 @@ export async function getTurnLlmRunEvaluationData(
     phase: LlmRunPhase
     status: LlmRunStatus
     turn_number: number
+    reasoning_summaries_enabled: boolean
   }>(
     `
       SELECT
@@ -5122,7 +5198,8 @@ export async function getTurnLlmRunEvaluationData(
         llm_run.full_prompt,
         llm_run.phase,
         llm_run.status,
-        turn_run.turn_number
+        turn_run.turn_number,
+        simulation.reasoning_summaries_enabled
       FROM simulations simulation
       JOIN simulation_turn_llm_runs turn_run
         ON turn_run.simulation_id = simulation.id
@@ -5149,6 +5226,7 @@ export async function getTurnLlmRunEvaluationData(
     phase: run.phase,
     status: run.status,
     turnNumber: run.turn_number,
+    reasoningSummariesEnabled: run.reasoning_summaries_enabled,
     chunks,
   }
 }

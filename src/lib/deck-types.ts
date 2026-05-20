@@ -51,6 +51,7 @@ export type Simulation = {
   library: string[]
   turnsToSimulate: number
   autoGenerateReport: boolean
+  reasoningSummariesEnabled: boolean
   completedLlmRunCount: number
   activeLlmRunCount: number
   status: SimulationStatus
