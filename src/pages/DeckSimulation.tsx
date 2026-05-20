@@ -101,6 +101,7 @@ import {
 import {
   formatSimulationRunClipboardText,
   getLoggedTurnAction,
+  getLoggedTurnActions,
   getSimulationRunActivityBlocks,
   getSimulationRunActiveToolCallName,
   getSimulationResultEntries,
@@ -5374,11 +5375,11 @@ function SimulationResultEvent({
 
   if (chunk.kind === "mcp_call_complete") {
     if (chunk.mcpFunctionName === "log_turn_action") {
-      const loggedAction = getLoggedTurnAction(chunk)
+      const loggedActions = getLoggedTurnActions(chunk)
 
       return (
         <SimulationResultLoggedTurnActionEvent
-          actions={loggedAction === null ? [] : [loggedAction]}
+          actions={loggedActions}
           chunks={[chunk]}
         />
       )

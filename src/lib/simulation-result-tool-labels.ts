@@ -342,20 +342,56 @@ function getLogTurnActionLabel(
     case "failed":
       return "Could not log turn action"
     case "completed": {
-      const loggedAction = getLoggedTurnActionFromOutput(mcpFunctionOutput)
+      const loggedActions = getLoggedTurnActionsFromOutput(mcpFunctionOutput)
 
-      return loggedAction === null
+      return loggedActions.length === 0
         ? "Logged turn action"
-        : `Logged turn action: ${loggedAction}`
+        : formatLoggedTurnActionLabel(loggedActions)
     }
   }
 }
 
-function getLoggedTurnActionFromOutput(output: unknown) {
+function formatLoggedTurnActionLabel(actions: string[]) {
+  if (actions.length === 1) {
+    return `Logged turn action: ${actions[0]}`
+  }
+
+  const actionSummary =
+    actions.length > 2
+      ? `${actions.slice(0, 2).join("; ")}; ...`
+      : actions.join("; ")
+
+  return `Logged ${actions.length} turn actions: ${actionSummary}`
+}
+
+function getLoggedTurnActionsFromOutput(output: unknown) {
   const resolvedOutput = parseJsonObjectPayload(output)
   const outputRecord = asRecord(resolvedOutput)
-  const latestAction = asRecord(outputRecord.latestAction)
-  const action = getString(latestAction, "action")?.trim()
+  const loggedActions = parseLoggedTurnActionTexts(outputRecord.loggedActions)
+
+  if (loggedActions.length > 0) {
+    return loggedActions
+  }
+
+  const latestAction = getLoggedTurnActionText(outputRecord.latestAction)
+
+  return latestAction === null ? [] : [latestAction]
+}
+
+function parseLoggedTurnActionTexts(value: unknown) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.flatMap((entry) => {
+    const action = getLoggedTurnActionText(entry)
+
+    return action === null ? [] : [action]
+  })
+}
+
+function getLoggedTurnActionText(value: unknown) {
+  const action = getString(value, "action")?.trim()
 
   return action && action.length > 0 ? action : null
 }

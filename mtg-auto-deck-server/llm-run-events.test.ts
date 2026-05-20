@@ -63,7 +63,9 @@ import {
   getOpenRouterReportedCostUsd,
 } from "./llm-pricing.js"
 import {
+  GENERIC_GAME_RULES_REFERENCE_ENABLED_ENVIRONMENT_VARIABLE,
   getEvaluationLlmRunConfig,
+  getGenericGameRulesReferenceEnabled,
   getLlmRunQueueConfig,
   getOpeningHandLlmRunConfig,
   getTurnSimulationLlmRunConfig,
@@ -1054,6 +1056,28 @@ test("requires a positive LLM run queue global concurrency limit", () => {
     {
       maxConcurrentRuns: 50,
     }
+  )
+})
+
+test("includes generic game rules reference by default", () => {
+  assert.equal(getGenericGameRulesReferenceEnabled({}), true)
+  assert.equal(
+    getGenericGameRulesReferenceEnabled({
+      [GENERIC_GAME_RULES_REFERENCE_ENABLED_ENVIRONMENT_VARIABLE]: "false",
+    }),
+    false
+  )
+  assert.equal(
+    getGenericGameRulesReferenceEnabled({
+      [GENERIC_GAME_RULES_REFERENCE_ENABLED_ENVIRONMENT_VARIABLE]: "0",
+    }),
+    false
+  )
+  assert.equal(
+    getGenericGameRulesReferenceEnabled({
+      [GENERIC_GAME_RULES_REFERENCE_ENABLED_ENVIRONMENT_VARIABLE]: "yes",
+    }),
+    true
   )
 })
 

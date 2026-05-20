@@ -193,6 +193,7 @@ import {
   throwIfRuntimeAborted,
 } from "./llm-runtime-cancellation.js"
 import {
+  getGenericGameRulesReferenceEnabled,
   LlmConfigurationError,
   getOpenRouterApiKey,
   getEvaluationLlmRunConfig,
@@ -1133,9 +1134,12 @@ type McpReturnCardsInput = McpSimulationIdentifierInput & {
 type McpTakeCardsInput = McpSimulationIdentifierInput & {
   cards: string[]
 }
-type McpLogTurnActionInput = McpSimulationIdentifierInput & {
+type McpLogTurnActionEntryInput = {
   action: string
   phaseChange?: TurnPhaseChange | null
+}
+type McpLogTurnActionInput = McpSimulationIdentifierInput & {
+  actions: McpLogTurnActionEntryInput[]
 }
 
 type McpSimulationIdentifierConfig = {
@@ -1192,6 +1196,22 @@ const diceSidesSchema = z
   .min(2)
   .max(1000)
   .describe("How many sides each die has. Must be between 2 and 1000.")
+const logTurnActionEntrySchema = z.object({
+  action: z
+    .string()
+    .trim()
+    .min(1)
+    .describe(
+      "A concise description of one action being committed, such as a phase change, land play, spell cast, attack, or other turn progression."
+    ),
+  phaseChange: turnPhaseChangeSchema.optional(),
+})
+const logTurnActionsSchema = z
+  .array(logTurnActionEntrySchema)
+  .min(1)
+  .describe(
+    "One or more committed turn actions to append to the authoritative turn log, in the exact order they happen."
+  )
 
 function addMcpReasonToToolResult<T extends object>(
   identifier: McpSimulationIdentifierConfig,
@@ -1811,17 +1831,10 @@ function registerLogTurnActionTool(
     {
       title: "Log Turn Action",
       description:
-        "Append an irreversible action note to the active turn log for this simulation. Use this as the authoritative turn history while resolving the turn. The response returns the full logged action list for the active turn.",
+        "Append one or more irreversible action notes to the active turn log for this simulation. Use this as the authoritative turn history while resolving the turn. The response returns the full logged action list for the active turn.",
       inputSchema: {
         ...identifier.inputSchema,
-        action: z
-          .string()
-          .trim()
-          .min(1)
-          .describe(
-            "A concise description of the action being committed, such as a phase change, land play, spell cast, attack, or other turn progression."
-          ),
-        phaseChange: turnPhaseChangeSchema.optional(),
+        actions: logTurnActionsSchema,
       },
     },
     async (input: McpLogTurnActionInput) => {
@@ -1829,20 +1842,15 @@ function registerLogTurnActionTool(
         input,
         identifier.authContext
       )
-      const { action, phaseChange } = input
-      const response = await logTurnAction(
-        resolvedSimulationId,
-        action,
-        phaseChange ?? null
-      )
+      const response = await logTurnAction(resolvedSimulationId, input.actions)
 
       return {
         content: createCompactToolResultContent({
           actions: response.actions.map((loggedAction) => loggedAction.action),
-          latestAction: {
-            action: response.latestAction.action,
-            phaseChange: response.latestAction.phaseChange,
-          },
+          loggedActions: response.loggedActions.map((loggedAction) => ({
+            action: loggedAction.action,
+            phaseChange: loggedAction.phaseChange,
+          })),
         }),
       }
     }
@@ -1901,17 +1909,10 @@ const turnSimulationLlmToolDefinitions: LlamaCppToolDefinition[] = [
   {
     name: "log_turn_action",
     description:
-      "Append an irreversible action note to the active turn log for this simulation. Use this as the authoritative turn history while resolving the turn. The response returns the full logged action list for the active turn.",
+      "Append one or more irreversible action notes to the active turn log for this simulation. Use this as the authoritative turn history while resolving the turn. The response returns the full logged action list for the active turn.",
     inputSchema: z.object({
       ...llmRunIdentifierSchema,
-      action: z
-        .string()
-        .trim()
-        .min(1)
-        .describe(
-          "A concise description of the action being committed, such as a phase change, land play, spell cast, attack, or other turn progression."
-        ),
-      phaseChange: turnPhaseChangeSchema.optional(),
+      actions: logTurnActionsSchema,
     }),
   },
   {
@@ -7486,10 +7487,11 @@ function buildTurnSimulationPromptFromData(
   const strategyGuidelinesBlock = strategyGuidelinesSection
     ? `\n\n${strategyGuidelinesSection}`
     : ""
+  const genericGameRulesReferenceBlock = getGenericGameRulesReferenceEnabled()
+    ? `\n\n${GENERIC_GAME_RULES_REFERENCE}`
+    : ""
 
-  return `${SIMULATE_TURN_PROMPT}
-
-${GENERIC_GAME_RULES_REFERENCE}
+  return `${SIMULATE_TURN_PROMPT}${genericGameRulesReferenceBlock}
 
 Card reference:
 ${cardReference}${strategyGuidelinesBlock}

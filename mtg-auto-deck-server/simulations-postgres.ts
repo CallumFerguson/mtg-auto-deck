@@ -568,12 +568,17 @@ export type TurnActionLogEntry = {
   createdAt: string
 }
 
+export type TurnActionLogInput = {
+  action: string
+  phaseChange?: TurnPhaseChange | null
+}
+
 export type TurnActionLogResult = {
   simulationId: string
   llmRunId: string
   turnNumber: number
   attemptNumber: number
-  latestAction: TurnActionLogEntry
+  loggedActions: TurnActionLogEntry[]
   actions: TurnActionLogEntry[]
 }
 
@@ -2122,18 +2127,29 @@ export async function takeCardsFromSimulationLibrary(
 
 export async function logTurnAction(
   simulationId: string,
-  action: string,
-  phaseChange: TurnPhaseChange | null = null
+  turnActions: readonly TurnActionLogInput[]
 ): Promise<TurnActionLogResult> {
-  const trimmedAction = action.trim()
-
-  if (!trimmedAction) {
-    throw new SimulationValidationError("Turn action is required.")
+  if (turnActions.length === 0) {
+    throw new SimulationValidationError("At least one turn action is required.")
   }
 
-  if (phaseChange !== null && !isTurnPhaseChange(phaseChange)) {
-    throw new SimulationValidationError("Turn phase change is invalid.")
-  }
+  const normalizedActions = turnActions.map((turnAction) => {
+    const trimmedAction = turnAction.action.trim()
+    const phaseChange = turnAction.phaseChange ?? null
+
+    if (!trimmedAction) {
+      throw new SimulationValidationError("Turn action is required.")
+    }
+
+    if (phaseChange !== null && !isTurnPhaseChange(phaseChange)) {
+      throw new SimulationValidationError("Turn phase change is invalid.")
+    }
+
+    return {
+      action: trimmedAction,
+      phaseChange,
+    }
+  })
 
   return withDatabaseTransaction(async (client) => {
     const turnRunResult = await client.query<{
@@ -2176,20 +2192,30 @@ export async function logTurnAction(
       `,
       [turnRun.llm_run_id]
     )
-    const sequence = Number(sequenceResult.rows[0].sequence)
-
-    await client.query(
-      `
-        INSERT INTO simulation_turn_actions (
-          turn_llm_run_id,
-          sequence,
-          action,
-          phase_change
-        )
-        VALUES ($1, $2, $3, $4)
-      `,
-      [turnRun.llm_run_id, sequence, trimmedAction, phaseChange]
+    const firstSequence = Number(sequenceResult.rows[0].sequence)
+    const loggedSequences = normalizedActions.map(
+      (_turnAction, index) => firstSequence + index
     )
+
+    for (const [index, turnAction] of normalizedActions.entries()) {
+      await client.query(
+        `
+          INSERT INTO simulation_turn_actions (
+            turn_llm_run_id,
+            sequence,
+            action,
+            phase_change
+          )
+          VALUES ($1, $2, $3, $4)
+        `,
+        [
+          turnRun.llm_run_id,
+          loggedSequences[index],
+          turnAction.action,
+          turnAction.phaseChange,
+        ]
+      )
+    }
 
     const actionsResult = await client.query<{
       sequence: number
@@ -2210,10 +2236,13 @@ export async function logTurnAction(
       [turnRun.llm_run_id]
     )
     const actions = actionsResult.rows.map(mapTurnActionLogEntry)
-    const latestAction = actions.find((entry) => entry.sequence === sequence)
+    const loggedSequenceSet = new Set(loggedSequences)
+    const loggedActions = actions.filter((entry) =>
+      loggedSequenceSet.has(entry.sequence)
+    )
 
-    if (!latestAction) {
-      throw new SimulationValidationError("Logged turn action not found.")
+    if (loggedActions.length !== normalizedActions.length) {
+      throw new SimulationValidationError("Logged turn actions not found.")
     }
 
     return {
@@ -2221,7 +2250,7 @@ export async function logTurnAction(
       llmRunId: turnRun.llm_run_id,
       turnNumber: turnRun.turn_number,
       attemptNumber: turnRun.attempt_number,
-      latestAction,
+      loggedActions,
       actions,
     }
   })

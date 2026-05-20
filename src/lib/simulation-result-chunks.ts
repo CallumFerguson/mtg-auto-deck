@@ -72,46 +72,74 @@ export function getSimulationResultEntries(
   chunks: readonly SimulationDebugLlmRunChunk[]
 ): SimulationResultEntry[] {
   const entries: SimulationResultEntry[] = []
+  let pendingTurnActions: LoggedTurnAction[] = []
   let pendingTurnActionChunks: SimulationDebugLlmRunChunk[] = []
+  let turnActionLogEntryIndex = 0
 
-  function flushPendingTurnActionChunks() {
+  function addPendingTurnActionChunk(chunk: SimulationDebugLlmRunChunk) {
+    if (!pendingTurnActionChunks.includes(chunk)) {
+      pendingTurnActionChunks.push(chunk)
+    }
+  }
+
+  function addPendingTurnAction(
+    action: LoggedTurnAction,
+    chunk: SimulationDebugLlmRunChunk
+  ) {
+    pendingTurnActions.push(action)
+    addPendingTurnActionChunk(chunk)
+  }
+
+  function createTurnActionLogEntry(
+    actions: LoggedTurnAction[],
+    actionChunks: SimulationDebugLlmRunChunk[]
+  ): SimulationResultEntry {
+    const entry = {
+      id: `${getTurnActionLogEntryId(actionChunks)}-${turnActionLogEntryIndex}`,
+      type: "turn_action_log" as const,
+      actions,
+      chunks: actionChunks,
+    }
+    turnActionLogEntryIndex += 1
+
+    return entry
+  }
+
+  function flushPendingTurnActions() {
     if (pendingTurnActionChunks.length === 0) {
       return
     }
 
-    entries.push({
-      id: getTurnActionLogEntryId(pendingTurnActionChunks),
-      type: "turn_action_log",
-      actions: pendingTurnActionChunks.flatMap((chunk) => {
-        const action = getLoggedTurnAction(chunk)
-
-        return action === null ? [] : [action]
-      }),
-      chunks: pendingTurnActionChunks,
-    })
+    entries.push(
+      createTurnActionLogEntry(pendingTurnActions, pendingTurnActionChunks)
+    )
+    pendingTurnActions = []
     pendingTurnActionChunks = []
   }
 
   for (const chunk of getSimulationResultChunks(chunks)) {
     if (isCompletedLogTurnActionChunk(chunk)) {
-      const loggedAction = getLoggedTurnAction(chunk)
+      const loggedActions = getLoggedTurnActions(chunk)
 
-      if (loggedAction !== null && loggedAction.phaseChange !== null) {
-        flushPendingTurnActionChunks()
-        entries.push({
-          id: getTurnActionLogEntryId([chunk]),
-          type: "turn_action_log",
-          actions: loggedAction === null ? [] : [loggedAction],
-          chunks: [chunk],
-        })
+      if (loggedActions.length === 0) {
+        addPendingTurnActionChunk(chunk)
         continue
       }
 
-      pendingTurnActionChunks.push(chunk)
+      for (const loggedAction of loggedActions) {
+        if (loggedAction.phaseChange !== null) {
+          flushPendingTurnActions()
+          entries.push(createTurnActionLogEntry([loggedAction], [chunk]))
+          continue
+        }
+
+        addPendingTurnAction(loggedAction, chunk)
+      }
+
       continue
     }
 
-    flushPendingTurnActionChunks()
+    flushPendingTurnActions()
     entries.push({
       id: `chunk-${getResultChunkId(chunk)}`,
       type: "chunk",
@@ -119,7 +147,7 @@ export function getSimulationResultEntries(
     })
   }
 
-  flushPendingTurnActionChunks()
+  flushPendingTurnActions()
 
   return entries
 }
@@ -310,14 +338,39 @@ export function getSimulationRunActivityBlocks(
 }
 
 export function getLoggedTurnAction(chunk: SimulationDebugLlmRunChunk) {
+  const loggedActions = getLoggedTurnActions(chunk)
+
+  return loggedActions[loggedActions.length - 1] ?? null
+}
+
+export function getLoggedTurnActions(chunk: SimulationDebugLlmRunChunk) {
   if (!isCompletedLogTurnActionChunk(chunk)) {
-    return null
+    return []
   }
 
   const resolvedPayload = parseJsonObjectPayload(chunk.mcpFunctionOutput)
-  const latestAction = asPayloadRecord(resolvedPayload).latestAction
+  const payloadRecord = asPayloadRecord(resolvedPayload)
+  const loggedActions = parseLoggedTurnActions(payloadRecord.loggedActions)
 
-  return parseLoggedTurnAction(latestAction)
+  if (loggedActions.length > 0) {
+    return loggedActions
+  }
+
+  const latestAction = parseLoggedTurnAction(payloadRecord.latestAction)
+
+  return latestAction === null ? [] : [latestAction]
+}
+
+function parseLoggedTurnActions(value: unknown): LoggedTurnAction[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.flatMap((entry) => {
+    const loggedAction = parseLoggedTurnAction(entry)
+
+    return loggedAction === null ? [] : [loggedAction]
+  })
 }
 
 function parseLoggedTurnAction(value: unknown): LoggedTurnAction | null {

@@ -7,6 +7,7 @@ import {
   getSimulationRunActivityBlocks,
   getSimulationRunActiveToolCallName,
   getLoggedTurnAction,
+  getLoggedTurnActions,
   getSimulationResultEntries,
   getSimulationResultChunks,
   getSimulationRunThinkingPreview,
@@ -898,6 +899,94 @@ test("combines adjacent completed regular turn action log entries after hiding t
   )
 })
 
+test("shows multiple regular actions from one completed turn action log call", () => {
+  const resultEntries = getSimulationResultEntries([
+    createChunk({
+      id: 1,
+      kind: "mcp_call_complete",
+      mcpFunctionName: "log_turn_action",
+      mcpFunctionOutput: {
+        loggedActions: [
+          {
+            action: "Tap Command Tower for {G}.",
+            phaseChange: null,
+          },
+          {
+            action: "Cast Llanowar Elves using {G}.",
+            phaseChange: null,
+          },
+        ],
+        actions: [
+          "Tap Command Tower for {G}.",
+          "Cast Llanowar Elves using {G}.",
+        ],
+      },
+      sequence: 1,
+    }),
+  ])
+
+  assert.equal(resultEntries.length, 1)
+  assert.deepEqual(
+    resultEntries[0]?.type === "turn_action_log"
+      ? resultEntries[0].actions.map((action) => action.action)
+      : [],
+    ["Tap Command Tower for {G}.", "Cast Llanowar Elves using {G}."]
+  )
+})
+
+test("splits mixed batched turn action logs around phase changes", () => {
+  const resultEntries = getSimulationResultEntries([
+    createChunk({
+      id: 1,
+      kind: "mcp_call_complete",
+      mcpFunctionName: "log_turn_action",
+      mcpFunctionOutput: {
+        loggedActions: [
+          {
+            action: "Cast Sol Ring using {1}.",
+            phaseChange: null,
+          },
+          {
+            action: "Move to combat.",
+            phaseChange: "combat",
+          },
+          {
+            action: "Attack opponent 1 with the commander.",
+            phaseChange: null,
+          },
+        ],
+        actions: [
+          "Cast Sol Ring using {1}.",
+          "Move to combat.",
+          "Attack opponent 1 with the commander.",
+        ],
+      },
+      sequence: 1,
+    }),
+  ])
+
+  assert.deepEqual(
+    resultEntries.map((entry) =>
+      entry.type === "turn_action_log"
+        ? entry.actions.map((action) => action.action)
+        : []
+    ),
+    [
+      ["Cast Sol Ring using {1}."],
+      ["Move to combat."],
+      ["Attack opponent 1 with the commander."],
+    ]
+  )
+  assert.deepEqual(
+    resultEntries.map((entry) =>
+      entry.type === "turn_action_log"
+        ? entry.actions.map((action) => action.phaseChange)
+        : []
+    ),
+    [[null], ["combat"], [null]]
+  )
+})
+
 test("keeps turn action log groups separated by other visible events", () => {
   const resultEntries = getSimulationResultEntries([
     createChunk({
@@ -1109,6 +1198,41 @@ test("parses structured turn action log output", () => {
     action: "Move to postcombat main.",
     phaseChange: "postcombat_main",
   })
+})
+
+test("parses batched structured turn action log output", () => {
+  const loggedActions = getLoggedTurnActions(
+    createChunk({
+      id: 1,
+      kind: "mcp_call_complete",
+      mcpFunctionName: "log_turn_action",
+      mcpFunctionOutput: {
+        loggedActions: [
+          {
+            action: "Draw a card.",
+            phaseChange: null,
+          },
+          {
+            action: "Move to precombat main.",
+            phaseChange: "precombat_main",
+          },
+        ],
+        actions: ["Draw a card.", "Move to precombat main."],
+      },
+      sequence: 1,
+    })
+  )
+
+  assert.deepEqual(loggedActions, [
+    {
+      action: "Draw a card.",
+      phaseChange: null,
+    },
+    {
+      action: "Move to precombat main.",
+      phaseChange: "precombat_main",
+    },
+  ])
 })
 
 test("omits reasoning and output lifecycle chunks and deltas from result chunks", () => {
@@ -1732,6 +1856,58 @@ test("formats known completed randomizer events with result details", () => {
       state: "completed",
     }),
     "Rolled 2 d20: total 17"
+  )
+})
+
+test("formats completed turn action log labels with batched output", () => {
+  assert.equal(
+    getKnownSimulationResultToolLabelForChunk({
+      chunk: createChunk({
+        id: 1,
+        kind: "mcp_call_complete",
+        mcpFunctionName: "log_turn_action",
+        mcpFunctionOutput: {
+          loggedActions: [
+            {
+              action: "Draw a card.",
+              phaseChange: null,
+            },
+          ],
+          actions: ["Draw a card."],
+        },
+        sequence: 1,
+      }),
+      state: "completed",
+    }),
+    "Logged turn action: Draw a card."
+  )
+  assert.equal(
+    getKnownSimulationResultToolLabelForChunk({
+      chunk: createChunk({
+        id: 2,
+        kind: "mcp_call_complete",
+        mcpFunctionName: "log_turn_action",
+        mcpFunctionOutput: {
+          loggedActions: [
+            {
+              action: "Tap Command Tower for {G}.",
+              phaseChange: null,
+            },
+            {
+              action: "Cast Llanowar Elves using {G}.",
+              phaseChange: null,
+            },
+          ],
+          actions: [
+            "Tap Command Tower for {G}.",
+            "Cast Llanowar Elves using {G}.",
+          ],
+        },
+        sequence: 2,
+      }),
+      state: "completed",
+    }),
+    "Logged 2 turn actions: Tap Command Tower for {G}.; Cast Llanowar Elves using {G}."
   )
 })
 

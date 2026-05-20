@@ -16,6 +16,9 @@ export type ReasoningEffort = z.infer<typeof reasoningEffortSchema>
 
 type Environment = Record<string, string | undefined>
 
+export const GENERIC_GAME_RULES_REFERENCE_ENABLED_ENVIRONMENT_VARIABLE =
+  "GENERIC_GAME_RULES_REFERENCE_ENABLED"
+
 type BaseLlmRunConfig = {
   apiKey: string
   modelPresetId: string
@@ -175,6 +178,16 @@ export function getLlmRunQueueConfig(
   }
 }
 
+export function getGenericGameRulesReferenceEnabled(
+  environment: Environment = process.env
+) {
+  return getOptionalBooleanEnvironmentVariable(
+    environment,
+    GENERIC_GAME_RULES_REFERENCE_ENABLED_ENVIRONMENT_VARIABLE,
+    true
+  )
+}
+
 function getLlmRunConfig(
   preset: LlmModelPresetRunConfig,
   environment: Environment
@@ -279,4 +292,26 @@ function getOptionalEnvironmentVariable(
   environmentVariable: string
 ) {
   return environment[environmentVariable]?.trim() || null
+}
+
+function getOptionalBooleanEnvironmentVariable(
+  environment: Environment,
+  environmentVariable: string,
+  defaultValue: boolean
+) {
+  const value = environment[environmentVariable]?.trim().toLowerCase()
+
+  if (!value) {
+    return defaultValue
+  }
+
+  if (value === "true" || value === "1" || value === "yes") {
+    return true
+  }
+
+  if (value === "false" || value === "0" || value === "no") {
+    return false
+  }
+
+  throw new LlmConfigurationError(`${environmentVariable} must be true or false.`)
 }
