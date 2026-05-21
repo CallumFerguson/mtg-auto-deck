@@ -552,12 +552,13 @@ function createRandomSimulationSeed() {
 
 function getStoredCreateSimulationUseFlexServiceTier() {
   try {
-    return (
-      window.localStorage.getItem(CREATE_SIMULATION_USE_FLEX_STORAGE_KEY) ===
-      "true"
+    const storedValue = window.localStorage.getItem(
+      CREATE_SIMULATION_USE_FLEX_STORAGE_KEY
     )
+
+    return storedValue === null ? true : storedValue === "true"
   } catch {
-    return false
+    return true
   }
 }
 
@@ -1529,6 +1530,8 @@ export function DeckSimulation({
                           selectedModelPresetSupportsFlex && useFlexServiceTier
                         }
                         disabled={!selectedModelPresetSupportsFlex}
+                        label="Flex processing"
+                        activeWarning="Simulation may be slower and has a higher chance of failing."
                         onCheckedChange={handleCreateSimulationUseFlexChange}
                       />
                     </div>
@@ -1985,15 +1988,21 @@ function ReasoningSummariesSwitch({
 function FlexServiceTierSwitch({
   checked,
   disabled = false,
+  label = "Use flex service tier",
+  activeWarning,
   onCheckedChange,
 }: {
   checked: boolean
   disabled?: boolean
+  label?: string
+  activeWarning?: string
   onCheckedChange: (checked: boolean) => void
 }) {
+  const visibleWarning = checked ? activeWarning : null
+
   return (
     <div
-      className={`flex items-center gap-3 rounded-md border px-3 py-3 text-sm transition-colors ${
+      className={`flex items-start gap-3 rounded-md border px-3 py-3 text-sm transition-colors ${
         checked
           ? "border-ring bg-accent text-accent-foreground"
           : "border-border bg-background/35 text-muted-foreground"
@@ -2008,7 +2017,7 @@ function FlexServiceTierSwitch({
         type="button"
         role="switch"
         aria-checked={checked}
-        aria-label="Use flex service tier"
+        aria-label={label}
         disabled={disabled}
         onClick={() => onCheckedChange(!checked)}
       >
@@ -2018,7 +2027,14 @@ function FlexServiceTierSwitch({
           }`}
         />
       </button>
-      <span className="font-medium">Use flex service tier</span>
+      <span className="grid gap-1">
+        <span className="font-medium">{label}</span>
+        {visibleWarning ? (
+          <span className="text-xs leading-5 text-amber-100/90" role="alert">
+            {visibleWarning}
+          </span>
+        ) : null}
+      </span>
     </div>
   )
 }
