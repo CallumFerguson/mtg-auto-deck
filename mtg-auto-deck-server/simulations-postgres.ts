@@ -6105,7 +6105,7 @@ function getOpeningHandFinalOutput(run: SimulationDebugLlmRun) {
   const keptHand = asStringArray(payload.keptHand)
   const summary = getRequiredString(payload.summary)
 
-  if (!keptHand || !summary) {
+  if (payload.error !== null || !keptHand || !summary) {
     return null
   }
 
@@ -6120,7 +6120,7 @@ function getTurnFinalOutput(run: SimulationDebugLlmRun) {
   const gameState = getRequiredString(payload.gameState)
   const summary = getRequiredString(payload.summary)
 
-  if (!gameState || !summary) {
+  if (payload.error !== null || !gameState || !summary) {
     return null
   }
 

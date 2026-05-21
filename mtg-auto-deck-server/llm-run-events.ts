@@ -387,14 +387,19 @@ export function parseOpeningHandCompletionFromResponseText(
   }
 
   const responseRecord = asRecord(parsedResponse)
-  throwIfModelReportedSimulationError(responseRecord)
+  assertSuccessfulSimulationOutputErrorIsNull(responseRecord, "Opening-hand")
   const keptHand = responseRecord.keptHand
+  const summary = getRequiredStringProperty(responseRecord, "summary")
 
   if (
     !Array.isArray(keptHand) ||
     keptHand.some((card) => typeof card !== "string")
   ) {
     throw new Error("Opening-hand LLM response did not include keptHand.")
+  }
+
+  if (!summary) {
+    throw new Error("Opening-hand LLM response did not include summary.")
   }
 
   return {
@@ -430,11 +435,16 @@ export function parseTurnSimulationCompletionFromResponseText(
   }
 
   const responseRecord = asRecord(parsedResponse)
-  throwIfModelReportedSimulationError(responseRecord)
+  assertSuccessfulSimulationOutputErrorIsNull(responseRecord, "Turn")
   const gameState = getStringProperty(responseRecord, "gameState")?.trim()
+  const summary = getRequiredStringProperty(responseRecord, "summary")
 
   if (!gameState) {
     throw new Error("Turn LLM response did not include gameState.")
+  }
+
+  if (!summary) {
+    throw new Error("Turn LLM response did not include summary.")
   }
 
   return {
@@ -443,14 +453,37 @@ export function parseTurnSimulationCompletionFromResponseText(
   }
 }
 
-function throwIfModelReportedSimulationError(
-  responseRecord: Record<string, unknown>
+function assertSuccessfulSimulationOutputErrorIsNull(
+  responseRecord: Record<string, unknown>,
+  phaseName: string
 ) {
-  const modelError = getStringProperty(responseRecord, "error")?.trim()
+  const errorValue = responseRecord.error
 
-  if (modelError) {
-    throw new ModelReportedSimulationError(modelError)
+  if (errorValue === null) {
+    return
   }
+
+  if (errorValue === undefined) {
+    throw new Error(
+      `${phaseName} LLM response did not include error: null.`
+    )
+  }
+
+  const modelError = typeof errorValue === "string" ? errorValue.trim() : ""
+
+  throw new ModelReportedSimulationError(
+    modelError ||
+      "Model reported an unrecoverable simulation error without a readable message."
+  )
+}
+
+function getRequiredStringProperty(
+  record: Record<string, unknown>,
+  property: string
+) {
+  const value = record[property]
+
+  return typeof value === "string" && value.trim() ? value : null
 }
 
 function parseJsonWithLastObjectFallback(responseText: string) {

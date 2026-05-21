@@ -42,17 +42,21 @@ Bottoming after a non-free mulligan:
 - Use one return_cards_to_library call with all bottomed cards.
 
 Unrecoverable error:
-If an already-made tool call makes the run impossible to complete accurately, stop immediately. Do not call more tools and do not output keptHand. Return only:
+If an already-made tool call makes the run impossible to complete accurately, stop immediately. Do not call more tools. Return exactly:
 {
+  "keptHand": null,
+  "summary": null,
   "error": "Short explanation of the unrecoverable mistake."
 }
 
 Successful output must be exactly this JSON shape:
 {
   "keptHand": ["Card Name", "Card Name"],
-  "summary": "User-facing summary. Markdown and newlines are allowed."
+  "summary": "User-facing summary. Markdown and newlines are allowed.",
+  "error": null
 }
 
+Never omit keptHand, summary, or error. Use null for any field that does not apply.
 keptHand must be the exact final hand after all mulligans and any cards bottomed to the library.
 summary should briefly state keep/mulligan decisions, total mulligans, bottomed cards if any, and why the final hand was kept.
 
@@ -142,20 +146,24 @@ MANA COSTS AND MANA SYMBOLS REFERENCE
 - Lands and permanents produce only the mana their text allows.
 - Not every land has a mana ability. Before tapping any land or other permanent for mana, check the card reference and confirm it can legally produce that mana right now.
 
-Unrecoverable error:
-If an already-made tool call makes the run impossible to complete accurately, stop immediately. Do not call more tools. Return only:
+Output must be exactly this JSON shape:
 {
+  "gameState": null | "Complete end-of-turn game state as a readable string.",
+  "summary": null | "User-facing summary. Markdown and newlines are allowed.",
+  "error": null | "optional description of mistake. include if simulation is not valid/legal."
+}
+
+Unrecoverable error:
+If an already-made tool call makes the run impossible to complete accurately, stop immediately. Do not call more tools. Return exactly:
+{
+  "gameState": null,
+  "summary": null,
   "error": "Short explanation of the unrecoverable mistake."
 }
 
 Before final response, verify legality, mana payments/colors, tools used for hidden/random actions, land count, triggers, targets, life totals, commander damage/tax, tapped status, counters, and every zone.
 
-Successful output must be exactly this JSON shape:
-{
-  "gameState": "Complete end-of-turn game state as a readable string.",
-  "summary": "User-facing summary. Markdown and newlines are allowed."
-}
-
+Never omit gameState, summary, or error. Use null for any field that does not apply.
 gameState is a compact end-of-turn state dump, complete enough to resume later. summary is a brief user-facing markdown recap of what you played and what changed.
 future turns will be given the full gameState from the previous turn
 use gameState notes to track any additional durible information or state that does not fit into the other categories and will be useful to know for future turns. Do not use notes to summarize the turn.

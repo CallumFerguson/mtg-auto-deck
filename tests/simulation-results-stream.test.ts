@@ -180,6 +180,7 @@ test("keeps card mentions from final parsed output chunks", () => {
       payload: {
         keptHand: ["Sol Ring", "Mega Fake Lotus"],
         summary: "Kept a hand.",
+        error: null,
       },
       cardMentions: [
         {
@@ -408,6 +409,7 @@ test("reads opening hand final output from final parsed output chunks", () => {
           payload: {
             keptHand: ["Forest", "Sol Ring"],
             summary: "Kept a stable opener.",
+            error: null,
           },
         }),
       ],
@@ -460,6 +462,7 @@ test("reads turn final output from final parsed output chunks", () => {
           payload: {
             gameState: "Hand: Forest\nBattlefield: Island",
             summary: "Played Island and passed.",
+            error: null,
           },
         }),
       ],
@@ -471,6 +474,51 @@ test("reads turn final output from final parsed output chunks", () => {
     gameState: "Hand: Forest\nBattlefield: Island",
     summary: "Played Island and passed.",
   })
+})
+
+test("ignores final parsed success payloads without explicit error null", () => {
+  const parsedOutput = getSimulationFinalParsedOutput(
+    createRun({
+      llmRunId: "turn-run",
+      phase: "turn",
+      chunks: [
+        createChunk({
+          id: 1,
+          sequence: 1,
+          kind: "final_parsed_output",
+          payload: {
+            gameState: "Hand: Forest\nBattlefield: Island",
+            summary: "Played Island and passed.",
+          },
+        }),
+      ],
+    })
+  )
+
+  assert.equal(parsedOutput, null)
+})
+
+test("ignores final parsed payloads with a model error", () => {
+  const parsedOutput = getSimulationFinalParsedOutput(
+    createRun({
+      llmRunId: "opening-run",
+      phase: "opening_hand",
+      chunks: [
+        createChunk({
+          id: 1,
+          sequence: 1,
+          kind: "final_parsed_output",
+          payload: {
+            keptHand: ["Forest", "Sol Ring"],
+            summary: "This should not be used.",
+            error: "Drew opening hand twice.",
+          },
+        }),
+      ],
+    })
+  )
+
+  assert.equal(parsedOutput, null)
 })
 
 test("reads report final output from final parsed output chunks", () => {
@@ -1274,6 +1322,7 @@ test("omits reasoning and output lifecycle chunks and deltas from result chunks"
       payload: {
         keptHand: ["Sol Ring", "Forest"],
         summary: "Kept a stable opener.",
+        error: null,
       },
       sequence: 7,
     }),
@@ -1635,6 +1684,7 @@ test("detects final parsed output chunks for active-run thinking visibility", ()
         payload: {
           keptHand: ["Sol Ring", "Forest"],
           summary: "Kept a stable opener.",
+          error: null,
         },
         sequence: 2,
       }),

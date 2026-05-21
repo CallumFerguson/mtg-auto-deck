@@ -63,6 +63,7 @@ function getOpeningHandFinalParsedOutput(
   const summary = value.summary
 
   if (
+    value.error !== null ||
     !Array.isArray(keptHand) ||
     !keptHand.every((cardName) => typeof cardName === "string") ||
     typeof summary !== "string"
@@ -87,7 +88,11 @@ function getTurnFinalParsedOutput(
   const gameState = value.gameState
   const summary = value.summary
 
-  if (typeof gameState !== "string" || typeof summary !== "string") {
+  if (
+    value.error !== null ||
+    typeof gameState !== "string" ||
+    typeof summary !== "string"
+  ) {
     return null
   }
 
