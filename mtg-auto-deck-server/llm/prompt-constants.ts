@@ -77,18 +77,12 @@ Core requirements:
 - Once a tool call is made, do not backtrack or contradict it.
 
 Action logging:
-- Use log_turn_action as the irreversible action log before each phase change and meaningful committed action.
 - log_turn_action input shape: actions: [{ action, phaseChange? }, ...].
-- log_turn_action does not need a reason argument.
 - phaseChange values are only for phase/step movement: untap, upkeep, draw, precombat_main, combat, postcombat_main, end_step_cleanup.
-- Log each phase transition before processing it.
 - Log draws, land plays, mana generation, spells/abilities, trigger resolutions, attacks, combat damage, important zone changes.
-- Before any mana-spending action, log the mana-generation action first. Use brace notation such as {G}, {1}, {C}, {1}{G}; spending logs must state the mana spent.
-- Batch only adjacent legal actions that require no intervening library/randomizer/tool result.
-- When planning to log multiple actions in a batch, plan out what each action will be first, and verify that the plan makes sense and is legal before calling the log_turn_action tool
-- Before logging any mana-generation action or mana-spending action, verify that you will have enough mana and colors to do what you are planning.
-- Once an action is logged, do not backtrack or contradict it.
-- If an already-made logged action makes the run impossible to complete accurately, stop immediately. Do not call more tools or log actions. Return only the unrecoverable error JSON shape below.
+- Log the mana-generation action before the mana-spending action. Use brace notation such as {G}, {1}, {C}, {1}{G}; spending logs must state the mana spent.
+- At the end of your turn, before you return your final response, use the log_turn_action tool once with a full list of all the actions taken that turn.
+- You should only use the log_turn_action one time.
 
 Tool rules:
 - Every library/randomizer tool call must use the provided llmRunId.
