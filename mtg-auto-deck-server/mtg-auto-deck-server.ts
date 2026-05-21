@@ -231,6 +231,7 @@ import {
 } from "./simulation-results-stream.js"
 import {
   aggregateOpenRouterUsage,
+  applyLlmRunEstimatedCostServiceTierDiscount,
   estimatePresetTokenCostUsd,
   formatUsdCostAsCentLabel,
   getOpenRouterReportedCostUsd,
@@ -893,6 +894,7 @@ function logLlmApiCallFinished({
   model,
   phase,
   provider,
+  serviceTier,
   tokenCosts,
   usage,
 }: {
@@ -900,13 +902,17 @@ function logLlmApiCallFinished({
   model: string
   phase: LlmRunPhase
   provider: string
+  serviceTier?: string | null
   tokenCosts: TokenPrice
   usage: unknown
 }) {
   const tokenUsage = getLlmTokenUsageSummary(usage)
-  const estimatedCostUsd = estimatePresetTokenCostUsd({
-    tokenCosts,
-    usage,
+  const estimatedCostUsd = applyLlmRunEstimatedCostServiceTierDiscount({
+    estimatedCostUsd: estimatePresetTokenCostUsd({
+      tokenCosts,
+      usage,
+    }),
+    serviceTier,
   })
   const openrouterReportedCostUsd =
     provider === "openrouter" ? getOpenRouterReportedCostUsd(usage) : null
@@ -3563,6 +3569,7 @@ async function collectOpenAiLlmStream({
     model: requestPayload.model,
     phase,
     provider: config.provider,
+    serviceTier: config.serviceTier,
     tokenCosts: config.tokenCosts,
     usage,
   })
@@ -3744,6 +3751,7 @@ async function collectOpenRouterLlmStream({
     model: requestPayload.model,
     phase,
     provider: config.provider,
+    serviceTier: config.serviceTier,
     tokenCosts: config.tokenCosts,
     usage,
   })
@@ -3836,6 +3844,7 @@ async function collectLlamaCppLlmStream({
         model: requestPayload.model,
         phase,
         provider: config.provider,
+        serviceTier: config.serviceTier,
         tokenCosts: config.tokenCosts,
         usage: result.usage,
       })
@@ -3902,6 +3911,7 @@ async function collectRunEvaluationCompletion({
       model: config.model,
       phase: "other",
       provider: config.provider,
+      serviceTier: config.serviceTier,
       tokenCosts: config.tokenCosts,
       usage: asRecord(response).usage ?? {},
     })
@@ -3941,6 +3951,7 @@ async function collectRunEvaluationCompletion({
       model: config.model,
       phase: "other",
       provider: config.provider,
+      serviceTier: config.serviceTier,
       tokenCosts: config.tokenCosts,
       usage: asRecord(result).usage ?? {},
     })

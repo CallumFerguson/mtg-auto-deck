@@ -53,6 +53,7 @@ import {
 } from "./llm-runtime-cancellation.js"
 import {
   aggregateOpenRouterUsage,
+  applyLlmRunEstimatedCostServiceTierDiscount,
   estimatePartialLlmRunCostUsd,
   estimatePresetTokenCostUsd,
   estimateRunningLlmRunInitialCostUsd,
@@ -214,6 +215,7 @@ test("builds partial LLM run cost snapshot query", () => {
   assert.match(normalizedSql, /length\(llm_run\.full_prompt\)/)
   assert.match(normalizedSql, /chunk\.reasoning_delta/)
   assert.match(normalizedSql, /chunk\.output_delta/)
+  assert.match(normalizedSql, /llm_run\.service_tier/)
   assert.match(normalizedSql, /cached_input_token_cost_usd_per_million/)
   assert.match(normalizedSql, /output_token_cost_usd_per_million/)
   assert.doesNotMatch(normalizedSql, /openrouter_reported_cost_usd/)
@@ -635,6 +637,38 @@ test("extracts OpenRouter reported cost separately from preset estimates", () =>
   assert.equal(getOpenRouterReportedCostUsd(usage), 0.00125)
 })
 
+test("cuts estimated cost in half for flex service tier runs only", () => {
+  assert.equal(
+    applyLlmRunEstimatedCostServiceTierDiscount({
+      estimatedCostUsd: 0.02064,
+      serviceTier: "flex",
+    }),
+    0.01032
+  )
+  assert.equal(
+    applyLlmRunEstimatedCostServiceTierDiscount({
+      estimatedCostUsd: 0.02064,
+      serviceTier: "priority",
+    }),
+    0.02064
+  )
+  assert.equal(
+    applyLlmRunEstimatedCostServiceTierDiscount({
+      estimatedCostUsd: null,
+      serviceTier: "flex",
+    }),
+    null
+  )
+
+  const usage = {
+    inputTokens: 1000,
+    outputTokens: 2000,
+    cost: 0.00125,
+  }
+
+  assert.equal(getOpenRouterReportedCostUsd(usage), 0.00125)
+})
+
 test("formats stored USD costs as cents", () => {
   assert.equal(formatUsdCostAsCents(0.00125), "0.1")
   assert.equal(formatUsdCostAsCents(0.0001), "<0.1")
@@ -932,6 +966,10 @@ test("builds queued LLM run claim query with explicit claim timestamp", () => {
   assert.match(normalizedSql, /output_token_cost_usd_per_million/)
   assert.match(normalizedSql, /cached_input_token_cost_usd_per_million >= 0/)
   assert.match(normalizedSql, /output_token_cost_usd_per_million >= 0/)
+  assert.match(
+    normalizedSql,
+    /CASE WHEN llm_run\.service_tier = 'flex' THEN 0\.5 ELSE 1 END/
+  )
   assert.match(normalizedSql, /ELSE NULL/)
   assert.match(normalizedSql, /updated_at = \$2::timestamptz/)
   assert.doesNotMatch(
@@ -974,6 +1012,10 @@ test("builds incremental running LLM run cost query", () => {
   assert.match(normalizedSql, /llm_run\.estimated_cost_usd \+/)
   assert.match(normalizedSql, /\$2::numeric \/ 4/)
   assert.match(normalizedSql, /preset\.output_token_cost_usd_per_million/)
+  assert.match(
+    normalizedSql,
+    /CASE WHEN llm_run\.service_tier = 'flex' THEN 0\.5 ELSE 1 END/
+  )
   assert.match(normalizedSql, /llm_run\.estimated_cost_usd IS NOT NULL/)
   assert.match(
     normalizedSql,

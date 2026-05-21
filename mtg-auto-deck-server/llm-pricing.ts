@@ -159,6 +159,20 @@ export function getOpenRouterReportedCostUsd(usage: unknown) {
   return costUsd !== null && costUsd >= 0 ? costUsd : null
 }
 
+export function applyLlmRunEstimatedCostServiceTierDiscount({
+  estimatedCostUsd,
+  serviceTier,
+}: {
+  estimatedCostUsd: number | null
+  serviceTier: string | null | undefined
+}) {
+  if (estimatedCostUsd === null) {
+    return null
+  }
+
+  return serviceTier === "flex" ? estimatedCostUsd / 2 : estimatedCostUsd
+}
+
 export function formatUsdCostAsCents(costUsd: number | null | undefined) {
   if (
     costUsd === null ||

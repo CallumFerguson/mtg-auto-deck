@@ -1,5 +1,6 @@
 import { queryDatabase, withDatabaseTransaction } from "./db.js"
 import {
+  applyLlmRunEstimatedCostServiceTierDiscount,
   estimatePartialLlmRunCostUsd,
   estimatePresetTokenCostUsd,
   formatPreferredLlmRunCostAsCents,
@@ -3290,7 +3291,8 @@ export function buildIncrementRunningLlmRunCostQuery({
             llm_run.estimated_cost_usd +
             (($2::numeric / 4) *
               preset.output_token_cost_usd_per_million /
-              1000000),
+              1000000 *
+              ${getLlmRunEstimatedCostServiceTierMultiplierSql()}),
           updated_at = now()
       FROM llm_model_presets preset
       WHERE llm_run.id = $1
@@ -4004,12 +4006,17 @@ function getRunningLlmRunInitialCostSql() {
               THEN
                 (length(llm_run.full_prompt)::numeric / 4) *
                 preset.cached_input_token_cost_usd_per_million /
-                1000000
+                1000000 *
+                ${getLlmRunEstimatedCostServiceTierMultiplierSql()}
               ELSE NULL
             END
             FROM llm_model_presets preset
             WHERE preset.id = llm_run.llm_model_preset_id
           )`
+}
+
+function getLlmRunEstimatedCostServiceTierMultiplierSql() {
+  return `(CASE WHEN llm_run.service_tier = 'flex' THEN 0.5 ELSE 1 END)`
 }
 
 export function buildFailQueuedLlmRunUsageLimitQuery(
@@ -4083,6 +4090,7 @@ export async function completeOpeningHandLlmRun({
       deck_id: string
       llm_run_status: LlmRunStatus
       provider: string
+      service_tier: string | null
       input_token_cost_usd_per_million: string | number | null
       cached_input_token_cost_usd_per_million: string | number | null
       output_token_cost_usd_per_million: string | number | null
@@ -4099,6 +4107,7 @@ export async function completeOpeningHandLlmRun({
           simulation.deck_id,
           llm_run.status AS llm_run_status,
           llm_run.provider,
+          llm_run.service_tier,
           preset.input_token_cost_usd_per_million,
           preset.cached_input_token_cost_usd_per_million,
           preset.output_token_cost_usd_per_million,
@@ -4224,6 +4233,7 @@ export async function completeTurnLlmRun({
       deck_id: string
       llm_run_status: LlmRunStatus
       provider: string
+      service_tier: string | null
       input_token_cost_usd_per_million: string | number | null
       cached_input_token_cost_usd_per_million: string | number | null
       output_token_cost_usd_per_million: string | number | null
@@ -4240,6 +4250,7 @@ export async function completeTurnLlmRun({
           simulation.deck_id,
           llm_run.status AS llm_run_status,
           llm_run.provider,
+          llm_run.service_tier,
           preset.input_token_cost_usd_per_million,
           preset.cached_input_token_cost_usd_per_million,
           preset.output_token_cost_usd_per_million,
@@ -4355,6 +4366,7 @@ export async function completeReportLlmRun({
     const snapshotResult = await client.query<{
       llm_run_status: LlmRunStatus
       provider: string
+      service_tier: string | null
       input_token_cost_usd_per_million: string | number | null
       cached_input_token_cost_usd_per_million: string | number | null
       output_token_cost_usd_per_million: string | number | null
@@ -4363,6 +4375,7 @@ export async function completeReportLlmRun({
         SELECT
           llm_run.status AS llm_run_status,
           llm_run.provider,
+          llm_run.service_tier,
           preset.input_token_cost_usd_per_million,
           preset.cached_input_token_cost_usd_per_million,
           preset.output_token_cost_usd_per_million
@@ -4428,26 +4441,32 @@ export async function completeReportLlmRun({
 function getCompletedLlmRunCostValues(
   run: {
     provider: string
+    service_tier: string | null
     input_token_cost_usd_per_million: string | number | null
     cached_input_token_cost_usd_per_million: string | number | null
     output_token_cost_usd_per_million: string | number | null
   },
   usage: unknown
 ) {
+  const estimatedCostUsd = estimatePresetTokenCostUsd({
+    tokenCosts: {
+      inputDollarsPerMillion: toOptionalNumber(
+        run.input_token_cost_usd_per_million
+      ),
+      cachedInputDollarsPerMillion: toOptionalNumber(
+        run.cached_input_token_cost_usd_per_million
+      ),
+      outputDollarsPerMillion: toOptionalNumber(
+        run.output_token_cost_usd_per_million
+      ),
+    },
+    usage,
+  })
+
   return {
-    estimatedCostUsd: estimatePresetTokenCostUsd({
-      tokenCosts: {
-        inputDollarsPerMillion: toOptionalNumber(
-          run.input_token_cost_usd_per_million
-        ),
-        cachedInputDollarsPerMillion: toOptionalNumber(
-          run.cached_input_token_cost_usd_per_million
-        ),
-        outputDollarsPerMillion: toOptionalNumber(
-          run.output_token_cost_usd_per_million
-        ),
-      },
-      usage,
+    estimatedCostUsd: applyLlmRunEstimatedCostServiceTierDiscount({
+      estimatedCostUsd,
+      serviceTier: run.service_tier,
     }),
     openrouterReportedCostUsd:
       run.provider === "openrouter" ? getOpenRouterReportedCostUsd(usage) : null,
@@ -4458,6 +4477,7 @@ type PartialLlmRunCostSnapshotRow = {
   full_prompt_character_count: string | number
   reasoning_delta_character_count: string | number
   output_delta_character_count: string | number
+  service_tier: string | null
   cached_input_token_cost_usd_per_million: string | number | null
   output_token_cost_usd_per_million: string | number | null
 }
@@ -4469,6 +4489,7 @@ export function buildPartialLlmRunCostSnapshotQuery(llmRunId: string) {
         length(llm_run.full_prompt) AS full_prompt_character_count,
         COALESCE(SUM(length(COALESCE(chunk.reasoning_delta, ''))), 0) AS reasoning_delta_character_count,
         COALESCE(SUM(length(COALESCE(chunk.output_delta, ''))), 0) AS output_delta_character_count,
+        llm_run.service_tier,
         preset.cached_input_token_cost_usd_per_million,
         preset.output_token_cost_usd_per_million
       FROM llm_runs llm_run
@@ -4479,6 +4500,7 @@ export function buildPartialLlmRunCostSnapshotQuery(llmRunId: string) {
       WHERE llm_run.id = $1
       GROUP BY
         llm_run.id,
+        llm_run.service_tier,
         preset.cached_input_token_cost_usd_per_million,
         preset.output_token_cost_usd_per_million
     `,
@@ -4501,7 +4523,7 @@ async function estimatePartialLlmRunCostUsdWithClient(
     return null
   }
 
-  return estimatePartialLlmRunCostUsd({
+  const estimatedCostUsd = estimatePartialLlmRunCostUsd({
     fullPromptCharCount:
       toOptionalNumber(snapshot.full_prompt_character_count) ?? 0,
     reasoningDeltaCharCount:
@@ -4516,6 +4538,11 @@ async function estimatePartialLlmRunCostUsdWithClient(
         snapshot.output_token_cost_usd_per_million
       ),
     },
+  })
+
+  return applyLlmRunEstimatedCostServiceTierDiscount({
+    estimatedCostUsd,
+    serviceTier: snapshot.service_tier,
   })
 }
 
