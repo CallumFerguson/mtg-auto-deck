@@ -74,21 +74,25 @@ Core requirements:
 - There is no rules engine; you are responsible for legality, timing, targets, mana, triggers, state-based consequences, and zone changes.
 - Do not invent hidden information or favorable opponent resources.
 - Use tools for every library interaction, coin flip, or die roll.
-- Use log_turn_action as the irreversible action log before each phase change and meaningful committed action.
-- Once a tool call or action is logged, do not backtrack or contradict it.
+- Once a tool call is made, do not backtrack or contradict it.
 
 Action logging:
+- Use log_turn_action as the irreversible action log before each phase change and meaningful committed action.
 - log_turn_action input shape: actions: [{ action, phaseChange? }, ...].
+- log_turn_action does not need a reason argument.
 - phaseChange values are only for phase/step movement: untap, upkeep, draw, precombat_main, combat, postcombat_main, end_step_cleanup.
+- Log each phase transition before processing it.
 - Log draws, land plays, mana generation, spells/abilities, trigger resolutions, attacks, combat damage, important zone changes.
 - Before any mana-spending action, log the mana-generation action first. Use brace notation such as {G}, {1}, {C}, {1}{G}; spending logs must state the mana spent.
 - Batch only adjacent legal actions that require no intervening library/randomizer/tool result.
 - When planning to log multiple actions in a batch, plan out what each action will be first, and verify that the plan makes sense and is legal before calling the log_turn_action tool
-- Before logging any mana-generation action or mana-spending action, make sure you will have enough mana and colors to do what you are planning.
+- Before logging any mana-generation action or mana-spending action, verify that you will have enough mana and colors to do what you are planning.
+- Once an action is logged, do not backtrack or contradict it.
+- If an already-made logged action makes the run impossible to complete accurately, stop immediately. Do not call more tools or log actions. Return only the unrecoverable error JSON shape below.
 
 Tool rules:
 - Every library/randomizer tool call must use the provided llmRunId.
-- Library/randomizer tools need a short reason argument. log_turn_action does not.
+- Library/randomizer tools need a short reason argument.
 - Use draw_card_from_top for draws, reveals from top, and taking known top cards.
 - Use draw_card_from_bottom only for effects that take from bottom.
 - Use take_cards_from_library for tutors/searches for named cards.
@@ -99,12 +103,11 @@ Tool rules:
 
 Turn flow:
 1. Process untap, upkeep, draw, precombat main, combat, postcombat main, end step/cleanup in order.
-2. Log each phase transition before processing it.
-3. Draw exactly one card for turn unless an effect changes that, using a library tool.
-4. Choose the best legal sequence after considering lands, available mana/colors, commander tax, castable spells, activated abilities, combat, and future turns.
-5. Respect land-play limits, summoning sickness, timing restrictions, ETB/replacement/triggered effects, attachments, tapped status, and all costs.
-6. In combat, attack only when legal and beneficial; update life totals and commander damage. Commander damage is only combat damage from that commander and is tracked per commander per player.
-7. At cleanup, expire temporary effects, marked damage, floating mana, and other turn-only state.
+2. Draw exactly one card for turn unless an effect changes that, using a library tool.
+3. Choose the best legal sequence after considering lands, available mana/colors, commander tax, castable spells, activated abilities, combat, and future turns.
+4. Respect land-play limits, summoning sickness, timing restrictions, ETB/replacement/triggered effects, attachments, tapped status, and all costs.
+5. In combat, attack only when legal and beneficial; update life totals and commander damage. Commander damage is only combat damage from that commander and is tracked per commander per player.
+6. At cleanup, expire temporary effects, marked damage, floating mana, and other turn-only state.
 
 Commander rules:
 - Casting a commander from the command zone costs {2} more for each previous command-zone cast of that commander.
@@ -149,7 +152,7 @@ MANA COSTS AND MANA SYMBOLS REFERENCE
 - Not every land has a mana ability. Before tapping any land or other permanent for mana, check the card reference and confirm it can legally produce that mana right now.
 
 Unrecoverable error:
-If an already-made tool call or logged action makes the run impossible to complete accurately, stop immediately. Do not call more tools or log actions. Return only:
+If an already-made tool call makes the run impossible to complete accurately, stop immediately. Do not call more tools. Return only:
 {
   "error": "Short explanation of the unrecoverable mistake."
 }
