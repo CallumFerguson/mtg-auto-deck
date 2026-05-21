@@ -136,6 +136,8 @@ type SimulationResultsAction =
 const DEFAULT_TURNS_TO_SIMULATE = "1"
 const ACTIVITY_PANEL_EXIT_FALLBACK_MS = 350
 const USAGE_LIMIT_FAILURE_MESSAGE_PATTERN = /\bout of usage limits\b/i
+const CREATE_SIMULATION_USE_FLEX_STORAGE_KEY =
+  "mtg-auto-deck:create-simulation-use-flex-service-tier"
 const MANA_SYMBOL_TEXT_PATTERN = /(\{[^{}\s]+\})/g
 const MANA_SYMBOL_CLASS_NAMES = new Set([
   "0",
@@ -548,6 +550,28 @@ function createRandomSimulationSeed() {
   return digits.join("")
 }
 
+function getStoredCreateSimulationUseFlexServiceTier() {
+  try {
+    return (
+      window.localStorage.getItem(CREATE_SIMULATION_USE_FLEX_STORAGE_KEY) ===
+      "true"
+    )
+  } catch {
+    return false
+  }
+}
+
+function storeCreateSimulationUseFlexServiceTier(isEnabled: boolean) {
+  try {
+    window.localStorage.setItem(
+      CREATE_SIMULATION_USE_FLEX_STORAGE_KEY,
+      String(isEnabled)
+    )
+  } catch {
+    // Local storage is only a convenience for this form preference.
+  }
+}
+
 function isUsageLimitFailureMessage(message: string | null) {
   return Boolean(message && USAGE_LIMIT_FAILURE_MESSAGE_PATTERN.test(message))
 }
@@ -662,6 +686,9 @@ export function DeckSimulation({
   const [autoGenerateReport, setAutoGenerateReport] = useState(false)
   const [reasoningSummariesEnabled, setReasoningSummariesEnabled] =
     useState(false)
+  const [useFlexServiceTier, setUseFlexServiceTier] = useState(
+    getStoredCreateSimulationUseFlexServiceTier
+  )
   const [openingHandMode, setOpeningHandMode] = useState<
     "simulate" | "provide"
   >("simulate")
@@ -707,6 +734,9 @@ export function DeckSimulation({
       modelPresets.find((preset) => preset.id === selectedModelPresetId) ??
       null,
     [modelPresets, selectedModelPresetId]
+  )
+  const selectedModelPresetSupportsFlex = Boolean(
+    selectedModelPreset?.supportsFlex
   )
   const selectedSimulation = useMemo(
     () =>
@@ -999,6 +1029,11 @@ export function DeckSimulation({
     setSelectedOpeningHandId(startingHands[0]?.id ?? "")
   }
 
+  function handleCreateSimulationUseFlexChange(nextEnabled: boolean) {
+    setUseFlexServiceTier(nextEnabled)
+    storeCreateSimulationUseFlexServiceTier(nextEnabled)
+  }
+
   async function handleStartSimulation() {
     if (!canStartSimulation || isCreatingSimulation) {
       return
@@ -1038,6 +1073,8 @@ export function DeckSimulation({
             turnsToSimulate: parsedTurnsToSimulate,
             autoGenerateReport: autoGenerateReport && canAutoGenerateReport,
             reasoningSummariesEnabled,
+            useFlexServiceTier:
+              selectedModelPreset.supportsFlex && useFlexServiceTier,
             startingHandId:
               openingHandMode === "provide" && selectedOpeningHand
                 ? selectedOpeningHand.id
@@ -1487,6 +1524,13 @@ export function DeckSimulation({
                           creating simulations.
                         </p>
                       ) : null}
+                      <FlexServiceTierSwitch
+                        checked={
+                          selectedModelPresetSupportsFlex && useFlexServiceTier
+                        }
+                        disabled={!selectedModelPresetSupportsFlex}
+                        onCheckedChange={handleCreateSimulationUseFlexChange}
+                      />
                     </div>
 
                     <div className="grid gap-3">
@@ -1938,6 +1982,47 @@ function ReasoningSummariesSwitch({
   )
 }
 
+function FlexServiceTierSwitch({
+  checked,
+  disabled = false,
+  onCheckedChange,
+}: {
+  checked: boolean
+  disabled?: boolean
+  onCheckedChange: (checked: boolean) => void
+}) {
+  return (
+    <div
+      className={`flex items-center gap-3 rounded-md border px-3 py-3 text-sm transition-colors ${
+        checked
+          ? "border-ring bg-accent text-accent-foreground"
+          : "border-border bg-background/35 text-muted-foreground"
+      } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+    >
+      <button
+        className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus:ring-3 focus:ring-ring/25 focus:outline-none disabled:cursor-not-allowed ${
+          checked
+            ? "border-sky-300/70 bg-sky-500/70"
+            : "border-border bg-muted/55"
+        }`}
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label="Use flex service tier"
+        disabled={disabled}
+        onClick={() => onCheckedChange(!checked)}
+      >
+        <span
+          className={`absolute top-1/2 left-1 size-4 -translate-y-1/2 rounded-full bg-foreground shadow-sm shadow-black/30 transition-transform ${
+            checked ? "translate-x-5" : "translate-x-0"
+          }`}
+        />
+      </button>
+      <span className="font-medium">Use flex service tier</span>
+    </div>
+  )
+}
+
 function SimulationDetailsModal({
   deckId,
   isAdmin,
@@ -2091,10 +2176,16 @@ function SimulationDetailsModal({
                 </div>
                 <div className="rounded-md border border-border bg-background/35 p-3 sm:col-span-2">
                   <dt className="text-muted-foreground">LLM options</dt>
-                  <dd className="mt-2">
+                  <dd className="mt-2 grid gap-3">
                     <SimulationReasoningSummariesSetting
                       deckId={deckId}
                       onSimulationUpdated={onSimulationUpdated}
+                      simulation={simulation}
+                    />
+                    <SimulationFlexServiceTierSetting
+                      deckId={deckId}
+                      onSimulationUpdated={onSimulationUpdated}
+                      selectedModelPreset={selectedModelPreset}
                       simulation={simulation}
                     />
                   </dd>
@@ -2995,6 +3086,102 @@ function SimulationReasoningSummariesSetting({
         disabled={isSaving}
         onCheckedChange={(nextEnabled) =>
           void handleReasoningSummariesChange(nextEnabled)
+        }
+      />
+      {isSaving ? (
+        <p className="text-sm text-muted-foreground">Saving...</p>
+      ) : null}
+      {error ? (
+        <p
+          className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          role="alert"
+        >
+          {error}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+function SimulationFlexServiceTierSetting({
+  deckId,
+  onSimulationUpdated,
+  selectedModelPreset,
+  simulation,
+}: {
+  deckId: string
+  onSimulationUpdated: (simulation: Simulation) => void
+  selectedModelPreset: LlmModelPreset | null
+  simulation: Simulation
+}) {
+  const [selectedEnabled, setSelectedEnabled] = useState(
+    simulation.useFlexServiceTier
+  )
+  const [isSaving, setIsSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const supportsFlex = Boolean(selectedModelPreset?.supportsFlex)
+  const checked = supportsFlex && selectedEnabled
+
+  useEffect(() => {
+    setSelectedEnabled(simulation.useFlexServiceTier)
+    setError(null)
+  }, [simulation.id, simulation.useFlexServiceTier])
+
+  async function handleFlexServiceTierChange(nextEnabled: boolean) {
+    if (
+      isSaving ||
+      !supportsFlex ||
+      nextEnabled === simulation.useFlexServiceTier
+    ) {
+      return
+    }
+
+    setSelectedEnabled(nextEnabled)
+    setIsSaving(true)
+    setError(null)
+
+    try {
+      const response = await apiFetch(
+        `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            useFlexServiceTier: nextEnabled,
+          }),
+        }
+      )
+
+      if (!response.ok) {
+        setSelectedEnabled(simulation.useFlexServiceTier)
+        setError(
+          await readApiError(
+            response,
+            "Flex service tier could not be updated."
+          )
+        )
+        return
+      }
+
+      const data = (await response.json()) as UpdateSimulationResponse
+      onSimulationUpdated(data.simulation)
+    } catch {
+      setSelectedEnabled(simulation.useFlexServiceTier)
+      setError("Flex service tier could not be updated.")
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  return (
+    <div className="grid gap-2">
+      <FlexServiceTierSwitch
+        checked={checked}
+        disabled={isSaving || !supportsFlex}
+        onCheckedChange={(nextEnabled) =>
+          void handleFlexServiceTierChange(nextEnabled)
         }
       />
       {isSaving ? (

@@ -250,7 +250,6 @@ export type EvaluationLlmModelPreset = {
   model: string
   reasoningEffort: ReasoningEffort
   openrouterModelProvider: string | null
-  serviceTier: string | null
   isEnabled: boolean
 }
 
@@ -332,7 +331,6 @@ export const TURN_EVALUATION_UPSERT_SQL = `
     preset.model AS llm_model_preset_model,
     preset.reasoning_effort AS llm_model_preset_reasoning_effort,
     preset.openrouter_model_provider AS llm_model_preset_openrouter_model_provider,
-    preset.service_tier AS llm_model_preset_service_tier,
     preset.is_enabled AS llm_model_preset_is_enabled,
     upserted.legal_turn_pass,
     upserted.reasoning_pass,
@@ -386,7 +384,6 @@ export const OPENING_HAND_EVALUATION_UPSERT_SQL = `
     preset.model AS llm_model_preset_model,
     preset.reasoning_effort AS llm_model_preset_reasoning_effort,
     preset.openrouter_model_provider AS llm_model_preset_openrouter_model_provider,
-    preset.service_tier AS llm_model_preset_service_tier,
     preset.is_enabled AS llm_model_preset_is_enabled,
     upserted.legal_simulation_pass,
     upserted.reasoning_pass,
@@ -496,6 +493,7 @@ export type SimulationSummary = {
   turnsToSimulate: number
   autoGenerateReport: boolean
   reasoningSummariesEnabled: boolean
+  useFlexServiceTier: boolean
   completedLlmRunCount: number
   activeLlmRunCount: number
   status: SimulationStatus
@@ -591,6 +589,7 @@ export type CreateSimulationInput = {
   turnsToSimulate: number
   autoGenerateReport: boolean
   reasoningSummariesEnabled?: boolean
+  useFlexServiceTier?: boolean
   startingHandId: string | null
   createdVia?: SimulationCreatedVia
 }
@@ -861,6 +860,7 @@ export async function ensureSimulationsSchema() {
       auto_simulate_next_step boolean NOT NULL DEFAULT true,
       auto_generate_report boolean NOT NULL DEFAULT false,
       reasoning_summaries_enabled boolean NOT NULL DEFAULT false,
+      use_flex_service_tier boolean NOT NULL DEFAULT false,
 
       status simulation_status NOT NULL DEFAULT 'pending',
       started_at timestamptz,
@@ -887,12 +887,18 @@ export async function ensureSimulationsSchema() {
   `)
   await queryDatabase(`
     ALTER TABLE simulations
+    ADD COLUMN IF NOT EXISTS use_flex_service_tier boolean NOT NULL DEFAULT false
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulations
     ADD COLUMN IF NOT EXISTS created_via simulation_created_via NOT NULL DEFAULT 'app'
   `)
   await queryDatabase(`
     ALTER TABLE simulations
     ADD COLUMN IF NOT EXISTS llm_model_preset_id uuid REFERENCES llm_model_presets(id) ON DELETE RESTRICT
   `)
+  await backfillSimulationFlexServiceTierFromLegacyPresets()
+  await dropLegacyLlmModelPresetServiceTier()
   await queryDatabase(`
     UPDATE simulations
     SET status = 'unmanaged',
@@ -1371,6 +1377,49 @@ export async function ensureSimulationsSchema() {
   `)
 }
 
+async function backfillSimulationFlexServiceTierFromLegacyPresets() {
+  await queryDatabase(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'llm_model_presets'
+          AND column_name = 'service_tier'
+      ) THEN
+        UPDATE simulations simulation
+        SET use_flex_service_tier = true,
+            updated_at = now()
+        FROM llm_model_presets preset
+        WHERE simulation.llm_model_preset_id = preset.id
+          AND preset.service_tier = 'flex'
+          AND simulation.use_flex_service_tier = false;
+      END IF;
+    END $$;
+  `)
+}
+
+async function dropLegacyLlmModelPresetServiceTier() {
+  await queryDatabase(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'llm_model_presets'
+          AND column_name = 'service_tier'
+      ) THEN
+        ALTER TABLE llm_model_presets
+          DROP CONSTRAINT IF EXISTS llm_model_presets_service_tier_provider_check;
+        ALTER TABLE llm_model_presets
+          DROP COLUMN service_tier;
+      END IF;
+    END $$;
+  `)
+}
+
 type SimulationSummaryRow = {
   id: string
   deck_id: string
@@ -1382,6 +1431,7 @@ type SimulationSummaryRow = {
   turns_to_simulate: number
   auto_generate_report: boolean
   reasoning_summaries_enabled: boolean
+  use_flex_service_tier: boolean
   completed_llm_run_count: number
   active_llm_run_count: number
   status: SimulationStatus
@@ -1483,6 +1533,7 @@ function mapSimulationSummaryRow(
     turnsToSimulate: simulation.turns_to_simulate,
     autoGenerateReport: simulation.auto_generate_report,
     reasoningSummariesEnabled: simulation.reasoning_summaries_enabled,
+    useFlexServiceTier: simulation.use_flex_service_tier,
     completedLlmRunCount: simulation.completed_llm_run_count,
     activeLlmRunCount: simulation.active_llm_run_count,
     status: simulation.status,
@@ -1507,6 +1558,7 @@ export async function listSimulationsForDeck(
         turns_to_simulate,
         auto_generate_report,
         reasoning_summaries_enabled,
+        use_flex_service_tier,
         ${SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL} AS completed_llm_run_count,
         ${SIMULATION_SUMMARY_ACTIVE_RUN_COUNT_SQL} AS active_llm_run_count,
         status,
@@ -1560,9 +1612,9 @@ export async function createSimulation(
   }
 
   if (llmModelPresetId !== null) {
-    const presetResult = await queryDatabase(
+    const presetResult = await queryDatabase<{ supports_flex: boolean }>(
       `
-        SELECT id
+        SELECT supports_flex
         FROM llm_model_presets
         WHERE id = $1
           AND is_enabled = true
@@ -1571,10 +1623,18 @@ export async function createSimulation(
     )
 
     if (presetResult.rowCount === 0) {
+      throw new SimulationValidationError("Model preset not found or disabled.")
+    }
+
+    if (input.useFlexServiceTier && !presetResult.rows[0].supports_flex) {
       throw new SimulationValidationError(
-        "Model preset not found or disabled."
+        "Flex service tier can only be enabled for model presets that support flex."
       )
     }
+  } else if (input.useFlexServiceTier) {
+    throw new SimulationValidationError(
+      "Flex service tier can only be enabled after selecting a model preset that supports flex."
+    )
   }
 
   if (input.startingHandId !== null) {
@@ -1613,12 +1673,13 @@ export async function createSimulation(
         turns_to_simulate,
         auto_generate_report,
         reasoning_summaries_enabled,
+        use_flex_service_tier,
         starting_hand_id,
         library,
         has_drawn_starting_hand,
         status
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13)
       RETURNING
         id,
         deck_id,
@@ -1630,6 +1691,7 @@ export async function createSimulation(
         turns_to_simulate,
         auto_generate_report,
         reasoning_summaries_enabled,
+        use_flex_service_tier,
         0::integer AS completed_llm_run_count,
         0::integer AS active_llm_run_count,
         status,
@@ -1645,6 +1707,7 @@ export async function createSimulation(
       input.turnsToSimulate,
       input.autoGenerateReport,
       input.reasoningSummariesEnabled ?? false,
+      input.useFlexServiceTier ?? false,
       input.startingHandId,
       JSON.stringify(shuffledLibrary.library),
       input.startingHandId !== null,
@@ -1672,6 +1735,7 @@ export async function getSimulationSummary(
         turns_to_simulate,
         auto_generate_report,
         reasoning_summaries_enabled,
+        use_flex_service_tier,
         ${SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL} AS completed_llm_run_count,
         ${SIMULATION_SUMMARY_ACTIVE_RUN_COUNT_SQL} AS active_llm_run_count,
         status,
@@ -1695,6 +1759,7 @@ export async function getSimulationSummary(
 export type UpdateSimulationInput = {
   llmModelPresetId?: string
   reasoningSummariesEnabled?: boolean
+  useFlexServiceTier?: boolean
 }
 
 export async function updateSimulation(
@@ -1706,7 +1771,8 @@ export async function updateSimulation(
 
   if (
     trimmedPresetId === undefined &&
-    input.reasoningSummariesEnabled === undefined
+    input.reasoningSummariesEnabled === undefined &&
+    input.useFlexServiceTier === undefined
   ) {
     throw new SimulationValidationError("Simulation update is required.")
   }
@@ -1715,19 +1781,62 @@ export async function updateSimulation(
     throw new SimulationValidationError("Model preset is required.")
   }
 
-  if (trimmedPresetId !== undefined) {
-    const presetResult = await queryDatabase(
+  let nextUseFlexServiceTier = input.useFlexServiceTier ?? null
+  const currentSimulationResult = await queryDatabase<{
+    llm_model_preset_id: string | null
+  }>(
+    `
+      SELECT llm_model_preset_id
+      FROM simulations
+      WHERE id = $1
+        AND deck_id = $2
+    `,
+    [simulationId, deckId]
+  )
+  const currentSimulation = currentSimulationResult.rows[0]
+
+  if (!currentSimulation) {
+    throw new SimulationValidationError("Simulation not found.")
+  }
+
+  const targetPresetId =
+    trimmedPresetId ?? currentSimulation.llm_model_preset_id
+
+  if (trimmedPresetId !== undefined || input.useFlexServiceTier === true) {
+    if (!targetPresetId) {
+      throw new SimulationValidationError(
+        "Flex service tier can only be enabled after selecting a model preset that supports flex."
+      )
+    }
+
+    const presetResult = await queryDatabase<{ supports_flex: boolean }>(
       `
-        SELECT id
+        SELECT supports_flex
         FROM llm_model_presets
         WHERE id = $1
           AND is_enabled = true
       `,
-      [trimmedPresetId]
+      [targetPresetId]
     )
 
     if (presetResult.rowCount === 0) {
-      throw new SimulationValidationError("Model preset not found or disabled.")
+      throw new SimulationValidationError(
+        trimmedPresetId !== undefined
+          ? "Model preset not found or disabled."
+          : "Flex service tier can only be enabled for an enabled model preset that supports flex."
+      )
+    }
+
+    const supportsFlex = presetResult.rows[0].supports_flex
+
+    if (input.useFlexServiceTier === true && !supportsFlex) {
+      throw new SimulationValidationError(
+        "Flex service tier can only be enabled for model presets that support flex."
+      )
+    }
+
+    if (trimmedPresetId !== undefined && !supportsFlex) {
+      nextUseFlexServiceTier = false
     }
   }
 
@@ -1736,6 +1845,7 @@ export async function updateSimulation(
       UPDATE simulations
       SET llm_model_preset_id = COALESCE($3, llm_model_preset_id),
           reasoning_summaries_enabled = COALESCE($4, reasoning_summaries_enabled),
+          use_flex_service_tier = COALESCE($5, use_flex_service_tier),
           updated_at = now()
       WHERE id = $1
         AND deck_id = $2
@@ -1750,6 +1860,7 @@ export async function updateSimulation(
         turns_to_simulate,
         auto_generate_report,
         reasoning_summaries_enabled,
+        use_flex_service_tier,
         ${SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL} AS completed_llm_run_count,
         ${SIMULATION_SUMMARY_ACTIVE_RUN_COUNT_SQL} AS active_llm_run_count,
         status,
@@ -1761,12 +1872,9 @@ export async function updateSimulation(
       deckId,
       trimmedPresetId ?? null,
       input.reasoningSummariesEnabled ?? null,
+      nextUseFlexServiceTier,
     ]
   )
-
-  if (result.rowCount === 0) {
-    throw new SimulationValidationError("Simulation not found.")
-  }
 
   return mapSimulationSummaryRow(result.rows[0])
 }
@@ -6055,7 +6163,6 @@ type OpeningHandEvaluationRow = {
   llm_model_preset_model: string | null
   llm_model_preset_reasoning_effort: ReasoningEffort | null
   llm_model_preset_openrouter_model_provider: string | null
-  llm_model_preset_service_tier: string | null
   llm_model_preset_is_enabled: boolean | null
   legal_simulation_pass: boolean
   reasoning_pass: boolean
@@ -6074,7 +6181,6 @@ type TurnEvaluationRow = {
   llm_model_preset_model: string | null
   llm_model_preset_reasoning_effort: ReasoningEffort | null
   llm_model_preset_openrouter_model_provider: string | null
-  llm_model_preset_service_tier: string | null
   llm_model_preset_is_enabled: boolean | null
   legal_turn_pass: boolean
   reasoning_pass: boolean
@@ -6113,7 +6219,7 @@ async function getSimulationDebugLlmRuns({
         llm_run.estimated_cost_usd,
         llm_run.openrouter_reported_cost_usd,
         COALESCE(preset.reasoning_effort, llm_run.reasoning_effort) AS reasoning_effort,
-        COALESCE(preset.service_tier, llm_run.service_tier) AS service_tier,
+        llm_run.service_tier,
         llm_run.status,
         llm_run.runtime_stream_key,
         llm_run.failure_message,
@@ -6279,7 +6385,6 @@ async function getOpeningHandEvaluationsByLlmRunIds(
         preset.model AS llm_model_preset_model,
         preset.reasoning_effort AS llm_model_preset_reasoning_effort,
         preset.openrouter_model_provider AS llm_model_preset_openrouter_model_provider,
-        preset.service_tier AS llm_model_preset_service_tier,
         preset.is_enabled AS llm_model_preset_is_enabled,
         evaluation.legal_simulation_pass,
         evaluation.reasoning_pass,
@@ -6441,7 +6546,6 @@ async function getTurnEvaluationsByLlmRunIds(llmRunIds: readonly string[]) {
         preset.model AS llm_model_preset_model,
         preset.reasoning_effort AS llm_model_preset_reasoning_effort,
         preset.openrouter_model_provider AS llm_model_preset_openrouter_model_provider,
-        preset.service_tier AS llm_model_preset_service_tier,
         preset.is_enabled AS llm_model_preset_is_enabled,
         evaluation.legal_turn_pass,
         evaluation.reasoning_pass,
@@ -6489,7 +6593,6 @@ function mapEvaluationLlmModelPresetRow(
     | "llm_model_preset_model"
     | "llm_model_preset_reasoning_effort"
     | "llm_model_preset_openrouter_model_provider"
-    | "llm_model_preset_service_tier"
     | "llm_model_preset_is_enabled"
   >
 ): EvaluationLlmModelPreset | null {
@@ -6509,7 +6612,6 @@ function mapEvaluationLlmModelPresetRow(
     model: row.llm_model_preset_model,
     reasoningEffort: row.llm_model_preset_reasoning_effort,
     openrouterModelProvider: row.llm_model_preset_openrouter_model_provider,
-    serviceTier: row.llm_model_preset_service_tier,
     isEnabled: row.llm_model_preset_is_enabled,
   }
 }

@@ -1218,17 +1218,29 @@ test("validates provider-specific LLM config requirements with presets", () => {
   assert.equal(config.maxOutputTokens, 12000)
   assert.equal(config.modelProvider, "openai")
   assert.equal(config.reasoningEffort, "high")
-  assert.equal(config.serviceTier, "priority")
+  assert.equal(config.serviceTier, null)
   assert.equal(config.stopWhenStepCount, 7)
+
+  const flexConfig = getOpeningHandLlmRunConfig(
+    createOpenRouterPreset(),
+    {
+      LLM_MAX_OUTPUT_TOKENS: "12000",
+      OPENROUTER_API_KEY: "key",
+      OPENROUTER_STOP_WHEN_STEP_COUNT: "7",
+    },
+    { useFlexServiceTier: true }
+  )
+
+  assert.equal(flexConfig.serviceTier, "flex")
 })
 
-test("builds model preset insert with a service tier placeholder", () => {
+test("builds model preset insert with a supports-flex placeholder", () => {
   const query = buildCreateLlmModelPresetInsertQuery({
     provider: "openrouter",
     model: "openai/gpt-5-nano",
     reasoningEffort: "high",
     openrouterModelProvider: "openai",
-    serviceTier: "priority",
+    supportsFlex: true,
     inputTokenCostUsdPerMillion: 1,
     cachedInputTokenCostUsdPerMillion: 0.1,
     outputTokenCostUsdPerMillion: 10,
@@ -1237,13 +1249,13 @@ test("builds model preset insert with a service tier placeholder", () => {
   })
   const normalizedSql = query.text.replace(/\s+/g, " ")
 
-  assert.match(normalizedSql, /service_tier/)
+  assert.match(normalizedSql, /supports_flex/)
   assert.match(
     normalizedSql,
     /VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10\)/
   )
   assert.equal(query.values.length, 10)
-  assert.equal(query.values[4], "priority")
+  assert.equal(query.values[4], true)
 })
 
 test("evaluation config uses the preset without requiring MCP URLs", () => {
@@ -1256,7 +1268,37 @@ test("evaluation config uses the preset without requiring MCP URLs", () => {
   assert.equal(config.model, "gpt-5.4-mini")
   assert.equal(config.modelPresetId, "preset-openai")
   assert.equal(config.maxOutputTokens, 12000)
-  assert.equal(config.serviceTier, "flex")
+  assert.equal(config.serviceTier, null)
+})
+
+test("uses flex service tier only when requested for a flex-capable preset", () => {
+  const environment = {
+    LLM_MAX_OUTPUT_TOKENS: "12000",
+    OPENAI_API_KEY: "key",
+    OPENING_HAND_MCP_PUBLIC_URL: "https://example.com/opening",
+  }
+
+  assert.equal(
+    getOpeningHandLlmRunConfig(createOpenAiPreset(), environment).serviceTier,
+    null
+  )
+  assert.equal(
+    getOpeningHandLlmRunConfig(createOpenAiPreset(), environment, {
+      useFlexServiceTier: true,
+    }).serviceTier,
+    "flex"
+  )
+  assert.equal(
+    getOpeningHandLlmRunConfig(
+      {
+        ...createOpenAiPreset(),
+        supportsFlex: false,
+      },
+      environment,
+      { useFlexServiceTier: true }
+    ).serviceTier,
+    null
+  )
 })
 
 test("validates llama.cpp LLM config requirements", () => {
@@ -1314,7 +1356,7 @@ function createOpenAiPreset() {
     model: "gpt-5.4-mini",
     reasoningEffort: "medium" as const,
     openrouterModelProvider: null,
-    serviceTier: "flex",
+    supportsFlex: true,
     inputTokenCostUsdPerMillion: 1,
     cachedInputTokenCostUsdPerMillion: 0.1,
     outputTokenCostUsdPerMillion: 10,
@@ -1328,7 +1370,7 @@ function createOpenRouterPreset() {
     model: "openai/gpt-5-nano",
     reasoningEffort: "high" as const,
     openrouterModelProvider: "openai",
-    serviceTier: "priority",
+    supportsFlex: true,
     inputTokenCostUsdPerMillion: 1,
     cachedInputTokenCostUsdPerMillion: 0.1,
     outputTokenCostUsdPerMillion: 10,
@@ -1342,7 +1384,7 @@ function createLlamaCppPreset() {
     model: "qwen3-8b-q4_k_m.gguf",
     reasoningEffort: "none" as const,
     openrouterModelProvider: null,
-    serviceTier: "ignored-local-tier",
+    supportsFlex: false,
     inputTokenCostUsdPerMillion: null,
     cachedInputTokenCostUsdPerMillion: null,
     outputTokenCostUsdPerMillion: null,
@@ -2026,10 +2068,7 @@ test("opening-hand evaluation upsert overwrites existing evaluation columns", ()
     normalizedSql,
     /ON CONFLICT \(opening_hand_llm_run_id\) DO UPDATE/
   )
-  assert.match(
-    normalizedSql,
-    /preset\.service_tier AS llm_model_preset_service_tier/
-  )
+  assert.doesNotMatch(normalizedSql, /preset\.service_tier/)
 
   for (const column of [
     "llm_model_preset_id",
@@ -2206,10 +2245,7 @@ test("turn evaluation upsert overwrites existing evaluation columns", () => {
   const normalizedSql = TURN_EVALUATION_UPSERT_SQL.replace(/\s+/g, " ").trim()
 
   assert.match(normalizedSql, /ON CONFLICT \(turn_llm_run_id\) DO UPDATE/)
-  assert.match(
-    normalizedSql,
-    /preset\.service_tier AS llm_model_preset_service_tier/
-  )
+  assert.doesNotMatch(normalizedSql, /preset\.service_tier/)
 
   for (const column of [
     "llm_model_preset_id",

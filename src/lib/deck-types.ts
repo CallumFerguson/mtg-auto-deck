@@ -52,6 +52,7 @@ export type Simulation = {
   turnsToSimulate: number
   autoGenerateReport: boolean
   reasoningSummariesEnabled: boolean
+  useFlexServiceTier: boolean
   completedLlmRunCount: number
   activeLlmRunCount: number
   status: SimulationStatus
@@ -135,7 +136,6 @@ export type EvaluationLlmModelPreset = {
   model: string
   reasoningEffort: ReasoningEffort
   openrouterModelProvider: string | null
-  serviceTier: string | null
   isEnabled: boolean
 }
 

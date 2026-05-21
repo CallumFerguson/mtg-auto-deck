@@ -365,17 +365,20 @@ const createSimulationSchema = z.object({
   turnsToSimulate: z.number().int().nonnegative(),
   autoGenerateReport: z.boolean().default(false),
   reasoningSummariesEnabled: z.boolean().default(false),
+  useFlexServiceTier: z.boolean().default(false),
   startingHandId: z.uuid().nullable(),
 })
 const updateSimulationSchema = z
   .object({
     llmModelPresetId: z.uuid().optional(),
     reasoningSummariesEnabled: z.boolean().optional(),
+    useFlexServiceTier: z.boolean().optional(),
   })
   .refine(
     (update) =>
       update.llmModelPresetId !== undefined ||
-      update.reasoningSummariesEnabled !== undefined
+      update.reasoningSummariesEnabled !== undefined ||
+      update.useFlexServiceTier !== undefined
   )
 const optionalTokenCostSchema = z
   .number()
@@ -388,7 +391,7 @@ const createLlmModelPresetSchema = z.object({
   model: z.string().trim().min(1),
   reasoningEffort: reasoningEffortSchema,
   openrouterModelProvider: z.string().trim().nullable().default(null),
-  serviceTier: z.string().trim().nullable().default(null),
+  supportsFlex: z.boolean().default(false),
   inputTokenCostUsdPerMillion: optionalTokenCostSchema,
   cachedInputTokenCostUsdPerMillion: optionalTokenCostSchema,
   outputTokenCostUsdPerMillion: optionalTokenCostSchema,
@@ -2510,6 +2513,21 @@ function getLlmRunServiceTier(
   return config.provider === "llamacpp" ? null : config.serviceTier
 }
 
+function withCapturedLlmRunServiceTier<
+  TConfig extends
+    | ResolvedOpeningHandLlmRunConfig
+    | ResolvedTurnSimulationLlmRunConfig,
+>(config: TConfig, serviceTier: string | null): TConfig {
+  if (config.provider === "llamacpp") {
+    return config
+  }
+
+  return {
+    ...config,
+    serviceTier,
+  }
+}
+
 function buildOpeningHandLlmRequestPayload(
   config: ResolvedOpeningHandLlmRunConfig,
   fullPrompt: string,
@@ -2744,7 +2762,10 @@ async function getRequiredEnabledSimulationLlmModelPreset(
     )
   }
 
-  return preset
+  return {
+    preset,
+    useFlexServiceTier: simulation.useFlexServiceTier,
+  }
 }
 
 async function getRequiredEnabledEvaluationLlmModelPreset(
@@ -2784,7 +2805,7 @@ function getLlmModelPresetRunConfig(preset: LlmModelPreset) {
     model: preset.model,
     reasoningEffort: preset.reasoningEffort,
     openrouterModelProvider: preset.openrouterModelProvider,
-    serviceTier: preset.serviceTier,
+    supportsFlex: preset.supportsFlex,
     inputTokenCostUsdPerMillion: preset.inputTokenCostUsdPerMillion,
     cachedInputTokenCostUsdPerMillion:
       preset.cachedInputTokenCostUsdPerMillion,
@@ -2804,12 +2825,16 @@ async function prepareAndStartOpeningHandLlmRun({
   let createdLlmRunId: string | null = null
 
   try {
-    const modelPreset = await getRequiredEnabledSimulationLlmModelPreset(
-      deckId,
-      simulationId
-    )
+    const modelPresetSelection =
+      await getRequiredEnabledSimulationLlmModelPreset(deckId, simulationId)
     const llmConfig = await resolveLlmRunConfigModel(
-      getOpeningHandLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
+      getOpeningHandLlmRunConfig(
+        getLlmModelPresetRunConfig(modelPresetSelection.preset),
+        process.env,
+        {
+          useFlexServiceTier: modelPresetSelection.useFlexServiceTier,
+        }
+      )
     )
 
     if (resetBeforeStart) {
@@ -2888,12 +2913,16 @@ async function prepareAndStartTurnLlmRun({
   let createdLlmRunId: string | null = null
 
   try {
-    const modelPreset = await getRequiredEnabledSimulationLlmModelPreset(
-      deckId,
-      simulationId
-    )
+    const modelPresetSelection =
+      await getRequiredEnabledSimulationLlmModelPreset(deckId, simulationId)
     const llmConfig = await resolveLlmRunConfigModel(
-      getTurnSimulationLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
+      getTurnSimulationLlmRunConfig(
+        getLlmModelPresetRunConfig(modelPresetSelection.preset),
+        process.env,
+        {
+          useFlexServiceTier: modelPresetSelection.useFlexServiceTier,
+        }
+      )
     )
     const turnRun = await createTurnLlmRun(deckId, {
       simulationId,
@@ -2967,12 +2996,16 @@ async function prepareAndStartReportLlmRun({
   let createdLlmRunId: string | null = null
 
   try {
-    const modelPreset = await getRequiredEnabledSimulationLlmModelPreset(
-      deckId,
-      simulationId
-    )
+    const modelPresetSelection =
+      await getRequiredEnabledSimulationLlmModelPreset(deckId, simulationId)
     const llmConfig = await resolveLlmRunConfigModel(
-      getTurnSimulationLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
+      getTurnSimulationLlmRunConfig(
+        getLlmModelPresetRunConfig(modelPresetSelection.preset),
+        process.env,
+        {
+          useFlexServiceTier: modelPresetSelection.useFlexServiceTier,
+        }
+      )
     )
     const fullPrompt = await buildSimulationReportPrompt({
       deckId,
@@ -3196,8 +3229,11 @@ async function startClaimedQueuedLlmRun(run: ClaimedQueuedLlmRun) {
     const modelPreset = await getRequiredEnabledQueuedRunLlmModelPreset(run)
 
     if (run.phase === "opening_hand") {
-      const config = await resolveLlmRunConfigModel(
-        getOpeningHandLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
+      const config = withCapturedLlmRunServiceTier(
+        await resolveLlmRunConfigModel(
+          getOpeningHandLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
+        ),
+        run.serviceTier
       )
 
       assertClaimedRunMatchesConfig(run, config)
@@ -3221,8 +3257,11 @@ async function startClaimedQueuedLlmRun(run: ClaimedQueuedLlmRun) {
       return
     }
 
-    const config = await resolveLlmRunConfigModel(
-      getTurnSimulationLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
+    const config = withCapturedLlmRunServiceTier(
+      await resolveLlmRunConfigModel(
+        getTurnSimulationLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
+      ),
+      run.serviceTier
     )
 
     assertClaimedRunMatchesConfig(run, config)

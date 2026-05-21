@@ -175,10 +175,7 @@ export function AdminAccessDeniedPage({
   onSignedOut,
   onStopImpersonating,
   user,
-}: Omit<
-  AdminDashboardProps,
-  "activeSectionId" | "onSessionChanged"
->) {
+}: Omit<AdminDashboardProps, "activeSectionId" | "onSessionChanged">) {
   const navigate = useNavigate()
 
   return (
@@ -238,10 +235,7 @@ function AdminDashboardHeader({
   onSignedOut,
   onStopImpersonating,
   user,
-}: Omit<
-  AdminDashboardProps,
-  "activeSectionId" | "onSessionChanged"
-> & {
+}: Omit<AdminDashboardProps, "activeSectionId" | "onSessionChanged"> & {
   navigate: (path: string) => void
 }) {
   return (
@@ -817,7 +811,7 @@ function AdminModelPresetsSection() {
     model: "",
     reasoningEffort: "medium" as ReasoningEffort,
     openrouterModelProvider: "",
-    serviceTier: "",
+    supportsFlex: false,
     inputTokenCostUsdPerMillion: "",
     cachedInputTokenCostUsdPerMillion: "",
     outputTokenCostUsdPerMillion: "",
@@ -830,9 +824,7 @@ function AdminModelPresetsSection() {
     setLoadError(null)
 
     try {
-      const response = await apiFetch(
-        `${API_BASE_URL}/admin/llm-model-presets`
-      )
+      const response = await apiFetch(`${API_BASE_URL}/admin/llm-model-presets`)
 
       if (!response.ok) {
         setLoadError(
@@ -866,36 +858,37 @@ function AdminModelPresetsSection() {
     setActionError(null)
 
     try {
-      const response = await apiFetch(`${API_BASE_URL}/admin/llm-model-presets`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          provider: form.provider,
-          model,
-          reasoningEffort: form.reasoningEffort,
-          openrouterModelProvider:
-            form.provider === "openrouter"
-              ? form.openrouterModelProvider.trim() || null
-              : null,
-          serviceTier:
-            form.provider === "llamacpp"
-              ? null
-              : form.serviceTier.trim() || null,
-          inputTokenCostUsdPerMillion: parseOptionalCost(
-            form.inputTokenCostUsdPerMillion
-          ),
-          cachedInputTokenCostUsdPerMillion: parseOptionalCost(
-            form.cachedInputTokenCostUsdPerMillion
-          ),
-          outputTokenCostUsdPerMillion: parseOptionalCost(
-            form.outputTokenCostUsdPerMillion
-          ),
-          isEnabled: form.isEnabled,
-          isDefault: form.isDefault,
-        }),
-      })
+      const response = await apiFetch(
+        `${API_BASE_URL}/admin/llm-model-presets`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            provider: form.provider,
+            model,
+            reasoningEffort: form.reasoningEffort,
+            openrouterModelProvider:
+              form.provider === "openrouter"
+                ? form.openrouterModelProvider.trim() || null
+                : null,
+            supportsFlex:
+              form.provider === "llamacpp" ? false : form.supportsFlex,
+            inputTokenCostUsdPerMillion: parseOptionalCost(
+              form.inputTokenCostUsdPerMillion
+            ),
+            cachedInputTokenCostUsdPerMillion: parseOptionalCost(
+              form.cachedInputTokenCostUsdPerMillion
+            ),
+            outputTokenCostUsdPerMillion: parseOptionalCost(
+              form.outputTokenCostUsdPerMillion
+            ),
+            isEnabled: form.isEnabled,
+            isDefault: form.isDefault,
+          }),
+        }
+      )
 
       if (!response.ok) {
         setActionError(
@@ -909,7 +902,7 @@ function AdminModelPresetsSection() {
         ...currentForm,
         model: "",
         openrouterModelProvider: "",
-        serviceTier: "",
+        supportsFlex: false,
         inputTokenCostUsdPerMillion: "",
         cachedInputTokenCostUsdPerMillion: "",
         outputTokenCostUsdPerMillion: "",
@@ -1033,10 +1026,10 @@ function AdminModelPresetsSection() {
                   setForm((currentForm) => ({
                     ...currentForm,
                     provider: event.target.value as LlmProvider,
-                    serviceTier:
+                    supportsFlex:
                       event.target.value === "llamacpp"
-                        ? ""
-                        : currentForm.serviceTier,
+                        ? false
+                        : currentForm.supportsFlex,
                   }))
                 }
               >
@@ -1090,19 +1083,22 @@ function AdminModelPresetsSection() {
                 }
               />
             </AdminFormField>
-            <AdminFormField label="Service tier">
-              <input
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:opacity-50"
-                value={form.serviceTier}
-                placeholder="auto"
-                disabled={form.provider === "llamacpp"}
-                onChange={(event) =>
-                  setForm((currentForm) => ({
-                    ...currentForm,
-                    serviceTier: event.target.value,
-                  }))
-                }
-              />
+            <AdminFormField label="Flex">
+              <label className="flex h-9 items-center gap-2 rounded-md border border-border bg-background/35 px-3 text-sm">
+                <input
+                  className="size-4 accent-sky-300"
+                  type="checkbox"
+                  checked={form.supportsFlex && form.provider !== "llamacpp"}
+                  disabled={form.provider === "llamacpp"}
+                  onChange={(event) =>
+                    setForm((currentForm) => ({
+                      ...currentForm,
+                      supportsFlex: event.target.checked,
+                    }))
+                  }
+                />
+                Supports flex
+              </label>
             </AdminFormField>
             <AdminFormField label="Input $/M">
               <CostInput
@@ -1147,8 +1143,7 @@ function AdminModelPresetsSection() {
                     setForm((currentForm) => ({
                       ...currentForm,
                       isEnabled: event.target.checked,
-                      isDefault:
-                        event.target.checked && currentForm.isDefault,
+                      isDefault: event.target.checked && currentForm.isDefault,
                     }))
                   }
                 />
@@ -1230,20 +1225,21 @@ function AdminModelPresetsSection() {
             </thead>
             <tbody className="divide-y divide-border">
               {presets.map((preset) => (
-                <tr className="transition-colors hover:bg-muted/25" key={preset.id}>
+                <tr
+                  className="transition-colors hover:bg-muted/25"
+                  key={preset.id}
+                >
                   <TableCell>
                     <div className="min-w-0">
-                      <p className="break-words font-medium text-foreground">
+                      <p className="font-medium break-words text-foreground">
                         {getLlmModelPresetLabel(preset)}
                       </p>
-                      <p className="break-words text-xs text-muted-foreground">
+                      <p className="text-xs break-words text-muted-foreground">
                         {formatProviderLabel(preset.provider)}
                         {preset.openrouterModelProvider
                           ? ` via ${preset.openrouterModelProvider}`
                           : ""}
-                        {preset.serviceTier
-                          ? ` (${preset.serviceTier} tier)`
-                          : ""}
+                        {preset.supportsFlex ? " / supports flex" : ""}
                       </p>
                     </div>
                   </TableCell>
@@ -1346,7 +1342,12 @@ function AdminModelPresetsSection() {
                   <TableCell>
                     <CompactMetricList
                       items={[
-                        ["in", formatOptionalCost(preset.inputTokenCostUsdPerMillion)],
+                        [
+                          "in",
+                          formatOptionalCost(
+                            preset.inputTokenCostUsdPerMillion
+                          ),
+                        ],
                         [
                           "cached",
                           formatOptionalCost(
@@ -1355,7 +1356,9 @@ function AdminModelPresetsSection() {
                         ],
                         [
                           "out",
-                          formatOptionalCost(preset.outputTokenCostUsdPerMillion),
+                          formatOptionalCost(
+                            preset.outputTokenCostUsdPerMillion
+                          ),
                         ],
                       ]}
                     />
@@ -1488,7 +1491,10 @@ function DeleteLlmModelPresetModal({
               )}
             </div>
             <div className="min-w-0 space-y-1">
-              <h2 id="delete-model-preset-title" className="text-xl font-semibold">
+              <h2
+                id="delete-model-preset-title"
+                className="text-xl font-semibold"
+              >
                 {title}
               </h2>
               <p className="text-sm break-words text-muted-foreground">
@@ -2159,7 +2165,10 @@ function CompactMetricList({
   return (
     <dl className="grid gap-0.5 text-xs text-muted-foreground">
       {items.map(([label, value]) => (
-        <div className="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-1" key={label}>
+        <div
+          className="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-1"
+          key={label}
+        >
           <dt>{label}</dt>
           <dd className="min-w-0 break-words text-foreground/85">{value}</dd>
         </div>
@@ -2181,7 +2190,9 @@ function parseOptionalCost(value: string) {
 }
 
 function formatOptionalCost(value: number | null) {
-  return value === null ? "n/a" : `$${value.toFixed(6).replace(/0+$/u, "").replace(/\.$/u, "")}`
+  return value === null
+    ? "n/a"
+    : `$${value.toFixed(6).replace(/0+$/u, "").replace(/\.$/u, "")}`
 }
 
 function formatUsdCost(value: number) {

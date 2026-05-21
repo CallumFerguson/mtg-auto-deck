@@ -42,7 +42,7 @@ export type LlmModelPresetRunConfig = {
   model: string
   reasoningEffort: ReasoningEffort
   openrouterModelProvider: string | null
-  serviceTier: string | null
+  supportsFlex: boolean
   inputTokenCostUsdPerMillion: number | null
   cachedInputTokenCostUsdPerMillion: number | null
   outputTokenCostUsdPerMillion: number | null
@@ -111,6 +111,10 @@ export type LlmRunQueueConfig = {
   maxConcurrentRuns: number
 }
 
+type LlmRunServiceTierOptions = {
+  useFlexServiceTier?: boolean
+}
+
 export function buildProviderReasoningOptions(
   reasoningEffort: ReasoningEffort,
   reasoningSummariesEnabled: boolean
@@ -130,9 +134,10 @@ export class LlmConfigurationError extends Error {
 
 export function getOpeningHandLlmRunConfig(
   preset: LlmModelPresetRunConfig,
-  environment: Environment = process.env
+  environment: Environment = process.env,
+  serviceTierOptions: LlmRunServiceTierOptions = {}
 ): OpeningHandLlmRunConfig {
-  const config = getLlmRunConfig(preset, environment)
+  const config = getLlmRunConfig(preset, environment, serviceTierOptions)
 
   if (config.provider === "openai") {
     return {
@@ -149,9 +154,10 @@ export function getOpeningHandLlmRunConfig(
 
 export function getTurnSimulationLlmRunConfig(
   preset: LlmModelPresetRunConfig,
-  environment: Environment = process.env
+  environment: Environment = process.env,
+  serviceTierOptions: LlmRunServiceTierOptions = {}
 ): TurnSimulationLlmRunConfig {
-  const config = getLlmRunConfig(preset, environment)
+  const config = getLlmRunConfig(preset, environment, serviceTierOptions)
 
   if (config.provider === "openai") {
     return {
@@ -200,13 +206,16 @@ export function getGenericGameRulesReferenceEnabled(
 
 function getLlmRunConfig(
   preset: LlmModelPresetRunConfig,
-  environment: Environment
+  environment: Environment,
+  serviceTierOptions: LlmRunServiceTierOptions = {}
 ): OpenAiRunConfig | OpenRouterRunConfig | LlamaCppRunConfig {
   const maxOutputTokens = getRequiredPositiveIntegerEnvironmentVariable(
     environment,
     "LLM_MAX_OUTPUT_TOKENS"
   )
   const tokenCosts = getPresetTokenCosts(preset)
+  const serviceTier =
+    preset.supportsFlex && serviceTierOptions.useFlexServiceTier ? "flex" : null
 
   if (preset.provider === "openai") {
     return {
@@ -216,7 +225,7 @@ function getLlmRunConfig(
       modelPresetId: preset.id,
       provider: preset.provider,
       reasoningEffort: preset.reasoningEffort,
-      serviceTier: preset.serviceTier,
+      serviceTier,
       tokenCosts,
     }
   }
@@ -249,7 +258,7 @@ function getLlmRunConfig(
     modelProvider: preset.openrouterModelProvider,
     provider: preset.provider,
     reasoningEffort: preset.reasoningEffort,
-    serviceTier: preset.serviceTier,
+    serviceTier,
     stopWhenStepCount: getRequiredPositiveIntegerEnvironmentVariable(
       environment,
       "OPENROUTER_STOP_WHEN_STEP_COUNT"
