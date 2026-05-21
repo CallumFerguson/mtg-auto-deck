@@ -404,7 +404,6 @@ ACTION LOGGING AND FINALITY
 - Each logged action object is irreversible for this turn.
 - Once an action is logged, treat it as locked in and continue from that point.
 - Never backtrack, revise history, contradict an earlier logged action, or choose a different line that would require undoing a logged action.
-- Use the returned action list as the authoritative sequence of committed actions for the current turn.
 - Logging does not replace legality checks. Only log an action you are actually committing to take.
 - Do not call log_turn_action after reporting the final result.
 

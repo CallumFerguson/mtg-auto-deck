@@ -142,6 +142,7 @@ import type {
   SimulationReportPromptData,
   SimulationReportTurnPromptData,
   OpeningHandEvaluationJson,
+  TurnActionLogResult,
   TurnPhaseChange,
   TurnEvaluationJson,
 } from "./simulations-postgres.js"
@@ -196,6 +197,7 @@ import {
   buildOpenRouterReasoningOptions,
   buildProviderReasoningOptions,
   getGenericGameRulesReferenceEnabled,
+  getLogTurnActionFullActionListEnabled,
   LlmConfigurationError,
   getOpenRouterApiKey,
   getEvaluationLlmRunConfig,
@@ -1849,8 +1851,7 @@ function registerLogTurnActionTool(
     "log_turn_action",
     {
       title: "Log Turn Action",
-      description:
-        "Append one or more irreversible action notes to the active turn log for this simulation. Use this as the authoritative turn history while resolving the turn. The response returns the full logged action list for the active turn.",
+      description: getLogTurnActionToolDescription(),
       inputSchema: {
         ...identifier.inputSchema,
         actions: logTurnActionsSchema,
@@ -1864,16 +1865,32 @@ function registerLogTurnActionTool(
       const response = await logTurnAction(resolvedSimulationId, input.actions)
 
       return {
-        content: createCompactToolResultContent({
-          actions: response.actions.map((loggedAction) => loggedAction.action),
-          loggedActions: response.loggedActions.map((loggedAction) => ({
-            action: loggedAction.action,
-            phaseChange: loggedAction.phaseChange,
-          })),
-        }),
+        content: createCompactToolResultContent(
+          createLogTurnActionToolResultData(response)
+        ),
       }
     }
   )
+}
+
+function getLogTurnActionToolDescription() {
+  return getLogTurnActionFullActionListEnabled()
+    ? "Append one or more irreversible action notes to the active turn log for this simulation. Use this as the authoritative turn history while resolving the turn. The response returns the newly logged actions and the full logged action list for the active turn."
+    : "Append one or more irreversible action notes to the active turn log for this simulation. Use this as the authoritative turn history while resolving the turn. The response returns the newly logged actions for this call."
+}
+
+function createLogTurnActionToolResultData(response: TurnActionLogResult) {
+  return {
+    ...(getLogTurnActionFullActionListEnabled()
+      ? {
+          actions: response.actions.map((loggedAction) => loggedAction.action),
+        }
+      : {}),
+    loggedActions: response.loggedActions.map((loggedAction) => ({
+      action: loggedAction.action,
+      phaseChange: loggedAction.phaseChange,
+    })),
+  }
 }
 
 const openingHandLlmToolDefinitions: LlamaCppToolDefinition[] = [
@@ -1927,8 +1944,7 @@ const openingHandLlmToolDefinitions: LlamaCppToolDefinition[] = [
 const turnSimulationLlmToolDefinitions: LlamaCppToolDefinition[] = [
   {
     name: "log_turn_action",
-    description:
-      "Append one or more irreversible action notes to the active turn log for this simulation. Use this as the authoritative turn history while resolving the turn. The response returns the full logged action list for the active turn.",
+    description: getLogTurnActionToolDescription(),
     inputSchema: z.object({
       ...llmRunIdentifierSchema,
       actions: logTurnActionsSchema,

@@ -69,9 +69,11 @@ import {
   GENERIC_GAME_RULES_REFERENCE_ENABLED_ENVIRONMENT_VARIABLE,
   getEvaluationLlmRunConfig,
   getGenericGameRulesReferenceEnabled,
+  getLogTurnActionFullActionListEnabled,
   getLlmRunQueueConfig,
   getOpeningHandLlmRunConfig,
   getTurnSimulationLlmRunConfig,
+  LOG_TURN_ACTION_FULL_ACTION_LIST_ENABLED_ENVIRONMENT_VARIABLE,
 } from "./llm-config.js"
 import { buildCreateLlmModelPresetInsertQuery } from "./llm-model-presets-postgres.js"
 import { canClaimQueuedLlmRunWithCapacity } from "./llm-run-queue.js"
@@ -1147,6 +1149,28 @@ test("includes generic game rules reference by default", () => {
   assert.equal(
     getGenericGameRulesReferenceEnabled({
       [GENERIC_GAME_RULES_REFERENCE_ENABLED_ENVIRONMENT_VARIABLE]: "yes",
+    }),
+    true
+  )
+})
+
+test("returns full log_turn_action action list by default", () => {
+  assert.equal(getLogTurnActionFullActionListEnabled({}), true)
+  assert.equal(
+    getLogTurnActionFullActionListEnabled({
+      [LOG_TURN_ACTION_FULL_ACTION_LIST_ENABLED_ENVIRONMENT_VARIABLE]: "false",
+    }),
+    false
+  )
+  assert.equal(
+    getLogTurnActionFullActionListEnabled({
+      [LOG_TURN_ACTION_FULL_ACTION_LIST_ENABLED_ENVIRONMENT_VARIABLE]: "0",
+    }),
+    false
+  )
+  assert.equal(
+    getLogTurnActionFullActionListEnabled({
+      [LOG_TURN_ACTION_FULL_ACTION_LIST_ENABLED_ENVIRONMENT_VARIABLE]: "yes",
     }),
     true
   )
