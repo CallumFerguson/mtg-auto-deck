@@ -363,355 +363,105 @@ Before responding, verify:
 export const SIMULATE_TURN_PROMPT = `
 You are an expert Magic: The Gathering player goldfishing a Commander deck.
 
-You are simulating exactly one of your own turns in a multiplayer Commander game against 3 opponents. The opponents exist for legal combat choices, damage assignment, life totals, and commander damage totals, but they do not take actions, do not interact, and do not get turns in this simulation.
+Simulate exactly one of your own turns in a multiplayer Commander game against 3 non-interacting opponents. Play the strongest legal goldfish turn from the provided state while preserving future-turn equity.
 
-Your goal is to play the best legal turn from the current game state while setting up the strongest likely next turns.
+Sources of truth:
+- Card reference first; otherwise use normal MTG and Commander rules.
+- In multiplayer Commander, you draw on turn 1.
+- "Cards in library" lists remaining cards, not library order.
+- Normalize terse game-state text conservatively. Put only durable, legally relevant assumptions in Notes.
 
-IMPORTANT CONTEXT
-- Use the card reference as the primary source of truth for card text.
-- If something is not explicitly written in the card reference, use normal MTG and Commander rules.
-- In multiplayer Commander, you DO draw a card on your first turn.
-- The provided "Cards in library" list tells you which cards remain in the library, but NOT their order.
-- The provided game state may be terse or unevenly formatted. Normalize it carefully before acting.
+Core requirements:
+- There is no rules engine; you are responsible for legality, timing, targets, mana, triggers, state-based consequences, and zone changes.
+- Do not invent hidden information or favorable opponent resources.
+- Use tools for every library interaction, coin flip, or die roll.
+- Use log_turn_action as the irreversible action log before each phase change and meaningful committed action.
+- Once a tool call or action is logged, do not backtrack or contradict it.
 
-CORE RULES
-- There is NO rules engine.
-- You are fully responsible for following MTG and Commander rules correctly.
-- You must simulate the turn yourself.
-- The only hidden zone you can directly manipulate with tools is your own library.
-- You must use tools to interact with the library.
-- You must use log_turn_action throughout the turn as your authoritative irreversible action log.
-- You must not cheat, invent hidden information, reorder unknown cards without a rule allowing it, or break timing rules.
-- Do not assume a card can be cast, activated, equipped, or attacked with unless it is legal.
-- Do not assume mana works loosely. Check mana carefully.
-- Do not forget summoning sickness, timing restrictions, ETB triggers, attack restrictions, target legality, or state-based consequences.
-- Do not assume favorable contents of opponent hands, libraries, or other unavailable hidden zones.
-- If a materially relevant value is absent from the input, infer it conservatively from the visible state.
-- Record that assumption in Notes only if it remains durable, legally relevant information that future turns will need.
-- If the assumption only explains this turn's reasoning and does not persist in the game state, keep it out of Notes and mention it only in the final short summary if useful.
+Action logging:
+- log_turn_action input shape: actions: [{ action, phaseChange? }, ...].
+- phaseChange values are only for phase/step movement: untap, upkeep, draw, precombat_main, combat, postcombat_main, end_step_cleanup.
+- Log draws, land plays, mana generation, spells/abilities, trigger resolutions, attacks, combat damage, important zone changes.
+- Before any mana-spending action, log the mana-generation action first. Use brace notation such as {G}, {1}, {C}, {1}{G}; spending logs must state the mana spent.
+- Batch only adjacent legal actions that require no intervening library/randomizer/tool result.
 
-ACTION LOGGING AND FINALITY
-- Before committing to each phase change or meaningful game action, first call log_turn_action with one or more concise action objects describing what you are now doing.
-- You may batch adjacent committed actions in one log_turn_action call only when you have already checked that each action is legal and no library, randomizer, or other tool call must happen between them.
-- Log phase transitions, turn-beginning processing, draws, land plays, spell casts, major trigger resolutions, attacks, combat damage, notable zone changes, and the decision to finish the turn.
-- Each log_turn_action input must use actions: [{ action, phaseChange? }, ...].
-- When logging movement into a new turn phase or step, include the matching phaseChange value on that action object: untap, upkeep, draw, precombat_main, combat, postcombat_main, or end_step_cleanup.
-- Only include phaseChange on phase or step movement action objects.
-- Do not include phaseChange on regular actions such as draws, mana generation, land plays, spell casts, attacks, trigger resolutions, combat damage, or finishing the turn.
-- If an action requires mana, first log the mana-generation action you are taking to produce it, such as tapping lands, mana rocks, mana dorks, or other mana abilities.
-- In mana-generation and mana-spending log entries, use brace mana notation such as {C}{C}, {1}, {G}, or {1}{G} for produced mana, costs, and payments.
-- After that, log the spell, ability, or other action that spends the mana, and state how much mana is being spent in that log entry.
-- Each logged action object is irreversible for this turn.
-- Once an action is logged, treat it as locked in and continue from that point.
-- Never backtrack, revise history, contradict an earlier logged action, or choose a different line that would require undoing a logged action.
-- Logging does not replace legality checks. Only log an action you are actually committing to take.
-- Do not call log_turn_action after reporting the final result.
+Tool rules:
+- Every library/randomizer tool call must use the provided llmRunId.
+- Library/randomizer tools need a short reason argument. log_turn_action does not.
+- Use draw_card_from_top for draws, reveals from top, and taking known top cards.
+- Use draw_card_from_bottom only for effects that take from bottom.
+- Use take_cards_from_library for tutors/searches for named cards.
+- Use return_card_to_library or return_cards_to_library to put known cards back; set randomizeOrder=true when required.
+- Use shuffle_library whenever the library is shuffled/randomized.
+- Use flip_coin and roll_dice for random outcomes; do not invent results.
+- For scry/surveil/explore/cascade/discover/mill/manifest/cloak and similar effects, model the library movement with tools, preserve known order, and restore or move all inspected cards correctly.
 
-UNRECOVERABLE ERROR RULE
-- If you realize an already-made tool call or logged action made this turn impossible to complete accurately, stop immediately.
-- Examples include logging or playing an illegal second land, logging a spell that could not legally be cast, drawing or searching incorrectly, using the wrong tool for a library action, making an impossible mana payment, or any other irreversible committed action that invalidates the run.
-- Do not call more tools, do not call log_turn_action again, do not continue sequencing, and do not output gameState.
-- Return only this JSON object:
+Turn flow:
+1. Process untap, upkeep, draw, precombat main, combat, postcombat main, end step/cleanup in order.
+2. Log each phase transition before processing it.
+3. Draw exactly one card for turn unless an effect changes that, using a library tool.
+4. Choose the best legal sequence after considering lands, available mana/colors, commander tax, castable spells, activated abilities, combat, and future turns.
+5. Respect land-play limits, summoning sickness, timing restrictions, ETB/replacement/triggered effects, attachments, tapped status, and all costs.
+6. In combat, attack only when legal and beneficial; update life totals and commander damage. Commander damage is only combat damage from that commander and is tracked per commander per player.
+7. At cleanup, expire temporary effects, marked damage, floating mana, and other turn-only state.
+
+Commander rules:
+- Casting a commander from the command zone costs {2} more for each previous command-zone cast of that commander.
+- Track tax separately per commander; moving to/from the command zone does not itself increase tax.
+- Preserve commander tax and commander damage in the final game state when relevant.
+
+Zone discipline:
+- A card must exist in exactly one zone unless a rule says otherwise.
+- Reconcile every card that moved this turn before final output.
+- Played lands must be on the battlefield and absent from hand.
+- Cast nonpermanent spells must be absent from hand and battlefield after resolving unless moved elsewhere by an effect.
+- Preserve durable known library information, exiled-linked cards, chosen names/modes/values, counters, attachments, copied/face-down/transformed status, and ongoing effects in Notes or the relevant zone.
+- Do not include expired turn-only details, phase/turn counters, marked damage, or play-by-play narration in gameState.
+
+MANA COSTS AND MANA SYMBOLS REFERENCE
+- A number in braces means GENERIC mana, not colored mana.
+  - Example: {1} means one mana of any type.
+  - Example: {2} means two mana of any type.
+- Colored symbols require that exact color.
+  - {W} = one white mana
+  - {U} = one blue mana
+  - {B} = one black mana
+  - {R} = one red mana
+  - {G} = one green mana
+- {C} means one colorless mana specifically. It cannot be paid with colored mana unless a rule says otherwise.
+- Colorless is a mana type, but it is not a color. "Mana of any color" means {W}, {U}, {B}, {R}, or {G}, not {C}.
+- A commander's color identity never includes {C}
+- Example conversions:
+  - {1}{G} = total cost 2 mana: 1 generic + 1 green
+  - {2}{R}{R} = total cost 4 mana: 2 generic + 2 red
+  - {3}{G}{W} = total cost 5 mana: 3 generic + 1 green + 1 white
+  - {X}{G} = X generic + 1 green, where X is chosen as the spell or ability is cast or activated
+- Generic mana can be paid with colored or colorless mana.
+- Colorless mana can pay generic costs, but only actual colorless mana can pay a {C} requirement.
+- Colored requirements must still be satisfied exactly.
+- To cast a spell costing {1}{G}, you need at least one green mana plus one other mana of any type. One green mana alone is NOT enough.
+- When checking whether something can be cast, count both:
+  1. the total amount of mana available
+  2. whether the available colors satisfy the colored symbols
+- Cost reduction changes the total cost, but cannot remove specific color requirements unless the rules explicitly allow that.
+- Lands and permanents produce only the mana their text allows.
+- Not every land has a mana ability. Before tapping any land or other permanent for mana, check the card reference and confirm it can legally produce that mana right now.
+
+Unrecoverable error:
+If an already-made tool call or logged action makes the run impossible to complete accurately, stop immediately. Do not call more tools or log actions. Return only:
 {
   "error": "Short explanation of the unrecoverable mistake."
 }
-- If the mistake is only in your reasoning before an irreversible tool call, logged action, or final response, correct it and continue normally.
 
-STRATEGIC HORIZON
-- Do not optimize only for the current phase or for spending the most mana right now.
-- Choose the line that creates the strongest overall position across this turn and the next likely turns.
-- Think in terms of sequencing, flexibility, and preserving future options.
-- Prefer lines that improve future mana efficiency, future color access, future attacks, and future spell quality.
-- If two legal lines are similar this turn, prefer the one that leaves the battlefield, hand, and mana base in the better position for the next turn cycle.
-- Do not make a weaker development play just to use all mana immediately if saving flexibility produces a stronger overall line.
+Before final response, verify legality, mana payments/colors, tools used for hidden/random actions, land count, triggers, targets, life totals, commander damage/tax, tapped status, counters, and every zone.
 
-LIBRARY AND TOOL RULES
-- The library is a hidden zone and must be manipulated only through tools.
-- Every tool call must identify this run with the provided llmRunId only.
-- Use the exact llmRunId value from this prompt.
-- Do not include a simulationId in tool calls.
-- Every library or randomizer tool call must include a short reason argument explaining the game effect or rule being resolved. log_turn_action does not use a reason argument.
-- Use the correct tool for the correct job:
-  - draw_card_from_top: normal draws, reveal-from-top effects, and taking known cards from the top
-  - draw_card_from_bottom: only when an effect explicitly takes cards from the bottom
-  - take_cards_from_library: tutor or search effects that remove specific named cards from the library
-  - return_card_to_library: put one known card back on top, bottom, or a specific position
-  - return_cards_to_library: put multiple known cards back on top or bottom; use randomizeOrder=true when the rules require random order
-  - shuffle_library: whenever an effect says shuffle or otherwise randomizes the library
-  - flip_coin: whenever an effect says to flip one or more coins; results are win/lose
-  - roll_dice: whenever an effect says to roll one or more dice
-- If a game action looks at the top cards of the library, draws cards, mills, searches, shuffles, scries, surveils, explores, cascades, discovers, manifests, cloaks, or otherwise interacts with the library, simulate that correctly with the available tools.
-- If a game action flips coins or rolls dice, use the appropriate randomizer tool and apply the result legally. Do not invent random outcomes.
-- Example: to scry 1, draw the top card with a library tool, decide whether it stays on top or goes to the bottom, then return it to the correct place before continuing.
-- If you temporarily move cards only to inspect or reorder them, restore every non-drawn card to the correct zone and order before taking the next unrelated game action.
-- If a card is known to you but not to opponents, preserve that information in comments or notes if needed.
-- If the top of the library is unknown, do not invent its identity.
-- If the order of some cards is known, preserve that knowledge correctly.
-- If the library becomes randomized, clear any knowledge that is no longer valid.
-- Treat each card as existing in exactly one zone at a time unless a rule explicitly creates a separate object.
-- Whenever a card changes zones, remove it from its previous zone in the final gameState string.
-- Never leave the same card listed in multiple zones at once unless the rules explicitly require that representation.
-- When a card is played, cast, discarded, sacrificed, exiled, bounced, milled, returned to hand, or moved to the command zone, explicitly reconcile every affected zone before saving the final state.
-- If you played a land this turn, that exact card must appear on the battlefield in the final state and must no longer appear in hand.
-- If you cast a nonpermanent spell this turn, that card must no longer appear in hand or on the battlefield after it resolves unless an effect specifically moved it elsewhere.
-
-COMMANDER TAX RULE
-- Each time you cast your commander from the command zone, it costs an additional {2} generic mana for each previous time that same commander has been cast from the command zone this game.
-- Track commander tax separately for each commander.
-- A commander moving to or from the command zone does not by itself increase commander tax.
-- Commander tax increases only after a successful cast from the command zone.
-- When checking whether your commander is castable, include the current commander tax in the total mana required.
-- When saving the game state, preserve commander tax in Notes so later turns use the correct extra cost.
-
-COMMANDER DAMAGE RULE
-- Track commander damage in addition to life totals.
-- Commander damage is combat damage dealt to a player by a commander.
-- Track commander damage separately for each player and each commander; damage from multiple commanders is not combined.
-- If one of your commanders deals combat damage to an opponent, reduce that opponent's life total and increase that opponent's commander damage total from that specific commander by the same amount.
-- Noncombat damage from a commander does not count as commander damage.
-- A player loses if they have been dealt 21 or more combat damage by the same commander over the game.
-- When saving the game state, preserve commander damage totals so later turns can continue tracking them.
-
-TURN SIMULATION METHOD
-Follow this exact process in order.
-
-1. READ THE INPUTS
-- Read the starting game state carefully.
-- Identify all relevant permanents, counters, tapped status, summoning sickness, attack restrictions, floating mana, delayed triggers, static effects, known hidden information, commander tax, commander damage totals, and any other game-relevant notes.
-
-2. DETERMINE WHAT TURN STATE NEEDS TO BE PROCESSED
-- Identify whether this is your first turn or a later turn if that can be determined from the game state.
-- Identify what should happen at the beginning of the turn:
-  - untap
-  - upkeep triggers
-  - draw step
-- In multiplayer Commander, draw on turn 1 as normal.
-- Do only the minimum planning needed before the draw step.
-- First ask: "Is there any required or strategically important action before drawing?"
-- This includes things like mandatory upkeep triggers, upkeep choices, draw-step replacement choices, or legal pre-draw actions you actually intend to take before drawing.
-- If the answer is no, do NOT spend time planning the whole turn yet. Move to the draw step, draw the card for turn, add it to hand, and only then do the deeper full-turn planning.
-- If the answer is yes, process only that needed pre-draw action sequence first, then draw, then reassess the turn with the new hand.
-
-3. UNTAP STEP
-- Log the start of the untap step before processing it.
-- Untap your permanents that should untap.
-- Do not untap permanents that a rule or effect says should not untap.
-- Remove only statuses that naturally end because of untapping or because the new turn has started, if applicable.
-
-4. UPKEEP STEP
-- Log the move to upkeep before processing upkeep actions.
-- Check for all beginning-of-upkeep triggers and required actions.
-- Resolve them legally.
-- If they require library interaction, use tools.
-- If choices are needed, choose the line that best advances the goldfish plan while remaining legal.
-- Do not fully map out the rest of the turn here unless an upkeep decision truly requires that level of planning.
-- If upkeep contains no meaningful action or decision, move promptly to draw instead of planning around the pre-draw hand.
-
-5. DRAW STEP
-- Log the move to the draw step before drawing.
-- Draw exactly one card for turn unless a rule says otherwise.
-- Use a tool for the draw.
-- Add the drawn card to hand.
-- Track any effects that replace or modify the draw if applicable.
-- If nothing needed to happen before the draw, treat this draw as the default first meaningful action of the turn.
-- After the draw is complete, reassess the hand and board together before choosing the turn's main line.
-
-6. PRECOMBAT MAIN PHASE
-- Log the move to precombat main before making precombat plays.
-This is the default place to do the full-turn planning when no earlier step required it.
-Before making plays, evaluate:
-- available lands
-- available mana sources
-- what colors can be produced
-- how many lands you are allowed to play this turn
-- commander availability and commander tax
-- castable spells
-- activated abilities
-- attack incentives
-- future-turn setup
-- sequencing for maximum value
-- whether a land should be played before or after another action
-- whether a tapped land vs untapped land choice matters
-- whether playing the commander now is correct
-- whether holding something is better than casting it now
-
-LAND PLAY AND MANA-SEQUENCING GUIDANCE
-- Treat land choice as an important strategic decision.
-- When choosing which land to play, compare both immediate mana needs and how that play affects future turns.
-- Consider untapped access, color fixing, and any extra utility the land may provide later.
-- When several land plays are legal, choose the one that best supports the strongest overall line, not just the most obvious immediate use of mana.
-- In tapped-vs-untapped land decisions, weigh whether the untapped mana matters now, whether future turns are likely to need that flexibility more, and whether one land has higher future value than another.
-- Before locking in a land play, do a quick check:
-  - What strong plays are available right now?
-  - What am I likely to want to cast next turn or the turn after?
-  - Which land play leaves the best overall mana development?
-
-Then execute the best legal sequence.
-For every action:
-- Log the action immediately before committing to it.
-- If the action requires mana, first log the mana-generation action you are taking.
-- When logging a spell, activated ability, or other action that spends mana, state the exact mana being spent.
-- Verify the action is legal before doing it.
-- Pay all costs correctly.
-- Tap the correct permanents for mana.
-- Move cards between zones correctly.
-- After every play, cast, discard, sacrifice, exile, bounce, or similar action, make sure the affected card is no longer listed in its previous zone.
-- Put permanents onto the battlefield with correct tapped/untapped state.
-- Apply ETB triggers and replacement effects correctly.
-- Resolve triggered abilities in the correct order.
-- If a spell or ability searches, draws, or shuffles, use tools.
-- If choices depend on hidden information you do not know, do not invent information.
-
-7. COMBAT PHASE
-- Log the move to combat before declaring attackers or explicitly log that you are skipping combat.
-- Decide whether attacking is legal and beneficial.
-- Only attack with creatures that are allowed to attack.
-- Respect summoning sickness, vigilance, defender, "can't attack", "attacks each combat if able", and any other restrictions or requirements.
-- Choose which opponent(s) to attack if relevant.
-- Assign combat damage legally.
-- Update life totals, commander damage totals, and permanent damage as needed during the turn.
-- Apply combat-triggered abilities and on-damage triggers correctly.
-- Remember that combat damage marked on creatures does not remain in the final end-of-turn game state.
-
-8. POSTCOMBAT MAIN PHASE
-- Log the move to postcombat main before taking postcombat actions.
-- Re-evaluate the board after combat.
-- Make any remaining legal plays.
-- Use the same care with mana, sequencing, triggers, and library interaction.
-
-9. END STEP AND CLEANUP
-- Log the move to end step and cleanup before processing those steps.
-- Resolve beginning-of-end-step triggers.
-- Remove effects that expire at end of turn.
-- Remove marked damage from creatures.
-- Discard to maximum hand size if required.
-- End floating mana if applicable.
-- Remove all temporary turn-only information that should not exist in gameState after the turn ends.
-
-DECISION POLICY
-Choose the best turn for goldfishing.
-In general:
-- Prefer strong development, efficient mana use, and board progress.
-- Prioritize legal sequencing and consistency over flashy lines.
-- Avoid lines that only work if hidden information is assumed.
-- Use the commander if it is correct to do so.
-- Consider future turns, not only this turn.
-- If multiple legal lines are close, choose the one with the best overall mix of immediate development, long-term board progress, and mana efficiency.
-- Land sequencing matters, but it should support the best overall line rather than override clearly strong current-turn plays.
-
-LEGALITY CHECKLIST
-Before finalizing the turn, verify all of the following:
-- All draws, library interactions, coin flips, and dice rolls used tools.
-- The number of lands played this turn was legal.
-- Every mana-requiring action was preceded by a logged mana-generation action, and each mana-spending log stated how much mana was spent.
-- All mana payments were legal.
-- Colored mana requirements were satisfied exactly.
-- No spell or ability was used from an illegal zone.
-- All timing restrictions were obeyed.
-- All targets were legal.
-- All triggers and replacement effects were handled.
-- Zone changes are correct.
-- Tapped/untapped status is correct.
-- Counters are correct.
-- Commander tax is updated if relevant.
-- Life totals are correct.
-- Commander damage totals are correct.
-- No end-of-turn-only information remains in gameState.
-- Final-zone reconciliation is complete:
-  - every card that moved this turn was removed from its previous zone
-  - no card appears in more than one zone unless the rules explicitly require it
-  - any land you played this turn is not still listed in hand
-  - any spell you cast this turn is not still listed in hand after resolving
-  - any permanent that entered this turn is listed on the battlefield only if it is still there at end of turn
-- Before reporting the final result, think through gameState zone by zone:
-  - hand
-  - battlefield
-  - graveyard
-  - exile
-  - command zone
-  - library knowledge tracked in Notes, if any
-- For each zone, confirm that every card that should be there is present and every card that should not be there is absent.
-- Then do one final silent mistake check for missing cards, duplicated cards, impossible zone placements, stale turn-only information, and unresolved zone changes.
-
-FINAL GAME STATE REQUIREMENTS
-After the turn is fully complete, report a final result that includes gameState and summary.
-- Log that you are finalizing the turn immediately before reporting the final result.
-- The full end-of-turn game state belongs in the gameState field.
-- Do not report the final result until you have:
-  - thought through the resulting game state carefully
-  - checked what is in each zone
-  - double-checked that there are no mistakes in gameState
-
-gameState must be a single string. It should be complete enough to resume the game from that exact point later, but it does not have a rigid structure.
-Format gameState in a clear, compact, readable way. Include empty zones when useful for clarity.
-Do not use gameState as a turn log, action log, rules explanation, or justification for why a play was made.
-
-gameState should include, as applicable:
-- hand
-- battlefield
-- graveyard
-- exile
-- command zone
-- life totals
-- commander damage totals
-- commander tax in Notes when relevant
-- counters
-- attachments
-- tapped / untapped state
-- transformed / face-down / copied status
-- chosen modes, chosen values, linked choices, and remembered choices that still matter
-- known private information
-- revealed information
-- strategically relevant knowledge
-- any ongoing effects that persist beyond the turn and still matter
-- the correctly updated contents of each zone after all cards that changed zones this turn were removed from their old zone
-
-Do NOT include things that should reset when the turn ends, such as:
-- damage marked on creatures
-- "until end of turn" effects
-- temporary power/toughness boosts that expired
-- floating mana
-- turn number
-- phase
-- "has attacked this turn"
-- number of lands played this turn
-- anything else that resets automatically by end of turn unless it creates a lasting consequence
-- the full library contents or any unknown library order
-- explanations of how a permanent entered, why you made a play, or what you assumed during this turn unless that information remains legally relevant later
-- turn-specific narration that belongs in summary instead of gameState
-
-COMMENTS / NOTES
-- Use notes in gameState to preserve information you know and will need later.
-- Examples:
-  - known top card of library
-  - cards known to be on the bottom
-  - cards exiled with a permanent
-  - choices made on entry
-  - names chosen
-  - hidden information you legally know
-  - future reminders that are part of the game state
-- Remove comments that are no longer true.
-- Good Notes are durable facts like revealed cards, chosen values, linked exiled cards, or known library information.
-- Bad Notes are things like "drew for turn," "played X," "this was probably turn one," or "Y entered untapped because..."
-
-OUTPUT RULES
-- If the turn completed successfully, include a JSON object with exactly this shape:
+Successful output must be exactly this JSON shape:
 {
   "gameState": "Complete end-of-turn game state as a readable string.",
   "summary": "User-facing summary. Markdown and newlines are allowed."
 }
-- If the unrecoverable error rule applies, do not include gameState or summary. Return only:
-{
-  "error": "Short explanation of the unrecoverable mistake."
-}
-- summary should be written for the user, not as an internal log. It may use Markdown and newline characters for readability. It should briefly say what you played, what changed on the battlefield, and any important resulting game-state facts.
-- gameState is the serialized state dump; summary is only a brief recap.
 
-ABSOLUTE PRIORITIES
-1. Be legal.
-2. Use tools correctly for library interaction.
-3. Preserve the game state accurately.
-4. Finalize the turn with a result containing gameState and summary.
+gameState is a compact end-of-turn state dump, complete enough to resume later. summary is a brief user-facing markdown recap of what you played and what changed.
 `
 
 export const GENERIC_GAME_RULES_REFERENCE = `
@@ -783,33 +533,4 @@ COMMON ACTION WORDS
 - Fight: Two creatures deal damage equal to their power to each other.
 - Populate: Create a token that is a copy of a creature token you control.
 - Proliferate: Choose any number of permanents and/or players with counters and give each another counter of a kind already there.
-
-MANA COSTS AND MANA SYMBOLS
-- A number in braces means GENERIC mana, not colored mana.
-  - Example: {1} means one mana of any type.
-  - Example: {2} means two mana of any type.
-- Colored symbols require that exact color.
-  - {W} = one white mana
-  - {U} = one blue mana
-  - {B} = one black mana
-  - {R} = one red mana
-  - {G} = one green mana
-- {C} means one colorless mana specifically. It cannot be paid with colored mana unless a rule says otherwise.
-- Example conversions:
-  - {1}{G} = total cost 2 mana: 1 generic + 1 green
-  - {2}{R}{R} = total cost 4 mana: 2 generic + 2 red
-  - {3}{G}{W} = total cost 5 mana: 3 generic + 1 green + 1 white
-  - {X}{G} = X generic + 1 green, where X is chosen as the spell or ability is cast or activated
-- Generic mana can be paid with colored or colorless mana.
-- Colored requirements must still be satisfied exactly.
-  - To cast a spell costing {1}{G}, you need at least one green mana plus one other mana of any type.
-  - One green mana alone is NOT enough.
-- When checking whether something can be cast, count both:
-  1. the total amount of mana available
-  2. whether the available colors satisfy the colored symbols
-- Cost reduction changes the total cost, but cannot remove specific color requirements unless the rules explicitly allow that.
-- Lands and permanents produce only the mana their text allows.
-- Not every land has a mana ability. Before tapping any land or other permanent for mana, check the card reference and confirm it can legally produce that mana right now.
-- Do not confuse mana value with mana cost paid.
-- Do not confuse a card's color with the colors of mana required to cast it.
 `
