@@ -468,7 +468,7 @@ let llmRunQueueDrainTimer: NodeJS.Timeout | null = null
 let llmRunQueueDrainPromise: Promise<void> | null = null
 
 function createRuntimeCompletion() {
-  let resolveCompletion: () => void = () => {}
+  let resolveCompletion: () => void = () => { }
   const completionPromise = new Promise<void>((resolve) => {
     resolveCompletion = resolve
   })
@@ -1883,8 +1883,8 @@ function createLogTurnActionToolResultData(response: TurnActionLogResult) {
   return {
     ...(getLogTurnActionFullActionListEnabled()
       ? {
-          actions: response.actions.map((loggedAction) => loggedAction.action),
-        }
+        actions: response.actions.map((loggedAction) => loggedAction.action),
+      }
       : {}),
     loggedActions: response.loggedActions.map((loggedAction) => ({
       action: loggedAction.action,
@@ -2538,8 +2538,8 @@ function getLlmRunServiceTier(
 
 function withCapturedLlmRunServiceTier<
   TConfig extends
-    | ResolvedOpeningHandLlmRunConfig
-    | ResolvedTurnSimulationLlmRunConfig,
+  | ResolvedOpeningHandLlmRunConfig
+  | ResolvedTurnSimulationLlmRunConfig,
 >(config: TConfig, serviceTier: string | null): TConfig {
   if (config.provider === "llamacpp") {
     return config
@@ -7217,9 +7217,9 @@ function isLoopbackOrigin(origin: string) {
     const parsedOrigin = new URL(origin)
 
     return (
-        parsedOrigin.protocol === "http:" &&
-        (parsedOrigin.hostname === "localhost" ||
-          parsedOrigin.hostname === "127.0.0.1" ||
+      parsedOrigin.protocol === "http:" &&
+      (parsedOrigin.hostname === "localhost" ||
+        parsedOrigin.hostname === "127.0.0.1" ||
         parsedOrigin.hostname === "[::1]")
     )
   } catch {
@@ -7610,9 +7610,9 @@ function buildTurnSimulationPromptFromData(
   const resolvedGameState = gameState?.trim()
     ? gameState.trim()
     : buildInitialTurnGameState({
-        commanderNames,
-        startingHand,
-      })
+      commanderNames,
+      startingHand,
+    })
   const strategyGuidelinesSection = formatUserGuidelinesSection(
     "User provided strategy guidelines",
     "USER PROVIDED STRATEGY GUIDELINES",
@@ -7633,7 +7633,7 @@ ${cardReference}${strategyGuidelinesBlock}
 Cards in library. Not actual order of library. Use tools to interact with library:
 ${cardNames.join("\n")}
 
-===Start Game State===
+===Start Previous End of Turn Game State===
 
 ${resolvedGameState}
 
