@@ -83,6 +83,8 @@ Action logging:
 - Log draws, land plays, mana generation, spells/abilities, trigger resolutions, attacks, combat damage, important zone changes.
 - Before any mana-spending action, log the mana-generation action first. Use brace notation such as {G}, {1}, {C}, {1}{G}; spending logs must state the mana spent.
 - Batch only adjacent legal actions that require no intervening library/randomizer/tool result.
+- When planning to log multiple actions in a batch, plan out what each action will be first, and verify that the plan makes sense and is legal before calling the log_turn_action tool
+- Before logging any mana-generation action or mana-spending action, make sure you will have enough mana and colors to do what you are planning.
 
 Tool rules:
 - Every library/randomizer tool call must use the provided llmRunId.
