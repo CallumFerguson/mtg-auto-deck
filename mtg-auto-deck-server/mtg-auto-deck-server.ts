@@ -7750,6 +7750,9 @@ Opponent B Commander Damage: none
 
 Opponent C Life: 40
 Opponent C Commander Damage: none
+
+Notes:
+// none
 `.trim()
 }
 
