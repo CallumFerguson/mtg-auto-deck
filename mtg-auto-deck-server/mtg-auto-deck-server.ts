@@ -504,7 +504,7 @@ function createRuntimeStreamChunk(
     mcpFunctionReason: chunk.mcpFunctionReason,
     reasoningDelta: chunk.reasoningDelta,
     outputDelta: chunk.outputDelta,
-    payload: chunk.payload,
+    payload: chunk.payload ?? null,
     cardMentions: [],
     receivedAt: new Date().toISOString(),
   }

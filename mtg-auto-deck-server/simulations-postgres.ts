@@ -176,7 +176,7 @@ export type LlmRunChunkInput = {
   mcpFunctionReason: string | null
   reasoningDelta: string | null
   outputDelta: string | null
-  payload: unknown
+  payload?: unknown | null
 }
 
 export type LlmRunChunkCardMentionResolutionStatus =
@@ -216,7 +216,7 @@ export type SimulationDebugLlmRunChunk = {
   mcpFunctionReason: string | null
   reasoningDelta: string | null
   outputDelta: string | null
-  payload: unknown
+  payload: unknown | null
   cardMentions: SimulationDebugLlmRunChunkCardMention[]
   receivedAt: string
 }
@@ -1075,7 +1075,7 @@ export async function ensureSimulationsSchema() {
       mcp_function_reason text,
       reasoning_delta text,
       output_delta text,
-      payload jsonb NOT NULL DEFAULT '{}',
+      payload jsonb,
       received_at timestamptz NOT NULL DEFAULT now(),
 
       CONSTRAINT llm_run_chunks_kind_active_values_check
@@ -1107,6 +1107,14 @@ export async function ensureSimulationsSchema() {
   await queryDatabase(`
     ALTER TABLE llm_run_chunks
     ADD COLUMN IF NOT EXISTS mcp_function_reason text
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_run_chunks
+    ALTER COLUMN payload DROP NOT NULL
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_run_chunks
+    ALTER COLUMN payload DROP DEFAULT
   `)
   await queryDatabase(`
     ALTER TABLE llm_run_chunks
@@ -3163,11 +3171,27 @@ async function appendLlmRunChunksWithClient(
   llmRunId: string,
   chunks: readonly LlmRunChunkInput[]
 ) {
-  const query = buildAppendLlmRunChunksQuery(llmRunId, chunks)
-  const result = await client.query<InsertedLlmRunChunkRow>(
-    query.text,
-    query.values
+  const compactedChunks = compactLlmRunDeltaChunks(chunks)
+
+  if (compactedChunks.length === 0) {
+    return []
+  }
+
+  const mergeResult = await mergeFirstDeltaChunkIntoLastPersistedChunk(
+    client,
+    llmRunId,
+    compactedChunks
   )
+  const insertQuery =
+    mergeResult.chunks.length === 0
+      ? null
+      : buildAppendLlmRunChunksQuery(llmRunId, mergeResult.chunks)
+  const result = insertQuery
+    ? await client.query<InsertedLlmRunChunkRow>(
+        insertQuery.text,
+        insertQuery.values
+      )
+    : { rows: [] as InsertedLlmRunChunkRow[] }
   const insertedChunks = result.rows.map((row) => ({
     ...row,
     cardMentions: [] as SimulationDebugLlmRunChunkCardMention[],
@@ -3176,11 +3200,219 @@ async function appendLlmRunChunksWithClient(
   await incrementRunningLlmRunCostFromInsertedChunks(
     client,
     llmRunId,
-    insertedChunks
+    [...mergeResult.appendedDeltaChunks, ...insertedChunks]
   )
   await insertLlmRunChunkCardMentions(client, insertedChunks)
 
   return insertedChunks
+}
+
+export type LlmRunDeltaChunkKind = Extract<
+  LlmChunkKind,
+  "reasoning_delta" | "message_delta"
+>
+
+type GeneratedDeltaChunkCost = {
+  reasoning_delta: string | null
+  output_delta: string | null
+}
+
+type LastPersistedLlmRunChunkRow = {
+  id: string | number
+  sequence: number
+  kind: LlmChunkKind
+}
+
+export function compactLlmRunDeltaChunks(
+  chunks: readonly LlmRunChunkInput[]
+) {
+  return chunks.reduce<LlmRunChunkInput[]>((compactedChunks, chunk) => {
+    const deltaKind = getDeltaChunkKind(chunk)
+
+    if (!deltaKind) {
+      compactedChunks.push(chunk)
+      return compactedChunks
+    }
+
+    const normalizedChunk = createNormalizedDeltaChunk(chunk, deltaKind)
+    const previousChunk = compactedChunks[compactedChunks.length - 1]
+
+    if (previousChunk && getDeltaChunkKind(previousChunk) === deltaKind) {
+      compactedChunks[compactedChunks.length - 1] = combineDeltaChunks(
+        previousChunk,
+        normalizedChunk,
+        deltaKind
+      )
+    } else {
+      compactedChunks.push(normalizedChunk)
+    }
+
+    return compactedChunks
+  }, [])
+}
+
+function createNormalizedDeltaChunk(
+  chunk: LlmRunChunkInput,
+  deltaKind: LlmRunDeltaChunkKind
+): LlmRunChunkInput {
+  return {
+    sequence: chunk.sequence,
+    kind: deltaKind,
+    mcpFunctionName: null,
+    mcpFunctionOutput: null,
+    mcpFunctionReason: null,
+    reasoningDelta:
+      deltaKind === "reasoning_delta" ? chunk.reasoningDelta : null,
+    outputDelta: deltaKind === "message_delta" ? chunk.outputDelta : null,
+    payload: null,
+  }
+}
+
+function combineDeltaChunks(
+  firstChunk: LlmRunChunkInput,
+  secondChunk: LlmRunChunkInput,
+  deltaKind: LlmRunDeltaChunkKind
+): LlmRunChunkInput {
+  const combinedDeltaText = combineOptionalText(
+    getDeltaChunkText(firstChunk, deltaKind),
+    getDeltaChunkText(secondChunk, deltaKind)
+  )
+
+  return {
+    sequence: secondChunk.sequence,
+    kind: deltaKind,
+    mcpFunctionName: null,
+    mcpFunctionOutput: null,
+    mcpFunctionReason: null,
+    reasoningDelta:
+      deltaKind === "reasoning_delta" ? combinedDeltaText : null,
+    outputDelta: deltaKind === "message_delta" ? combinedDeltaText : null,
+    payload: null,
+  }
+}
+
+function combineOptionalText(firstText: string | null, secondText: string | null) {
+  if (firstText === null && secondText === null) {
+    return null
+  }
+
+  return `${firstText ?? ""}${secondText ?? ""}`
+}
+
+async function mergeFirstDeltaChunkIntoLastPersistedChunk(
+  client: DatabaseTransactionClient,
+  llmRunId: string,
+  chunks: readonly LlmRunChunkInput[]
+) {
+  const firstChunk = chunks[0]
+  const firstDeltaKind = firstChunk ? getDeltaChunkKind(firstChunk) : null
+
+  if (!firstChunk || !firstDeltaKind) {
+    return {
+      chunks,
+      appendedDeltaChunks: [] as GeneratedDeltaChunkCost[],
+    }
+  }
+
+  const lastChunkResult = await client.query<LastPersistedLlmRunChunkRow>(
+    `
+      SELECT id, sequence, kind
+      FROM llm_run_chunks
+      WHERE llm_run_id = $1
+      ORDER BY sequence DESC
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [llmRunId]
+  )
+  const lastChunk = lastChunkResult.rows[0]
+
+  if (
+    !lastChunk ||
+    lastChunk.kind !== firstDeltaKind ||
+    lastChunk.sequence >= firstChunk.sequence
+  ) {
+    return {
+      chunks,
+      appendedDeltaChunks: [] as GeneratedDeltaChunkCost[],
+    }
+  }
+
+  const updateQuery = buildAppendToPersistedLlmRunDeltaChunkQuery({
+    chunkId: lastChunk.id,
+    kind: firstDeltaKind,
+    sequence: firstChunk.sequence,
+    reasoningDelta: firstChunk.reasoningDelta,
+    outputDelta: firstChunk.outputDelta,
+  })
+  const updateResult = await client.query(updateQuery.text, updateQuery.values)
+
+  if (updateResult.rowCount === 0) {
+    return {
+      chunks,
+      appendedDeltaChunks: [] as GeneratedDeltaChunkCost[],
+    }
+  }
+
+  return {
+    chunks: chunks.slice(1),
+    appendedDeltaChunks: [createGeneratedDeltaCost(firstChunk)],
+  }
+}
+
+export function buildAppendToPersistedLlmRunDeltaChunkQuery({
+  chunkId,
+  kind,
+  outputDelta,
+  reasoningDelta,
+  sequence,
+}: {
+  chunkId: string | number
+  kind: LlmRunDeltaChunkKind
+  outputDelta: string | null
+  reasoningDelta: string | null
+  sequence: number
+}) {
+  return {
+    text: `
+      UPDATE llm_run_chunks
+      SET
+        sequence = $2,
+        reasoning_delta =
+          CASE
+            WHEN $5::llm_chunk_kind = 'reasoning_delta' THEN
+              CASE
+                WHEN reasoning_delta IS NULL AND $3::text IS NULL THEN NULL
+                ELSE COALESCE(reasoning_delta, '') || COALESCE($3::text, '')
+              END
+            ELSE reasoning_delta
+          END,
+        output_delta =
+          CASE
+            WHEN $5::llm_chunk_kind = 'message_delta' THEN
+              CASE
+                WHEN output_delta IS NULL AND $4::text IS NULL THEN NULL
+                ELSE COALESCE(output_delta, '') || COALESCE($4::text, '')
+              END
+            ELSE output_delta
+          END,
+        payload = NULL
+      WHERE id = $1
+        AND kind = $5::llm_chunk_kind
+        AND sequence < $2
+    `,
+    values: [chunkId, sequence, reasoningDelta, outputDelta, kind],
+  }
+}
+
+function createGeneratedDeltaCost(
+  chunk: LlmRunChunkInput
+): GeneratedDeltaChunkCost {
+  return {
+    reasoning_delta:
+      chunk.kind === "reasoning_delta" ? chunk.reasoningDelta : null,
+    output_delta: chunk.kind === "message_delta" ? chunk.outputDelta : null,
+  }
 }
 
 export function buildAppendLlmRunChunksQuery(
@@ -3202,7 +3434,7 @@ export function buildAppendLlmRunChunksQuery(
       chunk.mcpFunctionReason ?? extractMcpFunctionReasonFromChunk(chunk),
       chunk.reasoningDelta,
       chunk.outputDelta,
-      JSON.stringify(chunk.payload)
+      getJsonbQueryValue(chunk.payload)
     )
 
     return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}::jsonb, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}::jsonb)`
@@ -3237,6 +3469,29 @@ export function buildAppendLlmRunChunksQuery(
     `,
     values,
   }
+}
+
+function getDeltaChunkKind(
+  chunk: Pick<LlmRunChunkInput, "kind">
+): LlmRunDeltaChunkKind | null {
+  if (chunk.kind === "reasoning_delta" || chunk.kind === "message_delta") {
+    return chunk.kind
+  }
+
+  return null
+}
+
+function getDeltaChunkText(
+  chunk: Pick<LlmRunChunkInput, "reasoningDelta" | "outputDelta">,
+  deltaKind: LlmRunDeltaChunkKind
+) {
+  return deltaKind === "reasoning_delta"
+    ? chunk.reasoningDelta
+    : chunk.outputDelta
+}
+
+function getJsonbQueryValue(value: unknown | null | undefined) {
+  return value === null || value === undefined ? null : JSON.stringify(value)
 }
 
 async function incrementRunningLlmRunCostFromInsertedChunks(
@@ -3355,7 +3610,7 @@ type InsertedLlmRunChunkRow = {
   mcp_function_reason: string | null
   reasoning_delta: string | null
   output_delta: string | null
-  payload: unknown
+  payload: unknown | null
   received_at: Date
 }
 
@@ -5376,7 +5631,7 @@ async function getLlmRunEvaluationChunks(llmRunId: string) {
     mcp_function_reason: string | null
     reasoning_delta: string | null
     output_delta: string | null
-    payload: unknown
+    payload: unknown | null
     received_at: Date
   }>(
     `
@@ -6170,7 +6425,7 @@ type SimulationDebugLlmRunRow = {
   mcp_function_reason: string | null
   reasoning_delta: string | null
   output_delta: string | null
-  payload: unknown
+  payload: unknown | null
   received_at: Date | null
 }
 

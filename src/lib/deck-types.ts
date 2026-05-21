@@ -110,7 +110,7 @@ export type SimulationDebugLlmRunChunk = {
   mcpFunctionReason: string | null
   reasoningDelta: string | null
   outputDelta: string | null
-  payload: unknown
+  payload: unknown | null
   cardMentions: SimulationDebugLlmRunChunkCardMention[]
   receivedAt: string
 }

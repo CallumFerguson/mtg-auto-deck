@@ -7,6 +7,7 @@ import {
   createFinalParsedOutputChunk,
   createLlamaCppCompletedChunk,
   createLlamaCppMessageDeltaChunk,
+  createLlamaCppReasoningDeltaChunk,
   createLlamaCppToolCallCompleteChunk,
   createLlamaCppToolCallStartChunk,
   getCompletedResponseOutputText,
@@ -27,12 +28,14 @@ import {
   STALE_IN_FLIGHT_LLM_RUN_CANCELLATION_MESSAGE,
   STALE_RUNNING_SIMULATION_CANCELLATION_MESSAGE,
   TURN_EVALUATION_UPSERT_SQL,
+  buildAppendToPersistedLlmRunDeltaChunkQuery,
   buildAppendLlmRunChunksQuery,
   buildClaimQueuedLlmRunStreamingQuery,
   buildFailQueuedLlmRunUsageLimitQuery,
   buildIncrementRunningLlmRunCostQuery,
   buildPartialLlmRunCostSnapshotQuery,
   canApplyLateLlmRunTerminalUpdate,
+  compactLlmRunDeltaChunks,
   extractLlmRunChunkCardMentionRequests,
   getInsertedLlmRunGeneratedDeltaCharCount,
   getInitialSimulationStatus,
@@ -223,6 +226,164 @@ test("builds chunk inserts with extracted MCP function reason", () => {
   assert.equal(query.values[5], "Bottoming after mulligan")
 })
 
+test("builds delta chunk inserts with nullable payloads", () => {
+  const query = buildAppendLlmRunChunksQuery(
+    "00000000-0000-0000-0000-000000000001",
+    [
+      {
+        sequence: 1,
+        kind: "message_delta",
+        mcpFunctionName: null,
+        mcpFunctionOutput: null,
+        mcpFunctionReason: null,
+        reasoningDelta: null,
+        outputDelta: "Keep",
+      },
+    ]
+  )
+
+  assert.equal(query.values[8], null)
+})
+
+test("compacts adjacent delta chunks using the last sequence", () => {
+  const chunks = compactLlmRunDeltaChunks([
+    {
+      sequence: 1,
+      kind: "message_delta",
+      mcpFunctionName: "ignored",
+      mcpFunctionOutput: { ignored: true },
+      mcpFunctionReason: "ignored",
+      reasoningDelta: null,
+      outputDelta: "Keep",
+      payload: { type: "response.output_text.delta" },
+    },
+    {
+      sequence: 2,
+      kind: "message_delta",
+      mcpFunctionName: null,
+      mcpFunctionOutput: null,
+      mcpFunctionReason: null,
+      reasoningDelta: null,
+      outputDelta: " seven.",
+      payload: { type: "response.output_text.delta" },
+    },
+    {
+      sequence: 3,
+      kind: "reasoning_delta",
+      mcpFunctionName: null,
+      mcpFunctionOutput: null,
+      mcpFunctionReason: null,
+      reasoningDelta: "Hand",
+      outputDelta: null,
+      payload: { type: "response.reasoning_summary_text.delta" },
+    },
+    {
+      sequence: 4,
+      kind: "reasoning_delta",
+      mcpFunctionName: null,
+      mcpFunctionOutput: null,
+      mcpFunctionReason: null,
+      reasoningDelta: " has ramp.",
+      outputDelta: null,
+      payload: { type: "response.reasoning_summary_text.delta" },
+    },
+    {
+      sequence: 5,
+      kind: "output_start",
+      mcpFunctionName: null,
+      mcpFunctionOutput: null,
+      mcpFunctionReason: null,
+      reasoningDelta: null,
+      outputDelta: null,
+      payload: { type: "response.output_item.added" },
+    },
+    {
+      sequence: 6,
+      kind: "message_delta",
+      mcpFunctionName: null,
+      mcpFunctionOutput: null,
+      mcpFunctionReason: null,
+      reasoningDelta: null,
+      outputDelta: "Again.",
+      payload: { type: "response.output_text.delta" },
+    },
+  ])
+
+  assert.deepEqual(
+    chunks.map((chunk) => ({
+      kind: chunk.kind,
+      mcpFunctionName: chunk.mcpFunctionName,
+      mcpFunctionOutput: chunk.mcpFunctionOutput,
+      mcpFunctionReason: chunk.mcpFunctionReason,
+      outputDelta: chunk.outputDelta,
+      payload: chunk.payload,
+      reasoningDelta: chunk.reasoningDelta,
+      sequence: chunk.sequence,
+    })),
+    [
+      {
+        kind: "message_delta",
+        mcpFunctionName: null,
+        mcpFunctionOutput: null,
+        mcpFunctionReason: null,
+        outputDelta: "Keep seven.",
+        payload: null,
+        reasoningDelta: null,
+        sequence: 2,
+      },
+      {
+        kind: "reasoning_delta",
+        mcpFunctionName: null,
+        mcpFunctionOutput: null,
+        mcpFunctionReason: null,
+        outputDelta: null,
+        payload: null,
+        reasoningDelta: "Hand has ramp.",
+        sequence: 4,
+      },
+      {
+        kind: "output_start",
+        mcpFunctionName: null,
+        mcpFunctionOutput: null,
+        mcpFunctionReason: null,
+        outputDelta: null,
+        payload: { type: "response.output_item.added" },
+        reasoningDelta: null,
+        sequence: 5,
+      },
+      {
+        kind: "message_delta",
+        mcpFunctionName: null,
+        mcpFunctionOutput: null,
+        mcpFunctionReason: null,
+        outputDelta: "Again.",
+        payload: null,
+        reasoningDelta: null,
+        sequence: 6,
+      },
+    ]
+  )
+})
+
+test("builds persisted delta append updates with advanced sequence", () => {
+  const query = buildAppendToPersistedLlmRunDeltaChunkQuery({
+    chunkId: 10,
+    kind: "message_delta",
+    outputDelta: " seven.",
+    reasoningDelta: null,
+    sequence: 6,
+  })
+  const normalizedSql = query.text.replace(/\s+/g, " ")
+
+  assert.deepEqual(query.values, [10, 6, null, " seven.", "message_delta"])
+  assert.match(normalizedSql, /sequence = \$2/)
+  assert.match(normalizedSql, /output_delta =/)
+  assert.match(normalizedSql, /\$3::text/)
+  assert.match(normalizedSql, /\$4::text/)
+  assert.match(normalizedSql, /payload = NULL/)
+  assert.match(normalizedSql, /sequence < \$2/)
+})
+
 test("builds partial LLM run cost snapshot query", () => {
   const llmRunId = "00000000-0000-0000-0000-000000000001"
   const query = buildPartialLlmRunCostSnapshotQuery(llmRunId)
@@ -282,6 +443,24 @@ test("normalizes OpenAI reasoning and output item lifecycle events", () => {
   assert.equal(reasoningDoneChunk.kind, "reasoning_done")
   assert.equal(outputStartChunk.kind, "output_start")
   assert.equal(outputDoneChunk.kind, "output_done")
+})
+
+test("normalizes OpenAI text and reasoning deltas with null payloads", () => {
+  const textChunk = normalizeOpenAiStreamEvent({
+    type: "response.output_text.delta",
+    delta: "Keep the seven.",
+  })
+  const reasoningChunk = normalizeOpenAiStreamEvent({
+    type: "response.reasoning_summary_text.delta",
+    delta: "Hand has ramp.",
+  })
+
+  assert.equal(textChunk.kind, "message_delta")
+  assert.equal(textChunk.outputDelta, "Keep the seven.")
+  assert.equal(textChunk.payload, null)
+  assert.equal(reasoningChunk.kind, "reasoning_delta")
+  assert.equal(reasoningChunk.reasoningDelta, "Hand has ramp.")
+  assert.equal(reasoningChunk.payload, null)
 })
 
 test("normalizes OpenAI reasoning summary part lifecycle events", () => {
@@ -1523,6 +1702,9 @@ test("creates llama.cpp text, tool, and completion chunks", () => {
     '{"keptHand":["Sol Ring"]}',
     { id: "chatcmpl_1" }
   )
+  const reasoningChunk = createLlamaCppReasoningDeltaChunk("Thinking.", {
+    id: "chatcmpl_1",
+  })
   const completedChunk = createLlamaCppCompletedChunk({ id: "chatcmpl_1" })
 
   assert.equal(startChunk.kind, "mcp_call_start")
@@ -1533,6 +1715,10 @@ test("creates llama.cpp text, tool, and completion chunks", () => {
   })
   assert.equal(textChunk.kind, "message_delta")
   assert.equal(textChunk.outputDelta, '{"keptHand":["Sol Ring"]}')
+  assert.equal(textChunk.payload, null)
+  assert.equal(reasoningChunk.kind, "reasoning_delta")
+  assert.equal(reasoningChunk.reasoningDelta, "Thinking.")
+  assert.equal(reasoningChunk.payload, null)
   assert.equal(completedChunk.kind, "completed")
 })
 
@@ -1639,10 +1825,13 @@ test("normalizes OpenRouter text and reasoning stream deltas", () => {
 
   assert.equal(textChunk.kind, "message_delta")
   assert.equal(textChunk.outputDelta, "Keep the seven.")
+  assert.equal(textChunk.payload, null)
   assert.equal(summaryChunk.kind, "reasoning_delta")
   assert.equal(summaryChunk.reasoningDelta, "Hand has ramp.")
+  assert.equal(summaryChunk.payload, null)
   assert.equal(reasoningChunk.kind, "reasoning_delta")
   assert.equal(reasoningChunk.reasoningDelta, "Evaluating mana.")
+  assert.equal(reasoningChunk.payload, null)
 })
 
 test("normalizes OpenRouter reasoning and output item lifecycle events", () => {

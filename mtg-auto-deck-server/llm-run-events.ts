@@ -671,11 +671,12 @@ function createChunk(
     mcpFunctionReason?: string | null
     reasoningDelta?: string | null
     outputDelta?: string | null
-    payload: unknown
+    payload?: unknown | null
   }
 ): Omit<LlmRunChunkInput, "sequence"> {
   const mcpFunctionName = values.mcpFunctionName ?? null
   const mcpFunctionOutput = values.mcpFunctionOutput ?? null
+  const isDeltaChunk = kind === "reasoning_delta" || kind === "message_delta"
 
   return {
     kind,
@@ -690,7 +691,7 @@ function createChunk(
       }),
     reasoningDelta: values.reasoningDelta ?? null,
     outputDelta: values.outputDelta ?? null,
-    payload: values.payload,
+    payload: isDeltaChunk ? null : (values.payload ?? null),
   }
 }
 

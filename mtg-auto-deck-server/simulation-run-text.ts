@@ -6,7 +6,7 @@ type SimulationRunTextChunk = {
   mcpFunctionOutput: unknown | null
   reasoningDelta: string | null
   outputDelta: string | null
-  payload: unknown
+  payload: unknown | null
 }
 
 export function formatSimulationRunClipboardText(
