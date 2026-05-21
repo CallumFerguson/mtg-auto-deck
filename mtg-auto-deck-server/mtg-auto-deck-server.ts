@@ -193,6 +193,7 @@ import {
   throwIfRuntimeAborted,
 } from "./llm-runtime-cancellation.js"
 import {
+  buildOpenRouterReasoningOptions,
   buildProviderReasoningOptions,
   getGenericGameRulesReferenceEnabled,
   LlmConfigurationError,
@@ -2352,7 +2353,7 @@ function buildOpeningHandOpenRouterRequestPayload(
       simulationId,
       phase: "opening_hand",
     },
-    reasoning: buildProviderReasoningOptions(
+    reasoning: buildOpenRouterReasoningOptions(
       config.reasoningEffort,
       reasoningSummariesEnabled
     ),
@@ -2378,7 +2379,7 @@ function buildReportOpenRouterRequestPayload(
       simulationId,
       phase: "report",
     },
-    reasoning: buildProviderReasoningOptions(
+    reasoning: buildOpenRouterReasoningOptions(
       config.reasoningEffort,
       reasoningSummariesEnabled
     ),
@@ -2456,7 +2457,7 @@ function buildTurnSimulationOpenRouterRequestPayload(
       phase: "turn",
       turnNumber: String(turnNumber),
     },
-    reasoning: buildProviderReasoningOptions(
+    reasoning: buildOpenRouterReasoningOptions(
       config.reasoningEffort,
       reasoningSummariesEnabled
     ),
@@ -3934,7 +3935,7 @@ async function collectRunEvaluationCompletion({
         ],
         metadata,
         provider: getOpenRouterChatProviderPreferences(config.modelProvider),
-        reasoning: buildProviderReasoningOptions(
+        reasoning: buildOpenRouterReasoningOptions(
           config.reasoningEffort,
           reasoningSummariesEnabled
         ),

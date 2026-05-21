@@ -64,6 +64,7 @@ import {
   getOpenRouterReportedCostUsd,
 } from "./llm-pricing.js"
 import {
+  buildOpenRouterReasoningOptions,
   buildProviderReasoningOptions,
   GENERIC_GAME_RULES_REFERENCE_ENABLED_ENVIRONMENT_VARIABLE,
   getEvaluationLlmRunConfig,
@@ -121,6 +122,20 @@ test("builds provider reasoning options without summaries by default", () => {
 
 test("builds provider reasoning options with summaries when enabled", () => {
   assert.deepEqual(buildProviderReasoningOptions("high", true), {
+    effort: "high",
+    summary: "auto",
+  })
+})
+
+test("builds OpenRouter reasoning options with excluded returned reasoning when summaries are disabled", () => {
+  assert.deepEqual(buildOpenRouterReasoningOptions("high", false), {
+    effort: "high",
+    exclude: true,
+  })
+})
+
+test("builds OpenRouter reasoning options with summaries when enabled", () => {
+  assert.deepEqual(buildOpenRouterReasoningOptions("high", true), {
     effort: "high",
     summary: "auto",
   })

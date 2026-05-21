@@ -125,6 +125,18 @@ export function buildProviderReasoningOptions(
   }
 }
 
+export function buildOpenRouterReasoningOptions(
+  reasoningEffort: ReasoningEffort,
+  reasoningSummariesEnabled: boolean
+) {
+  return {
+    effort: reasoningEffort,
+    ...(reasoningSummariesEnabled
+      ? { summary: "auto" as const }
+      : { exclude: true as const }),
+  }
+}
+
 export class LlmConfigurationError extends Error {
   constructor(message: string) {
     super(message)
