@@ -67,6 +67,11 @@ import {
   getOpenRouterReportedCostUsd,
 } from "./llm-pricing.js"
 import {
+  buildSimulateTurnPrompt,
+  GENERIC_GAME_RULES_REFERENCE,
+  TURN_ACTION_LOGGING_PROMPT_SECTION,
+} from "./llm/prompt-constants.js"
+import {
   buildOpenRouterReasoningOptions,
   buildProviderReasoningOptions,
   GENERIC_GAME_RULES_REFERENCE_ENABLED_ENVIRONMENT_VARIABLE,
@@ -75,8 +80,10 @@ import {
   getLogTurnActionFullActionListEnabled,
   getLlmRunQueueConfig,
   getOpeningHandLlmRunConfig,
+  getTurnActionLoggingEnabled,
   getTurnSimulationLlmRunConfig,
   LOG_TURN_ACTION_FULL_ACTION_LIST_ENABLED_ENVIRONMENT_VARIABLE,
+  TURN_ACTION_LOGGING_ENABLED_ENVIRONMENT_VARIABLE,
 } from "./llm-config.js"
 import { buildCreateLlmModelPresetInsertQuery } from "./llm-model-presets-postgres.js"
 import { canClaimQueuedLlmRunWithCapacity } from "./llm-run-queue.js"
@@ -1354,6 +1361,44 @@ test("returns full log_turn_action action list by default", () => {
     }),
     true
   )
+})
+
+test("enables turn action logging by default", () => {
+  assert.equal(getTurnActionLoggingEnabled({}), true)
+  assert.equal(
+    getTurnActionLoggingEnabled({
+      [TURN_ACTION_LOGGING_ENABLED_ENVIRONMENT_VARIABLE]: "false",
+    }),
+    false
+  )
+  assert.equal(
+    getTurnActionLoggingEnabled({
+      [TURN_ACTION_LOGGING_ENABLED_ENVIRONMENT_VARIABLE]: "0",
+    }),
+    false
+  )
+  assert.equal(
+    getTurnActionLoggingEnabled({
+      [TURN_ACTION_LOGGING_ENABLED_ENVIRONMENT_VARIABLE]: "yes",
+    }),
+    true
+  )
+})
+
+test("builds turn prompt sections from feature flags", () => {
+  const fullPrompt = buildSimulateTurnPrompt({
+    genericGameRulesReferenceEnabled: true,
+    turnActionLoggingEnabled: true,
+  })
+  assert.equal(fullPrompt.includes(TURN_ACTION_LOGGING_PROMPT_SECTION), true)
+  assert.equal(fullPrompt.includes(GENERIC_GAME_RULES_REFERENCE), true)
+
+  const minimalPrompt = buildSimulateTurnPrompt({
+    genericGameRulesReferenceEnabled: false,
+    turnActionLoggingEnabled: false,
+  })
+  assert.equal(minimalPrompt.includes(TURN_ACTION_LOGGING_PROMPT_SECTION), false)
+  assert.equal(minimalPrompt.includes(GENERIC_GAME_RULES_REFERENCE), false)
 })
 
 test("checks LLM run queue capacity before claiming", () => {

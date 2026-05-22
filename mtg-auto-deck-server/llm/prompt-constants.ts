@@ -78,14 +78,6 @@ Rules:
 - Use tools for every library interaction, coin flip, or die roll.
 - Once a tool call is made, do not backtrack or contradict it.
 
-Action logging:
-- log_turn_action input shape: actions: [{ action, phaseChange? }, ...].
-- phaseChange values are only for phase/step movement: untap, upkeep, draw, precombat_main, combat, postcombat_main, end_step_cleanup.
-- Log draws, land plays, mana generation, spells/abilities, trigger resolutions, attacks, combat damage, important zone changes.
-- Log the mana-generation action before the mana-spending action. Use brace notation such as {G}, {1}, {C}, {1}{G}; spending logs must state the mana spent.
-- At the end of your turn, before you return your final response, use the log_turn_action tool once with a full list of all the actions taken that turn.
-- You should only use the log_turn_action one time.
-
 Tool rules:
 - Every library/randomizer tool call must use the provided llmRunId.
 - Library/randomizer tools need a short reason argument.
@@ -169,6 +161,31 @@ gameState is a compact end-of-turn state dump, complete enough to resume later. 
 future turns will be given the full gameState from the previous turn
 use gameState notes to track any additional durible information or state that does not fit into the other categories and will be useful to know for future turns. Do not use notes to summarize the turn.
 `
+
+export const TURN_ACTION_LOGGING_PROMPT_SECTION = `Action logging:
+- log_turn_action input shape: actions: [{ action, phaseChange? }, ...].
+- phaseChange values are only for phase/step movement: untap, upkeep, draw, precombat_main, combat, postcombat_main, end_step_cleanup.
+- Log draws, land plays, mana generation, spells/abilities, trigger resolutions, attacks, combat damage, important zone changes.
+- Log the mana-generation action before the mana-spending action. Use brace notation such as {G}, {1}, {C}, {1}{G}; spending logs must state the mana spent.
+- At the end of your turn, before you return your final response, use the log_turn_action tool once with a full list of all the actions taken that turn.
+- You should only use the log_turn_action one time.`
+
+export function buildSimulateTurnPrompt({
+  genericGameRulesReferenceEnabled,
+  turnActionLoggingEnabled,
+}: {
+  genericGameRulesReferenceEnabled: boolean
+  turnActionLoggingEnabled: boolean
+}) {
+  const turnActionLoggingPromptBlock = turnActionLoggingEnabled
+    ? `\n\n${TURN_ACTION_LOGGING_PROMPT_SECTION}`
+    : ""
+  const genericGameRulesReferenceBlock = genericGameRulesReferenceEnabled
+    ? `\n\n${GENERIC_GAME_RULES_REFERENCE}`
+    : ""
+
+  return `${SIMULATE_TURN_PROMPT}${turnActionLoggingPromptBlock}${genericGameRulesReferenceBlock}`
+}
 
 export const GENERIC_GAME_RULES_REFERENCE = `
 Common keywords and rules reference (not comprehensive):

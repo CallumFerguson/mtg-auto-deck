@@ -43,9 +43,8 @@ import {
   verifyDatabaseConnection,
 } from "./db.js"
 import {
+  buildSimulateTurnPrompt,
   DRAW_STARTING_HAND_PROMPT,
-  GENERIC_GAME_RULES_REFERENCE,
-  SIMULATE_TURN_PROMPT,
 } from "./llm/prompt-constants.js"
 import { formatUserGuidelinesSection } from "./llm/user-guidelines.js"
 import {
@@ -198,6 +197,7 @@ import {
   buildProviderReasoningOptions,
   getGenericGameRulesReferenceEnabled,
   getLogTurnActionFullActionListEnabled,
+  getTurnActionLoggingEnabled,
   LlmConfigurationError,
   getOpenRouterApiKey,
   getEvaluationLlmRunConfig,
@@ -1299,7 +1299,9 @@ function createTurnSimulationServer(authContext?: LlmRunMcpTokenContext) {
   }
 
   return createServer(TURN_SIMULATION_SERVER_NAME, (server) => {
-    registerLogTurnActionTool(server, identifier)
+    if (getTurnActionLoggingEnabled()) {
+      registerLogTurnActionTool(server, identifier)
+    }
     registerDrawCardFromTopTool(server, identifier)
     registerDrawCardFromBottomTool(server, identifier)
     registerTakeCardsFromLibraryTool(server, identifier)
@@ -1941,15 +1943,18 @@ const openingHandLlmToolDefinitions: LlamaCppToolDefinition[] = [
   },
 ]
 
-const turnSimulationLlmToolDefinitions: LlamaCppToolDefinition[] = [
-  {
+function createLogTurnActionLlmToolDefinition(): LlamaCppToolDefinition {
+  return {
     name: "log_turn_action",
     description: getLogTurnActionToolDescription(),
     inputSchema: z.object({
       ...llmRunIdentifierSchema,
       actions: logTurnActionsSchema,
     }),
-  },
+  }
+}
+
+const turnSimulationLibraryLlmToolDefinitions: LlamaCppToolDefinition[] = [
   {
     name: "draw_card_from_top",
     description:
@@ -2069,6 +2074,15 @@ const turnSimulationLlmToolDefinitions: LlamaCppToolDefinition[] = [
   },
 ]
 
+function getTurnSimulationLlmToolDefinitions(): readonly LlamaCppToolDefinition[] {
+  return getTurnActionLoggingEnabled()
+    ? [
+        createLogTurnActionLlmToolDefinition(),
+        ...turnSimulationLibraryLlmToolDefinitions,
+      ]
+    : turnSimulationLibraryLlmToolDefinitions
+}
+
 function createOpeningHandOpenRouterTools(
   mcpClient: Client,
   signal: AbortSignal
@@ -2081,7 +2095,7 @@ function createTurnSimulationOpenRouterTools(
   signal: AbortSignal
 ): Tool[] {
   return createOpenRouterTools(
-    turnSimulationLlmToolDefinitions,
+    getTurnSimulationLlmToolDefinitions(),
     mcpClient,
     signal
   )
@@ -2288,8 +2302,7 @@ function buildTurnSimulationOpenAiRequestPayload(
       {
         type: "mcp" as const,
         server_label: TURN_SIMULATION_MCP_SERVER_LABEL,
-        server_description:
-          "Tools for resolving one Magic: The Gathering goldfish turn, including library operations, random coin/dice results, and turn action logging.",
+        server_description: getTurnSimulationMcpServerDescription(),
         server_url: appendMcpRunTokenToUrl(
           config.turnSimulationMcpPublicUrl,
           mcpRunToken
@@ -2298,6 +2311,12 @@ function buildTurnSimulationOpenAiRequestPayload(
       },
     ],
   }
+}
+
+function getTurnSimulationMcpServerDescription() {
+  return getTurnActionLoggingEnabled()
+    ? "Tools for resolving one Magic: The Gathering goldfish turn, including library operations, random coin/dice results, and turn action logging."
+    : "Tools for resolving one Magic: The Gathering goldfish turn, including library operations and random coin/dice results."
 }
 
 function buildReportOpenAiRequestPayload(
@@ -2505,7 +2524,9 @@ function buildTurnSimulationLlamaCppRequestPayload(
       turnNumber: String(turnNumber),
     },
     parallel_tool_calls: false,
-    tools: createLlamaCppChatCompletionTools(turnSimulationLlmToolDefinitions),
+    tools: createLlamaCppChatCompletionTools(
+      getTurnSimulationLlmToolDefinitions()
+    ),
     stopWhenStepCount: config.stopWhenStepCount,
   }
 }
@@ -4543,7 +4564,7 @@ async function runTurnLlmRun({
             phase: "turn",
             requestPayload: requireLlamaCppRequestPayload(requestPayload),
             runtime,
-            toolDefinitions: turnSimulationLlmToolDefinitions,
+            toolDefinitions: getTurnSimulationLlmToolDefinitions(),
           })
 
     throwIfRuntimeAborted(runtime.abortController.signal)
@@ -7621,11 +7642,12 @@ function buildTurnSimulationPromptFromData(
   const strategyGuidelinesBlock = strategyGuidelinesSection
     ? `\n\n${strategyGuidelinesSection}`
     : ""
-  const genericGameRulesReferenceBlock = getGenericGameRulesReferenceEnabled()
-    ? `\n\n${GENERIC_GAME_RULES_REFERENCE}`
-    : ""
+  const simulateTurnPrompt = buildSimulateTurnPrompt({
+    genericGameRulesReferenceEnabled: getGenericGameRulesReferenceEnabled(),
+    turnActionLoggingEnabled: getTurnActionLoggingEnabled(),
+  })
 
-  return `${SIMULATE_TURN_PROMPT}${genericGameRulesReferenceBlock}
+  return `${simulateTurnPrompt}
 
 Card reference:
 ${cardReference}${strategyGuidelinesBlock}
