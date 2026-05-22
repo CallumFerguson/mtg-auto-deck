@@ -141,25 +141,60 @@ MANA COSTS AND MANA SYMBOLS REFERENCE
 
 Output must be exactly this JSON shape:
 {
-  "gameState": null | "Complete end-of-turn game state as a readable string.",
-  "summary": null | "User-facing summary. Markdown and newlines are allowed.",
+  "gameState": null | {
+    "zones": {
+      "hand": [],
+      "command": [],
+      "battlefield": [],
+      "graveyard": [],
+      "exile": []
+    },
+    "yourLife": 40,
+    "opponentA": {
+      "life": 40,
+      "commanderDamage": {
+        "commander 1 name": 0,
+        "commander 2 name (if applicable)": 0
+      }
+    },
+    "opponentB": {
+      "life": 40,
+      "commanderDamage": {
+        "commander 1 name": 0,
+        "commander 2 name (if applicable)": 0
+      }
+    },
+    "opponentC": {
+      "life": 40,
+      "commanderDamage": {
+        "commander 1 name": 0,
+        "commander 2 name (if applicable)": 0
+      }
+    },
+    "other": "a single string containing any information about the game state that does not fit into the other categories. can also include private information you know, like if you scry a card and leave it on top of the deck for example."
+  },
   "error": null | "optional description of mistake. include if simulation is not valid/legal."
+}
+
+Each zone should be an array of cards where each card is the following JSON shape:
+{
+  "name": "exact card name",
+  "tapped": null | true | false,
+  "notes": null | "an other relevant information about the card. for example if it has counters, if the card can be played from exile, etc."
 }
 
 Unrecoverable error:
 If an already-made tool call makes the run impossible to complete accurately, stop immediately. Do not call more tools. Return exactly:
 {
   "gameState": null,
-  "summary": null,
   "error": "Short explanation of the unrecoverable mistake."
 }
 
 Before final response, verify legality, mana payments/colors, tools used for hidden/random actions, land count, triggers, targets, life totals, commander damage/tax, tapped status, counters, and every zone.
 
-Never omit gameState, summary, or error. Use null for any field that does not apply.
-gameState is a compact end-of-turn state dump, complete enough to resume later. summary is a brief user-facing markdown recap of what you played and what changed.
+Never omit gameState or error. Use null for any field that does not apply.
+gameState is a compact end-of-turn state dump, complete enough to resume later.
 future turns will be given the full gameState from the previous turn
-use gameState notes to track any additional durible information or state that does not fit into the other categories and will be useful to know for future turns. Do not use notes to summarize the turn.
 `
 
 export const TURN_ACTION_LOGGING_PROMPT_SECTION = `Action logging:
