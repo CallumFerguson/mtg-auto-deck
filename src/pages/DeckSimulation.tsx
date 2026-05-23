@@ -96,6 +96,12 @@ import {
 } from "@/lib/simulation-debug-chunks"
 import { applySimulationResultsStreamEvent } from "@/lib/simulation-results-stream"
 import {
+  buildSimulationResultsTimelineSteps,
+  isActiveSimulationResultsTimelineStep,
+  resolveSimulationResultsTimelineSelection,
+  type SimulationResultsTimelineStep,
+} from "@/lib/simulation-results-timeline"
+import {
   getSimulationRunStartTimeMs,
   parseTimestampMs,
 } from "@/lib/simulation-run-timing"
@@ -3753,247 +3759,387 @@ function SimulationResultsPanel({
       ),
     })),
   ]
+  const timelineSteps = useMemo(
+    () =>
+      buildSimulationResultsTimelineSteps({
+        hasPresetStartingHand,
+        resultsInfo,
+      }),
+    [hasPresetStartingHand, resultsInfo]
+  )
+  const [selectedTimelineStepIdPreference, setSelectedTimelineStepIdPreference] =
+    useState<string | null>(null)
+  const timelineStepButtonRefs = useRef<Map<string, HTMLButtonElement>>(
+    new Map()
+  )
+  const runsByTimelineStepId = new Map(
+    runs.map((run) => [getSimulationTimelineRunStepId(run.llmRunId), run])
+  )
+  const selectedTimelineStepId = resolveSimulationResultsTimelineSelection(
+    timelineSteps,
+    selectedTimelineStepIdPreference
+  )
+  const selectedTimelineStep =
+    timelineSteps.find((step) => step.id === selectedTimelineStepId) ?? null
+  const selectedTimelineRun =
+    selectedTimelineStep?.run === null
+      ? null
+      : selectedTimelineStep
+        ? (runsByTimelineStepId.get(selectedTimelineStep.id) ?? null)
+        : null
+  const selectedTimelinePanelId = selectedTimelineStep
+    ? getSimulationTimelineStepPanelId(selectedTimelineStep.id)
+    : undefined
+
+  useEffect(() => {
+    if (!selectedTimelineStepId) {
+      return
+    }
+
+    timelineStepButtonRefs.current
+      .get(selectedTimelineStepId)
+      ?.scrollIntoView({
+        block: "nearest",
+        inline: "center",
+      })
+  }, [selectedTimelineStepId, timelineSteps])
+
+  function renderSimulationRunDetail(
+    run: (typeof runs)[number],
+    panelId: string | undefined,
+    tabId: string | undefined
+  ) {
+    const finishedDurationText = getSimulationRunFinishedDurationText(run)
+    const shouldShowFinishedThinkingStatus =
+      !run.isActive && getSimulationRunFinishedTimeMs(run) !== null
+    const finishedThinkingStatus = shouldShowFinishedThinkingStatus ? (
+      <SimulationResultThinkingStatus
+        activeToolCallName={null}
+        canStopSimulation={false}
+        finishedDurationText={finishedDurationText}
+        isPending={false}
+        isFinishedSuccessfully={run.status === "completed"}
+        isFinished={true}
+        isActivitySelected={selectedActivityRunId === run.llmRunId}
+        isStoppingSimulation={false}
+        onViewActivity={() => onSelectActivityRun(run.llmRunId)}
+        onStopSimulation={onStopSimulation}
+        runStartTimeMs={null}
+        stopSimulationError={null}
+      />
+    ) : null
+    const runMetadata = [
+      run.status,
+      run.model,
+      getLlmRunEstimatedPriceText(run),
+      finishedDurationText ? `took ${finishedDurationText}` : null,
+      run.failureMessage ? run.failureMessage : null,
+      run.outdated ? "outdated" : null,
+    ].filter(Boolean)
+    const hasLiveReport =
+      run.resultKind === "report" &&
+      !run.hasFinalParsedOutputChunk &&
+      getReportTextFromChunks(run.chunks) !== null
+    const emptyRunFailureMessage =
+      run.status === "failed" ? run.failureMessage?.trim() || null : null
+    const isUsageLimitFailure = isUsageLimitFailureMessage(
+      emptyRunFailureMessage
+    )
+
+    return (
+      <section
+        key={run.llmRunId}
+        id={panelId}
+        aria-labelledby={tabId}
+        className="grid gap-3 rounded-md border border-border bg-background/35 p-3"
+        role={panelId ? "tabpanel" : undefined}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="min-w-0">
+            <h5 className="text-sm font-medium text-foreground">
+              {run.resultLabel}
+            </h5>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {runMetadata.join(" / ")}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            {run.canEvaluate ? (
+              <Button
+                className={
+                  (
+                    run.resultKind === "opening_hand"
+                      ? run.openingHandEvaluation
+                      : run.turnEvaluation
+                  )
+                    ? "text-emerald-300 hover:text-emerald-200"
+                    : ""
+                }
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                aria-label={
+                  run.resultKind === "opening_hand"
+                    ? `Evaluate opening hand attempt ${run.attemptNumber}`
+                    : `Evaluate turn ${run.turnNumber}`
+                }
+                title={
+                  run.resultKind === "opening_hand"
+                    ? `Evaluate opening hand attempt ${run.attemptNumber}`
+                    : `Evaluate turn ${run.turnNumber}`
+                }
+                onClick={() => {
+                  if (!canContinueWithModelPreset()) {
+                    return
+                  }
+
+                  setEvaluationRunSelection({
+                    llmRunId: run.llmRunId,
+                    resultKind:
+                      run.resultKind === "opening_hand"
+                        ? "opening_hand"
+                        : "turn",
+                  })
+                }}
+              >
+                <ClipboardCheck />
+              </Button>
+            ) : null}
+            {run.canRerun ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                disabled={isStartingSimulationRun}
+                aria-label={
+                  run.resultKind === "opening_hand"
+                    ? "Rerun opening hand"
+                    : run.resultKind === "report"
+                      ? "Rerun report"
+                      : `Rerun turn ${run.turnNumber}`
+                }
+                title={
+                  run.resultKind === "opening_hand"
+                    ? "Rerun opening hand"
+                    : run.resultKind === "report"
+                      ? "Rerun report"
+                      : `Rerun turn ${run.turnNumber}`
+                }
+                onClick={() => {
+                  if (!canContinueWithModelPreset()) {
+                    return
+                  }
+
+                  setSelectedTimelineStepIdPreference(null)
+                  onKeepResultsScrolledToBottom()
+
+                  if (run.resultKind === "opening_hand") {
+                    onStartOpeningHandRun()
+                    return
+                  }
+
+                  if (run.resultKind === "report") {
+                    onStartReportRun()
+                    return
+                  }
+
+                  if (typeof run.turnNumber === "number") {
+                    onStartTurnRun(run.turnNumber)
+                  }
+                }}
+              >
+                <RefreshCw />
+              </Button>
+            ) : null}
+          </div>
+        </div>
+
+        {hasGameState(run.gameState) && !getSimulationFinalParsedOutput(run) ? (
+          <div className="grid gap-2">
+            {hasTurnActions(run.turnActions) ? (
+              <SimulationTurnActionsBlock turnActions={run.turnActions} />
+            ) : null}
+            <details className={simulationResultChunkSurfaceClassName}>
+              <summary className={simulationResultChunkSummaryClassName}>
+                Game state
+              </summary>
+              <pre className={simulationResultChunkPreClassName}>
+                {formatGameStateJson(run.gameState)}
+              </pre>
+            </details>
+          </div>
+        ) : null}
+
+        {run.resultEntries.length > 0 ||
+        finishedThinkingStatus ||
+        hasLiveReport ? (
+          <SimulationResultChunkCards
+            run={run}
+            entries={run.resultEntries}
+            finishedThinkingStatus={finishedThinkingStatus}
+          />
+        ) : null}
+
+        {run.isActive && !run.hasFinalParsedOutputChunk ? (
+          <SimulationResultThinkingStatus
+            activeToolCallName={run.activeToolCallName}
+            canStopSimulation={run.status !== "cancel_requested"}
+            finishedDurationText={null}
+            isPending={run.status === "pending"}
+            isFinishedSuccessfully={false}
+            isFinished={false}
+            isActivitySelected={selectedActivityRunId === run.llmRunId}
+            isStoppingSimulation={isStoppingSimulation}
+            onViewActivity={() => onSelectActivityRun(run.llmRunId)}
+            onStopSimulation={onStopSimulation}
+            runStartTimeMs={getSimulationRunStartTimeMs(run)}
+            stopSimulationError={stopSimulationError}
+          />
+        ) : run.resultEntries.length === 0 && !hasGameState(run.gameState) ? (
+          <div
+            className={`rounded-md border px-3 py-2 text-sm ${
+              isUsageLimitFailure
+                ? "border-amber-300/30 bg-amber-400/10 text-amber-100"
+                : emptyRunFailureMessage
+                  ? "border-destructive/40 bg-destructive/10 text-destructive"
+                  : "border-border bg-black/20 text-muted-foreground"
+            }`}
+            role={
+              isUsageLimitFailure
+                ? "status"
+                : emptyRunFailureMessage
+                  ? "alert"
+                  : undefined
+            }
+          >
+            {isUsageLimitFailure ? (
+              <UsageLimitReachedNotice
+                onUpgradeUsage={onUpgradeUsage}
+                shouldShowUsageUpgradeAction={shouldShowUsageUpgradeAction}
+              />
+            ) : (
+              <p>
+                {emptyRunFailureMessage ??
+                  "No user-facing events have been saved for this run yet."}
+              </p>
+            )}
+          </div>
+        ) : null}
+      </section>
+    )
+  }
 
   return (
     <>
       <div className="grid gap-3">
-        {hasPresetStartingHand ? (
-          <SimulationPresetStartingHandBlock
-            isLoadingStartingHand={isLoadingStartingHand}
-            startingHand={startingHand}
-            startingHandLoadError={startingHandLoadError}
-          />
-        ) : null}
-
-        {runs.length === 0 && !hasPresetStartingHand ? (
+        {timelineSteps.length === 0 ? (
           <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
             No opening hand or turn runs have been saved for this simulation
             yet.
           </p>
         ) : null}
 
-        {runs.map((run) => {
-          const finishedDurationText = getSimulationRunFinishedDurationText(run)
-          const shouldShowFinishedThinkingStatus =
-            !run.isActive && getSimulationRunFinishedTimeMs(run) !== null
-          const finishedThinkingStatus = shouldShowFinishedThinkingStatus ? (
-            <SimulationResultThinkingStatus
-              activeToolCallName={null}
-              canStopSimulation={false}
-              finishedDurationText={finishedDurationText}
-              isPending={false}
-              isFinishedSuccessfully={run.status === "completed"}
-              isFinished={true}
-              isActivitySelected={selectedActivityRunId === run.llmRunId}
-              isStoppingSimulation={false}
-              onViewActivity={() => onSelectActivityRun(run.llmRunId)}
-              onStopSimulation={onStopSimulation}
-              runStartTimeMs={null}
-              stopSimulationError={null}
+        {timelineSteps.length > 0 ? (
+          <div
+            aria-label="Simulation timeline"
+            className="simulation-scrollbar overflow-x-auto rounded-md border border-border bg-background/35 px-3 py-4"
+            role="tablist"
+          >
+            <div className="flex min-w-max items-start">
+              {timelineSteps.map((step, stepIndex) => {
+                const isSelected = step.id === selectedTimelineStepId
+                const panelId = getSimulationTimelineStepPanelId(step.id)
+                const isFirstStep = stepIndex === 0
+                const isLastStep = stepIndex === timelineSteps.length - 1
+                const stepDescription =
+                  getSimulationTimelineStepDescription(step)
+
+                return (
+                  <button
+                    key={step.id}
+                    ref={(element) => {
+                      if (element) {
+                        timelineStepButtonRefs.current.set(step.id, element)
+                      } else {
+                        timelineStepButtonRefs.current.delete(step.id)
+                      }
+                    }}
+                    aria-label={`${step.label}, ${stepDescription}`}
+                    aria-controls={panelId}
+                    aria-selected={isSelected}
+                    className={getSimulationTimelineStepButtonClassName(
+                      step,
+                      isSelected
+                    )}
+                    id={getSimulationTimelineStepTabId(step.id)}
+                    role="tab"
+                    type="button"
+                    onClick={() => setSelectedTimelineStepIdPreference(step.id)}
+                  >
+                    <span className="flex w-full items-center" aria-hidden="true">
+                      <span
+                        className={getSimulationTimelineStepConnectorClassName({
+                          isHidden: isFirstStep,
+                          step,
+                        })}
+                      />
+                      <span
+                        className={getSimulationTimelineStepNodeClassName(step)}
+                      >
+                        {getSimulationTimelineStepNodeContent({
+                          step,
+                          stepNumber: stepIndex + 1,
+                        })}
+                      </span>
+                      <span
+                        className={getSimulationTimelineStepConnectorClassName({
+                          isHidden: isLastStep,
+                          step,
+                        })}
+                      />
+                    </span>
+                    <span className="grid w-full justify-items-center gap-0.5 px-1 text-center">
+                      <span
+                        className={getSimulationTimelineStepLabelClassName(
+                          isSelected
+                        )}
+                      >
+                        {step.label}
+                      </span>
+                      <span className="max-w-full truncate text-[0.7rem] leading-4 text-muted-foreground">
+                        {stepDescription}
+                      </span>
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        ) : null}
+
+        {selectedTimelineStep?.kind === "preset_opening_hand" ? (
+          <div
+            id={selectedTimelinePanelId}
+            aria-labelledby={getSimulationTimelineStepTabId(
+              selectedTimelineStep.id
+            )}
+            role="tabpanel"
+          >
+            <SimulationPresetStartingHandBlock
+              isLoadingStartingHand={isLoadingStartingHand}
+              startingHand={startingHand}
+              startingHandLoadError={startingHandLoadError}
             />
-          ) : null
-          const runMetadata = [
-            run.status,
-            run.model,
-            getLlmRunEstimatedPriceText(run),
-            finishedDurationText ? `took ${finishedDurationText}` : null,
-            run.failureMessage ? run.failureMessage : null,
-            run.outdated ? "outdated" : null,
-          ].filter(Boolean)
-          const hasLiveReport =
-            run.resultKind === "report" &&
-            !run.hasFinalParsedOutputChunk &&
-            getReportTextFromChunks(run.chunks) !== null
-          const emptyRunFailureMessage =
-            run.status === "failed" ? run.failureMessage?.trim() || null : null
-          const isUsageLimitFailure = isUsageLimitFailureMessage(
-            emptyRunFailureMessage
+          </div>
+        ) : selectedTimelineRun ? (
+          renderSimulationRunDetail(
+            selectedTimelineRun,
+            selectedTimelinePanelId,
+            selectedTimelineStep
+              ? getSimulationTimelineStepTabId(selectedTimelineStep.id)
+              : undefined
           )
-
-          return (
-            <section
-              key={run.llmRunId}
-              className={`grid gap-3 rounded-md border border-border bg-background/35 p-3 ${
-                run.resultKind === "report" ? "order-last" : ""
-              }`}
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <h5 className="text-sm font-medium text-foreground">
-                    {run.resultLabel}
-                  </h5>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {runMetadata.join(" / ")}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  {run.canEvaluate ? (
-                    <Button
-                      className={
-                        (
-                          run.resultKind === "opening_hand"
-                            ? run.openingHandEvaluation
-                            : run.turnEvaluation
-                        )
-                          ? "text-emerald-300 hover:text-emerald-200"
-                          : ""
-                      }
-                      type="button"
-                      variant="outline"
-                      size="icon-sm"
-                      aria-label={
-                        run.resultKind === "opening_hand"
-                          ? `Evaluate opening hand attempt ${run.attemptNumber}`
-                          : `Evaluate turn ${run.turnNumber}`
-                      }
-                      title={
-                        run.resultKind === "opening_hand"
-                          ? `Evaluate opening hand attempt ${run.attemptNumber}`
-                          : `Evaluate turn ${run.turnNumber}`
-                      }
-                      onClick={() => {
-                        if (!canContinueWithModelPreset()) {
-                          return
-                        }
-
-                        setEvaluationRunSelection({
-                          llmRunId: run.llmRunId,
-                          resultKind:
-                            run.resultKind === "opening_hand"
-                              ? "opening_hand"
-                              : "turn",
-                        })
-                      }}
-                    >
-                      <ClipboardCheck />
-                    </Button>
-                  ) : null}
-                  {run.canRerun ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon-sm"
-                      disabled={isStartingSimulationRun}
-                      aria-label={
-                        run.resultKind === "opening_hand"
-                          ? "Rerun opening hand"
-                          : run.resultKind === "report"
-                            ? "Rerun report"
-                            : `Rerun turn ${run.turnNumber}`
-                      }
-                      title={
-                        run.resultKind === "opening_hand"
-                          ? "Rerun opening hand"
-                          : run.resultKind === "report"
-                            ? "Rerun report"
-                            : `Rerun turn ${run.turnNumber}`
-                      }
-                      onClick={() => {
-                        if (!canContinueWithModelPreset()) {
-                          return
-                        }
-
-                        onKeepResultsScrolledToBottom()
-
-                        if (run.resultKind === "opening_hand") {
-                          onStartOpeningHandRun()
-                          return
-                        }
-
-                        if (run.resultKind === "report") {
-                          onStartReportRun()
-                          return
-                        }
-
-                        if (typeof run.turnNumber === "number") {
-                          onStartTurnRun(run.turnNumber)
-                        }
-                      }}
-                    >
-                      <RefreshCw />
-                    </Button>
-                  ) : null}
-                </div>
-              </div>
-
-              {hasGameState(run.gameState) &&
-              !getSimulationFinalParsedOutput(run) ? (
-                <div className="grid gap-2">
-                  {hasTurnActions(run.turnActions) ? (
-                    <SimulationTurnActionsBlock turnActions={run.turnActions} />
-                  ) : null}
-                  <details className={simulationResultChunkSurfaceClassName}>
-                    <summary className={simulationResultChunkSummaryClassName}>
-                      Game state
-                    </summary>
-                    <pre className={simulationResultChunkPreClassName}>
-                      {formatGameStateJson(run.gameState)}
-                    </pre>
-                  </details>
-                </div>
-              ) : null}
-
-              {run.resultEntries.length > 0 ||
-              finishedThinkingStatus ||
-              hasLiveReport ? (
-                <SimulationResultChunkCards
-                  run={run}
-                  entries={run.resultEntries}
-                  finishedThinkingStatus={finishedThinkingStatus}
-                />
-              ) : null}
-
-              {run.isActive && !run.hasFinalParsedOutputChunk ? (
-                <SimulationResultThinkingStatus
-                  activeToolCallName={run.activeToolCallName}
-                  canStopSimulation={run.status !== "cancel_requested"}
-                  finishedDurationText={null}
-                  isPending={run.status === "pending"}
-                  isFinishedSuccessfully={false}
-                  isFinished={false}
-                  isActivitySelected={selectedActivityRunId === run.llmRunId}
-                  isStoppingSimulation={isStoppingSimulation}
-                  onViewActivity={() => onSelectActivityRun(run.llmRunId)}
-                  onStopSimulation={onStopSimulation}
-                  runStartTimeMs={getSimulationRunStartTimeMs(run)}
-                  stopSimulationError={stopSimulationError}
-                />
-              ) : run.resultEntries.length === 0 &&
-                !hasGameState(run.gameState) ? (
-                <div
-                  className={`rounded-md border px-3 py-2 text-sm ${
-                    isUsageLimitFailure
-                      ? "border-amber-300/30 bg-amber-400/10 text-amber-100"
-                      : emptyRunFailureMessage
-                        ? "border-destructive/40 bg-destructive/10 text-destructive"
-                        : "border-border bg-black/20 text-muted-foreground"
-                  }`}
-                  role={
-                    isUsageLimitFailure
-                      ? "status"
-                      : emptyRunFailureMessage
-                        ? "alert"
-                        : undefined
-                  }
-                >
-                  {isUsageLimitFailure ? (
-                    <UsageLimitReachedNotice
-                      onUpgradeUsage={onUpgradeUsage}
-                      shouldShowUsageUpgradeAction={
-                        shouldShowUsageUpgradeAction
-                      }
-                    />
-                  ) : (
-                    <p>
-                      {emptyRunFailureMessage ??
-                        "No user-facing events have been saved for this run yet."}
-                    </p>
-                  )}
-                </div>
-              ) : null}
-            </section>
-          )
-        })}
+        ) : null}
 
         {actionError ? (
           <p
@@ -4016,10 +4162,12 @@ function SimulationResultsPanel({
                 }
 
                 if (renderedSimulationAction.kind === "opening_hand") {
+                  setSelectedTimelineStepIdPreference(null)
                   onStartOpeningHandRun()
                   return
                 }
 
+                setSelectedTimelineStepIdPreference(null)
                 onKeepResultsScrolledToBottom()
                 onStartTurnRun(renderedSimulationAction.turnNumber)
               }}
@@ -4042,6 +4190,7 @@ function SimulationResultsPanel({
                 }
 
                 onKeepResultsScrolledToBottom()
+                setSelectedTimelineStepIdPreference(null)
                 onStartReportRun()
               }}
             >
@@ -4074,6 +4223,176 @@ function SimulationResultsPanel({
       ) : null}
     </>
   )
+}
+
+function getSimulationTimelineRunStepId(llmRunId: string) {
+  return `run:${llmRunId}`
+}
+
+function getSimulationTimelineStepPanelId(stepId: string) {
+  return `simulation-timeline-panel-${getSimulationTimelineDomIdPart(stepId)}`
+}
+
+function getSimulationTimelineStepTabId(stepId: string) {
+  return `simulation-timeline-tab-${getSimulationTimelineDomIdPart(stepId)}`
+}
+
+function getSimulationTimelineDomIdPart(stepId: string) {
+  return stepId.replace(/[^A-Za-z0-9_-]/g, "-")
+}
+
+function getSimulationTimelineStepStatusLabel(
+  step: SimulationResultsTimelineStep
+) {
+  if (step.status === "preset") {
+    return "Preset"
+  }
+
+  if (step.status === "pending") {
+    return "Queued"
+  }
+
+  if (step.status === "streaming") {
+    return "Running"
+  }
+
+  if (step.status === "cancel_requested") {
+    return "Stopping"
+  }
+
+  if (step.status === "completed") {
+    return "Done"
+  }
+
+  if (step.status === "failed") {
+    return "Failed"
+  }
+
+  if (step.status === "cancelled") {
+    return "Cancelled"
+  }
+
+  return "Saved"
+}
+
+function getSimulationTimelineStepDescription(
+  step: SimulationResultsTimelineStep
+) {
+  if (step.kind === "preset_opening_hand") {
+    return "Preset hand"
+  }
+
+  if (
+    step.status === "pending" ||
+    step.status === "streaming" ||
+    step.status === "cancel_requested" ||
+    step.status === "failed" ||
+    step.status === "cancelled"
+  ) {
+    return `${step.detailLabel} - ${getSimulationTimelineStepStatusLabel(step)}`
+  }
+
+  return step.detailLabel
+}
+
+function getSimulationTimelineStepButtonClassName(
+  _step: SimulationResultsTimelineStep,
+  isSelected: boolean
+) {
+  const baseClassName =
+    "group flex w-36 shrink-0 flex-col items-center gap-2 rounded-sm px-0 py-1.5 text-center transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+
+  if (isSelected) {
+    return `${baseClassName} text-foreground`
+  }
+
+  return `${baseClassName} text-muted-foreground hover:text-foreground`
+}
+
+function getSimulationTimelineStepNodeClassName(
+  step: SimulationResultsTimelineStep
+) {
+  const baseClassName =
+    "relative z-10 grid size-9 shrink-0 place-items-center rounded-full border-2 bg-background text-xs font-semibold transition-all"
+
+  if (
+    step.status === "completed" ||
+    step.status === "preset" ||
+    isActiveSimulationResultsTimelineStep(step)
+  ) {
+    return `${baseClassName} border-primary text-primary`
+  }
+
+  if (step.status === "failed") {
+    return `${baseClassName} border-destructive text-destructive`
+  }
+
+  if (step.status === "cancelled") {
+    return `${baseClassName} border-muted-foreground/70 text-muted-foreground`
+  }
+
+  return `${baseClassName} border-border text-muted-foreground`
+}
+
+function getSimulationTimelineStepNodeContent({
+  step,
+  stepNumber,
+}: {
+  step: SimulationResultsTimelineStep
+  stepNumber: number
+}) {
+  if (isActiveSimulationResultsTimelineStep(step)) {
+    return <LoaderCircle className="size-4 animate-spin" />
+  }
+
+  if (step.status === "completed" || step.status === "preset") {
+    return <Check className="size-4" />
+  }
+
+  if (step.status === "failed") {
+    return <X className="size-4" />
+  }
+
+  return stepNumber
+}
+
+function getSimulationTimelineStepConnectorClassName({
+  isHidden,
+  step,
+}: {
+  isHidden: boolean
+  step: SimulationResultsTimelineStep
+}
+) {
+  const baseClassName = "h-px flex-1 transition-colors"
+
+  if (isHidden) {
+    return `${baseClassName} bg-transparent`
+  }
+
+  if (
+    step.status === "completed" ||
+    step.status === "preset" ||
+    isActiveSimulationResultsTimelineStep(step)
+  ) {
+    return `${baseClassName} bg-border`
+  }
+
+  if (step.status === "failed") {
+    return `${baseClassName} bg-border`
+  }
+
+  if (step.status === "cancelled") {
+    return `${baseClassName} bg-muted-foreground/40`
+  }
+
+  return `${baseClassName} bg-border`
+}
+
+function getSimulationTimelineStepLabelClassName(isSelected: boolean) {
+  const baseClassName = "max-w-full truncate text-sm font-medium leading-5"
+
+  return isSelected ? `${baseClassName} text-foreground` : baseClassName
 }
 
 function OpeningHandEvaluationModal({

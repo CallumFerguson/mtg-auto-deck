@@ -134,6 +134,7 @@
 
   .simulation-scrollbar {
     scrollbar-color: oklch(0.708 0 0 / 70%) transparent;
+    scrollbar-gutter: stable;
     scrollbar-width: thin;
   }
 

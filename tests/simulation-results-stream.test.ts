@@ -17,6 +17,11 @@ import {
   getSimulationResultToolReasonForChunk,
 } from "../src/lib/simulation-result-tool-labels.js"
 import { applySimulationResultsStreamEvent } from "../src/lib/simulation-results-stream.js"
+import {
+  buildSimulationResultsTimelineSteps,
+  getFallbackSimulationResultsTimelineStepId,
+  resolveSimulationResultsTimelineSelection,
+} from "../src/lib/simulation-results-timeline.js"
 import { getSimulationRunStartTimeMs } from "../src/lib/simulation-run-timing.js"
 import type {
   SimulationDebugLlmRun,
@@ -1770,6 +1775,189 @@ test("keeps unknown tool events available for diagnostic fallback", () => {
       state: "completed",
     }),
     null
+  )
+})
+
+test("builds no timeline steps when a simulation has no preset or runs", () => {
+  const steps = buildSimulationResultsTimelineSteps({
+    hasPresetStartingHand: false,
+    resultsInfo: createResults(),
+  })
+
+  assert.deepEqual(steps, [])
+  assert.equal(getFallbackSimulationResultsTimelineStepId(steps), null)
+})
+
+test("builds a preset opening hand timeline step", () => {
+  const steps = buildSimulationResultsTimelineSteps({
+    hasPresetStartingHand: true,
+    resultsInfo: createResults(),
+  })
+
+  assert.deepEqual(
+    steps.map((step) => [step.id, step.kind, step.status]),
+    [["preset-opening-hand", "preset_opening_hand", "preset"]]
+  )
+  assert.equal(
+    getFallbackSimulationResultsTimelineStepId(steps),
+    "preset-opening-hand"
+  )
+})
+
+test("builds timeline steps in opening hand, turn, report order", () => {
+  const steps = buildSimulationResultsTimelineSteps({
+    hasPresetStartingHand: false,
+    resultsInfo: createResults({
+      openingHandLlmRuns: [
+        createRun({
+          llmRunId: "opening-run",
+          phase: "opening_hand",
+          status: "completed",
+        }),
+      ],
+      turnLlmRuns: [
+        createRun({
+          llmRunId: "turn-2",
+          phase: "turn",
+          status: "completed",
+          turnNumber: 2,
+        }),
+        createRun({
+          llmRunId: "turn-1",
+          phase: "turn",
+          status: "completed",
+          turnNumber: 1,
+        }),
+      ],
+      reportLlmRuns: [
+        createRun({
+          llmRunId: "report-run",
+          phase: "report",
+          status: "completed",
+        }),
+      ],
+    }),
+  })
+
+  assert.deepEqual(
+    steps.map((step) => step.id),
+    ["run:opening-run", "run:turn-1", "run:turn-2", "run:report-run"]
+  )
+})
+
+test("prefers active timeline runs for fallback selection", () => {
+  const steps = buildSimulationResultsTimelineSteps({
+    hasPresetStartingHand: false,
+    resultsInfo: createResults({
+      openingHandLlmRuns: [
+        createRun({
+          llmRunId: "opening-run",
+          phase: "opening_hand",
+          status: "completed",
+        }),
+      ],
+      turnLlmRuns: [
+        createRun({
+          llmRunId: "turn-run",
+          phase: "turn",
+          status: "streaming",
+          turnNumber: 1,
+        }),
+      ],
+    }),
+  })
+
+  assert.equal(getFallbackSimulationResultsTimelineStepId(steps), "run:turn-run")
+})
+
+test("falls back to the latest visible timeline stage", () => {
+  const steps = buildSimulationResultsTimelineSteps({
+    hasPresetStartingHand: false,
+    resultsInfo: createResults({
+      openingHandLlmRuns: [
+        createRun({
+          llmRunId: "opening-run",
+          phase: "opening_hand",
+          status: "completed",
+        }),
+      ],
+      turnLlmRuns: [
+        createRun({
+          llmRunId: "turn-run",
+          phase: "turn",
+          status: "completed",
+          turnNumber: 1,
+        }),
+      ],
+      reportLlmRuns: [
+        createRun({
+          llmRunId: "report-run",
+          phase: "report",
+          status: "completed",
+        }),
+      ],
+    }),
+  })
+
+  assert.equal(
+    getFallbackSimulationResultsTimelineStepId(steps),
+    "run:report-run"
+  )
+})
+
+test("preserves a valid timeline selection across dynamic growth", () => {
+  const steps = buildSimulationResultsTimelineSteps({
+    hasPresetStartingHand: false,
+    resultsInfo: createResults({
+      openingHandLlmRuns: [
+        createRun({
+          llmRunId: "opening-run",
+          phase: "opening_hand",
+          status: "completed",
+        }),
+      ],
+      turnLlmRuns: [
+        createRun({
+          llmRunId: "turn-run",
+          phase: "turn",
+          status: "completed",
+          turnNumber: 1,
+        }),
+      ],
+    }),
+  })
+
+  assert.equal(
+    resolveSimulationResultsTimelineSelection(steps, "run:opening-run"),
+    "run:opening-run"
+  )
+})
+
+test("falls back when a selected timeline step is removed", () => {
+  const steps = buildSimulationResultsTimelineSteps({
+    hasPresetStartingHand: false,
+    resultsInfo: createResults({
+      openingHandLlmRuns: [
+        createRun({
+          llmRunId: "opening-run",
+          phase: "opening_hand",
+          status: "completed",
+        }),
+      ],
+      turnLlmRuns: [
+        createRun({
+          llmRunId: "turn-1",
+          phase: "turn",
+          status: "completed",
+          turnNumber: 1,
+        }),
+      ],
+    }),
+  })
+
+  assert.equal(
+    resolveSimulationResultsTimelineSelection(steps, "run:removed-turn"),
+    "run:turn-1"
   )
 })
 
