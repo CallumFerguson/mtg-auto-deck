@@ -4653,6 +4653,7 @@ const simulationResultChunkSummaryClassName =
   "cursor-pointer px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
 const simulationResultChunkPreClassName =
   "debug-scrollbar-neutral max-h-64 max-w-full overflow-y-auto border-t border-border p-3 text-xs leading-5 break-words whitespace-pre-wrap text-muted-foreground"
+const showSimulationResultCardImageToggle = false
 
 function SimulationResultChunkCards({
   entries,
@@ -6092,16 +6093,20 @@ function SimulationResultCompletedCardToolEvent({
       </div>
       <div className="grid gap-3 border-t border-border p-3">
         <div className="flex min-w-0 flex-wrap items-start gap-2">
-          <Button
-            className="shrink-0 border-emerald-500/30 bg-emerald-950/20 text-emerald-100 hover:bg-emerald-900/35 hover:text-emerald-50"
-            size="xs"
-            type="button"
-            variant="outline"
-            onClick={() => setShowCardImages((currentValue) => !currentValue)}
-          >
-            {showCardImages ? <EyeOff /> : <Eye />}
-            {showCardImages ? "Hide cards" : "Show cards"}
-          </Button>
+          {showSimulationResultCardImageToggle ? (
+            <Button
+              className="shrink-0 border-emerald-500/30 bg-emerald-950/20 text-emerald-100 hover:bg-emerald-900/35 hover:text-emerald-50"
+              size="xs"
+              type="button"
+              variant="outline"
+              onClick={() =>
+                setShowCardImages((currentValue) => !currentValue)
+              }
+            >
+              {showCardImages ? <EyeOff /> : <Eye />}
+              {showCardImages ? "Hide cards" : "Show cards"}
+            </Button>
+          ) : null}
           {!showCardImages ? (
             <SimulationResultCardTextLinks mentions={chunk.cardMentions} />
           ) : null}
