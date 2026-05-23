@@ -2106,25 +2106,26 @@ test("keeps parsed opening-hand JSON for final parsed output chunks", () => {
 })
 
 test("parses completed turn game state JSON", () => {
+  const gameState = createTurnGameState()
+
   assert.deepEqual(
     parseTurnSimulationFromResponseText(
       JSON.stringify({
-        gameState: "Hand:\nSol Ring\n\nBattlefield:\nCommand Tower",
-        summary: "Played Command Tower.",
+        gameState,
         error: null,
       })
     ),
     {
-      gameState: "Hand:\nSol Ring\n\nBattlefield:\nCommand Tower",
+      gameState,
     }
   )
 })
 
 test("keeps parsed turn JSON for final parsed output chunks", () => {
+  const gameState = createTurnGameState()
   const parsedCompletion = parseTurnSimulationCompletionFromResponseText(
     JSON.stringify({
-      gameState: "Hand:\nSol Ring\n\nBattlefield:\nCommand Tower",
-      summary: "Played Command Tower.",
+      gameState,
       error: null,
     })
   )
@@ -2132,52 +2133,55 @@ test("keeps parsed turn JSON for final parsed output chunks", () => {
 
   assert.equal(chunk.kind, "final_parsed_output")
   assert.deepEqual(chunk.payload, {
-    gameState: "Hand:\nSol Ring\n\nBattlefield:\nCommand Tower",
-    summary: "Played Command Tower.",
+    gameState,
     error: null,
   })
 })
 
 test("parses the last valid turn JSON object from noisy output", () => {
+  const gameState = createTurnGameState()
+
   assert.deepEqual(
     parseTurnSimulationFromResponseText(
       [
         "Earlier draft:",
         JSON.stringify({
-          gameState: "Hand:\nIsland",
-          summary: "This should be ignored.",
+          gameState: createTurnGameState({
+            battlefield: [],
+            hand: ["Island"],
+          }),
           error: null,
         }),
         "Final answer:",
         "```json",
         JSON.stringify({
-          gameState: "Hand:\nSol Ring\n\nBattlefield:\n{Command Tower}",
-          summary: "Played Command Tower.",
+          gameState,
           error: null,
         }),
         "```",
       ].join("\n")
     ),
     {
-      gameState: "Hand:\nSol Ring\n\nBattlefield:\n{Command Tower}",
+      gameState,
     }
   )
 })
 
 test("falls back to an earlier valid JSON object when later braces are malformed", () => {
+  const gameState = createTurnGameState({ battlefield: [] })
+
   assert.deepEqual(
     parseTurnSimulationFromResponseText(
       [
         JSON.stringify({
-          gameState: "Hand:\nSol Ring",
-          summary: "Parsed successfully.",
+          gameState,
           error: null,
         }),
         "Trailing malformed attempt: {not json}",
       ].join("\n")
     ),
     {
-      gameState: "Hand:\nSol Ring",
+      gameState,
     }
   )
 })
@@ -2186,7 +2190,20 @@ test("rejects completed turn JSON without game state", () => {
   assert.throws(
     () =>
       parseTurnSimulationFromResponseText(
-        '{"gameState":null,"summary":"No state.","error":null}'
+        '{"gameState":null,"error":null}'
+      ),
+    /Turn LLM response did not include gameState\./
+  )
+})
+
+test("rejects completed turn JSON with string game state", () => {
+  assert.throws(
+    () =>
+      parseTurnSimulationFromResponseText(
+        JSON.stringify({
+          gameState: "Hand:\nSol Ring",
+          error: null,
+        })
       ),
     /Turn LLM response did not include gameState\./
   )
@@ -2197,8 +2214,7 @@ test("reports turn model error JSON as an unrecoverable simulation error", () =>
     () =>
       parseTurnSimulationFromResponseText(
         JSON.stringify({
-          gameState: "Hand:\nSol Ring",
-          summary: "This successful-looking output should be ignored.",
+          gameState: createTurnGameState(),
           error: "Played a second land after logging the first land play.",
         })
       ),
@@ -2211,8 +2227,7 @@ test("rejects turn success JSON without explicit error null", () => {
     () =>
       parseTurnSimulationFromResponseText(
         JSON.stringify({
-          gameState: "Hand:\nSol Ring",
-          summary: "Played nothing.",
+          gameState: createTurnGameState(),
         })
       ),
     /Turn LLM response did not include error: null\./
@@ -2225,7 +2240,6 @@ test("rejects all-null turn JSON", () => {
       parseTurnSimulationFromResponseText(
         JSON.stringify({
           gameState: null,
-          summary: null,
           error: null,
         })
       ),
@@ -2240,14 +2254,12 @@ test("reports the final noisy model error JSON as an unrecoverable simulation er
         [
           "Earlier draft:",
           JSON.stringify({
-            gameState: "Hand:\nSol Ring",
-            summary: "This should be ignored.",
+            gameState: createTurnGameState(),
             error: null,
           }),
           "Final answer:",
           JSON.stringify({
             gameState: null,
-            summary: null,
             error: "Logged an impossible mana payment.",
           }),
         ].join("\n")
@@ -2952,4 +2964,44 @@ function assertThrowsModelReportedSimulationError(
 
     return true
   })
+}
+
+function createTurnGameState({
+  battlefield = ["Command Tower"],
+  hand = ["Sol Ring"],
+}: {
+  battlefield?: string[]
+  hand?: string[]
+} = {}) {
+  return {
+    zones: {
+      hand: hand.map(createGameStateCard),
+      command: [],
+      battlefield: battlefield.map(createGameStateCard),
+      graveyard: [],
+      exile: [],
+    },
+    yourLife: 40,
+    opponentA: {
+      life: 40,
+      commanderDamage: {},
+    },
+    opponentB: {
+      life: 40,
+      commanderDamage: {},
+    },
+    opponentC: {
+      life: 40,
+      commanderDamage: {},
+    },
+    other: "",
+  }
+}
+
+function createGameStateCard(name: string) {
+  return {
+    name,
+    tapped: false,
+    notes: null,
+  }
 }

@@ -199,7 +199,7 @@ export type SimulationDebugLlmRun = {
   failedAt: string | null
   cancelledAt: string | null
   turnNumber?: number
-  gameState?: string
+  gameState?: unknown
   report?: string
   outdated?: boolean
   openingHandIsValid?: boolean

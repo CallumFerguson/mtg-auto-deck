@@ -436,15 +436,10 @@ export function parseTurnSimulationCompletionFromResponseText(
 
   const responseRecord = asRecord(parsedResponse)
   assertSuccessfulSimulationOutputErrorIsNull(responseRecord, "Turn")
-  const gameState = getStringProperty(responseRecord, "gameState")?.trim()
-  const summary = getRequiredStringProperty(responseRecord, "summary")
+  const gameState = responseRecord.gameState
 
-  if (!gameState) {
+  if (!isJsonObject(gameState)) {
     throw new Error("Turn LLM response did not include gameState.")
-  }
-
-  if (!summary) {
-    throw new Error("Turn LLM response did not include summary.")
   }
 
   return {
@@ -648,6 +643,10 @@ export function getStringProperty(
   const value = record[property]
 
   return typeof value === "string" ? value : null
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 export function isAbortError(error: unknown) {

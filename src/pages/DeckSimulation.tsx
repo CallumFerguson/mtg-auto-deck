@@ -419,7 +419,7 @@ function isCountedTurnRun(run: SimulationResultsInfo["turnLlmRuns"][number]) {
     (isActiveLlmRunStatus(run.status) ||
       run.status === "failed" ||
       run.status === "cancelled" ||
-      (run.status === "completed" && Boolean(run.gameState?.trim())))
+      (run.status === "completed" && hasGameState(run.gameState)))
   )
 }
 
@@ -435,7 +435,7 @@ function isSuccessfulTurnRun(
   return (
     run.status === "completed" &&
     run.outdated !== true &&
-    Boolean(run.gameState?.trim())
+    hasGameState(run.gameState)
   )
 }
 
@@ -509,9 +509,8 @@ function canGenerateReportFromVisibleResults(
 
     if (
       turnFinalOutput?.type !== "turn" ||
-      !turnFinalOutput.summary.trim() ||
-      !turnFinalOutput.gameState.trim() ||
-      !run.gameState?.trim() ||
+      !hasGameState(turnFinalOutput.gameState) ||
+      !hasGameState(run.gameState) ||
       !hasLoggedTurnAction(run)
     ) {
       return false
@@ -527,6 +526,14 @@ function hasLoggedTurnAction(
   return getSimulationResultEntries(run.chunks).some(
     (entry) => entry.type === "turn_action_log" && entry.actions.length > 0
   )
+}
+
+function hasGameState(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function formatGameStateJson(value: unknown) {
+  return JSON.stringify(value, null, 2) ?? ""
 }
 
 function getRandomDigit(maxExclusive: number) {
@@ -3914,14 +3921,15 @@ function SimulationResultsPanel({
                 </div>
               </div>
 
-              {run.gameState && !getSimulationFinalParsedOutput(run) ? (
+              {hasGameState(run.gameState) &&
+              !getSimulationFinalParsedOutput(run) ? (
                 <details className={simulationResultChunkSurfaceClassName}>
                   <summary className={simulationResultChunkSummaryClassName}>
                     Game state
                   </summary>
-                  <p className={simulationResultChunkTextClassName}>
-                    {run.gameState}
-                  </p>
+                  <pre className={simulationResultChunkPreClassName}>
+                    {formatGameStateJson(run.gameState)}
+                  </pre>
                 </details>
               ) : null}
 
@@ -3950,7 +3958,8 @@ function SimulationResultsPanel({
                   runStartTimeMs={getSimulationRunStartTimeMs(run)}
                   stopSimulationError={stopSimulationError}
                 />
-              ) : run.resultEntries.length === 0 && !run.gameState ? (
+              ) : run.resultEntries.length === 0 &&
+                !hasGameState(run.gameState) ? (
                 <div
                   className={`rounded-md border px-3 py-2 text-sm ${
                     isUsageLimitFailure
@@ -4642,8 +4651,6 @@ const simulationResultChunkSurfaceClassName =
   "rounded-md border border-border bg-black/20"
 const simulationResultChunkSummaryClassName =
   "cursor-pointer px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
-const simulationResultChunkTextClassName =
-  "border-t border-border p-3 text-sm leading-6 whitespace-pre-wrap text-muted-foreground"
 const simulationResultChunkPreClassName =
   "debug-scrollbar-neutral max-h-64 max-w-full overflow-y-auto border-t border-border p-3 text-xs leading-5 break-words whitespace-pre-wrap text-muted-foreground"
 
@@ -5459,9 +5466,9 @@ function SimulationFinalOutputBlock({
 }) {
   return (
     <div className={`grid gap-3 p-3 ${simulationResultChunkSurfaceClassName}`}>
-      {finalOutput.type === "report" ? null : (
+      {finalOutput.type === "opening_hand" ? (
         <SimulationResultSummaryMarkdown summary={finalOutput.summary} />
-      )}
+      ) : null}
 
       {finalOutput.type === "opening_hand" ? (
         <SimulationOpeningHandCardsBlock
@@ -5476,9 +5483,9 @@ function SimulationFinalOutputBlock({
           <summary className={simulationResultChunkSummaryClassName}>
             Game state
           </summary>
-          <p className={simulationResultChunkTextClassName}>
-            {finalOutput.gameState}
-          </p>
+          <pre className={simulationResultChunkPreClassName}>
+            {formatGameStateJson(finalOutput.gameState)}
+          </pre>
         </details>
       ) : (
         <SimulationReportMarkdown report={finalOutput.report} />
@@ -6275,13 +6282,13 @@ function SimulationDebugRunGroup({
               />
             ) : null}
 
-            {run.gameState ? (
+            {hasGameState(run.gameState) ? (
               <details className="rounded-md border border-emerald-500/35 bg-emerald-950/20 shadow-sm shadow-emerald-950/20">
                 <summary className="cursor-pointer border-b border-emerald-500/20 px-3 py-2 text-sm font-medium text-emerald-200 transition-colors hover:text-emerald-100">
                   Game state
                 </summary>
                 <pre className="debug-scrollbar-neutral max-h-96 max-w-full min-w-0 overflow-y-auto p-3 text-xs leading-5 break-words whitespace-pre-wrap text-emerald-50/80">
-                  {run.gameState}
+                  {formatGameStateJson(run.gameState)}
                 </pre>
               </details>
             ) : null}

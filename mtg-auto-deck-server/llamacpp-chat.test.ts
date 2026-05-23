@@ -148,7 +148,8 @@ test("collects a llama.cpp turn tool loop with shorthand tool calls", async () =
     ]),
     createChatCompletionStream([
       createChatCompletionChunk({
-        content: '{"gameState":"Hand:\\nSol Ring"}',
+        content:
+          '{"gameState":{"zones":{"hand":[{"name":"Sol Ring","tapped":null,"notes":null}],"command":[],"battlefield":[],"graveyard":[],"exile":[]},"yourLife":40,"opponentA":{"life":40,"commanderDamage":{}},"opponentB":{"life":40,"commanderDamage":{}},"opponentC":{"life":40,"commanderDamage":{}},"other":""},"error":null}',
         finishReason: "stop",
       }),
     ]),
@@ -170,7 +171,10 @@ test("collects a llama.cpp turn tool loop with shorthand tool calls", async () =
     toolDefinitions: turnToolDefinitions,
   })
 
-  assert.equal(result.outputText, '{"gameState":"Hand:\\nSol Ring"}')
+  assert.equal(
+    result.outputText,
+    '{"gameState":{"zones":{"hand":[{"name":"Sol Ring","tapped":null,"notes":null}],"command":[],"battlefield":[],"graveyard":[],"exile":[]},"yourLife":40,"opponentA":{"life":40,"commanderDamage":{}},"opponentB":{"life":40,"commanderDamage":{}},"opponentC":{"life":40,"commanderDamage":{}},"other":""},"error":null}'
+  )
   assert.deepEqual(
     chunks.map((chunk) => chunk.mcpFunctionName).filter(Boolean),
     ["draw_card_from_top", "draw_card_from_top"]

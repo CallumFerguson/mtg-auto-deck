@@ -128,7 +128,7 @@ type FakeTurnRun = {
   llm_run_id: string
   turn_number: number
   attempt_number: number
-  game_state: string | null
+  game_state: Record<string, unknown> | null
   outdated: boolean
   library_snapshot: string[] | null
   random_state_snapshot: number | null
@@ -628,7 +628,7 @@ class FakeStarterDeckCopyClient {
     this.turnRuns.push({
       attempt_number: getNumber(values[3]),
       created_at: getDate(values[8]),
-      game_state: getStringOrNull(values[4]),
+      game_state: getJsonObjectOrNull(values[4]),
       library_snapshot: getJsonStringArrayOrNull(values[6]),
       llm_run_id: getString(values[1]),
       outdated: getBoolean(values[5]),
@@ -1121,7 +1121,11 @@ function createStarterDeckFixture() {
   db.turnRuns.push({
     attempt_number: 1,
     created_at: now,
-    game_state: "Battlefield: Command Tower",
+    game_state: {
+      zones: {
+        battlefield: [{ name: "Command Tower", tapped: false, notes: null }],
+      },
+    },
     library_snapshot: ["Forest"],
     llm_run_id: "run-turn",
     outdated: false,
@@ -1381,6 +1385,20 @@ function getJsonObject(value: unknown) {
   }
 
   return JSON.parse(value)
+}
+
+function getJsonObjectOrNull(value: unknown) {
+  if (value === null) {
+    return null
+  }
+
+  const parsed = getJsonObject(value)
+
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    assert.fail("Expected JSON object")
+  }
+
+  return parsed as Record<string, unknown>
 }
 
 function getJsonStringArray(value: unknown) {

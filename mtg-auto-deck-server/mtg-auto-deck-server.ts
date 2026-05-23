@@ -7598,7 +7598,7 @@ function formatPowerToughness({
 
 export async function buildTurnSimulationPrompt(
   identifier: LlmRunIdentifier,
-  gameState?: string
+  gameState?: unknown
 ) {
   const { llmRunId, simulationId } =
     await resolveSimulationPromptIdentifier(identifier)
@@ -7620,7 +7620,7 @@ function buildTurnSimulationPromptFromData(
     strategyGuidelines,
   }: TurnSimulationPromptData,
   llmRunId: string,
-  gameState?: string
+  gameState?: unknown
 ) {
   const commanderNames = expandCardNames(commanders)
   const cardNames = [...library].sort((left, right) =>
@@ -7628,9 +7628,8 @@ function buildTurnSimulationPromptFromData(
   )
   const uniqueCards = dedupeCardsByNameAndText([...commanders, ...libraryCards])
   const cardReference = formatCardReference(uniqueCards)
-  const resolvedGameState = gameState?.trim()
-    ? gameState.trim()
-    : buildInitialTurnGameState({
+  const resolvedGameState =
+    gameState ?? buildInitialTurnGameState({
       commanderNames,
       startingHand,
     })
@@ -7657,7 +7656,7 @@ ${cardNames.join("\n")}
 
 ===Start Previous End of Turn Game State===
 
-${resolvedGameState}
+${formatJsonForPrompt(resolvedGameState)}
 
 ===End Game State===
 
@@ -7716,7 +7715,6 @@ ${turnSections}
 function formatReportTurnPromptSection({
   gameState,
   loggedActions,
-  summary,
   turnNumber,
 }: SimulationReportTurnPromptData) {
   return `
@@ -7725,11 +7723,8 @@ function formatReportTurnPromptSection({
 Logged actions:
 ${formatReportList(loggedActions)}
 
-Turn summary:
-${summary}
-
 End-of-turn game state:
-${gameState}
+${formatJsonForPrompt(gameState)}
 `.trim()
 }
 
@@ -7746,36 +7741,45 @@ function buildInitialTurnGameState({
   commanderNames: readonly string[]
   startingHand: readonly string[]
 }) {
-  return `
-Hand:
-${startingHand.join("\n")}
+  const commanderDamage = Object.fromEntries(
+    commanderNames.map((commanderName) => [commanderName, 0])
+  )
 
-Command Zone:
-${commanderNames.join("\n")}
+  return {
+    zones: {
+      hand: startingHand.map(createInitialGameStateCard),
+      command: commanderNames.map(createInitialGameStateCard),
+      battlefield: [],
+      graveyard: [],
+      exile: [],
+    },
+    yourLife: 40,
+    opponentA: {
+      life: 40,
+      commanderDamage,
+    },
+    opponentB: {
+      life: 40,
+      commanderDamage,
+    },
+    opponentC: {
+      life: 40,
+      commanderDamage,
+    },
+    other: "",
+  }
+}
 
-Battlefield:
-// empty
+function createInitialGameStateCard(name: string) {
+  return {
+    name,
+    tapped: null,
+    notes: null,
+  }
+}
 
-Graveyard:
-// empty
-
-Exile:
-// empty
-
-Your Life: 40
-
-Opponent A Life: 40
-Opponent A Commander Damage: none
-
-Opponent B Life: 40
-Opponent B Commander Damage: none
-
-Opponent C Life: 40
-Opponent C Commander Damage: none
-
-Notes:
-// none
-`.trim()
+function formatJsonForPrompt(value: unknown) {
+  return JSON.stringify(value, null, 2) ?? "null"
 }
 
 main().catch(async (error: unknown) => {

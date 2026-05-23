@@ -449,6 +449,33 @@ test("does not parse raw output deltas as final output", () => {
 })
 
 test("reads turn final output from final parsed output chunks", () => {
+  const gameState = createTurnGameState()
+  const parsedOutput = getSimulationFinalParsedOutput(
+    createRun({
+      llmRunId: "turn-run",
+      phase: "turn",
+      turnNumber: 1,
+      chunks: [
+        createChunk({
+          id: 1,
+          sequence: 1,
+          kind: "final_parsed_output",
+          payload: {
+            gameState,
+            error: null,
+          },
+        }),
+      ],
+    })
+  )
+
+  assert.deepEqual(parsedOutput, {
+    type: "turn",
+    gameState,
+  })
+})
+
+test("ignores turn final output with string game state", () => {
   const parsedOutput = getSimulationFinalParsedOutput(
     createRun({
       llmRunId: "turn-run",
@@ -461,7 +488,6 @@ test("reads turn final output from final parsed output chunks", () => {
           kind: "final_parsed_output",
           payload: {
             gameState: "Hand: Forest\nBattlefield: Island",
-            summary: "Played Island and passed.",
             error: null,
           },
         }),
@@ -469,11 +495,7 @@ test("reads turn final output from final parsed output chunks", () => {
     })
   )
 
-  assert.deepEqual(parsedOutput, {
-    type: "turn",
-    gameState: "Hand: Forest\nBattlefield: Island",
-    summary: "Played Island and passed.",
-  })
+  assert.equal(parsedOutput, null)
 })
 
 test("ignores final parsed success payloads without explicit error null", () => {
@@ -487,8 +509,7 @@ test("ignores final parsed success payloads without explicit error null", () => 
           sequence: 1,
           kind: "final_parsed_output",
           payload: {
-            gameState: "Hand: Forest\nBattlefield: Island",
-            summary: "Played Island and passed.",
+            gameState: createTurnGameState(),
           },
         }),
       ],
@@ -2142,6 +2163,32 @@ function createChunk(overrides: {
     payload: overrides.payload ?? {},
     cardMentions: overrides.cardMentions ?? [],
     receivedAt: "2026-01-01T00:00:00.000Z",
+  }
+}
+
+function createTurnGameState() {
+  return {
+    zones: {
+      hand: [{ name: "Forest", tapped: null, notes: null }],
+      command: [],
+      battlefield: [{ name: "Island", tapped: false, notes: null }],
+      graveyard: [],
+      exile: [],
+    },
+    yourLife: 40,
+    opponentA: {
+      life: 40,
+      commanderDamage: {},
+    },
+    opponentB: {
+      life: 40,
+      commanderDamage: {},
+    },
+    opponentC: {
+      life: 40,
+      commanderDamage: {},
+    },
+    other: "",
   }
 }
 

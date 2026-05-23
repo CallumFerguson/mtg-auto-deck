@@ -171,7 +171,7 @@ Output must be exactly this JSON shape:
         "commander 2 name (if applicable)": 0
       }
     },
-    "other": "a single string containing any information about the game state that does not fit into the other categories. can also include private information you know, like if you scry a card and leave it on top of the deck for example."
+    "other": "a single string containing any information about the game state that does not fit into the other categories, but will be useful to know for future turns. can also include private information you know, like if you scry a card and leave it on top of the deck for example. do not use this to summarize the turn."
   },
   "error": null | "optional description of mistake. include if simulation is not valid/legal."
 }

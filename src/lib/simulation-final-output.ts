@@ -8,8 +8,7 @@ export type ParsedSimulationFinalOutput =
     }
   | {
       type: "turn"
-      gameState: string
-      summary: string
+      gameState: unknown
     }
   | {
       type: "report"
@@ -86,12 +85,10 @@ function getTurnFinalParsedOutput(
   }
 
   const gameState = value.gameState
-  const summary = value.summary
 
   if (
     value.error !== null ||
-    typeof gameState !== "string" ||
-    typeof summary !== "string"
+    !isRecord(gameState)
   ) {
     return null
   }
@@ -99,7 +96,6 @@ function getTurnFinalParsedOutput(
   return {
     type: "turn",
     gameState,
-    summary,
   }
 }
 
