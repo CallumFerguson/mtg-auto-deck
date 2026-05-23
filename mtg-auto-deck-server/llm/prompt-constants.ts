@@ -141,6 +141,15 @@ MANA COSTS AND MANA SYMBOLS REFERENCE
 
 Output must be exactly this JSON shape:
 {
+  "turnActions": null | {
+    "untap": [],
+    "upkeep": [],
+    "draw": [],
+    "precombat_main": [],
+    "combat": [],
+    "postcombat_main": [],
+    "end_step_cleanup": []
+  },
   "gameState": null | {
     "zones": {
       "hand": [],
@@ -176,6 +185,11 @@ Output must be exactly this JSON shape:
   "error": null | "optional description of mistake. include if simulation is not valid/legal."
 }
 
+turnActions should each be an array of strings describing any actions that took place in that phase.
+- Actions include draws, land plays, mana generation, spells/abilities, trigger resolutions, attacks, combat damage, important zone changes.
+- Log the mana-generation action before the mana-spending action. Use brace notation such as {G}, {1}, {C}, {1}{G}; spending logs must state the mana spent.
+- Use full card names when referencing any cards, and surround the card name with asterisk like *card name*
+
 Each zone should be an array of cards where each card is the following JSON shape:
 {
   "name": "exact card name",
@@ -186,6 +200,7 @@ Each zone should be an array of cards where each card is the following JSON shap
 Unrecoverable error:
 If an already-made tool call makes the run impossible to complete accurately, stop immediately. Do not call more tools. Return exactly:
 {
+  "turnActions": null,
   "gameState": null,
   "error": "Short explanation of the unrecoverable mistake."
 }
