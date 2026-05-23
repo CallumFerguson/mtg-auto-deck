@@ -5689,6 +5689,7 @@ function SimulationLoggedActionText({
       <SimulationResultCardPill
         key={`${token.cardName}-${index}`}
         href={mention?.scryfallUri?.trim() || null}
+        imageUrl={mention?.defaultImageUrl ?? null}
         label={token.cardName}
         title={
           mention?.scryfallUri?.trim()
@@ -6125,6 +6126,7 @@ function SimulationResultCardTextLinks({
         <SimulationResultCardPill
           key={`${mention.requestedName}-${index}`}
           href={getCardMentionScryfallUrl(mention)}
+          imageUrl={mention.defaultImageUrl}
           label={getCardMentionDisplayName(mention)}
           title={getCardMentionDisplayName(mention)}
         />
@@ -6135,16 +6137,23 @@ function SimulationResultCardTextLinks({
 
 function SimulationResultCardPill({
   href,
+  imageUrl,
   label,
   title,
 }: {
   href: string | null
+  imageUrl?: string | null
   label: string
   title: string
 }) {
+  const [isPreviewVisible, setIsPreviewVisible] = useState(false)
   const content = <span className="block truncate">{label}</span>
+  const trimmedImageUrl = imageUrl?.trim() || null
   const baseClassName =
     "inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-xs font-medium align-baseline"
+  const previewClassName = isPreviewVisible
+    ? "scale-100 opacity-100"
+    : "scale-95 opacity-0"
 
   if (!href) {
     return (
@@ -6158,16 +6167,47 @@ function SimulationResultCardPill({
     )
   }
 
-  return (
+  const link = (
     <a
       className={`${baseClassName} border-sky-500/30 bg-sky-950/30 text-sky-100 transition-colors hover:border-sky-300/60 hover:bg-sky-900/40 hover:text-sky-50 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none`}
       href={href}
       target="_blank"
       rel="noreferrer"
       title={title}
+      onBlur={() => setIsPreviewVisible(false)}
+      onClick={(event) => {
+        setIsPreviewVisible(false)
+        event.currentTarget.blur()
+      }}
+      onFocus={() => setIsPreviewVisible(true)}
     >
       {content}
     </a>
+  )
+
+  if (!trimmedImageUrl) {
+    return link
+  }
+
+  return (
+    <span
+      className="relative inline-flex max-w-full align-baseline"
+      onMouseEnter={() => setIsPreviewVisible(true)}
+      onMouseLeave={() => setIsPreviewVisible(false)}
+    >
+      {link}
+      <span
+        className={`pointer-events-none absolute top-full left-1/2 z-50 mt-2 w-40 -translate-x-1/2 rounded-[5.75%/4.4%] bg-black/80 p-1 shadow-2xl shadow-black/70 transition duration-150 motion-reduce:transition-none sm:w-48 ${previewClassName}`}
+        aria-hidden="true"
+      >
+        <img
+          className="block aspect-[488/680] w-full rounded-[4.75%/3.4%] object-cover"
+          src={trimmedImageUrl}
+          alt=""
+          loading="lazy"
+        />
+      </span>
+    </span>
   )
 }
 
