@@ -516,22 +516,13 @@ function canGenerateReportFromVisibleResults(
       turnFinalOutput?.type !== "turn" ||
       !hasGameState(turnFinalOutput.gameState) ||
       !hasGameState(run.gameState) ||
-      !hasTurnActions(run.turnActions) ||
-      !hasLoggedTurnAction(run)
+      !hasTurnActions(run.turnActions)
     ) {
       return false
     }
   }
 
   return true
-}
-
-function hasLoggedTurnAction(
-  run: SimulationResultsInfo["turnLlmRuns"][number]
-) {
-  return getSimulationResultEntries(run.chunks).some(
-    (entry) => entry.type === "turn_action_log" && entry.actions.length > 0
-  )
 }
 
 function hasGameState(value: unknown): value is Record<string, unknown> {

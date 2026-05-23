@@ -791,7 +791,7 @@ export type TurnSimulationPromptData = {
 export type SimulationReportTurnPromptData = {
   turnNumber: number
   gameState: unknown
-  loggedActions: string[]
+  turnActions: Record<TurnPhaseChange, string[]>
 }
 
 export type SimulationReportPromptData = {
@@ -6338,13 +6338,8 @@ async function getReportTurnPromptData(
     }
   }
 
-  const loggedActionsByRunId = await getTurnActionsByLlmRunIds(
-    sortedTurnRuns.map((run) => run.llmRunId)
-  )
-
   return sortedTurnRuns.map((run) => {
     const finalOutput = getTurnFinalOutput(run)
-    const loggedActions = loggedActionsByRunId.get(run.llmRunId) ?? []
 
     if (!finalOutput) {
       throw new SimulationValidationError(
@@ -6362,49 +6357,12 @@ async function getReportTurnPromptData(
       )
     }
 
-    if (loggedActions.length === 0) {
-      throw new SimulationValidationError(
-        `The current turn ${run.turnNumber} LLM run has no logged actions.`
-      )
-    }
-
     return {
       turnNumber: run.turnNumber as number,
       gameState: finalOutput.gameState,
-      loggedActions,
+      turnActions: run.turnActions,
     }
   })
-}
-
-async function getTurnActionsByLlmRunIds(llmRunIds: readonly string[]) {
-  const actionsByRunId = new Map<string, string[]>()
-
-  if (llmRunIds.length === 0) {
-    return actionsByRunId
-  }
-
-  const result = await queryDatabase<{
-    turn_llm_run_id: string
-    action: string
-  }>(
-    `
-      SELECT
-        turn_llm_run_id,
-        action
-      FROM simulation_turn_actions
-      WHERE turn_llm_run_id = ANY($1::uuid[])
-      ORDER BY turn_llm_run_id ASC, sequence ASC
-    `,
-    [llmRunIds]
-  )
-
-  for (const row of result.rows) {
-    const actions = actionsByRunId.get(row.turn_llm_run_id) ?? []
-    actions.push(row.action)
-    actionsByRunId.set(row.turn_llm_run_id, actions)
-  }
-
-  return actionsByRunId
 }
 
 function getOpeningHandFinalOutput(run: SimulationDebugLlmRun) {
@@ -7571,7 +7529,9 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-function isTurnActionsObject(value: unknown) {
+function isTurnActionsObject(
+  value: unknown
+): value is Record<TurnPhaseChange, string[]> {
   if (!isJsonObject(value)) {
     return false
   }

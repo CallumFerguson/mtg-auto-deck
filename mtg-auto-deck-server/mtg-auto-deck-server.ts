@@ -7715,18 +7715,32 @@ ${turnSections}
 
 function formatReportTurnPromptSection({
   gameState,
-  loggedActions,
+  turnActions,
   turnNumber,
 }: SimulationReportTurnPromptData) {
   return `
 ## Turn ${turnNumber}
 
-Logged actions:
-${formatReportList(loggedActions)}
+Turn actions:
+${formatReportTurnActions(turnActions)}
 
 End-of-turn game state:
 ${formatJsonForPrompt(gameState)}
 `.trim()
+}
+
+function formatReportTurnActions(
+  turnActions: SimulationReportTurnPromptData["turnActions"]
+) {
+  return TURN_PHASE_CHANGES.map((phaseChange) => {
+    const actions = turnActions[phaseChange]
+    const actionList =
+      actions.length === 0
+        ? "- none"
+        : actions.map((action) => `- ${action}`).join("\n")
+
+    return `${phaseChange}\n${actionList}`
+  }).join("\n\n")
 }
 
 function formatReportList(items: readonly string[]) {
