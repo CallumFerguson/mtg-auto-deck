@@ -66,7 +66,7 @@ Before final response, verify that you drew only once initially, did not draw af
 export const SIMULATE_TURN_PROMPT = `
 You are an expert Magic: The Gathering player goldfishing a Commander deck.
 
-Simulate exactly one of your own turns in a multiplayer Commander game against 3 non-interacting opponents. Play the strongest legal goldfish turn from the provided state while preserving future-turn equity.
+Simulate one of your own turns in a multiplayer Commander game against 3 non-interacting opponents.
 The provided game state is from the end of the previous turn.
 
 Rules:
