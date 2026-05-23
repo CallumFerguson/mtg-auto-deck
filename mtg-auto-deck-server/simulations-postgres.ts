@@ -185,6 +185,8 @@ export type LlmRunChunkCardMentionResolutionStatus =
   | "missing"
 
 export type SimulationDebugLlmRunChunkCardMention = {
+  sourcePath: string
+  position: number
   requestedName: string
   resolutionStatus: LlmRunChunkCardMentionResolutionStatus
   resolvedName: string | null
@@ -3559,6 +3561,8 @@ async function insertLlmRunChunkCardMentions(
 
   for (const mention of mentionInserts) {
     chunksById.get(mention.llmRunChunkId)?.cardMentions.push({
+      sourcePath: mention.sourcePath,
+      position: mention.position,
       requestedName: mention.requestedName,
       resolutionStatus: mention.resolutionStatus,
       resolvedName: mention.resolvedName,
@@ -3697,10 +3701,7 @@ export function extractLlmRunChunkCardMentionRequests(
   >
 ): LlmRunChunkCardMentionRequest[] {
   if (chunk.kind === "final_parsed_output") {
-    return getArrayCardMentions(
-      asUnknownRecord(chunk.payload).keptHand,
-      "payload.keptHand"
-    )
+    return getFinalParsedOutputCardMentions(chunk.payload)
   }
 
   if (chunk.kind === "mcp_call_complete") {
@@ -3724,6 +3725,91 @@ export function extractLlmRunChunkCardMentionRequests(
   }
 
   return []
+}
+
+function getFinalParsedOutputCardMentions(
+  payload: unknown
+): LlmRunChunkCardMentionRequest[] {
+  const payloadRecord = asUnknownRecord(payload)
+
+  return [
+    ...getArrayCardMentions(payloadRecord.keptHand, "payload.keptHand"),
+    ...getTurnActionCardMentions(payloadRecord.turnActions),
+  ]
+}
+
+function getTurnActionCardMentions(
+  value: unknown
+): LlmRunChunkCardMentionRequest[] {
+  if (!isTurnActionsObject(value)) {
+    return []
+  }
+
+  return TURN_PHASE_CHANGES.flatMap((phaseChange) =>
+    value[phaseChange].flatMap((action, actionIndex) =>
+      getSingleAsteriskCardMentions(
+        action,
+        getTurnActionSourcePath(phaseChange, actionIndex)
+      )
+    )
+  )
+}
+
+function getSingleAsteriskCardMentions(
+  text: string,
+  sourcePath: string
+): LlmRunChunkCardMentionRequest[] {
+  const mentions: LlmRunChunkCardMentionRequest[] = []
+  let searchIndex = 0
+
+  while (searchIndex < text.length) {
+    const startIndex = findNextSingleAsteriskIndex(text, searchIndex)
+
+    if (startIndex === -1) {
+      break
+    }
+
+    const endIndex = findNextSingleAsteriskIndex(text, startIndex + 1)
+
+    if (endIndex === -1) {
+      break
+    }
+
+    const requestedName = text.slice(startIndex + 1, endIndex).trim()
+
+    if (requestedName && !requestedName.includes("*")) {
+      mentions.push({
+        sourcePath,
+        position: mentions.length,
+        requestedName,
+      })
+    }
+
+    searchIndex = endIndex + 1
+  }
+
+  return mentions
+}
+
+function findNextSingleAsteriskIndex(text: string, startIndex: number) {
+  for (let index = startIndex; index < text.length; index += 1) {
+    if (
+      text[index] === "*" &&
+      text[index - 1] !== "*" &&
+      text[index + 1] !== "*"
+    ) {
+      return index
+    }
+  }
+
+  return -1
+}
+
+function getTurnActionSourcePath(
+  phaseChange: TurnPhaseChange,
+  actionIndex: number
+) {
+  return `payload.turnActions.${phaseChange}[${actionIndex}]`
 }
 
 function getToolOutputDataRecord(output: unknown) {
@@ -6539,6 +6625,8 @@ async function getCardMentionsByLlmRunChunkIds(chunkIds: readonly number[]) {
 
   const result = await queryDatabase<{
     llm_run_chunk_id: string
+    source_path: string
+    position: number
     requested_name: string
     resolution_status: LlmRunChunkCardMentionResolutionStatus
     resolved_name: string | null
@@ -6548,6 +6636,8 @@ async function getCardMentionsByLlmRunChunkIds(chunkIds: readonly number[]) {
     `
       SELECT
         mention.llm_run_chunk_id,
+        mention.source_path,
+        mention.position,
         mention.requested_name,
         mention.resolution_status,
         mention.resolved_name,
@@ -6557,7 +6647,7 @@ async function getCardMentionsByLlmRunChunkIds(chunkIds: readonly number[]) {
       LEFT JOIN scryfall_oracle_cards card
         ON card.oracle_id = mention.oracle_id
       WHERE mention.llm_run_chunk_id = ANY($1::bigint[])
-      ORDER BY mention.llm_run_chunk_id ASC, mention.position ASC, mention.source_path ASC, mention.id ASC
+      ORDER BY mention.llm_run_chunk_id ASC, mention.source_path ASC, mention.position ASC, mention.id ASC
     `,
     [chunkIds]
   )
@@ -6567,6 +6657,8 @@ async function getCardMentionsByLlmRunChunkIds(chunkIds: readonly number[]) {
     const cardMentions = cardMentionsByChunkId.get(chunkId) ?? []
 
     cardMentions.push({
+      sourcePath: row.source_path,
+      position: row.position,
       requestedName: row.requested_name,
       resolutionStatus: row.resolution_status,
       resolvedName: row.resolved_name,

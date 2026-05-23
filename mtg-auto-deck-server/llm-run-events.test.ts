@@ -661,6 +661,44 @@ test("extracts card mentions from opening-hand final parsed output", () => {
   )
 })
 
+test("extracts card mentions from turn final parsed output actions", () => {
+  assert.deepEqual(
+    extractLlmRunChunkCardMentionRequests({
+      kind: "final_parsed_output",
+      mcpFunctionName: null,
+      mcpFunctionOutput: null,
+      payload: {
+        turnActions: createTurnActions({
+          draw: ["Draw *Forest*."],
+          precombat_main: [
+            "Tap *Command Tower* for {G}. Cast *Sol Ring*.",
+            "Ignore **bold text**, * *, and an unfinished *card reference.",
+          ],
+        }),
+        gameState: createTurnGameState(),
+        error: null,
+      },
+    }),
+    [
+      {
+        sourcePath: "payload.turnActions.draw[0]",
+        position: 0,
+        requestedName: "Forest",
+      },
+      {
+        sourcePath: "payload.turnActions.precombat_main[0]",
+        position: 0,
+        requestedName: "Command Tower",
+      },
+      {
+        sourcePath: "payload.turnActions.precombat_main[0]",
+        position: 1,
+        requestedName: "Sol Ring",
+      },
+    ]
+  )
+})
+
 test("estimates preset token cost in unrounded USD", () => {
   const costUsd = estimatePresetTokenCostUsd({
     tokenCosts: {

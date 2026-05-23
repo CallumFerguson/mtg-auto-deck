@@ -5471,7 +5471,10 @@ function SimulationFinalOutputBlock({
         />
       ) : finalOutput.type === "turn" ? (
         <Fragment>
-          <SimulationTurnActionsBlock turnActions={finalOutput.turnActions} />
+          <SimulationTurnActionsBlock
+            cardMentions={cardMentions}
+            turnActions={finalOutput.turnActions}
+          />
           <details className={simulationResultChunkSurfaceClassName}>
             <summary className={simulationResultChunkSummaryClassName}>
               Game state
@@ -5564,14 +5567,21 @@ function SimulationOpeningHandCardsBlock({
 }
 
 function SimulationTurnActionsBlock({
+  cardMentions = [],
   turnActions,
 }: {
+  cardMentions?: SimulationDebugLlmRunChunk["cardMentions"]
   turnActions: Record<TurnPhaseChange, string[]>
 }) {
   const phaseEntries = TURN_PHASE_CHANGES.map((phaseChange) => ({
     phaseChange,
-    actions: turnActions[phaseChange].map((action) => ({
+    actions: turnActions[phaseChange].map((action, actionIndex) => ({
       action,
+      cardMentions: getTurnActionCardMentions(
+        cardMentions,
+        phaseChange,
+        actionIndex
+      ),
       phaseChange: null,
     })),
   }))
@@ -5597,6 +5607,27 @@ function SimulationTurnActionsBlock({
   )
 }
 
+function getTurnActionCardMentions(
+  cardMentions: SimulationDebugLlmRunChunk["cardMentions"],
+  phaseChange: TurnPhaseChange,
+  actionIndex: number
+) {
+  const sourcePath = getTurnActionSourcePath(phaseChange, actionIndex)
+
+  return cardMentions
+    .filter((mention) => mention.sourcePath === sourcePath)
+    .sort((firstMention, secondMention) => {
+      return firstMention.position - secondMention.position
+    })
+}
+
+function getTurnActionSourcePath(
+  phaseChange: TurnPhaseChange,
+  actionIndex: number
+) {
+  return `payload.turnActions.${phaseChange}[${actionIndex}]`
+}
+
 function SimulationResultLoggedTurnActionEvent({
   actions,
 }: {
@@ -5612,7 +5643,10 @@ function SimulationResultLoggedTurnActionEvent({
         <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-foreground/90">
           {actions.map((action, index) => (
             <li key={`${action.action}-${index}`}>
-              <SimulationLoggedActionText text={action.action} />
+              <SimulationLoggedActionText
+                cardMentions={action.cardMentions ?? []}
+                text={action.action}
+              />
             </li>
           ))}
         </ul>
@@ -5625,30 +5659,205 @@ function SimulationResultLoggedTurnActionEvent({
   )
 }
 
-function SimulationLoggedActionText({ text }: { text: string }) {
-  const parts = text.split(MANA_SYMBOL_TEXT_PATTERN)
-
-  if (parts.length === 1) {
-    return text
-  }
-
-  return parts.map((part, index) => {
-    const manaSymbolClassName = getManaSymbolClassName(part)
-
-    if (manaSymbolClassName === null) {
-      return <Fragment key={`${part}-${index}`}>{part}</Fragment>
+function SimulationLoggedActionText({
+  cardMentions,
+  text,
+}: {
+  cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
+  text: string
+}) {
+  return getSimulationLoggedActionTextTokens(text).map((token, index) => {
+    if (token.type === "text") {
+      return <Fragment key={`${token.text}-${index}`}>{token.text}</Fragment>
     }
 
+    if (token.type === "mana") {
+      return (
+        <span
+          key={`${token.text}-${index}`}
+          aria-label={token.text}
+          className={`ms ms-cost ms-shadow ms-${token.className} simulation-mana-symbol`}
+          role="img"
+          title={token.text}
+        />
+      )
+    }
+
+    const mention = getCardMentionForActionToken(cardMentions, token)
+
     return (
-      <span
-        key={`${part}-${index}`}
-        aria-label={part}
-        className={`ms ms-cost ms-shadow ms-${manaSymbolClassName} simulation-mana-symbol`}
-        role="img"
-        title={part}
+      <SimulationResultCardPill
+        key={`${token.cardName}-${index}`}
+        href={mention?.scryfallUri?.trim() || null}
+        label={token.cardName}
+        title={
+          mention?.scryfallUri?.trim()
+            ? getCardMentionDisplayName(mention)
+            : `${token.cardName} was not resolved to a Scryfall card.`
+        }
       />
     )
   })
+}
+
+type SimulationLoggedActionTextToken =
+  | {
+      text: string
+      type: "text"
+    }
+  | {
+      className: string
+      text: string
+      type: "mana"
+    }
+  | {
+      cardName: string
+      position: number
+      type: "card"
+    }
+
+function getSimulationLoggedActionTextTokens(
+  text: string
+): SimulationLoggedActionTextToken[] {
+  const tokens: SimulationLoggedActionTextToken[] = []
+  let index = 0
+  let cardPosition = 0
+
+  while (index < text.length) {
+    const manaToken = findNextManaSymbolToken(text, index)
+    const cardToken = findNextActionCardToken(text, index, cardPosition)
+    const nextToken =
+      cardToken !== null &&
+      (manaToken === null || cardToken.startIndex < manaToken.startIndex)
+        ? cardToken
+        : manaToken
+
+    if (nextToken === null) {
+      tokens.push({
+        text: text.slice(index),
+        type: "text",
+      })
+      break
+    }
+
+    if (nextToken.startIndex > index) {
+      tokens.push({
+        text: text.slice(index, nextToken.startIndex),
+        type: "text",
+      })
+    }
+
+    if (nextToken.type === "mana") {
+      tokens.push({
+        className: nextToken.className,
+        text: nextToken.text,
+        type: "mana",
+      })
+    } else {
+      tokens.push({
+        cardName: nextToken.cardName,
+        position: nextToken.position,
+        type: "card",
+      })
+      cardPosition += 1
+    }
+
+    index = nextToken.endIndex
+  }
+
+  return tokens
+}
+
+function findNextManaSymbolToken(text: string, startIndex: number) {
+  MANA_SYMBOL_TEXT_PATTERN.lastIndex = startIndex
+
+  while (true) {
+    const match = MANA_SYMBOL_TEXT_PATTERN.exec(text)
+
+    if (match === null) {
+      return null
+    }
+
+    const symbolText = match[0]
+    const className = getManaSymbolClassName(symbolText)
+
+    if (className !== null) {
+      return {
+        className,
+        endIndex: match.index + symbolText.length,
+        startIndex: match.index,
+        text: symbolText,
+        type: "mana" as const,
+      }
+    }
+  }
+}
+
+function findNextActionCardToken(
+  text: string,
+  startIndex: number,
+  position: number
+) {
+  let searchIndex = startIndex
+
+  while (searchIndex < text.length) {
+    const cardStartIndex = findNextSingleAsteriskIndex(text, searchIndex)
+
+    if (cardStartIndex === -1) {
+      return null
+    }
+
+    const cardEndIndex = findNextSingleAsteriskIndex(text, cardStartIndex + 1)
+
+    if (cardEndIndex === -1) {
+      return null
+    }
+
+    const cardName = text.slice(cardStartIndex + 1, cardEndIndex).trim()
+
+    if (cardName && !cardName.includes("*")) {
+      return {
+        cardName,
+        endIndex: cardEndIndex + 1,
+        position,
+        startIndex: cardStartIndex,
+        type: "card" as const,
+      }
+    }
+
+    searchIndex = cardEndIndex + 1
+  }
+
+  return null
+}
+
+function findNextSingleAsteriskIndex(text: string, startIndex: number) {
+  for (let index = startIndex; index < text.length; index += 1) {
+    if (
+      text[index] === "*" &&
+      text[index - 1] !== "*" &&
+      text[index + 1] !== "*"
+    ) {
+      return index
+    }
+  }
+
+  return -1
+}
+
+function getCardMentionForActionToken(
+  cardMentions: SimulationDebugLlmRunChunk["cardMentions"],
+  token: Extract<SimulationLoggedActionTextToken, { type: "card" }>
+) {
+  return (
+    cardMentions.find(
+      (mention) =>
+        mention.position === token.position &&
+        mention.requestedName === token.cardName
+    ) ??
+    cardMentions.find((mention) => mention.position === token.position) ??
+    null
+  )
 }
 
 function getManaSymbolClassName(text: string) {
@@ -5913,20 +6122,52 @@ function SimulationResultCardTextLinks({
   return (
     <div className="flex w-max max-w-full min-w-0 shrink-0 flex-wrap items-center gap-2">
       {mentions.map((mention, index) => (
-        <a
+        <SimulationResultCardPill
           key={`${mention.requestedName}-${index}`}
-          className="max-w-full rounded-full border border-sky-500/30 bg-sky-950/30 px-2.5 py-1 text-xs font-medium text-sky-100 transition-colors hover:border-sky-300/60 hover:bg-sky-900/40 hover:text-sky-50 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
           href={getCardMentionScryfallUrl(mention)}
-          target="_blank"
-          rel="noreferrer"
+          label={getCardMentionDisplayName(mention)}
           title={getCardMentionDisplayName(mention)}
-        >
-          <span className="block truncate">
-            {getCardMentionDisplayName(mention)}
-          </span>
-        </a>
+        />
       ))}
     </div>
+  )
+}
+
+function SimulationResultCardPill({
+  href,
+  label,
+  title,
+}: {
+  href: string | null
+  label: string
+  title: string
+}) {
+  const content = <span className="block truncate">{label}</span>
+  const baseClassName =
+    "inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-xs font-medium align-baseline"
+
+  if (!href) {
+    return (
+      <span
+        aria-disabled="true"
+        className={`${baseClassName} cursor-default border-sky-500/15 bg-sky-950/15 text-sky-100/55`}
+        title={title}
+      >
+        {content}
+      </span>
+    )
+  }
+
+  return (
+    <a
+      className={`${baseClassName} border-sky-500/30 bg-sky-950/30 text-sky-100 transition-colors hover:border-sky-300/60 hover:bg-sky-900/40 hover:text-sky-50 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none`}
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      title={title}
+    >
+      {content}
+    </a>
   )
 }
 
@@ -5970,9 +6211,17 @@ function getOpeningHandFinalOutputCardMentions(
   keptHand: readonly string[],
   cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
 ) {
+  const keptHandMentions = cardMentions
+    .filter((mention) => mention.sourcePath === "payload.keptHand")
+    .sort((firstMention, secondMention) => {
+      return firstMention.position - secondMention.position
+    })
+
   return keptHand.map(
     (cardName, index): SimulationResultCardMention =>
-      cardMentions[index] ?? {
+      keptHandMentions.find((mention) => mention.position === index) ?? {
+        sourcePath: "payload.keptHand",
+        position: index,
         requestedName: cardName,
         resolutionStatus: "missing",
         resolvedName: null,
@@ -5983,18 +6232,23 @@ function getOpeningHandFinalOutputCardMentions(
 }
 
 function getStartingHandCardMentions(startingHand: StartingHand) {
-  return startingHand.cards.flatMap((card) =>
-    Array.from(
-      { length: card.quantity },
-      (): SimulationResultCardMention => ({
+  const mentions: SimulationResultCardMention[] = []
+
+  for (const card of startingHand.cards) {
+    for (let copyIndex = 0; copyIndex < card.quantity; copyIndex += 1) {
+      mentions.push({
+        sourcePath: "startingHand.cards",
+        position: mentions.length,
         requestedName: card.name,
         resolutionStatus: "exact",
         resolvedName: card.name,
         scryfallUri: card.scryfallUri,
         defaultImageUrl: card.defaultImageUrl,
       })
-    )
-  )
+    }
+  }
+
+  return mentions
 }
 
 function getCardMentionDisplayName(mention: SimulationResultCardMention) {

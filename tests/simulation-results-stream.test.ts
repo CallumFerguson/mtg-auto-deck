@@ -120,6 +120,8 @@ test("keeps card mentions from first streamed persisted chunks", () => {
       sequence: 1,
       cardMentions: [
         {
+          sourcePath: "data.cards",
+          position: 0,
           requestedName: "Sol Ring",
           resolutionStatus: "exact",
           resolvedName: "Sol Ring",
@@ -127,6 +129,8 @@ test("keeps card mentions from first streamed persisted chunks", () => {
           defaultImageUrl: "https://cards.example/sol-ring.jpg",
         },
         {
+          sourcePath: "data.cards",
+          position: 1,
           requestedName: "Mega Fake Lotus",
           resolutionStatus: "missing",
           resolvedName: null,
@@ -141,6 +145,8 @@ test("keeps card mentions from first streamed persisted chunks", () => {
     updatedResults?.openingHandLlmRuns[0].chunks[0].cardMentions,
     [
       {
+        sourcePath: "data.cards",
+        position: 0,
         requestedName: "Sol Ring",
         resolutionStatus: "exact",
         resolvedName: "Sol Ring",
@@ -148,6 +154,8 @@ test("keeps card mentions from first streamed persisted chunks", () => {
         defaultImageUrl: "https://cards.example/sol-ring.jpg",
       },
       {
+        sourcePath: "data.cards",
+        position: 1,
         requestedName: "Mega Fake Lotus",
         resolutionStatus: "missing",
         resolvedName: null,
@@ -182,6 +190,8 @@ test("keeps card mentions from final parsed output chunks", () => {
       },
       cardMentions: [
         {
+          sourcePath: "payload.keptHand",
+          position: 0,
           requestedName: "Sol Ring",
           resolutionStatus: "exact",
           resolvedName: "Sol Ring",
@@ -189,6 +199,8 @@ test("keeps card mentions from final parsed output chunks", () => {
           defaultImageUrl: "https://cards.example/sol-ring.jpg",
         },
         {
+          sourcePath: "payload.keptHand",
+          position: 1,
           requestedName: "Mega Fake Lotus",
           resolutionStatus: "missing",
           resolvedName: null,
@@ -203,6 +215,8 @@ test("keeps card mentions from final parsed output chunks", () => {
     updatedResults?.openingHandLlmRuns[0].chunks[0].cardMentions,
     [
       {
+        sourcePath: "payload.keptHand",
+        position: 0,
         requestedName: "Sol Ring",
         resolutionStatus: "exact",
         resolvedName: "Sol Ring",
@@ -210,6 +224,8 @@ test("keeps card mentions from final parsed output chunks", () => {
         defaultImageUrl: "https://cards.example/sol-ring.jpg",
       },
       {
+        sourcePath: "payload.keptHand",
+        position: 1,
         requestedName: "Mega Fake Lotus",
         resolutionStatus: "missing",
         resolvedName: null,

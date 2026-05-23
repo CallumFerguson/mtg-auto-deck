@@ -94,6 +94,8 @@ export type StopSimulationResponse = {
 }
 
 export type SimulationDebugLlmRunChunkCardMention = {
+  sourcePath: string
+  position: number
   requestedName: string
   resolutionStatus: "exact" | "face_exact" | "missing"
   resolvedName: string | null
