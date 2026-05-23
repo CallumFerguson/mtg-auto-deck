@@ -138,6 +138,10 @@
     scrollbar-width: thin;
   }
 
+  .simulation-scrollbar-no-gutter {
+    scrollbar-gutter: auto;
+  }
+
   .simulation-scrollbar::-webkit-scrollbar {
     width: 0.75rem;
     height: 0.75rem;

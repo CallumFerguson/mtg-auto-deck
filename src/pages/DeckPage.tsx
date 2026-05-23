@@ -244,7 +244,7 @@ export function DeckPage({
               </Button>
             </div>
           ) : deck ? (
-            <div className="simulation-scrollbar min-h-0 min-w-0 flex-1 overflow-x-auto">
+            <div className="simulation-scrollbar simulation-scrollbar-no-gutter min-h-0 min-w-0 flex-1 overflow-x-auto">
               <DeckSimulation
                 canUpgradeUsage={!isImpersonating}
                 cards={deck.cards}

@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type RefObject,
   type ReactNode,
   type TransitionEvent,
   type UIEvent,
@@ -23,7 +24,6 @@ import {
   Dices,
   Eye,
   EyeOff,
-  FileText,
   Gauge,
   Hand,
   Hourglass,
@@ -138,6 +138,28 @@ type SimulationResultsAction =
       kind: "turn"
       turnNumber: number
     }
+
+type SimulationResultsNextTurnTimelineStep = {
+  id: string
+  kind: "simulate_turn"
+  label: string
+  detailLabel: string
+  status: "next_turn" | "starting_turn"
+  turnNumber: number
+}
+
+type SimulationResultsReportTimelineStep = {
+  id: "action:report"
+  kind: "generate_report"
+  label: string
+  detailLabel: string
+  status: "report"
+}
+
+type SimulationResultsDisplayTimelineStep =
+  | SimulationResultsTimelineStep
+  | SimulationResultsNextTurnTimelineStep
+  | SimulationResultsReportTimelineStep
 
 const DEFAULT_TURNS_TO_SIMULATE = "1"
 const ACTIVITY_PANEL_EXIT_FALLBACK_MS = 350
@@ -1354,53 +1376,54 @@ export function DeckSimulation({
           </nav>
         </aside>
 
-        <section className="simulation-scrollbar min-h-0 min-w-0 overflow-y-auto">
+        <section className="h-full min-h-0 min-w-0 overflow-hidden">
           {isNewSimulationSelected ? (
-            <div className="grid flex-1 place-items-center px-5 py-10">
-              <div className="grid w-full max-w-2xl gap-4">
-                <h3 className="text-center text-lg font-semibold">
-                  Create new simulation
-                </h3>
-                <div className="flex flex-col gap-6 rounded-lg border border-border bg-card/70 p-6 shadow-sm">
-                  <div className="grid gap-6">
-                    <fieldset className="grid gap-3">
-                      <legend className="text-sm font-medium text-foreground">
-                        Simulation seed
-                      </legend>
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <label
-                          className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
-                            seedMode === "random"
-                              ? "border-ring bg-accent text-accent-foreground"
-                              : "border-border bg-background/35 text-muted-foreground"
-                          }`}
-                        >
-                          <input
-                            className="size-4 accent-sky-300"
-                            type="radio"
-                            name="seed-mode"
-                            checked={seedMode === "random"}
-                            onChange={() => setSeedMode("random")}
-                          />
-                          Random seed
-                        </label>
-                        <label
-                          className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
-                            seedMode === "set"
-                              ? "border-ring bg-accent text-accent-foreground"
-                              : "border-border bg-background/35 text-muted-foreground"
-                          }`}
-                        >
-                          <input
-                            className="size-4 accent-sky-300"
-                            type="radio"
-                            name="seed-mode"
-                            checked={seedMode === "set"}
-                            onChange={() => setSeedMode("set")}
-                          />
-                          Set seed
-                        </label>
-                      </div>
+            <div className="simulation-scrollbar h-full min-h-0 overflow-y-auto">
+              <div className="grid min-h-full place-items-center px-5 py-10">
+                <div className="grid w-full max-w-2xl gap-4">
+                  <h3 className="text-center text-lg font-semibold">
+                    Create new simulation
+                  </h3>
+                  <div className="flex flex-col gap-6 rounded-lg border border-border bg-card/70 p-6 shadow-sm">
+                    <div className="grid gap-6">
+                      <fieldset className="grid gap-3">
+                        <legend className="text-sm font-medium text-foreground">
+                          Simulation seed
+                        </legend>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <label
+                            className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
+                              seedMode === "random"
+                                ? "border-ring bg-accent text-accent-foreground"
+                                : "border-border bg-background/35 text-muted-foreground"
+                            }`}
+                          >
+                            <input
+                              className="size-4 accent-sky-300"
+                              type="radio"
+                              name="seed-mode"
+                              checked={seedMode === "random"}
+                              onChange={() => setSeedMode("random")}
+                            />
+                            Random seed
+                          </label>
+                          <label
+                            className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
+                              seedMode === "set"
+                                ? "border-ring bg-accent text-accent-foreground"
+                                : "border-border bg-background/35 text-muted-foreground"
+                            }`}
+                          >
+                            <input
+                              className="size-4 accent-sky-300"
+                              type="radio"
+                              name="seed-mode"
+                              checked={seedMode === "set"}
+                              onChange={() => setSeedMode("set")}
+                            />
+                            Set seed
+                          </label>
+                        </div>
 
                       {seedMode === "set" ? (
                         <div className="grid gap-3 rounded-md border border-border bg-background/35 p-3">
@@ -1770,6 +1793,7 @@ export function DeckSimulation({
                   ) : null}
                 </div>
               </div>
+            </div>
             </div>
           ) : selectedSimulation ? (
             <SimulationDetails
@@ -2956,14 +2980,64 @@ function SimulationDetails({
     simulation.id,
   ])
 
-  return (
+  const activityPanel = activityPanelRun ? (
+    <SimulationRunActivityPanel
+      deckId={deckId}
+      isAdmin={isAdmin}
+      isOpen={isActivityPanelOpen}
+      run={activityPanelRun}
+      simulationId={simulation.id}
+      onClose={closeActivityPanel}
+      onExited={handleActivityPanelExited}
+    />
+  ) : null
+
+  return resultsInfo ? (
+    <SimulationResultsPanel
+      activityPanel={activityPanel}
+      canUpgradeUsage={canUpgradeUsage}
+      defaultModelPresetId={defaultModelPresetId}
+      deckId={deckId}
+      hasUsableModelPreset={selectedModelPreset !== null}
+      isAdmin={isAdmin}
+      isStartingOpeningHandRun={isStartingOpeningHandRun}
+      isStartingReportRun={isStartingReportRun}
+      isStartingTurnRun={isStartingTurnRun}
+      isLoadingStartingHand={isLoadingStartingHand}
+      modelPresets={modelPresets}
+      isStoppingSimulation={isStoppingSimulation}
+      onStartOpeningHandRun={() => void handleStartOpeningHandRun()}
+      onStartReportRun={() => void handleStartReportRun()}
+      onKeepResultsScrolledToBottom={keepResultsScrolledToBottom}
+      onModelPresetRequired={onOpenDetails}
+      onResultsScroll={handleResultsScroll}
+      onScrollResultsToBottomIfKept={scrollResultsToBottomIfKept}
+      onSelectActivityRun={toggleActivityRun}
+      onStartTurnRun={(turnNumber) => void handleStartTurnRun(turnNumber)}
+      onStopSimulation={() => void handleStopSimulation()}
+      onOpeningHandEvaluationSaved={handleOpeningHandEvaluationSaved}
+      onTurnEvaluationSaved={handleTurnEvaluationSaved}
+      onUpgradeUsage={onUpgradeUsage}
+      openingHandRunError={openingHandRunError}
+      reportRunError={reportRunError}
+      resultsError={resultsError}
+      resultsInfo={resultsInfo}
+      resultsPanelRef={resultsPanelRef}
+      selectedActivityRunId={selectedActivityRunId}
+      simulation={simulation}
+      startingHand={startingHand}
+      startingHandLoadError={startingHandLoadError}
+      stopSimulationError={stopSimulationError}
+      turnRunError={turnRunError}
+    />
+  ) : (
     <div className="flex h-full min-h-0 min-w-0 overflow-hidden">
       <main
         ref={resultsPanelRef}
-        className="simulation-scrollbar h-full min-h-0 min-w-0 flex-1 overflow-y-auto px-5 py-6"
+        className="simulation-scrollbar h-full min-h-0 min-w-0 flex-1 overflow-y-auto"
         onScroll={handleResultsScroll}
       >
-        <section className="mx-auto grid w-full max-w-5xl gap-4">
+        <section className="mx-auto grid w-full max-w-5xl gap-4 px-5 py-6">
           {resultsError ? (
             <p
               className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
@@ -2973,49 +3047,11 @@ function SimulationDetails({
             </p>
           ) : null}
 
-          {isLoadingResults && !resultsInfo ? (
+          {isLoadingResults ? (
             <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
               Loading simulation results...
             </p>
-          ) : null}
-
-          {resultsInfo ? (
-            <SimulationResultsPanel
-              canUpgradeUsage={canUpgradeUsage}
-              defaultModelPresetId={defaultModelPresetId}
-              deckId={deckId}
-              hasUsableModelPreset={selectedModelPreset !== null}
-              isAdmin={isAdmin}
-              isStartingOpeningHandRun={isStartingOpeningHandRun}
-              isStartingReportRun={isStartingReportRun}
-              isStartingTurnRun={isStartingTurnRun}
-              isLoadingStartingHand={isLoadingStartingHand}
-              modelPresets={modelPresets}
-              isStoppingSimulation={isStoppingSimulation}
-              onStartOpeningHandRun={() => void handleStartOpeningHandRun()}
-              onStartReportRun={() => void handleStartReportRun()}
-              onKeepResultsScrolledToBottom={keepResultsScrolledToBottom}
-              onModelPresetRequired={onOpenDetails}
-              onScrollResultsToBottomIfKept={scrollResultsToBottomIfKept}
-              onSelectActivityRun={toggleActivityRun}
-              onStartTurnRun={(turnNumber) =>
-                void handleStartTurnRun(turnNumber)
-              }
-              onStopSimulation={() => void handleStopSimulation()}
-              onOpeningHandEvaluationSaved={handleOpeningHandEvaluationSaved}
-              onTurnEvaluationSaved={handleTurnEvaluationSaved}
-              onUpgradeUsage={onUpgradeUsage}
-              openingHandRunError={openingHandRunError}
-              reportRunError={reportRunError}
-              resultsInfo={resultsInfo}
-              selectedActivityRunId={selectedActivityRunId}
-              simulation={simulation}
-              startingHand={startingHand}
-              startingHandLoadError={startingHandLoadError}
-              stopSimulationError={stopSimulationError}
-              turnRunError={turnRunError}
-            />
-          ) : !isLoadingResults && !resultsError ? (
+          ) : !resultsError ? (
             <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
               Waiting for simulation results.
             </p>
@@ -3023,17 +3059,7 @@ function SimulationDetails({
         </section>
       </main>
 
-      {activityPanelRun ? (
-        <SimulationRunActivityPanel
-          deckId={deckId}
-          isAdmin={isAdmin}
-          isOpen={isActivityPanelOpen}
-          run={activityPanelRun}
-          simulationId={simulation.id}
-          onClose={closeActivityPanel}
-          onExited={handleActivityPanelExited}
-        />
-      ) : null}
+      {activityPanel}
     </div>
   )
 }
@@ -3442,6 +3468,7 @@ function SimulationDebugModal({
 }
 
 function SimulationResultsPanel({
+  activityPanel,
   canUpgradeUsage,
   defaultModelPresetId,
   deckId,
@@ -3456,6 +3483,7 @@ function SimulationResultsPanel({
   onStartOpeningHandRun,
   onKeepResultsScrolledToBottom,
   onModelPresetRequired,
+  onResultsScroll,
   onScrollResultsToBottomIfKept,
   onSelectActivityRun,
   onStartTurnRun,
@@ -3466,7 +3494,9 @@ function SimulationResultsPanel({
   onUpgradeUsage,
   openingHandRunError,
   reportRunError,
+  resultsError,
   resultsInfo,
+  resultsPanelRef,
   selectedActivityRunId,
   simulation,
   startingHand,
@@ -3474,6 +3504,7 @@ function SimulationResultsPanel({
   stopSimulationError,
   turnRunError,
 }: {
+  activityPanel: ReactNode
   canUpgradeUsage: boolean
   defaultModelPresetId: string | null
   deckId: string
@@ -3488,6 +3519,7 @@ function SimulationResultsPanel({
   onStartOpeningHandRun: () => void
   onKeepResultsScrolledToBottom: () => void
   onModelPresetRequired: () => void
+  onResultsScroll: (event: UIEvent<HTMLElement>) => void
   onScrollResultsToBottomIfKept: () => void
   onSelectActivityRun: (llmRunId: string) => void
   onStartTurnRun: (turnNumber: number) => void
@@ -3498,7 +3530,9 @@ function SimulationResultsPanel({
   onUpgradeUsage: () => void
   openingHandRunError: string | null
   reportRunError: string | null
+  resultsError: string | null
   resultsInfo: SimulationResultsInfo
+  resultsPanelRef: RefObject<HTMLElement | null>
   selectedActivityRunId: string | null
   simulation: Simulation
   startingHand: StartingHand | null
@@ -3675,6 +3709,10 @@ function SimulationResultsPanel({
 
   useEffect(() => {
     if (!simulationAction) {
+      if (renderedSimulationAction?.kind === "turn" && isStartingTurnRun) {
+        return
+      }
+
       const hideTimeoutId = window.setTimeout(() => {
         setRenderedSimulationAction(null)
       }, 0)
@@ -3691,7 +3729,7 @@ function SimulationResultsPanel({
     return () => {
       window.clearTimeout(showTimeoutId)
     }
-  }, [simulationAction])
+  }, [isStartingTurnRun, renderedSimulationAction, simulationAction])
 
   useLayoutEffect(() => {
     if (renderedSimulationAction?.kind === "turn") {
@@ -3748,7 +3786,7 @@ function SimulationResultsPanel({
     ...resultsInfo.reportLlmRuns.map((run) => ({
       ...run,
       canEvaluate: false,
-      canRerun: !isSimulationActionBlocked,
+      canRerun: false,
       isActive: isActiveLlmRunStatus(run.status),
       resultKind: "report" as const,
       resultLabel: `Report attempt ${run.attemptNumber}`,
@@ -3767,8 +3805,36 @@ function SimulationResultsPanel({
       }),
     [hasPresetStartingHand, resultsInfo]
   )
+  const displayedTimelineSteps = useMemo<SimulationResultsDisplayTimelineStep[]>(
+    () => {
+      const steps: SimulationResultsDisplayTimelineStep[] = [...timelineSteps]
+
+      if (renderedSimulationAction?.kind === "turn") {
+        const turnNumber = renderedSimulationAction.turnNumber
+
+        if (!hasSimulationTimelineTurnStep(timelineSteps, turnNumber)) {
+          steps.push(createNextTurnTimelineStep(turnNumber, isStartingTurnRun))
+        }
+      }
+
+      const reportTimelineStep = getReportTimelineStep(canStartReportRun)
+
+      if (reportTimelineStep) {
+        steps.push(reportTimelineStep)
+      }
+
+      return steps
+    },
+    [
+      canStartReportRun,
+      isStartingTurnRun,
+      renderedSimulationAction,
+      timelineSteps,
+    ]
+  )
   const [selectedTimelineStepIdPreference, setSelectedTimelineStepIdPreference] =
     useState<string | null>(null)
+  const previousSelectedTimelineStepIdRef = useRef<string | null>(null)
   const timelineStepButtonRefs = useRef<Map<string, HTMLButtonElement>>(
     new Map()
   )
@@ -3802,7 +3868,21 @@ function SimulationResultsPanel({
         block: "nearest",
         inline: "center",
       })
-  }, [selectedTimelineStepId, timelineSteps])
+  }, [displayedTimelineSteps, selectedTimelineStepId])
+
+  useLayoutEffect(() => {
+    if (previousSelectedTimelineStepIdRef.current === selectedTimelineStepId) {
+      return
+    }
+
+    previousSelectedTimelineStepIdRef.current = selectedTimelineStepId
+
+    if (!selectedTimelineStepId) {
+      return
+    }
+
+    onKeepResultsScrolledToBottom()
+  }, [onKeepResultsScrolledToBottom, selectedTimelineStepId])
 
   function renderSimulationRunDetail(
     run: (typeof runs)[number],
@@ -3852,14 +3932,11 @@ function SimulationResultsPanel({
         id={panelId}
         aria-labelledby={tabId}
         className="grid gap-3 rounded-md border border-border bg-background/35 p-3"
-        role={panelId ? "tabpanel" : undefined}
+        role={panelId ? "region" : undefined}
       >
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
-            <h5 className="text-sm font-medium text-foreground">
-              {run.resultLabel}
-            </h5>
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               {runMetadata.join(" / ")}
             </p>
           </div>
@@ -4031,173 +4108,191 @@ function SimulationResultsPanel({
 
   return (
     <>
-      <div className="grid gap-3">
-        {timelineSteps.length === 0 ? (
-          <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
-            No opening hand or turn runs have been saved for this simulation
-            yet.
-          </p>
-        ) : null}
+      <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
+        {displayedTimelineSteps.length > 0 ? (
+          <header className="relative w-full shrink-0 bg-background px-5 py-3">
+            <div className="mx-auto w-full max-w-5xl">
+              <div
+                aria-label="Simulation timeline"
+                className="simulation-scrollbar simulation-scrollbar-no-gutter overflow-x-auto pb-1"
+                role="group"
+              >
+                <div className="flex min-w-max items-start">
+                  {displayedTimelineSteps.map((step, stepIndex) => {
+                    const isResultStep = isSimulationTimelineResultStep(step)
+                    const isSelected =
+                      isResultStep && step.id === selectedTimelineStepId
+                    const panelId = isResultStep
+                      ? getSimulationTimelineStepPanelId(step.id)
+                      : undefined
+                    const isFirstStep = stepIndex === 0
+                    const isLastStep =
+                      stepIndex === displayedTimelineSteps.length - 1
+                    const stepDescription =
+                      getSimulationTimelineStepDescription(step)
 
-        {timelineSteps.length > 0 ? (
-          <div
-            aria-label="Simulation timeline"
-            className="simulation-scrollbar overflow-x-auto rounded-md border border-border bg-background/35 px-3 py-4"
-            role="tablist"
-          >
-            <div className="flex min-w-max items-start">
-              {timelineSteps.map((step, stepIndex) => {
-                const isSelected = step.id === selectedTimelineStepId
-                const panelId = getSimulationTimelineStepPanelId(step.id)
-                const isFirstStep = stepIndex === 0
-                const isLastStep = stepIndex === timelineSteps.length - 1
-                const stepDescription =
-                  getSimulationTimelineStepDescription(step)
-
-                return (
-                  <button
-                    key={step.id}
-                    ref={(element) => {
-                      if (element) {
-                        timelineStepButtonRefs.current.set(step.id, element)
-                      } else {
-                        timelineStepButtonRefs.current.delete(step.id)
-                      }
-                    }}
-                    aria-label={`${step.label}, ${stepDescription}`}
-                    aria-controls={panelId}
-                    aria-selected={isSelected}
-                    className={getSimulationTimelineStepButtonClassName(
-                      step,
-                      isSelected
-                    )}
-                    id={getSimulationTimelineStepTabId(step.id)}
-                    role="tab"
-                    type="button"
-                    onClick={() => setSelectedTimelineStepIdPreference(step.id)}
-                  >
-                    <span className="flex w-full items-center" aria-hidden="true">
-                      <span
-                        className={getSimulationTimelineStepConnectorClassName({
-                          isHidden: isFirstStep,
+                    return (
+                      <button
+                        key={step.id}
+                        ref={(element) => {
+                          if (element) {
+                            timelineStepButtonRefs.current.set(
+                              step.id,
+                              element
+                            )
+                          } else {
+                            timelineStepButtonRefs.current.delete(step.id)
+                          }
+                        }}
+                        aria-label={`${step.label}, ${stepDescription}`}
+                        aria-controls={panelId}
+                        aria-current={isSelected ? "step" : undefined}
+                        className={getSimulationTimelineStepButtonClassName(
                           step,
-                        })}
-                      />
-                      <span
-                        className={getSimulationTimelineStepNodeClassName(step)}
-                      >
-                        {getSimulationTimelineStepNodeContent({
-                          step,
-                          stepNumber: stepIndex + 1,
-                        })}
-                      </span>
-                      <span
-                        className={getSimulationTimelineStepConnectorClassName({
-                          isHidden: isLastStep,
-                          step,
-                        })}
-                      />
-                    </span>
-                    <span className="grid w-full justify-items-center gap-0.5 px-1 text-center">
-                      <span
-                        className={getSimulationTimelineStepLabelClassName(
                           isSelected
                         )}
+                        id={
+                          isResultStep
+                            ? getSimulationTimelineStepTabId(step.id)
+                            : undefined
+                        }
+                        disabled={
+                          step.kind === "simulate_turn" &&
+                          step.status === "starting_turn"
+                        }
+                        type="button"
+                        onClick={() => {
+                          if (step.kind === "simulate_turn") {
+                            if (step.status === "starting_turn") {
+                              return
+                            }
+
+                            if (!canContinueWithModelPreset()) {
+                              return
+                            }
+
+                            setSelectedTimelineStepIdPreference(null)
+                            onKeepResultsScrolledToBottom()
+                            onStartTurnRun(step.turnNumber)
+                            return
+                          }
+
+                          if (isResultStep) {
+                            setSelectedTimelineStepIdPreference(step.id)
+                            onKeepResultsScrolledToBottom()
+                          }
+                        }}
                       >
-                        {step.label}
-                      </span>
-                      <span className="max-w-full truncate text-[0.7rem] leading-4 text-muted-foreground">
-                        {stepDescription}
-                      </span>
-                    </span>
-                  </button>
-                )
-              })}
+                        <span
+                          className="flex w-full items-center"
+                          aria-hidden="true"
+                        >
+                          <span
+                            className={getSimulationTimelineStepConnectorClassName(
+                              {
+                                isHidden: isFirstStep,
+                              }
+                            )}
+                          />
+                          <span
+                            className={getSimulationTimelineStepNodeClassName(
+                              step
+                            )}
+                          >
+                            {getSimulationTimelineStepNodeContent({
+                              step,
+                              stepNumber: stepIndex + 1,
+                            })}
+                          </span>
+                          <span
+                            className={getSimulationTimelineStepConnectorClassName(
+                              {
+                                isHidden: isLastStep,
+                              }
+                            )}
+                          />
+                        </span>
+                        <span className="grid w-full justify-items-center gap-0.5 px-1 text-center">
+                          <span
+                            className={getSimulationTimelineStepLabelClassName(
+                              isSelected
+                            )}
+                          >
+                            {step.label}
+                          </span>
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
-          </div>
-        ) : null}
-
-        {selectedTimelineStep?.kind === "preset_opening_hand" ? (
-          <div
-            id={selectedTimelinePanelId}
-            aria-labelledby={getSimulationTimelineStepTabId(
-              selectedTimelineStep.id
-            )}
-            role="tabpanel"
-          >
-            <SimulationPresetStartingHandBlock
-              isLoadingStartingHand={isLoadingStartingHand}
-              startingHand={startingHand}
-              startingHandLoadError={startingHandLoadError}
+            <div
+              className="pointer-events-none absolute right-0 bottom-0 left-0 border-b border-border/80"
+              aria-hidden="true"
             />
-          </div>
-        ) : selectedTimelineRun ? (
-          renderSimulationRunDetail(
-            selectedTimelineRun,
-            selectedTimelinePanelId,
-            selectedTimelineStep
-              ? getSimulationTimelineStepTabId(selectedTimelineStep.id)
-              : undefined
-          )
+          </header>
         ) : null}
 
-        {actionError ? (
-          <p
-            className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-            role="alert"
+        <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+          <main
+            ref={resultsPanelRef}
+            className="simulation-scrollbar h-full min-h-0 min-w-0 flex-1 overflow-y-auto"
+            onScroll={onResultsScroll}
           >
-            {actionError}
-          </p>
-        ) : null}
+            <section className="mx-auto grid w-full max-w-5xl gap-3 px-5 py-6">
+              {resultsError ? (
+                <p
+                  className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                  role="alert"
+                >
+                  {resultsError}
+                </p>
+              ) : null}
 
-        <div className="flex min-h-8 flex-wrap justify-center gap-2">
-          {renderedSimulationAction ? (
-            <Button
-              className="w-fit bg-background/35 text-foreground hover:bg-muted/45"
-              variant="outline"
-              type="button"
-              onClick={() => {
-                if (!canContinueWithModelPreset()) {
-                  return
-                }
+              {timelineSteps.length === 0 ? (
+                <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+                  No opening hand or turn runs have been saved for this
+                  simulation yet.
+                </p>
+              ) : null}
 
-                if (renderedSimulationAction.kind === "opening_hand") {
-                  setSelectedTimelineStepIdPreference(null)
-                  onStartOpeningHandRun()
-                  return
-                }
+              {selectedTimelineStep?.kind === "preset_opening_hand" ? (
+                <div
+                  id={selectedTimelinePanelId}
+                  aria-labelledby={getSimulationTimelineStepTabId(
+                    selectedTimelineStep.id
+                  )}
+                  role="region"
+                >
+                  <SimulationPresetStartingHandBlock
+                    isLoadingStartingHand={isLoadingStartingHand}
+                    startingHand={startingHand}
+                    startingHandLoadError={startingHandLoadError}
+                  />
+                </div>
+              ) : selectedTimelineRun ? (
+                renderSimulationRunDetail(
+                  selectedTimelineRun,
+                  selectedTimelinePanelId,
+                  selectedTimelineStep
+                    ? getSimulationTimelineStepTabId(selectedTimelineStep.id)
+                    : undefined
+                )
+              ) : null}
 
-                setSelectedTimelineStepIdPreference(null)
-                onKeepResultsScrolledToBottom()
-                onStartTurnRun(renderedSimulationAction.turnNumber)
-              }}
-            >
-              <Sparkles data-icon="inline-start" />
-              {renderedSimulationAction.kind === "opening_hand"
-                ? "Simulate opening hand"
-                : "Simulate next turn"}
-            </Button>
-          ) : null}
-          {canStartReportRun ? (
-            <Button
-              className="w-fit bg-background/35 text-foreground hover:bg-muted/45"
-              variant="outline"
-              type="button"
-              disabled={isStartingSimulationRun}
-              onClick={() => {
-                if (!canContinueWithModelPreset()) {
-                  return
-                }
+              {actionError ? (
+                <p
+                  className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                  role="alert"
+                >
+                  {actionError}
+                </p>
+              ) : null}
+            </section>
+          </main>
 
-                onKeepResultsScrolledToBottom()
-                setSelectedTimelineStepIdPreference(null)
-                onStartReportRun()
-              }}
-            >
-              <FileText data-icon="inline-start" />
-              Generate report
-            </Button>
-          ) : null}
+          {activityPanel}
         </div>
       </div>
       {isAdmin && evaluationRun?.resultKind === "opening_hand" ? (
@@ -4229,6 +4324,53 @@ function getSimulationTimelineRunStepId(llmRunId: string) {
   return `run:${llmRunId}`
 }
 
+function createNextTurnTimelineStep(
+  turnNumber: number,
+  isStartingTurnRun: boolean
+): SimulationResultsNextTurnTimelineStep {
+  return {
+    id: `action:turn:${turnNumber}`,
+    kind: "simulate_turn",
+    label: `Turn ${turnNumber}`,
+    detailLabel: "Simulate next turn",
+    status: isStartingTurnRun ? "starting_turn" : "next_turn",
+    turnNumber,
+  }
+}
+
+function hasSimulationTimelineTurnStep(
+  steps: readonly SimulationResultsTimelineStep[],
+  turnNumber: number
+) {
+  return steps.some(
+    (step) =>
+      step.kind === "turn" &&
+      step.run !== null &&
+      step.run.turnNumber === turnNumber
+  )
+}
+
+function getReportTimelineStep(
+  canStartReportRun: boolean
+): SimulationResultsReportTimelineStep | null {
+  if (canStartReportRun) {
+    return null
+  }
+
+  return null
+}
+
+function isSimulationTimelineResultStep(
+  step: SimulationResultsDisplayTimelineStep
+): step is SimulationResultsTimelineStep {
+  return (
+    step.kind === "preset_opening_hand" ||
+    step.kind === "opening_hand" ||
+    step.kind === "turn" ||
+    step.kind === "report"
+  )
+}
+
 function getSimulationTimelineStepPanelId(stepId: string) {
   return `simulation-timeline-panel-${getSimulationTimelineDomIdPart(stepId)}`
 }
@@ -4242,8 +4384,20 @@ function getSimulationTimelineDomIdPart(stepId: string) {
 }
 
 function getSimulationTimelineStepStatusLabel(
-  step: SimulationResultsTimelineStep
+  step: SimulationResultsDisplayTimelineStep
 ) {
+  if (step.status === "next_turn") {
+    return "Next"
+  }
+
+  if (step.status === "starting_turn") {
+    return "Starting"
+  }
+
+  if (step.status === "report") {
+    return "Report"
+  }
+
   if (step.status === "preset") {
     return "Preset"
   }
@@ -4276,8 +4430,12 @@ function getSimulationTimelineStepStatusLabel(
 }
 
 function getSimulationTimelineStepDescription(
-  step: SimulationResultsTimelineStep
+  step: SimulationResultsDisplayTimelineStep
 ) {
+  if (step.kind === "simulate_turn" || step.kind === "generate_report") {
+    return step.detailLabel
+  }
+
   if (step.kind === "preset_opening_hand") {
     return "Preset hand"
   }
@@ -4296,7 +4454,7 @@ function getSimulationTimelineStepDescription(
 }
 
 function getSimulationTimelineStepButtonClassName(
-  _step: SimulationResultsTimelineStep,
+  _step: SimulationResultsDisplayTimelineStep,
   isSelected: boolean
 ) {
   const baseClassName =
@@ -4310,10 +4468,18 @@ function getSimulationTimelineStepButtonClassName(
 }
 
 function getSimulationTimelineStepNodeClassName(
-  step: SimulationResultsTimelineStep
+  step: SimulationResultsDisplayTimelineStep
 ) {
   const baseClassName =
     "relative z-10 grid size-9 shrink-0 place-items-center rounded-full border-2 bg-background text-xs font-semibold transition-all"
+
+  if (step.status === "starting_turn") {
+    return `${baseClassName} border-primary text-primary`
+  }
+
+  if (step.kind === "simulate_turn" || step.kind === "generate_report") {
+    return `${baseClassName} border-border text-muted-foreground group-hover:border-primary/60 group-hover:text-primary`
+  }
 
   if (
     step.status === "completed" ||
@@ -4338,9 +4504,17 @@ function getSimulationTimelineStepNodeContent({
   step,
   stepNumber,
 }: {
-  step: SimulationResultsTimelineStep
+  step: SimulationResultsDisplayTimelineStep
   stepNumber: number
 }) {
+  if (step.status === "starting_turn") {
+    return <LoaderCircle className="size-4 animate-spin" />
+  }
+
+  if (step.kind === "simulate_turn" || step.kind === "generate_report") {
+    return <Plus className="size-4" />
+  }
+
   if (isActiveSimulationResultsTimelineStep(step)) {
     return <LoaderCircle className="size-4 animate-spin" />
   }
@@ -4349,7 +4523,7 @@ function getSimulationTimelineStepNodeContent({
     return <Check className="size-4" />
   }
 
-  if (step.status === "failed") {
+  if (step.status === "failed" || step.status === "cancelled") {
     return <X className="size-4" />
   }
 
@@ -4358,32 +4532,14 @@ function getSimulationTimelineStepNodeContent({
 
 function getSimulationTimelineStepConnectorClassName({
   isHidden,
-  step,
 }: {
   isHidden: boolean
-  step: SimulationResultsTimelineStep
 }
 ) {
   const baseClassName = "h-px flex-1 transition-colors"
 
   if (isHidden) {
     return `${baseClassName} bg-transparent`
-  }
-
-  if (
-    step.status === "completed" ||
-    step.status === "preset" ||
-    isActiveSimulationResultsTimelineStep(step)
-  ) {
-    return `${baseClassName} bg-border`
-  }
-
-  if (step.status === "failed") {
-    return `${baseClassName} bg-border`
-  }
-
-  if (step.status === "cancelled") {
-    return `${baseClassName} bg-muted-foreground/40`
   }
 
   return `${baseClassName} bg-border`
