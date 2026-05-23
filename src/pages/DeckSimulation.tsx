@@ -5594,14 +5594,11 @@ function SimulationTurnActionsBlock({
       </p>
       <div className="grid gap-2">
         {phaseEntries.map(({ actions, phaseChange }) => (
-          <Fragment key={phaseChange}>
-            <SimulationResultPhaseChangeEvent
-              action={{ action: "", phaseChange }}
-            />
-            {actions.length > 0 ? (
-              <SimulationResultLoggedTurnActionEvent actions={actions} />
-            ) : null}
-          </Fragment>
+          <SimulationResultTurnPhaseActionEvent
+            key={phaseChange}
+            actions={actions}
+            phaseChange={phaseChange}
+          />
         ))}
       </div>
     </section>
@@ -5903,18 +5900,47 @@ function SimulationResultPhaseChangeEvent({
   }
 
   return (
+    <SimulationResultTurnPhaseActionEvent
+      actions={[]}
+      phaseChange={phaseChange}
+    />
+  )
+}
+
+function SimulationResultTurnPhaseActionEvent({
+  actions,
+  phaseChange,
+}: {
+  actions: LoggedTurnAction[]
+  phaseChange: TurnPhaseChange
+}) {
+  return (
     <div
-      className={`flex min-w-0 items-center gap-2 px-3 py-2 text-sm font-medium text-sky-100 ${simulationResultChunkSurfaceClassName}`}
+      className={`grid gap-2 px-3 py-2 ${simulationResultChunkSurfaceClassName}`}
     >
-      <span
-        className="flex size-5 shrink-0 items-center justify-center text-sky-300"
-        aria-hidden="true"
-      >
-        {getTurnPhaseChangeIcon(phaseChange)}
-      </span>
-      <span className="min-w-0 truncate">
-        {getTurnPhaseChangeLabel(phaseChange)}
-      </span>
+      <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-sky-100">
+        <span
+          className="flex size-5 shrink-0 items-center justify-center text-sky-300"
+          aria-hidden="true"
+        >
+          {getTurnPhaseChangeIcon(phaseChange)}
+        </span>
+        <span className="min-w-0 truncate">
+          {getTurnPhaseChangeLabel(phaseChange)}
+        </span>
+      </div>
+      {actions.length > 0 ? (
+        <ul className="list-disc space-y-1 pl-10 text-sm leading-6 text-foreground/90">
+          {actions.map((action, index) => (
+            <li key={`${action.action}-${index}`}>
+              <SimulationLoggedActionText
+                cardMentions={action.cardMentions ?? []}
+                text={action.action}
+              />
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   )
 }
