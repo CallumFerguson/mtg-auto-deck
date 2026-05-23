@@ -21,18 +21,11 @@ export type LoggedTurnAction = {
   phaseChange: TurnPhaseChange | null
 }
 
-export type SimulationResultEntry =
-  | {
-      id: string
-      type: "chunk"
-      chunk: SimulationDebugLlmRunChunk
-    }
-  | {
-      id: string
-      type: "turn_action_log"
-      actions: LoggedTurnAction[]
-      chunks: SimulationDebugLlmRunChunk[]
-    }
+export type SimulationResultEntry = {
+  id: string
+  type: "chunk"
+  chunk: SimulationDebugLlmRunChunk
+}
 
 export type SimulationRunActivityBlock =
   | {
@@ -71,85 +64,11 @@ export function getSimulationResultChunks(
 export function getSimulationResultEntries(
   chunks: readonly SimulationDebugLlmRunChunk[]
 ): SimulationResultEntry[] {
-  const entries: SimulationResultEntry[] = []
-  let pendingTurnActions: LoggedTurnAction[] = []
-  let pendingTurnActionChunks: SimulationDebugLlmRunChunk[] = []
-  let turnActionLogEntryIndex = 0
-
-  function addPendingTurnActionChunk(chunk: SimulationDebugLlmRunChunk) {
-    if (!pendingTurnActionChunks.includes(chunk)) {
-      pendingTurnActionChunks.push(chunk)
-    }
-  }
-
-  function addPendingTurnAction(
-    action: LoggedTurnAction,
-    chunk: SimulationDebugLlmRunChunk
-  ) {
-    pendingTurnActions.push(action)
-    addPendingTurnActionChunk(chunk)
-  }
-
-  function createTurnActionLogEntry(
-    actions: LoggedTurnAction[],
-    actionChunks: SimulationDebugLlmRunChunk[]
-  ): SimulationResultEntry {
-    const entry = {
-      id: `${getTurnActionLogEntryId(actionChunks)}-${turnActionLogEntryIndex}`,
-      type: "turn_action_log" as const,
-      actions,
-      chunks: actionChunks,
-    }
-    turnActionLogEntryIndex += 1
-
-    return entry
-  }
-
-  function flushPendingTurnActions() {
-    if (pendingTurnActionChunks.length === 0) {
-      return
-    }
-
-    entries.push(
-      createTurnActionLogEntry(pendingTurnActions, pendingTurnActionChunks)
-    )
-    pendingTurnActions = []
-    pendingTurnActionChunks = []
-  }
-
-  for (const chunk of getSimulationResultChunks(chunks)) {
-    if (isCompletedLogTurnActionChunk(chunk)) {
-      const loggedActions = getLoggedTurnActions(chunk)
-
-      if (loggedActions.length === 0) {
-        addPendingTurnActionChunk(chunk)
-        continue
-      }
-
-      for (const loggedAction of loggedActions) {
-        if (loggedAction.phaseChange !== null) {
-          flushPendingTurnActions()
-          entries.push(createTurnActionLogEntry([loggedAction], [chunk]))
-          continue
-        }
-
-        addPendingTurnAction(loggedAction, chunk)
-      }
-
-      continue
-    }
-
-    flushPendingTurnActions()
-    entries.push({
-      id: `chunk-${getResultChunkId(chunk)}`,
-      type: "chunk",
-      chunk,
-    })
-  }
-
-  flushPendingTurnActions()
-
-  return entries
+  return getSimulationResultChunks(chunks).map((chunk) => ({
+    id: `chunk-${getResultChunkId(chunk)}`,
+    type: "chunk",
+    chunk,
+  }))
 }
 
 export function hasSimulationRunFinalParsedOutputChunk(
@@ -337,82 +256,6 @@ export function getSimulationRunActivityBlocks(
   )
 }
 
-export function getLoggedTurnAction(chunk: SimulationDebugLlmRunChunk) {
-  const loggedActions = getLoggedTurnActions(chunk)
-
-  return loggedActions[loggedActions.length - 1] ?? null
-}
-
-export function getLoggedTurnActions(chunk: SimulationDebugLlmRunChunk) {
-  if (!isCompletedLogTurnActionChunk(chunk)) {
-    return []
-  }
-
-  const resolvedPayload = parseJsonObjectPayload(chunk.mcpFunctionOutput)
-  const payloadRecord = asPayloadRecord(resolvedPayload)
-  const loggedActions = parseLoggedTurnActions(payloadRecord.loggedActions)
-
-  if (loggedActions.length > 0) {
-    return loggedActions
-  }
-
-  const latestAction = parseLoggedTurnAction(payloadRecord.latestAction)
-
-  return latestAction === null ? [] : [latestAction]
-}
-
-function parseLoggedTurnActions(value: unknown): LoggedTurnAction[] {
-  if (!Array.isArray(value)) {
-    return []
-  }
-
-  return value.flatMap((entry) => {
-    const loggedAction = parseLoggedTurnAction(entry)
-
-    return loggedAction === null ? [] : [loggedAction]
-  })
-}
-
-function parseLoggedTurnAction(value: unknown): LoggedTurnAction | null {
-  const entry = asPayloadRecord(value)
-  const action = getPayloadString(entry, "action")?.trim()
-
-  if (!action) {
-    return null
-  }
-
-  return {
-    action,
-    phaseChange: getTurnPhaseChange(entry.phaseChange),
-  }
-}
-
-function getTurnPhaseChange(value: unknown): TurnPhaseChange | null {
-  return typeof value === "string" && isTurnPhaseChange(value) ? value : null
-}
-
-function isTurnPhaseChange(value: string): value is TurnPhaseChange {
-  return TURN_PHASE_CHANGES.includes(value as TurnPhaseChange)
-}
-
-function isCompletedLogTurnActionChunk(chunk: SimulationDebugLlmRunChunk) {
-  return (
-    chunk.kind === "mcp_call_complete" &&
-    chunk.mcpFunctionName === "log_turn_action"
-  )
-}
-
-function getTurnActionLogEntryId(
-  chunks: readonly SimulationDebugLlmRunChunk[]
-) {
-  const firstChunk = chunks[0]
-  const lastChunk = chunks[chunks.length - 1]
-
-  return `turn-action-log-${getResultChunkId(firstChunk)}-${getResultChunkId(
-    lastChunk
-  )}`
-}
-
 function getResultChunkId(chunk: SimulationDebugLlmRunChunk) {
   return chunk.id === null ? `live-${chunk.sequence}` : String(chunk.id)
 }
@@ -586,65 +429,6 @@ function asPayloadRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null
     ? (value as Record<string, unknown>)
     : {}
-}
-
-function parseJsonObjectPayload(payload: unknown): unknown {
-  if (Array.isArray(payload)) {
-    for (const part of payload) {
-      const text = getPayloadString(part, "text")
-
-      if (text === null) {
-        continue
-      }
-
-      const parsedTextPayload = parseJsonObjectPayload(text)
-
-      if (typeof parsedTextPayload === "object" && parsedTextPayload !== null) {
-        return parsedTextPayload
-      }
-    }
-
-    return null
-  }
-
-  if (typeof payload === "object" && payload !== null) {
-    const content = asPayloadRecord(payload).content
-
-    if (Array.isArray(content)) {
-      for (const part of content) {
-        const text = getPayloadString(part, "text")
-
-        if (text === null) {
-          continue
-        }
-
-        const parsedTextPayload = parseJsonObjectPayload(text)
-
-        if (
-          typeof parsedTextPayload === "object" &&
-          parsedTextPayload !== null
-        ) {
-          return parsedTextPayload
-        }
-      }
-    }
-
-    return payload
-  }
-
-  if (typeof payload !== "string") {
-    return null
-  }
-
-  try {
-    const parsedPayload = JSON.parse(payload) as unknown
-
-    return typeof parsedPayload === "object" && parsedPayload !== null
-      ? parsedPayload
-      : null
-  } catch {
-    return null
-  }
 }
 
 function getPayloadString(value: unknown, property: string) {

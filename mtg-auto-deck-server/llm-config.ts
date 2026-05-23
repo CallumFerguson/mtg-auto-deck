@@ -18,10 +18,6 @@ type Environment = Record<string, string | undefined>
 
 export const GENERIC_GAME_RULES_REFERENCE_ENABLED_ENVIRONMENT_VARIABLE =
   "GENERIC_GAME_RULES_REFERENCE_ENABLED"
-export const TURN_ACTION_LOGGING_ENABLED_ENVIRONMENT_VARIABLE =
-  "TURN_ACTION_LOGGING_ENABLED"
-export const LOG_TURN_ACTION_FULL_ACTION_LIST_ENABLED_ENVIRONMENT_VARIABLE =
-  "LOG_TURN_ACTION_FULL_ACTION_LIST_ENABLED"
 
 type BaseLlmRunConfig = {
   apiKey: string
@@ -216,26 +212,6 @@ export function getGenericGameRulesReferenceEnabled(
   return getOptionalBooleanEnvironmentVariable(
     environment,
     GENERIC_GAME_RULES_REFERENCE_ENABLED_ENVIRONMENT_VARIABLE,
-    true
-  )
-}
-
-export function getTurnActionLoggingEnabled(
-  environment: Environment = process.env
-) {
-  return getOptionalBooleanEnvironmentVariable(
-    environment,
-    TURN_ACTION_LOGGING_ENABLED_ENVIRONMENT_VARIABLE,
-    true
-  )
-}
-
-export function getLogTurnActionFullActionListEnabled(
-  environment: Environment = process.env
-) {
-  return getOptionalBooleanEnvironmentVariable(
-    environment,
-    LOG_TURN_ACTION_FULL_ACTION_LIST_ENABLED_ENVIRONMENT_VARIABLE,
     true
   )
 }

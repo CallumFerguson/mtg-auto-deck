@@ -96,7 +96,6 @@ import {
   isLlmRunStreaming,
   listActiveSimulationLlmRuns,
   listSimulationsForDeck,
-  logTurnAction,
   markLlmRunQueued,
   markSimulationCancelled,
   markSimulationCompleted,
@@ -141,8 +140,6 @@ import type {
   SimulationReportPromptData,
   SimulationReportTurnPromptData,
   OpeningHandEvaluationJson,
-  TurnActionLogResult,
-  TurnPhaseChange,
   TurnEvaluationJson,
 } from "./simulations-postgres.js"
 import {
@@ -196,8 +193,6 @@ import {
   buildOpenRouterReasoningOptions,
   buildProviderReasoningOptions,
   getGenericGameRulesReferenceEnabled,
-  getLogTurnActionFullActionListEnabled,
-  getTurnActionLoggingEnabled,
   LlmConfigurationError,
   getOpenRouterApiKey,
   getEvaluationLlmRunConfig,
@@ -411,12 +406,6 @@ const setDefaultLlmModelPresetSchema = z.object({
 const createTurnLlmRunSchema = z.object({
   turnNumber: z.number().int().positive(),
 })
-const turnPhaseChangeSchema = z
-  .enum(TURN_PHASE_CHANGES)
-  .nullable()
-  .describe(
-    "Optional phase metadata. Include this only when the action logs moving into a new turn phase or step."
-  )
 
 type ActiveLlmRunRuntime = {
   abortController: AbortController
@@ -1105,15 +1094,6 @@ function createToolResultContent(message: string, data: unknown) {
   ]
 }
 
-function createCompactToolResultContent(data: unknown) {
-  return [
-    {
-      type: "text" as const,
-      text: JSON.stringify(data),
-    },
-  ]
-}
-
 type LlmRunIdentifier = {
   llmRunId: string
 }
@@ -1154,13 +1134,6 @@ type McpReturnCardsInput = McpSimulationIdentifierInput & {
 }
 type McpTakeCardsInput = McpSimulationIdentifierInput & {
   cards: string[]
-}
-type McpLogTurnActionEntryInput = {
-  action: string
-  phaseChange?: TurnPhaseChange | null
-}
-type McpLogTurnActionInput = McpSimulationIdentifierInput & {
-  actions: McpLogTurnActionEntryInput[]
 }
 
 type McpSimulationIdentifierConfig = {
@@ -1217,22 +1190,6 @@ const diceSidesSchema = z
   .min(2)
   .max(1000)
   .describe("How many sides each die has. Must be between 2 and 1000.")
-const logTurnActionEntrySchema = z.object({
-  action: z
-    .string()
-    .trim()
-    .min(1)
-    .describe(
-      "A concise description of one action being committed, such as a phase change, land play, spell cast, attack, or other turn progression."
-    ),
-  phaseChange: turnPhaseChangeSchema.optional(),
-})
-const logTurnActionsSchema = z
-  .array(logTurnActionEntrySchema)
-  .min(1)
-  .describe(
-    "One or more committed turn actions to append to the authoritative turn log, in the exact order they happen."
-  )
 
 function addMcpReasonToToolResult<T extends object>(
   identifier: McpSimulationIdentifierConfig,
@@ -1299,9 +1256,6 @@ function createTurnSimulationServer(authContext?: LlmRunMcpTokenContext) {
   }
 
   return createServer(TURN_SIMULATION_SERVER_NAME, (server) => {
-    if (getTurnActionLoggingEnabled()) {
-      registerLogTurnActionTool(server, identifier)
-    }
     registerDrawCardFromTopTool(server, identifier)
     registerDrawCardFromBottomTool(server, identifier)
     registerTakeCardsFromLibraryTool(server, identifier)
@@ -1845,56 +1799,6 @@ function registerRollDiceTool(
   )
 }
 
-function registerLogTurnActionTool(
-  server: McpServer,
-  identifier: McpSimulationIdentifierConfig
-) {
-  server.registerTool(
-    "log_turn_action",
-    {
-      title: "Log Turn Action",
-      description: getLogTurnActionToolDescription(),
-      inputSchema: {
-        ...identifier.inputSchema,
-        actions: logTurnActionsSchema,
-      },
-    },
-    async (input: McpLogTurnActionInput) => {
-      const resolvedSimulationId = await resolveMcpSimulationId(
-        input,
-        identifier.authContext
-      )
-      const response = await logTurnAction(resolvedSimulationId, input.actions)
-
-      return {
-        content: createCompactToolResultContent(
-          createLogTurnActionToolResultData(response)
-        ),
-      }
-    }
-  )
-}
-
-function getLogTurnActionToolDescription() {
-  return getLogTurnActionFullActionListEnabled()
-    ? "Append one or more irreversible action notes to the active turn log for this simulation. Use this as the authoritative turn history while resolving the turn. The response returns the newly logged actions and the full logged action list for the active turn."
-    : "Append one or more irreversible action notes to the active turn log for this simulation. Use this as the authoritative turn history while resolving the turn. The response returns the newly logged actions for this call."
-}
-
-function createLogTurnActionToolResultData(response: TurnActionLogResult) {
-  return {
-    ...(getLogTurnActionFullActionListEnabled()
-      ? {
-        actions: response.actions.map((loggedAction) => loggedAction.action),
-      }
-      : {}),
-    loggedActions: response.loggedActions.map((loggedAction) => ({
-      action: loggedAction.action,
-      phaseChange: loggedAction.phaseChange,
-    })),
-  }
-}
-
 const openingHandLlmToolDefinitions: LlamaCppToolDefinition[] = [
   {
     name: "draw_starting_hand",
@@ -1942,17 +1846,6 @@ const openingHandLlmToolDefinitions: LlamaCppToolDefinition[] = [
     }),
   },
 ]
-
-function createLogTurnActionLlmToolDefinition(): LlamaCppToolDefinition {
-  return {
-    name: "log_turn_action",
-    description: getLogTurnActionToolDescription(),
-    inputSchema: z.object({
-      ...llmRunIdentifierSchema,
-      actions: logTurnActionsSchema,
-    }),
-  }
-}
 
 const turnSimulationLibraryLlmToolDefinitions: LlamaCppToolDefinition[] = [
   {
@@ -2075,12 +1968,7 @@ const turnSimulationLibraryLlmToolDefinitions: LlamaCppToolDefinition[] = [
 ]
 
 function getTurnSimulationLlmToolDefinitions(): readonly LlamaCppToolDefinition[] {
-  return getTurnActionLoggingEnabled()
-    ? [
-        createLogTurnActionLlmToolDefinition(),
-        ...turnSimulationLibraryLlmToolDefinitions,
-      ]
-    : turnSimulationLibraryLlmToolDefinitions
+  return turnSimulationLibraryLlmToolDefinitions
 }
 
 function createOpeningHandOpenRouterTools(
@@ -2314,9 +2202,7 @@ function buildTurnSimulationOpenAiRequestPayload(
 }
 
 function getTurnSimulationMcpServerDescription() {
-  return getTurnActionLoggingEnabled()
-    ? "Tools for resolving one Magic: The Gathering goldfish turn, including library operations, random coin/dice results, and turn action logging."
-    : "Tools for resolving one Magic: The Gathering goldfish turn, including library operations and random coin/dice results."
+  return "Tools for resolving one Magic: The Gathering goldfish turn, including library operations and random coin/dice results."
 }
 
 function buildReportOpenAiRequestPayload(
@@ -7644,7 +7530,6 @@ function buildTurnSimulationPromptFromData(
     : ""
   const simulateTurnPrompt = buildSimulateTurnPrompt({
     genericGameRulesReferenceEnabled: getGenericGameRulesReferenceEnabled(),
-    turnActionLoggingEnabled: getTurnActionLoggingEnabled(),
   })
 
   return `${simulateTurnPrompt}

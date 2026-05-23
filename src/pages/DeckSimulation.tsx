@@ -102,8 +102,6 @@ import {
 import {
   TURN_PHASE_CHANGES,
   formatSimulationRunClipboardText,
-  getLoggedTurnAction,
-  getLoggedTurnActions,
   getSimulationRunActivityBlocks,
   getSimulationRunActiveToolCallName,
   getSimulationResultEntries,
@@ -3922,9 +3920,7 @@ function SimulationResultsPanel({
               !getSimulationFinalParsedOutput(run) ? (
                 <div className="grid gap-2">
                   {hasTurnActions(run.turnActions) ? (
-                    <SimulationTurnActionsBlock
-                      turnActions={run.turnActions}
-                    />
+                    <SimulationTurnActionsBlock turnActions={run.turnActions} />
                   ) : null}
                   <details className={simulationResultChunkSurfaceClassName}>
                     <summary className={simulationResultChunkSummaryClassName}>
@@ -4687,15 +4683,6 @@ function SimulationResultChunkCards({
       : null
 
   function renderEntry(entry: SimulationResultEntry) {
-    if (entry.type === "turn_action_log") {
-      return (
-        <SimulationResultLoggedTurnActionEvent
-          actions={entry.actions}
-          chunks={entry.chunks}
-        />
-      )
-    }
-
     const { chunk } = entry
 
     if (chunk.kind === "final_parsed_output") {
@@ -5601,10 +5588,7 @@ function SimulationTurnActionsBlock({
               <SimulationResultPhaseChangeEvent
                 action={{ action: "", phaseChange }}
               />
-              <SimulationResultLoggedTurnActionEvent
-                actions={actions}
-                chunks={[]}
-              />
+              <SimulationResultLoggedTurnActionEvent actions={actions} />
             </Fragment>
           ))}
         </div>
@@ -5621,24 +5605,15 @@ function SimulationTurnActionsBlock({
 
 function SimulationResultLoggedTurnActionEvent({
   actions,
-  chunks,
 }: {
   actions: LoggedTurnAction[]
-  chunks: SimulationDebugLlmRunChunk[]
 }) {
-  const hasFailure = chunks.some(isMcpCallFailure)
-
-  if (!hasFailure && actions.length === 1 && actions[0].phaseChange !== null) {
+  if (actions.length === 1 && actions[0].phaseChange !== null) {
     return <SimulationResultPhaseChangeEvent action={actions[0]} />
   }
 
-  const title = hasFailure ? "Turn action log failed" : null
-
   return (
     <div className={`grid gap-2 p-3 ${simulationResultChunkSurfaceClassName}`}>
-      {title ? (
-        <p className="text-sm font-medium text-muted-foreground">{title}</p>
-      ) : null}
       {actions.length > 0 ? (
         <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-foreground/90">
           {actions.map((action, index) => (
@@ -5649,7 +5624,7 @@ function SimulationResultLoggedTurnActionEvent({
         </ul>
       ) : (
         <p className="text-sm leading-6 text-muted-foreground">
-          {getTurnActionLogFallbackText(chunks)}
+          No turn action details were reported.
         </p>
       )}
     </div>
@@ -5719,9 +5694,7 @@ function SimulationResultPhaseChangeEvent({
   const phaseChange = action.phaseChange
 
   if (phaseChange === null) {
-    return (
-      <SimulationResultLoggedTurnActionEvent actions={[action]} chunks={[]} />
-    )
+    return <SimulationResultLoggedTurnActionEvent actions={[action]} />
   }
 
   return (
@@ -5800,17 +5773,6 @@ function SimulationResultEvent({
   }
 
   if (chunk.kind === "mcp_call_complete") {
-    if (chunk.mcpFunctionName === "log_turn_action") {
-      const loggedActions = getLoggedTurnActions(chunk)
-
-      return (
-        <SimulationResultLoggedTurnActionEvent
-          actions={loggedActions}
-          chunks={[chunk]}
-        />
-      )
-    }
-
     if (chunk.cardMentions.length > 0 && !isMcpCallFailure(chunk)) {
       return <SimulationResultCompletedCardToolEvent chunk={chunk} />
     }
@@ -6078,14 +6040,6 @@ function getMcpCallCompleteTitle(chunk: SimulationDebugLlmRunChunk) {
     return `Tool failed: ${toolName}`
   }
 
-  if (chunk.mcpFunctionName === "log_turn_action") {
-    const lastLoggedAction = getLoggedTurnAction(chunk)
-
-    if (lastLoggedAction) {
-      return `Tool completed: ${toolName} - ${lastLoggedAction.action}`
-    }
-  }
-
   return `Tool completed: ${toolName}`
 }
 
@@ -6095,35 +6049,6 @@ function getMcpCallCompleteIcon(chunk: SimulationDebugLlmRunChunk) {
   }
 
   return null
-}
-
-function getMcpCallResultPayload(chunk: SimulationDebugLlmRunChunk) {
-  if (isMcpCallFailure(chunk)) {
-    return chunk.mcpFunctionOutput ?? getMcpCallErrorPayload(chunk)
-  }
-
-  return chunk.mcpFunctionOutput
-}
-
-function getTurnActionLogFallbackText(
-  chunks: readonly SimulationDebugLlmRunChunk[]
-) {
-  if (!chunks.some(isMcpCallFailure)) {
-    return "The action log was updated."
-  }
-
-  const failurePayload = chunks
-    .filter(isMcpCallFailure)
-    .map(getMcpCallResultPayload)
-    .find((payload) => payload !== null && payload !== undefined)
-
-  if (typeof failurePayload === "string" && failurePayload.trim()) {
-    return failurePayload
-  }
-
-  const failureMessage = getPayloadString(failurePayload, "message")
-
-  return failureMessage ?? "The action was not logged."
 }
 
 function isMcpCallFailure(chunk: SimulationDebugLlmRunChunk) {

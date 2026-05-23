@@ -157,14 +157,6 @@ type LlmRunChunkCardMentionRow = {
   created_at: Date
 }
 
-type TurnActionRow = {
-  turn_llm_run_id: string
-  sequence: number
-  action: string
-  phase_change: string | null
-  created_at: Date
-}
-
 type OpeningHandEvaluationRow = {
   simulation_id: string
   opening_hand_llm_run_id: string
@@ -1233,11 +1225,6 @@ async function copyLlmRunChildren({
       client,
     })
   }
-
-  await copyTurnActions({
-    client,
-    llmRunIdMap,
-  })
 }
 
 async function copyLlmRunChunks({
@@ -1383,60 +1370,6 @@ async function copyLlmRunChunkCardMentions({
         mention.resolved_name,
         mention.default_image_url,
         mention.created_at,
-      ]
-    )
-  }
-}
-
-async function copyTurnActions({
-  client,
-  llmRunIdMap,
-}: {
-  client: Queryable
-  llmRunIdMap: Map<string, string>
-}) {
-  const sourceLlmRunIds = Array.from(llmRunIdMap.keys())
-
-  if (sourceLlmRunIds.length === 0) {
-    return
-  }
-
-  const result = await client.query<TurnActionRow>(
-    `
-      /* starter-copy:list-turn-actions */
-      SELECT
-        turn_llm_run_id,
-        sequence,
-        action,
-        phase_change,
-        created_at
-      FROM simulation_turn_actions
-      WHERE turn_llm_run_id = ANY($1::uuid[])
-      ORDER BY turn_llm_run_id ASC, sequence ASC
-    `,
-    [sourceLlmRunIds]
-  )
-
-  for (const action of result.rows) {
-    await client.query(
-      `
-        /* starter-copy:copy-turn-action */
-        INSERT INTO simulation_turn_actions (
-          turn_llm_run_id,
-          sequence,
-          action,
-          phase_change,
-          created_at
-        )
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (turn_llm_run_id, sequence) DO NOTHING
-      `,
-      [
-        getMappedId(llmRunIdMap, action.turn_llm_run_id, "turn action run"),
-        action.sequence,
-        action.action,
-        action.phase_change,
-        action.created_at,
       ]
     )
   }

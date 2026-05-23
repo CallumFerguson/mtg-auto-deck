@@ -42,8 +42,6 @@ export function getKnownSimulationResultToolLabel({
       return getFlipCoinLabel(state, outputData)
     case "roll_dice":
       return getRollDiceLabel(state, outputData)
-    case "log_turn_action":
-      return getLogTurnActionLabel(state, mcpFunctionOutput)
     default:
       return null
   }
@@ -75,7 +73,7 @@ export function getSimulationResultToolReason({
   mcpFunctionOutput?: unknown | null
   mcpFunctionReason?: string | null
 }) {
-  if (mcpFunctionName === null || mcpFunctionName === "log_turn_action") {
+  if (mcpFunctionName === null) {
     return null
   }
 
@@ -329,71 +327,6 @@ function getRollDiceLabel(
       return "Rolled dice"
     }
   }
-}
-
-function getLogTurnActionLabel(
-  state: SimulationResultToolLabelState,
-  mcpFunctionOutput: unknown
-) {
-  switch (state) {
-    case "active":
-    case "started":
-      return "Logging turn action"
-    case "failed":
-      return "Could not log turn action"
-    case "completed": {
-      const loggedActions = getLoggedTurnActionsFromOutput(mcpFunctionOutput)
-
-      return loggedActions.length === 0
-        ? "Logged turn action"
-        : formatLoggedTurnActionLabel(loggedActions)
-    }
-  }
-}
-
-function formatLoggedTurnActionLabel(actions: string[]) {
-  if (actions.length === 1) {
-    return `Logged turn action: ${actions[0]}`
-  }
-
-  const actionSummary =
-    actions.length > 2
-      ? `${actions.slice(0, 2).join("; ")}; ...`
-      : actions.join("; ")
-
-  return `Logged ${actions.length} turn actions: ${actionSummary}`
-}
-
-function getLoggedTurnActionsFromOutput(output: unknown) {
-  const resolvedOutput = parseJsonObjectPayload(output)
-  const outputRecord = asRecord(resolvedOutput)
-  const loggedActions = parseLoggedTurnActionTexts(outputRecord.loggedActions)
-
-  if (loggedActions.length > 0) {
-    return loggedActions
-  }
-
-  const latestAction = getLoggedTurnActionText(outputRecord.latestAction)
-
-  return latestAction === null ? [] : [latestAction]
-}
-
-function parseLoggedTurnActionTexts(value: unknown) {
-  if (!Array.isArray(value)) {
-    return []
-  }
-
-  return value.flatMap((entry) => {
-    const action = getLoggedTurnActionText(entry)
-
-    return action === null ? [] : [action]
-  })
-}
-
-function getLoggedTurnActionText(value: unknown) {
-  const action = getString(value, "action")?.trim()
-
-  return action && action.length > 0 ? action : null
 }
 
 function getToolOutputDataRecord(output: unknown) {

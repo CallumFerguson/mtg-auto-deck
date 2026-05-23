@@ -69,7 +69,6 @@ import {
 import {
   buildSimulateTurnPrompt,
   GENERIC_GAME_RULES_REFERENCE,
-  TURN_ACTION_LOGGING_PROMPT_SECTION,
 } from "./llm/prompt-constants.js"
 import {
   buildOpenRouterReasoningOptions,
@@ -77,13 +76,9 @@ import {
   GENERIC_GAME_RULES_REFERENCE_ENABLED_ENVIRONMENT_VARIABLE,
   getEvaluationLlmRunConfig,
   getGenericGameRulesReferenceEnabled,
-  getLogTurnActionFullActionListEnabled,
   getLlmRunQueueConfig,
   getOpeningHandLlmRunConfig,
-  getTurnActionLoggingEnabled,
   getTurnSimulationLlmRunConfig,
-  LOG_TURN_ACTION_FULL_ACTION_LIST_ENABLED_ENVIRONMENT_VARIABLE,
-  TURN_ACTION_LOGGING_ENABLED_ENVIRONMENT_VARIABLE,
 } from "./llm-config.js"
 import { buildCreateLlmModelPresetInsertQuery } from "./llm-model-presets-postgres.js"
 import { canClaimQueuedLlmRunWithCapacity } from "./llm-run-queue.js"
@@ -1341,63 +1336,15 @@ test("includes generic game rules reference by default", () => {
   )
 })
 
-test("returns full log_turn_action action list by default", () => {
-  assert.equal(getLogTurnActionFullActionListEnabled({}), true)
-  assert.equal(
-    getLogTurnActionFullActionListEnabled({
-      [LOG_TURN_ACTION_FULL_ACTION_LIST_ENABLED_ENVIRONMENT_VARIABLE]: "false",
-    }),
-    false
-  )
-  assert.equal(
-    getLogTurnActionFullActionListEnabled({
-      [LOG_TURN_ACTION_FULL_ACTION_LIST_ENABLED_ENVIRONMENT_VARIABLE]: "0",
-    }),
-    false
-  )
-  assert.equal(
-    getLogTurnActionFullActionListEnabled({
-      [LOG_TURN_ACTION_FULL_ACTION_LIST_ENABLED_ENVIRONMENT_VARIABLE]: "yes",
-    }),
-    true
-  )
-})
-
-test("enables turn action logging by default", () => {
-  assert.equal(getTurnActionLoggingEnabled({}), true)
-  assert.equal(
-    getTurnActionLoggingEnabled({
-      [TURN_ACTION_LOGGING_ENABLED_ENVIRONMENT_VARIABLE]: "false",
-    }),
-    false
-  )
-  assert.equal(
-    getTurnActionLoggingEnabled({
-      [TURN_ACTION_LOGGING_ENABLED_ENVIRONMENT_VARIABLE]: "0",
-    }),
-    false
-  )
-  assert.equal(
-    getTurnActionLoggingEnabled({
-      [TURN_ACTION_LOGGING_ENABLED_ENVIRONMENT_VARIABLE]: "yes",
-    }),
-    true
-  )
-})
-
-test("builds turn prompt sections from feature flags", () => {
+test("builds turn prompt with optional generic rules reference", () => {
   const fullPrompt = buildSimulateTurnPrompt({
     genericGameRulesReferenceEnabled: true,
-    turnActionLoggingEnabled: true,
   })
-  assert.equal(fullPrompt.includes(TURN_ACTION_LOGGING_PROMPT_SECTION), true)
   assert.equal(fullPrompt.includes(GENERIC_GAME_RULES_REFERENCE), true)
 
   const minimalPrompt = buildSimulateTurnPrompt({
     genericGameRulesReferenceEnabled: false,
-    turnActionLoggingEnabled: false,
   })
-  assert.equal(minimalPrompt.includes(TURN_ACTION_LOGGING_PROMPT_SECTION), false)
   assert.equal(minimalPrompt.includes(GENERIC_GAME_RULES_REFERENCE), false)
 })
 
@@ -2639,13 +2586,10 @@ test("builds turn evaluation input like copy activity with prompt", () => {
         id: 2,
         sequence: 2,
         kind: "mcp_call_complete",
-        mcpFunctionName: "log_turn_action",
+        mcpFunctionName: "draw_card_from_top",
         mcpFunctionOutput: {
-          latestAction: {
-            action: "Play Command Tower.",
-            phaseChange: null,
-          },
-          actions: ["Play Command Tower."],
+          cards: ["Forest"],
+          cardsRemaining: 88,
         },
         mcpFunctionReason: null,
         reasoningDelta: null,
@@ -2662,14 +2606,11 @@ test("builds turn evaluation input like copy activity with prompt", () => {
     [
       "Full turn prompt",
       "Reason about the turn.",
-      "[called log_turn_action]",
-      `[result of log_turn_action]\n${JSON.stringify(
+      "[called draw_card_from_top]",
+      `[result of draw_card_from_top]\n${JSON.stringify(
         {
-          latestAction: {
-            action: "Play Command Tower.",
-            phaseChange: null,
-          },
-          actions: ["Play Command Tower."],
+          cards: ["Forest"],
+          cardsRemaining: 88,
         },
         null,
         2

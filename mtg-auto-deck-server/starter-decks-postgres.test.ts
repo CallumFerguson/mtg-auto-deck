@@ -173,14 +173,6 @@ type FakeMention = {
   created_at: Date
 }
 
-type FakeTurnAction = {
-  turn_llm_run_id: string
-  sequence: number
-  action: string
-  phase_change: string | null
-  created_at: Date
-}
-
 type FakeOpeningEvaluation = {
   id: number
   simulation_id: string
@@ -230,7 +222,6 @@ class FakeStarterDeckCopyClient {
   reportRuns: FakeReportRun[] = []
   chunks: FakeChunk[] = []
   mentions: FakeMention[] = []
-  turnActions: FakeTurnAction[] = []
   openingEvaluations: FakeOpeningEvaluation[] = []
   turnEvaluations: FakeTurnEvaluation[] = []
   starterDeckCopies: {
@@ -336,16 +327,6 @@ class FakeStarterDeckCopyClient {
 
       case "copy-llm-run-chunk-card-mention":
         return this.copyChunkMention<T>(values)
-
-      case "list-turn-actions":
-        return this.result<T>(
-          this.turnActions.filter((action) =>
-            getStringArray(values[0]).includes(action.turn_llm_run_id)
-          )
-        )
-
-      case "copy-turn-action":
-        return this.copyTurnAction<T>(values)
 
       case "list-opening-hand-evaluations":
         return this.result<T>(
@@ -701,18 +682,6 @@ class FakeStarterDeckCopyClient {
     return this.result<T>([])
   }
 
-  copyTurnAction<T>(values: unknown[]) {
-    this.turnActions.push({
-      action: getString(values[2]),
-      created_at: getDate(values[4]),
-      phase_change: getStringOrNull(values[3]),
-      sequence: getNumber(values[1]),
-      turn_llm_run_id: getString(values[0]),
-    })
-
-    return this.result<T>([])
-  }
-
   copyOpeningEvaluation<T>(values: unknown[]) {
     this.openingEvaluations.push({
       created_at: getDate(values[7]),
@@ -887,13 +856,6 @@ test("starter deck copy clones deck data, presets, terminal history, and remaps 
 
   assert.ok(copiedMention)
   assert.equal(copiedMention.requested_name, "Sol Ring")
-
-  const copiedAction = db.turnActions.find(
-    (action) => action.turn_llm_run_id === copiedTurnRun.llm_run_id
-  )
-
-  assert.ok(copiedAction)
-  assert.equal(copiedAction.action, "Play Command Tower.")
 
   assert.equal(
     db.openingEvaluations.some(
@@ -1189,13 +1151,6 @@ function createStarterDeckFixture() {
     resolution_status: "exact",
     resolved_name: "Sol Ring",
     source_path: "data.cards",
-  })
-  db.turnActions.push({
-    action: "Play Command Tower.",
-    created_at: now,
-    phase_change: null,
-    sequence: 1,
-    turn_llm_run_id: "run-turn",
   })
   db.openingEvaluations.push({
     created_at: now,

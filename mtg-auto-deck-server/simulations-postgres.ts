@@ -564,27 +564,6 @@ export const TURN_PHASE_CHANGES = [
 
 export type TurnPhaseChange = (typeof TURN_PHASE_CHANGES)[number]
 
-export type TurnActionLogEntry = {
-  sequence: number
-  action: string
-  phaseChange: TurnPhaseChange | null
-  createdAt: string
-}
-
-export type TurnActionLogInput = {
-  action: string
-  phaseChange?: TurnPhaseChange | null
-}
-
-export type TurnActionLogResult = {
-  simulationId: string
-  llmRunId: string
-  turnNumber: number
-  attemptNumber: number
-  loggedActions: TurnActionLogEntry[]
-  actions: TurnActionLogEntry[]
-}
-
 export type CreateSimulationInput = {
   seed: string
   llmModelPresetId: string | null
@@ -1219,33 +1198,7 @@ export async function ensureSimulationsSchema() {
     ADD COLUMN IF NOT EXISTS outdated boolean NOT NULL DEFAULT false
   `)
   await queryDatabase(`
-    CREATE TABLE IF NOT EXISTS simulation_turn_actions (
-      id bigserial PRIMARY KEY,
-
-      turn_llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
-      sequence integer NOT NULL CHECK (sequence > 0),
-      action text NOT NULL,
-      phase_change text,
-      created_at timestamptz NOT NULL DEFAULT now(),
-
-      UNIQUE (turn_llm_run_id, sequence)
-    )
-  `)
-  await queryDatabase(`
-    ALTER TABLE simulation_turn_actions
-    ADD COLUMN IF NOT EXISTS phase_change text
-  `)
-  await queryDatabase(`
-    ALTER TABLE simulation_turn_actions
-    DROP CONSTRAINT IF EXISTS simulation_turn_actions_phase_change_check
-  `)
-  await queryDatabase(`
-    ALTER TABLE simulation_turn_actions
-    ADD CONSTRAINT simulation_turn_actions_phase_change_check
-      CHECK (
-        phase_change IS NULL
-        OR phase_change IN (${TURN_PHASE_CHANGES.map(quoteSqlLiteral).join(", ")})
-      )
+    DROP TABLE IF EXISTS simulation_turn_actions
   `)
   await queryDatabase(`
     CREATE TABLE IF NOT EXISTS simulation_turn_evaluations (
@@ -1395,10 +1348,6 @@ export async function ensureSimulationsSchema() {
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS simulation_turn_llm_runs_simulation_id_turn_number_idx
       ON simulation_turn_llm_runs (simulation_id, turn_number)
-  `)
-  await queryDatabase(`
-    CREATE INDEX IF NOT EXISTS simulation_turn_actions_turn_llm_run_id_sequence_idx
-      ON simulation_turn_actions (turn_llm_run_id, sequence)
   `)
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS simulation_turn_evaluations_simulation_id_idx
@@ -2335,155 +2284,6 @@ export async function takeCardsFromSimulationLibrary(
       cardsRemaining: library.length,
     }
   })
-}
-
-export async function logTurnAction(
-  simulationId: string,
-  turnActions: readonly TurnActionLogInput[]
-): Promise<TurnActionLogResult> {
-  if (turnActions.length === 0) {
-    throw new SimulationValidationError("At least one turn action is required.")
-  }
-
-  const normalizedActions = turnActions.map((turnAction) => {
-    const trimmedAction = turnAction.action.trim()
-    const phaseChange = turnAction.phaseChange ?? null
-
-    if (!trimmedAction) {
-      throw new SimulationValidationError("Turn action is required.")
-    }
-
-    if (phaseChange !== null && !isTurnPhaseChange(phaseChange)) {
-      throw new SimulationValidationError("Turn phase change is invalid.")
-    }
-
-    return {
-      action: trimmedAction,
-      phaseChange,
-    }
-  })
-
-  return withDatabaseTransaction(async (client) => {
-    const turnRunResult = await client.query<{
-      simulation_id: string
-      llm_run_id: string
-      turn_number: number
-      attempt_number: number
-    }>(
-      `
-        SELECT
-          turn_run.simulation_id,
-          turn_run.llm_run_id,
-          turn_run.turn_number,
-          turn_run.attempt_number
-        FROM simulation_turn_llm_runs turn_run
-        JOIN llm_runs llm_run
-          ON llm_run.id = turn_run.llm_run_id
-        WHERE turn_run.simulation_id = $1
-          AND llm_run.phase = 'turn'
-          AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
-        ORDER BY turn_run.turn_number DESC, turn_run.attempt_number DESC
-        LIMIT 1
-        FOR UPDATE OF turn_run
-      `,
-      [simulationId]
-    )
-
-    if (turnRunResult.rowCount === 0) {
-      throw new SimulationValidationError(
-        "No active turn LLM run exists for this simulation."
-      )
-    }
-
-    const turnRun = turnRunResult.rows[0]
-    const sequenceResult = await client.query<{ sequence: number }>(
-      `
-        SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence
-        FROM simulation_turn_actions
-        WHERE turn_llm_run_id = $1
-      `,
-      [turnRun.llm_run_id]
-    )
-    const firstSequence = Number(sequenceResult.rows[0].sequence)
-    const loggedSequences = normalizedActions.map(
-      (_turnAction, index) => firstSequence + index
-    )
-
-    for (const [index, turnAction] of normalizedActions.entries()) {
-      await client.query(
-        `
-          INSERT INTO simulation_turn_actions (
-            turn_llm_run_id,
-            sequence,
-            action,
-            phase_change
-          )
-          VALUES ($1, $2, $3, $4)
-        `,
-        [
-          turnRun.llm_run_id,
-          loggedSequences[index],
-          turnAction.action,
-          turnAction.phaseChange,
-        ]
-      )
-    }
-
-    const actionsResult = await client.query<{
-      sequence: number
-      action: string
-      phase_change: TurnPhaseChange | null
-      created_at: Date
-    }>(
-      `
-        SELECT
-          sequence,
-          action,
-          phase_change,
-          created_at
-        FROM simulation_turn_actions
-        WHERE turn_llm_run_id = $1
-        ORDER BY sequence ASC
-      `,
-      [turnRun.llm_run_id]
-    )
-    const actions = actionsResult.rows.map(mapTurnActionLogEntry)
-    const loggedSequenceSet = new Set(loggedSequences)
-    const loggedActions = actions.filter((entry) =>
-      loggedSequenceSet.has(entry.sequence)
-    )
-
-    if (loggedActions.length !== normalizedActions.length) {
-      throw new SimulationValidationError("Logged turn actions not found.")
-    }
-
-    return {
-      simulationId: turnRun.simulation_id,
-      llmRunId: turnRun.llm_run_id,
-      turnNumber: turnRun.turn_number,
-      attemptNumber: turnRun.attempt_number,
-      loggedActions,
-      actions,
-    }
-  })
-}
-
-function mapTurnActionLogEntry(row: {
-  sequence: number
-  action: string
-  phase_change: TurnPhaseChange | null
-  created_at: Date
-}): TurnActionLogEntry {
-  return {
-    sequence: row.sequence,
-    action: row.action,
-    phaseChange: row.phase_change,
-    createdAt: row.created_at.toISOString(),
-  }
-}
-
-function isTurnPhaseChange(value: string): value is TurnPhaseChange {
-  return TURN_PHASE_CHANGES.includes(value as TurnPhaseChange)
 }
 
 export async function createOpeningHandLlmRun(
@@ -3612,10 +3412,7 @@ export function extractMcpFunctionReasonFromChunk(
     "kind" | "mcpFunctionName" | "mcpFunctionOutput"
   >
 ) {
-  if (
-    chunk.kind !== "mcp_call_complete" ||
-    chunk.mcpFunctionName === "log_turn_action"
-  ) {
+  if (chunk.kind !== "mcp_call_complete") {
     return null
   }
 

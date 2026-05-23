@@ -6,8 +6,6 @@ import {
   formatSimulationRunClipboardText,
   getSimulationRunActivityBlocks,
   getSimulationRunActiveToolCallName,
-  getLoggedTurnAction,
-  getLoggedTurnActions,
   getSimulationResultEntries,
   getSimulationResultChunks,
   getSimulationRunThinkingPreview,
@@ -962,7 +960,7 @@ test("clears active tool call name once a newer chunk arrives", () => {
   assert.equal(activeToolCallName, null)
 })
 
-test("combines adjacent completed regular turn action log entries after hiding tool starts", () => {
+test("keeps legacy turn action log chunks as regular result chunks", () => {
   const resultEntries = getSimulationResultEntries([
     createChunk({
       id: 1,
@@ -985,8 +983,8 @@ test("combines adjacent completed regular turn action log entries after hiding t
     }),
     createChunk({
       id: 3,
-      kind: "mcp_call_start",
-      mcpFunctionName: "log_turn_action",
+      kind: "mcp_call_complete",
+      mcpFunctionName: "draw_card_from_top",
       sequence: 3,
     }),
     createChunk({
@@ -1004,359 +1002,17 @@ test("combines adjacent completed regular turn action log entries after hiding t
         ],
       },
       sequence: 4,
-    }),
-  ])
-
-  assert.equal(resultEntries.length, 1)
-  assert.equal(resultEntries[0]?.type, "turn_action_log")
-  assert.deepEqual(
-    resultEntries[0]?.type === "turn_action_log"
-      ? resultEntries[0].actions.map((action) => action.action)
-      : [],
-    ["Tap Command Tower for one mana.", "Cast Sol Ring using one mana."]
-  )
-  assert.deepEqual(
-    resultEntries[0]?.type === "turn_action_log"
-      ? resultEntries[0].chunks.map((chunk) => chunk.sequence)
-      : [],
-    [2, 4]
-  )
-})
-
-test("shows multiple regular actions from one completed turn action log call", () => {
-  const resultEntries = getSimulationResultEntries([
-    createChunk({
-      id: 1,
-      kind: "mcp_call_complete",
-      mcpFunctionName: "log_turn_action",
-      mcpFunctionOutput: {
-        loggedActions: [
-          {
-            action: "Tap Command Tower for {G}.",
-            phaseChange: null,
-          },
-          {
-            action: "Cast Llanowar Elves using {G}.",
-            phaseChange: null,
-          },
-        ],
-        actions: [
-          "Tap Command Tower for {G}.",
-          "Cast Llanowar Elves using {G}.",
-        ],
-      },
-      sequence: 1,
-    }),
-  ])
-
-  assert.equal(resultEntries.length, 1)
-  assert.deepEqual(
-    resultEntries[0]?.type === "turn_action_log"
-      ? resultEntries[0].actions.map((action) => action.action)
-      : [],
-    ["Tap Command Tower for {G}.", "Cast Llanowar Elves using {G}."]
-  )
-})
-
-test("splits mixed batched turn action logs around phase changes", () => {
-  const resultEntries = getSimulationResultEntries([
-    createChunk({
-      id: 1,
-      kind: "mcp_call_complete",
-      mcpFunctionName: "log_turn_action",
-      mcpFunctionOutput: {
-        loggedActions: [
-          {
-            action: "Cast Sol Ring using {1}.",
-            phaseChange: null,
-          },
-          {
-            action: "Move to combat.",
-            phaseChange: "combat",
-          },
-          {
-            action: "Attack opponent 1 with the commander.",
-            phaseChange: null,
-          },
-        ],
-        actions: [
-          "Cast Sol Ring using {1}.",
-          "Move to combat.",
-          "Attack opponent 1 with the commander.",
-        ],
-      },
-      sequence: 1,
-    }),
-  ])
-
-  assert.deepEqual(
-    resultEntries.map((entry) =>
-      entry.type === "turn_action_log"
-        ? entry.actions.map((action) => action.action)
-        : []
-    ),
-    [
-      ["Cast Sol Ring using {1}."],
-      ["Move to combat."],
-      ["Attack opponent 1 with the commander."],
-    ]
-  )
-  assert.deepEqual(
-    resultEntries.map((entry) =>
-      entry.type === "turn_action_log"
-        ? entry.actions.map((action) => action.phaseChange)
-        : []
-    ),
-    [[null], ["combat"], [null]]
-  )
-})
-
-test("keeps turn action log groups separated by other visible events", () => {
-  const resultEntries = getSimulationResultEntries([
-    createChunk({
-      id: 1,
-      kind: "mcp_call_complete",
-      mcpFunctionName: "log_turn_action",
-      mcpFunctionOutput: {
-        latestAction: {
-          action: "Draw a card.",
-          phaseChange: null,
-        },
-        actions: ["Draw a card."],
-      },
-      sequence: 1,
-    }),
-    createChunk({
-      id: 2,
-      kind: "mcp_call_complete",
-      mcpFunctionName: "draw_card_from_top",
-      sequence: 2,
-    }),
-    createChunk({
-      id: 3,
-      kind: "mcp_call_complete",
-      mcpFunctionName: "log_turn_action",
-      mcpFunctionOutput: JSON.stringify({
-        latestAction: {
-          action: "Play a land.",
-          phaseChange: null,
-        },
-        actions: ["Draw a card.", "Play a land."],
-      }),
-      sequence: 3,
     }),
   ])
 
   assert.deepEqual(
     resultEntries.map((entry) => entry.type),
-    ["turn_action_log", "chunk", "turn_action_log"]
+    ["chunk", "chunk", "chunk"]
   )
   assert.deepEqual(
-    resultEntries.flatMap((entry) =>
-      entry.type === "turn_action_log"
-        ? entry.actions.map((action) => action.action)
-        : []
-    ),
-    ["Draw a card.", "Play a land."]
+    resultEntries.map((entry) => entry.chunk.sequence),
+    [2, 3, 4]
   )
-})
-
-test("keeps phase change logs separate from regular turn action groups", () => {
-  const resultEntries = getSimulationResultEntries([
-    createChunk({
-      id: 1,
-      kind: "mcp_call_complete",
-      mcpFunctionName: "log_turn_action",
-      mcpFunctionOutput: {
-        latestAction: {
-          action: "Tap Command Tower for one mana.",
-          phaseChange: null,
-        },
-        actions: ["Tap Command Tower for one mana."],
-      },
-      sequence: 1,
-    }),
-    createChunk({
-      id: 2,
-      kind: "mcp_call_complete",
-      mcpFunctionName: "log_turn_action",
-      mcpFunctionOutput: {
-        latestAction: {
-          action: "Cast Sol Ring using one mana.",
-          phaseChange: null,
-        },
-        actions: [
-          "Tap Command Tower for one mana.",
-          "Cast Sol Ring using one mana.",
-        ],
-      },
-      sequence: 2,
-    }),
-    createChunk({
-      id: 3,
-      kind: "mcp_call_complete",
-      mcpFunctionName: "log_turn_action",
-      mcpFunctionOutput: {
-        latestAction: {
-          action: "Move to combat.",
-          phaseChange: "combat",
-        },
-        actions: [
-          "Tap Command Tower for one mana.",
-          "Cast Sol Ring using one mana.",
-          "Move to combat.",
-        ],
-      },
-      sequence: 3,
-    }),
-    createChunk({
-      id: 4,
-      kind: "mcp_call_complete",
-      mcpFunctionName: "log_turn_action",
-      mcpFunctionOutput: {
-        latestAction: {
-          action: "Attack opponent 1 with the commander.",
-          phaseChange: null,
-        },
-        actions: [
-          "Tap Command Tower for one mana.",
-          "Cast Sol Ring using one mana.",
-          "Move to combat.",
-          "Attack opponent 1 with the commander.",
-        ],
-      },
-      sequence: 4,
-    }),
-  ])
-
-  assert.equal(resultEntries.length, 3)
-  assert.deepEqual(
-    resultEntries.map((entry) =>
-      entry.type === "turn_action_log"
-        ? entry.actions.map((action) => action.action)
-        : []
-    ),
-    [
-      ["Tap Command Tower for one mana.", "Cast Sol Ring using one mana."],
-      ["Move to combat."],
-      ["Attack opponent 1 with the commander."],
-    ]
-  )
-  assert.deepEqual(
-    resultEntries.map((entry) =>
-      entry.type === "turn_action_log"
-        ? entry.actions.map((action) => action.phaseChange)
-        : []
-    ),
-    [[null, null], ["combat"], [null]]
-  )
-})
-
-test("keeps consecutive phase change logs as standalone entries", () => {
-  const resultEntries = getSimulationResultEntries([
-    createChunk({
-      id: 1,
-      kind: "mcp_call_complete",
-      mcpFunctionName: "log_turn_action",
-      mcpFunctionOutput: {
-        latestAction: {
-          action: "Move to untap.",
-          phaseChange: "untap",
-        },
-        actions: ["Move to untap."],
-      },
-      sequence: 1,
-    }),
-    createChunk({
-      id: 2,
-      kind: "mcp_call_complete",
-      mcpFunctionName: "log_turn_action",
-      mcpFunctionOutput: {
-        latestAction: {
-          action: "Move to upkeep.",
-          phaseChange: "upkeep",
-        },
-        actions: ["Move to untap.", "Move to upkeep."],
-      },
-      sequence: 2,
-    }),
-  ])
-
-  assert.equal(resultEntries.length, 2)
-  assert.deepEqual(
-    resultEntries.map((entry) =>
-      entry.type === "turn_action_log"
-        ? entry.actions.map((action) => action.phaseChange)
-        : []
-    ),
-    [["untap"], ["upkeep"]]
-  )
-  assert.deepEqual(
-    resultEntries.map((entry) =>
-      entry.type === "turn_action_log"
-        ? entry.chunks.map((chunk) => chunk.sequence)
-        : []
-    ),
-    [[1], [2]]
-  )
-})
-
-test("parses structured turn action log output", () => {
-  const loggedAction = getLoggedTurnAction(
-    createChunk({
-      id: 1,
-      kind: "mcp_call_complete",
-      mcpFunctionName: "log_turn_action",
-      mcpFunctionOutput: {
-        latestAction: {
-          action: "Move to postcombat main.",
-          phaseChange: "postcombat_main",
-        },
-        actions: ["Move to postcombat main."],
-      },
-      sequence: 1,
-    })
-  )
-
-  assert.deepEqual(loggedAction, {
-    action: "Move to postcombat main.",
-    phaseChange: "postcombat_main",
-  })
-})
-
-test("parses batched structured turn action log output", () => {
-  const loggedActions = getLoggedTurnActions(
-    createChunk({
-      id: 1,
-      kind: "mcp_call_complete",
-      mcpFunctionName: "log_turn_action",
-      mcpFunctionOutput: {
-        loggedActions: [
-          {
-            action: "Draw a card.",
-            phaseChange: null,
-          },
-          {
-            action: "Move to precombat main.",
-            phaseChange: "precombat_main",
-          },
-        ],
-        actions: ["Draw a card.", "Move to precombat main."],
-      },
-      sequence: 1,
-    })
-  )
-
-  assert.deepEqual(loggedActions, [
-    {
-      action: "Draw a card.",
-      phaseChange: null,
-    },
-    {
-      action: "Move to precombat main.",
-      phaseChange: "precombat_main",
-    },
-  ])
 })
 
 test("omits reasoning and output lifecycle chunks and deltas from result chunks", () => {
@@ -1985,7 +1641,7 @@ test("formats known completed randomizer events with result details", () => {
   )
 })
 
-test("formats completed turn action log labels with batched output", () => {
+test("treats legacy turn action logging as an unknown diagnostic tool", () => {
   assert.equal(
     getKnownSimulationResultToolLabelForChunk({
       chunk: createChunk({
@@ -2005,35 +1661,7 @@ test("formats completed turn action log labels with batched output", () => {
       }),
       state: "completed",
     }),
-    "Logged turn action: Draw a card."
-  )
-  assert.equal(
-    getKnownSimulationResultToolLabelForChunk({
-      chunk: createChunk({
-        id: 2,
-        kind: "mcp_call_complete",
-        mcpFunctionName: "log_turn_action",
-        mcpFunctionOutput: {
-          loggedActions: [
-            {
-              action: "Tap Command Tower for {G}.",
-              phaseChange: null,
-            },
-            {
-              action: "Cast Llanowar Elves using {G}.",
-              phaseChange: null,
-            },
-          ],
-          actions: [
-            "Tap Command Tower for {G}.",
-            "Cast Llanowar Elves using {G}.",
-          ],
-        },
-        sequence: 2,
-      }),
-      state: "completed",
-    }),
-    "Logged 2 turn actions: Tap Command Tower for {G}.; Cast Llanowar Elves using {G}."
+    null
   )
 })
 
@@ -2111,11 +1739,11 @@ test("extracts MCP function reasons for simulation result tool events", () => {
         id: 3,
         kind: "mcp_call_complete",
         mcpFunctionName: "log_turn_action",
-        mcpFunctionReason: "Do not show this.",
+        mcpFunctionReason: "Legacy reason.",
         sequence: 3,
       }),
     }),
-    null
+    "Legacy reason."
   )
 })
 
@@ -2247,9 +1875,7 @@ function createTurnGameState() {
   }
 }
 
-function createTurnActions(
-  overrides: Partial<Record<string, string[]>> = {}
-) {
+function createTurnActions(overrides: Partial<Record<string, string[]>> = {}) {
   return {
     untap: [],
     upkeep: [],
