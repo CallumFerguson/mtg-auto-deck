@@ -100,6 +100,7 @@ import {
   parseTimestampMs,
 } from "@/lib/simulation-run-timing"
 import {
+  TURN_PHASE_CHANGES,
   formatSimulationRunClipboardText,
   getLoggedTurnAction,
   getLoggedTurnActions,
@@ -3930,14 +3931,9 @@ function SimulationResultsPanel({
               !getSimulationFinalParsedOutput(run) ? (
                 <div className="grid gap-2">
                   {hasTurnActions(run.turnActions) ? (
-                    <details className={simulationResultChunkSurfaceClassName}>
-                      <summary className={simulationResultChunkSummaryClassName}>
-                        Turn actions
-                      </summary>
-                      <pre className={simulationResultChunkPreClassName}>
-                        {formatGameStateJson(run.turnActions)}
-                      </pre>
-                    </details>
+                    <SimulationTurnActionsBlock
+                      turnActions={run.turnActions}
+                    />
                   ) : null}
                   <details className={simulationResultChunkSurfaceClassName}>
                     <summary className={simulationResultChunkSummaryClassName}>
@@ -5497,14 +5493,7 @@ function SimulationFinalOutputBlock({
         />
       ) : finalOutput.type === "turn" ? (
         <Fragment>
-          <details className={simulationResultChunkSurfaceClassName}>
-            <summary className={simulationResultChunkSummaryClassName}>
-              Turn actions
-            </summary>
-            <pre className={simulationResultChunkPreClassName}>
-              {formatGameStateJson(finalOutput.turnActions)}
-            </pre>
-          </details>
+          <SimulationTurnActionsBlock turnActions={finalOutput.turnActions} />
           <details className={simulationResultChunkSurfaceClassName}>
             <summary className={simulationResultChunkSummaryClassName}>
               Game state
@@ -5593,6 +5582,49 @@ function SimulationOpeningHandCardsBlock({
         <SimulationResultCardImageLinks mentions={mentions} />
       </div>
     </div>
+  )
+}
+
+function SimulationTurnActionsBlock({
+  turnActions,
+}: {
+  turnActions: Record<TurnPhaseChange, string[]>
+}) {
+  const phaseEntries = TURN_PHASE_CHANGES.map((phaseChange) => ({
+    phaseChange,
+    actions: turnActions[phaseChange].map((action) => ({
+      action,
+      phaseChange: null,
+    })),
+  })).filter((entry) => entry.actions.length > 0)
+
+  return (
+    <section className="grid gap-2">
+      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        Turn actions
+      </p>
+      {phaseEntries.length > 0 ? (
+        <div className="grid gap-2">
+          {phaseEntries.map(({ actions, phaseChange }) => (
+            <Fragment key={phaseChange}>
+              <SimulationResultPhaseChangeEvent
+                action={{ action: "", phaseChange }}
+              />
+              <SimulationResultLoggedTurnActionEvent
+                actions={actions}
+                chunks={[]}
+              />
+            </Fragment>
+          ))}
+        </div>
+      ) : (
+        <div className={`p-3 ${simulationResultChunkSurfaceClassName}`}>
+          <p className="text-sm leading-6 text-muted-foreground">
+            No turn actions were reported.
+          </p>
+        </div>
+      )}
+    </section>
   )
 }
 
