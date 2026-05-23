@@ -86,6 +86,7 @@ import { getDeckSimulationPath } from "@/lib/navigation"
 import {
   getSimulationFinalParsedOutput,
   getSimulationFinalParsedOutputFromPayload,
+  hasTurnActions,
   type ParsedSimulationFinalOutput,
 } from "@/lib/simulation-final-output"
 import {
@@ -419,7 +420,9 @@ function isCountedTurnRun(run: SimulationResultsInfo["turnLlmRuns"][number]) {
     (isActiveLlmRunStatus(run.status) ||
       run.status === "failed" ||
       run.status === "cancelled" ||
-      (run.status === "completed" && hasGameState(run.gameState)))
+      (run.status === "completed" &&
+        hasGameState(run.gameState) &&
+        hasTurnActions(run.turnActions)))
   )
 }
 
@@ -435,7 +438,8 @@ function isSuccessfulTurnRun(
   return (
     run.status === "completed" &&
     run.outdated !== true &&
-    hasGameState(run.gameState)
+    hasGameState(run.gameState) &&
+    hasTurnActions(run.turnActions)
   )
 }
 
@@ -511,6 +515,7 @@ function canGenerateReportFromVisibleResults(
       turnFinalOutput?.type !== "turn" ||
       !hasGameState(turnFinalOutput.gameState) ||
       !hasGameState(run.gameState) ||
+      !hasTurnActions(run.turnActions) ||
       !hasLoggedTurnAction(run)
     ) {
       return false
@@ -3923,14 +3928,26 @@ function SimulationResultsPanel({
 
               {hasGameState(run.gameState) &&
               !getSimulationFinalParsedOutput(run) ? (
-                <details className={simulationResultChunkSurfaceClassName}>
-                  <summary className={simulationResultChunkSummaryClassName}>
-                    Game state
-                  </summary>
-                  <pre className={simulationResultChunkPreClassName}>
-                    {formatGameStateJson(run.gameState)}
-                  </pre>
-                </details>
+                <div className="grid gap-2">
+                  {hasTurnActions(run.turnActions) ? (
+                    <details className={simulationResultChunkSurfaceClassName}>
+                      <summary className={simulationResultChunkSummaryClassName}>
+                        Turn actions
+                      </summary>
+                      <pre className={simulationResultChunkPreClassName}>
+                        {formatGameStateJson(run.turnActions)}
+                      </pre>
+                    </details>
+                  ) : null}
+                  <details className={simulationResultChunkSurfaceClassName}>
+                    <summary className={simulationResultChunkSummaryClassName}>
+                      Game state
+                    </summary>
+                    <pre className={simulationResultChunkPreClassName}>
+                      {formatGameStateJson(run.gameState)}
+                    </pre>
+                  </details>
+                </div>
               ) : null}
 
               {run.resultEntries.length > 0 ||
@@ -5479,14 +5496,24 @@ function SimulationFinalOutputBlock({
           )}
         />
       ) : finalOutput.type === "turn" ? (
-        <details className={simulationResultChunkSurfaceClassName}>
-          <summary className={simulationResultChunkSummaryClassName}>
-            Game state
-          </summary>
-          <pre className={simulationResultChunkPreClassName}>
-            {formatGameStateJson(finalOutput.gameState)}
-          </pre>
-        </details>
+        <Fragment>
+          <details className={simulationResultChunkSurfaceClassName}>
+            <summary className={simulationResultChunkSummaryClassName}>
+              Turn actions
+            </summary>
+            <pre className={simulationResultChunkPreClassName}>
+              {formatGameStateJson(finalOutput.turnActions)}
+            </pre>
+          </details>
+          <details className={simulationResultChunkSurfaceClassName}>
+            <summary className={simulationResultChunkSummaryClassName}>
+              Game state
+            </summary>
+            <pre className={simulationResultChunkPreClassName}>
+              {formatGameStateJson(finalOutput.gameState)}
+            </pre>
+          </details>
+        </Fragment>
       ) : (
         <SimulationReportMarkdown report={finalOutput.report} />
       )}

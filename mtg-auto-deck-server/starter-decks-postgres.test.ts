@@ -128,6 +128,7 @@ type FakeTurnRun = {
   llm_run_id: string
   turn_number: number
   attempt_number: number
+  turn_actions: Record<string, string[]> | null
   game_state: Record<string, unknown> | null
   outdated: boolean
   library_snapshot: string[] | null
@@ -627,13 +628,17 @@ class FakeStarterDeckCopyClient {
   copyTurnRun<T>(values: unknown[]) {
     this.turnRuns.push({
       attempt_number: getNumber(values[3]),
-      created_at: getDate(values[8]),
-      game_state: getJsonObjectOrNull(values[4]),
-      library_snapshot: getJsonStringArrayOrNull(values[6]),
+      created_at: getDate(values[9]),
+      game_state: getJsonObjectOrNull(values[5]),
+      library_snapshot: getJsonStringArrayOrNull(values[7]),
       llm_run_id: getString(values[1]),
-      outdated: getBoolean(values[5]),
-      random_state_snapshot: getNumberOrNull(values[7]),
+      outdated: getBoolean(values[6]),
+      random_state_snapshot: getNumberOrNull(values[8]),
       simulation_id: getString(values[0]),
+      turn_actions: getJsonObjectOrNull(values[4]) as Record<
+        string,
+        string[]
+      > | null,
       turn_number: getNumber(values[2]),
     })
 
@@ -858,6 +863,15 @@ test("starter deck copy clones deck data, presets, terminal history, and remaps 
   assert.equal(copiedOpeningRun.llm_run_id.startsWith("copied-run-"), true)
   assert.equal(copiedTurnRun.llm_run_id.startsWith("copied-run-"), true)
   assert.equal(copiedReportRun.llm_run_id.startsWith("copied-run-"), true)
+  assert.deepEqual(copiedTurnRun.turn_actions, {
+    untap: [],
+    upkeep: [],
+    draw: ["Draw *Sol Ring*."],
+    precombat_main: ["Play *Command Tower*."],
+    combat: [],
+    postcombat_main: [],
+    end_step_cleanup: [],
+  })
 
   const copiedChunk = db.chunks.find(
     (chunk) => chunk.llm_run_id === copiedOpeningRun.llm_run_id
@@ -1121,6 +1135,15 @@ function createStarterDeckFixture() {
   db.turnRuns.push({
     attempt_number: 1,
     created_at: now,
+    turn_actions: {
+      untap: [],
+      upkeep: [],
+      draw: ["Draw *Sol Ring*."],
+      precombat_main: ["Play *Command Tower*."],
+      combat: [],
+      postcombat_main: [],
+      end_step_cleanup: [],
+    },
     game_state: {
       zones: {
         battlefield: [{ name: "Command Tower", tapped: false, notes: null }],

@@ -122,6 +122,7 @@ type TurnLlmRunRow = {
   llm_run_id: string
   turn_number: number
   attempt_number: number
+  turn_actions: unknown | null
   game_state: unknown | null
   outdated: boolean
   library_snapshot: unknown | null
@@ -1112,6 +1113,7 @@ async function copyTurnLlmRuns({
         llm_run_id,
         turn_number,
         attempt_number,
+        turn_actions,
         game_state,
         outdated,
         library_snapshot,
@@ -1133,19 +1135,21 @@ async function copyTurnLlmRuns({
           llm_run_id,
           turn_number,
           attempt_number,
+          turn_actions,
           game_state,
           outdated,
           library_snapshot,
           random_state_snapshot,
           created_at
         )
-        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8, $9)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8::jsonb, $9, $10)
       `,
       [
         copiedSimulationId,
         getMappedId(llmRunIdMap, run.llm_run_id, "turn LLM run"),
         run.turn_number,
         run.attempt_number,
+        toNullableJsonParameter(run.turn_actions),
         toNullableJsonParameter(run.game_state),
         run.outdated,
         toNullableJsonParameter(run.library_snapshot),

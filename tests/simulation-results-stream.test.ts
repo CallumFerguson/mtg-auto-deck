@@ -450,6 +450,7 @@ test("does not parse raw output deltas as final output", () => {
 
 test("reads turn final output from final parsed output chunks", () => {
   const gameState = createTurnGameState()
+  const turnActions = createTurnActions()
   const parsedOutput = getSimulationFinalParsedOutput(
     createRun({
       llmRunId: "turn-run",
@@ -461,6 +462,7 @@ test("reads turn final output from final parsed output chunks", () => {
           sequence: 1,
           kind: "final_parsed_output",
           payload: {
+            turnActions,
             gameState,
             error: null,
           },
@@ -471,6 +473,7 @@ test("reads turn final output from final parsed output chunks", () => {
 
   assert.deepEqual(parsedOutput, {
     type: "turn",
+    turnActions,
     gameState,
   })
 })
@@ -487,7 +490,58 @@ test("ignores turn final output with string game state", () => {
           sequence: 1,
           kind: "final_parsed_output",
           payload: {
+            turnActions: createTurnActions(),
             gameState: "Hand: Forest\nBattlefield: Island",
+            error: null,
+          },
+        }),
+      ],
+    })
+  )
+
+  assert.equal(parsedOutput, null)
+})
+
+test("ignores turn final output without turn actions", () => {
+  const parsedOutput = getSimulationFinalParsedOutput(
+    createRun({
+      llmRunId: "turn-run",
+      phase: "turn",
+      turnNumber: 1,
+      chunks: [
+        createChunk({
+          id: 1,
+          sequence: 1,
+          kind: "final_parsed_output",
+          payload: {
+            gameState: createTurnGameState(),
+            error: null,
+          },
+        }),
+      ],
+    })
+  )
+
+  assert.equal(parsedOutput, null)
+})
+
+test("ignores turn final output with invalid turn actions", () => {
+  const parsedOutput = getSimulationFinalParsedOutput(
+    createRun({
+      llmRunId: "turn-run",
+      phase: "turn",
+      turnNumber: 1,
+      chunks: [
+        createChunk({
+          id: 1,
+          sequence: 1,
+          kind: "final_parsed_output",
+          payload: {
+            turnActions: {
+              ...createTurnActions(),
+              precombat_main: [1],
+            },
+            gameState: createTurnGameState(),
             error: null,
           },
         }),
@@ -509,6 +563,7 @@ test("ignores final parsed success payloads without explicit error null", () => 
           sequence: 1,
           kind: "final_parsed_output",
           payload: {
+            turnActions: createTurnActions(),
             gameState: createTurnGameState(),
           },
         }),
@@ -2189,6 +2244,21 @@ function createTurnGameState() {
       commanderDamage: {},
     },
     other: "",
+  }
+}
+
+function createTurnActions(
+  overrides: Partial<Record<string, string[]>> = {}
+) {
+  return {
+    untap: [],
+    upkeep: [],
+    draw: ["Draw *Forest*."],
+    precombat_main: ["Play *Island*."],
+    combat: [],
+    postcombat_main: [],
+    end_step_cleanup: [],
+    ...overrides,
   }
 }
 

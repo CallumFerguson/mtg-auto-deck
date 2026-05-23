@@ -4587,6 +4587,7 @@ async function runTurnLlmRun({
       llmRunId,
       gameState: parsedTurn.gameState,
       responseMetadata: streamResult.responseMetadata,
+      turnActions: parsedTurn.turnActions,
       usage: streamResult.usage,
     })
     runtime.status = "completed"

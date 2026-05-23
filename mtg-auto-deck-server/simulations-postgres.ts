@@ -416,6 +416,7 @@ export type SimulationDebugLlmRun = {
   failedAt: string | null
   cancelledAt: string | null
   turnNumber?: number
+  turnActions?: unknown
   gameState?: unknown
   report?: string
   outdated?: boolean
@@ -1176,6 +1177,7 @@ export async function ensureSimulationsSchema() {
       turn_number integer NOT NULL CHECK (turn_number > 0),
       attempt_number integer NOT NULL CHECK (attempt_number > 0),
       game_state jsonb,
+      turn_actions jsonb,
       outdated boolean NOT NULL DEFAULT false,
       library_snapshot jsonb CHECK (library_snapshot IS NULL OR jsonb_typeof(library_snapshot) = 'array'),
       random_state_snapshot bigint,
@@ -1189,6 +1191,10 @@ export async function ensureSimulationsSchema() {
     ALTER TABLE simulation_turn_llm_runs
     ADD COLUMN IF NOT EXISTS game_state jsonb
   `)
+  await queryDatabase(`
+    ALTER TABLE simulation_turn_llm_runs
+    ADD COLUMN IF NOT EXISTS turn_actions jsonb
+  `)
   await ensureSimulationTurnGameStateJsonbColumn()
   await queryDatabase(`
     ALTER TABLE simulation_turn_llm_runs
@@ -1198,6 +1204,15 @@ export async function ensureSimulationsSchema() {
     ALTER TABLE simulation_turn_llm_runs
     ADD CONSTRAINT simulation_turn_llm_runs_game_state_object_check
       CHECK (game_state IS NULL OR jsonb_typeof(game_state) = 'object')
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulation_turn_llm_runs
+    DROP CONSTRAINT IF EXISTS simulation_turn_llm_runs_turn_actions_object_check
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulation_turn_llm_runs
+    ADD CONSTRAINT simulation_turn_llm_runs_turn_actions_object_check
+      CHECK (turn_actions IS NULL OR jsonb_typeof(turn_actions) = 'object')
   `)
   await queryDatabase(`
     ALTER TABLE simulation_turn_llm_runs
@@ -1509,6 +1524,7 @@ const SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL = `
         OR (
           llm_run.status = 'completed'
           AND turn_run.game_state IS NOT NULL
+          AND turn_run.turn_actions IS NOT NULL
         )
       )
   ) + (
@@ -4504,11 +4520,13 @@ export async function completeTurnLlmRun({
   gameState,
   llmRunId,
   responseMetadata,
+  turnActions,
   usage,
 }: {
   llmRunId: string
   gameState: unknown
   responseMetadata: unknown
+  turnActions: unknown
   usage: unknown
 }): Promise<SimulationLlmCompletionResult> {
   return withDatabaseTransaction(async (client) => {
@@ -4574,13 +4592,15 @@ export async function completeTurnLlmRun({
       `
         UPDATE simulation_turn_llm_runs
         SET game_state = $2::jsonb,
-            library_snapshot = $3::jsonb,
-            random_state_snapshot = $4
+            turn_actions = $3::jsonb,
+            library_snapshot = $4::jsonb,
+            random_state_snapshot = $5
         WHERE llm_run_id = $1
       `,
       [
         llmRunId,
         JSON.stringify(gameState),
+        JSON.stringify(turnActions),
         JSON.stringify(librarySnapshot),
         snapshot.random_state,
       ]
@@ -5479,7 +5499,7 @@ export async function getSimulationDebugInfo(
     simulationId,
     tableName: "simulation_opening_hand_llm_runs",
     selectColumns:
-      "run.attempt_number, NULL::integer AS turn_number, NULL::jsonb AS game_state, NULL::text AS report, NULL::boolean AS outdated, run.opening_hand_is_valid",
+      "run.attempt_number, NULL::integer AS turn_number, NULL::jsonb AS turn_actions, NULL::jsonb AS game_state, NULL::text AS report, NULL::boolean AS outdated, run.opening_hand_is_valid",
     orderBy: "run.attempt_number ASC",
   })
   await attachOpeningHandEvaluations(openingHandRuns)
@@ -5487,7 +5507,7 @@ export async function getSimulationDebugInfo(
     simulationId,
     tableName: "simulation_turn_llm_runs",
     selectColumns:
-      "run.attempt_number, run.turn_number, run.game_state, NULL::text AS report, run.outdated, NULL::boolean AS opening_hand_is_valid",
+      "run.attempt_number, run.turn_number, run.turn_actions, run.game_state, NULL::text AS report, run.outdated, NULL::boolean AS opening_hand_is_valid",
     orderBy: "run.turn_number ASC, run.attempt_number ASC",
   })
   await attachTurnEvaluations(turnRuns)
@@ -5495,7 +5515,7 @@ export async function getSimulationDebugInfo(
     simulationId,
     tableName: "simulation_report_llm_runs",
     selectColumns:
-      "run.attempt_number, NULL::integer AS turn_number, NULL::jsonb AS game_state, run.report, run.outdated, NULL::boolean AS opening_hand_is_valid",
+      "run.attempt_number, NULL::integer AS turn_number, NULL::jsonb AS turn_actions, NULL::jsonb AS game_state, run.report, run.outdated, NULL::boolean AS opening_hand_is_valid",
     orderBy: "run.attempt_number ASC",
   })
 
@@ -5797,7 +5817,7 @@ export async function getSimulationResultsInfo(
     simulationId,
     tableName: "simulation_opening_hand_llm_runs",
     selectColumns:
-      "run.attempt_number, NULL::integer AS turn_number, NULL::jsonb AS game_state, NULL::text AS report, NULL::boolean AS outdated, run.opening_hand_is_valid",
+      "run.attempt_number, NULL::integer AS turn_number, NULL::jsonb AS turn_actions, NULL::jsonb AS game_state, NULL::text AS report, NULL::boolean AS outdated, run.opening_hand_is_valid",
     orderBy: "run.attempt_number ASC",
     excludeChunkKinds: SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
     additionalWhereSql: `
@@ -5813,7 +5833,7 @@ export async function getSimulationResultsInfo(
     simulationId,
     tableName: "simulation_turn_llm_runs",
     selectColumns:
-      "run.attempt_number, run.turn_number, run.game_state, NULL::text AS report, run.outdated, NULL::boolean AS opening_hand_is_valid",
+      "run.attempt_number, run.turn_number, run.turn_actions, run.game_state, NULL::text AS report, run.outdated, NULL::boolean AS opening_hand_is_valid",
     orderBy: "run.turn_number ASC, run.attempt_number ASC",
     excludeChunkKinds: SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
     additionalWhereSql: "run.outdated = false",
@@ -5823,7 +5843,7 @@ export async function getSimulationResultsInfo(
     simulationId,
     tableName: "simulation_report_llm_runs",
     selectColumns:
-      "run.attempt_number, NULL::integer AS turn_number, NULL::jsonb AS game_state, run.report, run.outdated, NULL::boolean AS opening_hand_is_valid",
+      "run.attempt_number, NULL::integer AS turn_number, NULL::jsonb AS turn_actions, NULL::jsonb AS game_state, run.report, run.outdated, NULL::boolean AS opening_hand_is_valid",
     orderBy: "run.attempt_number ASC",
     excludeChunkKinds: SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
     additionalWhereSql: "run.outdated = false",
@@ -6328,13 +6348,17 @@ async function getReportTurnPromptData(
 
     if (!finalOutput) {
       throw new SimulationValidationError(
-        `The current turn ${run.turnNumber} LLM run is missing its final game state.`
+        `The current turn ${run.turnNumber} LLM run is missing its final turn output.`
       )
     }
 
-    if (!isJsonObject(run.gameState) || !isJsonObject(finalOutput.gameState)) {
+    if (
+      !isJsonObject(run.gameState) ||
+      !isJsonObject(finalOutput.gameState) ||
+      !isTurnActionsObject(run.turnActions)
+    ) {
       throw new SimulationValidationError(
-        `The current turn ${run.turnNumber} LLM run is missing its game state.`
+        `The current turn ${run.turnNumber} LLM run is missing valid turn output.`
       )
     }
 
@@ -6401,13 +6425,19 @@ function getOpeningHandFinalOutput(run: SimulationDebugLlmRun) {
 function getTurnFinalOutput(run: SimulationDebugLlmRun) {
   const payload = getFinalParsedOutputPayload(run)
   const gameState = payload.gameState
+  const turnActions = payload.turnActions
 
-  if (payload.error !== null || !isJsonObject(gameState)) {
+  if (
+    payload.error !== null ||
+    !isJsonObject(gameState) ||
+    !isTurnActionsObject(turnActions)
+  ) {
     return null
   }
 
   return {
     gameState,
+    turnActions,
   }
 }
 
@@ -6439,6 +6469,7 @@ type SimulationDebugLlmRunRow = {
   cancelled_at: Date | null
   attempt_number: number
   turn_number: number | null
+  turn_actions: unknown | null
   game_state: unknown | null
   report: string | null
   outdated: boolean | null
@@ -6599,6 +6630,10 @@ async function getSimulationDebugLlmRuns({
 
       if (row.turn_number !== null) {
         run.turnNumber = row.turn_number
+      }
+
+      if (row.turn_actions !== null) {
+        run.turnActions = row.turn_actions
       }
 
       if (row.game_state !== null) {
@@ -7181,6 +7216,15 @@ async function resetSimulationForTurnLlmRun(
         `The most recent turn ${previousTurnNumber} LLM run is outdated.`
       )
     }
+
+    if (
+      !isJsonObject(previousTurnRun.game_state) ||
+      !isTurnActionsObject(previousTurnRun.turn_actions)
+    ) {
+      throw new SimulationValidationError(
+        `The most recent turn ${previousTurnNumber} LLM run does not have valid turn output.`
+      )
+    }
   }
 
   const immediatePreviousTurn = latestPreviousTurnRunsByTurn.get(turnNumber - 1)
@@ -7193,9 +7237,12 @@ async function resetSimulationForTurnLlmRun(
 
   const previousGameState = immediatePreviousTurn.game_state
 
-  if (!isJsonObject(previousGameState)) {
+  if (
+    !isJsonObject(previousGameState) ||
+    !isTurnActionsObject(immediatePreviousTurn.turn_actions)
+  ) {
     throw new SimulationValidationError(
-      `The most recent turn ${turnNumber - 1} LLM run does not have a game state.`
+      `The most recent turn ${turnNumber - 1} LLM run does not have valid turn output.`
     )
   }
 
@@ -7335,6 +7382,7 @@ async function getLatestPreviousTurnRuns(
     attempt_number: number
     status: LlmRunStatus
     outdated: boolean
+    turn_actions: unknown | null
     game_state: unknown | null
     library_snapshot: unknown | null
     random_state_snapshot: string | null
@@ -7345,6 +7393,7 @@ async function getLatestPreviousTurnRuns(
         turn_run.attempt_number,
         llm_run.status,
         turn_run.outdated,
+        turn_run.turn_actions,
         turn_run.game_state,
         turn_run.library_snapshot,
         turn_run.random_state_snapshot
@@ -7520,6 +7569,26 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function isTurnActionsObject(value: unknown) {
+  if (!isJsonObject(value)) {
+    return false
+  }
+
+  const phaseKeySet = new Set<string>(TURN_PHASE_CHANGES)
+
+  return (
+    Object.keys(value).every((key) => phaseKeySet.has(key)) &&
+    TURN_PHASE_CHANGES.every((phaseKey) => {
+      const actions = value[phaseKey]
+
+      return (
+        Array.isArray(actions) &&
+        actions.every((action) => typeof action === "string")
+      )
+    })
+  )
 }
 
 function asStringArray(value: unknown) {

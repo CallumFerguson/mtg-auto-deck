@@ -2105,26 +2105,31 @@ test("keeps parsed opening-hand JSON for final parsed output chunks", () => {
   })
 })
 
-test("parses completed turn game state JSON", () => {
+test("parses completed turn JSON", () => {
   const gameState = createTurnGameState()
+  const turnActions = createTurnActions()
 
   assert.deepEqual(
     parseTurnSimulationFromResponseText(
       JSON.stringify({
+        turnActions,
         gameState,
         error: null,
       })
     ),
     {
       gameState,
+      turnActions,
     }
   )
 })
 
 test("keeps parsed turn JSON for final parsed output chunks", () => {
   const gameState = createTurnGameState()
+  const turnActions = createTurnActions()
   const parsedCompletion = parseTurnSimulationCompletionFromResponseText(
     JSON.stringify({
+      turnActions,
       gameState,
       error: null,
     })
@@ -2133,6 +2138,7 @@ test("keeps parsed turn JSON for final parsed output chunks", () => {
 
   assert.equal(chunk.kind, "final_parsed_output")
   assert.deepEqual(chunk.payload, {
+    turnActions,
     gameState,
     error: null,
   })
@@ -2140,12 +2146,16 @@ test("keeps parsed turn JSON for final parsed output chunks", () => {
 
 test("parses the last valid turn JSON object from noisy output", () => {
   const gameState = createTurnGameState()
+  const turnActions = createTurnActions()
 
   assert.deepEqual(
     parseTurnSimulationFromResponseText(
       [
         "Earlier draft:",
         JSON.stringify({
+          turnActions: createTurnActions({
+            draw: ["Draw *Island*."],
+          }),
           gameState: createTurnGameState({
             battlefield: [],
             hand: ["Island"],
@@ -2155,6 +2165,7 @@ test("parses the last valid turn JSON object from noisy output", () => {
         "Final answer:",
         "```json",
         JSON.stringify({
+          turnActions,
           gameState,
           error: null,
         }),
@@ -2163,17 +2174,20 @@ test("parses the last valid turn JSON object from noisy output", () => {
     ),
     {
       gameState,
+      turnActions,
     }
   )
 })
 
 test("falls back to an earlier valid JSON object when later braces are malformed", () => {
   const gameState = createTurnGameState({ battlefield: [] })
+  const turnActions = createTurnActions({ precombat_main: [] })
 
   assert.deepEqual(
     parseTurnSimulationFromResponseText(
       [
         JSON.stringify({
+          turnActions,
           gameState,
           error: null,
         }),
@@ -2182,7 +2196,66 @@ test("falls back to an earlier valid JSON object when later braces are malformed
     ),
     {
       gameState,
+      turnActions,
     }
+  )
+})
+
+test("rejects completed turn JSON without turn actions", () => {
+  assert.throws(
+    () =>
+      parseTurnSimulationFromResponseText(
+        JSON.stringify({
+          gameState: createTurnGameState(),
+          error: null,
+        })
+      ),
+    /Turn LLM response did not include valid turnActions\./
+  )
+})
+
+test("rejects completed turn JSON with null turn actions", () => {
+  assert.throws(
+    () =>
+      parseTurnSimulationFromResponseText(
+        JSON.stringify({
+          turnActions: null,
+          gameState: createTurnGameState(),
+          error: null,
+        })
+      ),
+    /Turn LLM response did not include valid turnActions\./
+  )
+})
+
+test("rejects completed turn JSON with non-object turn actions", () => {
+  assert.throws(
+    () =>
+      parseTurnSimulationFromResponseText(
+        JSON.stringify({
+          turnActions: [],
+          gameState: createTurnGameState(),
+          error: null,
+        })
+      ),
+    /Turn LLM response did not include valid turnActions\./
+  )
+})
+
+test("rejects completed turn JSON with invalid turn action phase values", () => {
+  assert.throws(
+    () =>
+      parseTurnSimulationFromResponseText(
+        JSON.stringify({
+          turnActions: {
+            ...createTurnActions(),
+            draw: "Draw *Sol Ring*.",
+          },
+          gameState: createTurnGameState(),
+          error: null,
+        })
+      ),
+    /Turn LLM response did not include valid turnActions\./
   )
 })
 
@@ -2214,7 +2287,8 @@ test("reports turn model error JSON as an unrecoverable simulation error", () =>
     () =>
       parseTurnSimulationFromResponseText(
         JSON.stringify({
-          gameState: createTurnGameState(),
+          turnActions: null,
+          gameState: null,
           error: "Played a second land after logging the first land play.",
         })
       ),
@@ -2254,6 +2328,7 @@ test("reports the final noisy model error JSON as an unrecoverable simulation er
         [
           "Earlier draft:",
           JSON.stringify({
+            turnActions: createTurnActions(),
             gameState: createTurnGameState(),
             error: null,
           }),
@@ -2995,6 +3070,21 @@ function createTurnGameState({
       commanderDamage: {},
     },
     other: "",
+  }
+}
+
+function createTurnActions(
+  overrides: Partial<Record<string, string[]>> = {}
+) {
+  return {
+    untap: [],
+    upkeep: [],
+    draw: ["Draw *Sol Ring*."],
+    precombat_main: ["Play *Command Tower*."],
+    combat: [],
+    postcombat_main: [],
+    end_step_cleanup: [],
+    ...overrides,
   }
 }
 

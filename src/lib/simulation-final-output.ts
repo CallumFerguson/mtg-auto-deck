@@ -8,6 +8,7 @@ export type ParsedSimulationFinalOutput =
     }
   | {
       type: "turn"
+      turnActions: Record<string, string[]>
       gameState: unknown
     }
   | {
@@ -85,16 +86,19 @@ function getTurnFinalParsedOutput(
   }
 
   const gameState = value.gameState
+  const turnActions = value.turnActions
 
   if (
     value.error !== null ||
-    !isRecord(gameState)
+    !isRecord(gameState) ||
+    !hasTurnActions(turnActions)
   ) {
     return null
   }
 
   return {
     type: "turn",
+    turnActions,
     gameState,
   }
 }
@@ -120,4 +124,36 @@ function getReportFinalParsedOutput(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+const TURN_ACTION_PHASE_KEYS = [
+  "untap",
+  "upkeep",
+  "draw",
+  "precombat_main",
+  "combat",
+  "postcombat_main",
+  "end_step_cleanup",
+] as const
+
+export function hasTurnActions(
+  value: unknown
+): value is Record<(typeof TURN_ACTION_PHASE_KEYS)[number], string[]> {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  const phaseKeySet = new Set<string>(TURN_ACTION_PHASE_KEYS)
+
+  return (
+    Object.keys(value).every((key) => phaseKeySet.has(key)) &&
+    TURN_ACTION_PHASE_KEYS.every((phaseKey) => {
+      const actions = value[phaseKey]
+
+      return (
+        Array.isArray(actions) &&
+        actions.every((action) => typeof action === "string")
+      )
+    })
+  )
 }

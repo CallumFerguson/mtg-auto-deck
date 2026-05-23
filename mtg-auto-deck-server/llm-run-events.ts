@@ -414,6 +414,7 @@ export function parseTurnSimulationFromResponseText(responseText: string) {
 
   return {
     gameState: parsedCompletion.gameState,
+    turnActions: parsedCompletion.turnActions,
   }
 }
 
@@ -437,15 +438,53 @@ export function parseTurnSimulationCompletionFromResponseText(
   const responseRecord = asRecord(parsedResponse)
   assertSuccessfulSimulationOutputErrorIsNull(responseRecord, "Turn")
   const gameState = responseRecord.gameState
+  const turnActions = responseRecord.turnActions
 
   if (!isJsonObject(gameState)) {
     throw new Error("Turn LLM response did not include gameState.")
   }
 
+  if (!isTurnActionsObject(turnActions)) {
+    throw new Error("Turn LLM response did not include valid turnActions.")
+  }
+
   return {
     gameState,
+    turnActions,
     parsedOutput: responseRecord,
   }
+}
+
+const TURN_ACTION_PHASE_KEYS = [
+  "untap",
+  "upkeep",
+  "draw",
+  "precombat_main",
+  "combat",
+  "postcombat_main",
+  "end_step_cleanup",
+] as const
+
+function isTurnActionsObject(
+  value: unknown
+): value is Record<(typeof TURN_ACTION_PHASE_KEYS)[number], string[]> {
+  if (!isJsonObject(value)) {
+    return false
+  }
+
+  const phaseKeySet = new Set<string>(TURN_ACTION_PHASE_KEYS)
+
+  return (
+    Object.keys(value).every((key) => phaseKeySet.has(key)) &&
+    TURN_ACTION_PHASE_KEYS.every((phaseKey) => {
+      const actions = value[phaseKey]
+
+      return (
+        Array.isArray(actions) &&
+        actions.every((action) => typeof action === "string")
+      )
+    })
+  )
 }
 
 function assertSuccessfulSimulationOutputErrorIsNull(
