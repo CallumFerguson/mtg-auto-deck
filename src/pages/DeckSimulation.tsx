@@ -5574,31 +5574,25 @@ function SimulationTurnActionsBlock({
       action,
       phaseChange: null,
     })),
-  })).filter((entry) => entry.actions.length > 0)
+  }))
 
   return (
     <section className="grid gap-2">
       <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
         Turn actions
       </p>
-      {phaseEntries.length > 0 ? (
-        <div className="grid gap-2">
-          {phaseEntries.map(({ actions, phaseChange }) => (
-            <Fragment key={phaseChange}>
-              <SimulationResultPhaseChangeEvent
-                action={{ action: "", phaseChange }}
-              />
+      <div className="grid gap-2">
+        {phaseEntries.map(({ actions, phaseChange }) => (
+          <Fragment key={phaseChange}>
+            <SimulationResultPhaseChangeEvent
+              action={{ action: "", phaseChange }}
+            />
+            {actions.length > 0 ? (
               <SimulationResultLoggedTurnActionEvent actions={actions} />
-            </Fragment>
-          ))}
-        </div>
-      ) : (
-        <div className={`p-3 ${simulationResultChunkSurfaceClassName}`}>
-          <p className="text-sm leading-6 text-muted-foreground">
-            No turn actions were reported.
-          </p>
-        </div>
-      )}
+            ) : null}
+          </Fragment>
+        ))}
+      </div>
     </section>
   )
 }
