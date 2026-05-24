@@ -13,6 +13,7 @@ import {
   type UIEvent,
 } from "react"
 import ReactMarkdown from "react-markdown"
+import { createPortal } from "react-dom"
 import { useNavigate } from "react-router-dom"
 import {
   BookCopy,
@@ -4240,7 +4241,7 @@ function SimulationResultsPanel({
             className="simulation-scrollbar h-full min-h-0 min-w-0 flex-1 overflow-y-auto"
             onScroll={onResultsScroll}
           >
-            <section className="mx-auto grid w-full max-w-5xl gap-3 px-5 py-6">
+            <section className="mx-auto grid w-full max-w-5xl gap-3 p-5">
               {resultsError ? (
                 <p
                   className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
@@ -5924,6 +5925,20 @@ const simulationResultSummaryMarkdownClassName =
 type SimulationResultCardMention =
   SimulationDebugLlmRunChunk["cardMentions"][number]
 
+type SimulationResultCardPreviewPosition = {
+  left: number
+  placement: "above" | "below"
+  top: number
+  width: number
+}
+
+const SIMULATION_RESULT_CARD_PREVIEW_GAP_PX = 8
+const SIMULATION_RESULT_CARD_PREVIEW_MARGIN_PX = 12
+const SIMULATION_RESULT_CARD_PREVIEW_PADDING_PX = 8
+const SIMULATION_RESULT_CARD_PREVIEW_WIDTH_PX = 160
+const SIMULATION_RESULT_CARD_PREVIEW_WIDTH_SM_PX = 192
+const SIMULATION_RESULT_CARD_PREVIEW_IMAGE_HEIGHT_RATIO = 680 / 488
+
 function SimulationFinalOutputBlock({
   cardMentions = [],
   finalOutput,
@@ -6653,13 +6668,49 @@ function SimulationResultCardPill({
   title: string
 }) {
   const [isPreviewVisible, setIsPreviewVisible] = useState(false)
+  const [previewPosition, setPreviewPosition] =
+    useState<SimulationResultCardPreviewPosition | null>(null)
+  const previewTriggerRef = useRef<HTMLSpanElement | null>(null)
   const content = <span className="block truncate">{label}</span>
   const trimmedImageUrl = imageUrl?.trim() || null
   const baseClassName =
     "inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-xs font-medium align-baseline"
-  const previewClassName = isPreviewVisible
-    ? "scale-100 opacity-100"
-    : "scale-95 opacity-0"
+
+  useLayoutEffect(() => {
+    if (!isPreviewVisible || !trimmedImageUrl) {
+      setPreviewPosition(null)
+      return
+    }
+
+    function updatePreviewPosition() {
+      const triggerElement = previewTriggerRef.current
+
+      if (!triggerElement) {
+        setPreviewPosition(null)
+        return
+      }
+
+      setPreviewPosition(
+        getSimulationResultCardPreviewPosition(
+          triggerElement.getBoundingClientRect()
+        )
+      )
+    }
+
+    updatePreviewPosition()
+    window.addEventListener("resize", updatePreviewPosition)
+    window.addEventListener("scroll", updatePreviewPosition, true)
+
+    return () => {
+      window.removeEventListener("resize", updatePreviewPosition)
+      window.removeEventListener("scroll", updatePreviewPosition, true)
+    }
+  }, [isPreviewVisible, trimmedImageUrl])
+
+  function hidePreview() {
+    setIsPreviewVisible(false)
+    setPreviewPosition(null)
+  }
 
   if (!href) {
     return (
@@ -6680,9 +6731,9 @@ function SimulationResultCardPill({
       target="_blank"
       rel="noreferrer"
       title={title}
-      onBlur={() => setIsPreviewVisible(false)}
+      onBlur={hidePreview}
       onClick={(event) => {
-        setIsPreviewVisible(false)
+        hidePreview()
         event.currentTarget.blur()
       }}
       onFocus={() => setIsPreviewVisible(true)}
@@ -6696,25 +6747,101 @@ function SimulationResultCardPill({
   }
 
   return (
-    <span
-      className="relative inline-flex max-w-full align-baseline"
-      onMouseEnter={() => setIsPreviewVisible(true)}
-      onMouseLeave={() => setIsPreviewVisible(false)}
-    >
-      {link}
+    <>
       <span
-        className={`pointer-events-none absolute top-full left-1/2 z-50 mt-2 w-40 -translate-x-1/2 rounded-[5.75%/4.4%] bg-black/80 p-1 shadow-2xl shadow-black/70 transition duration-150 motion-reduce:transition-none sm:w-48 ${previewClassName}`}
-        aria-hidden="true"
+        ref={previewTriggerRef}
+        className="inline-flex max-w-full align-baseline"
+        onMouseEnter={() => setIsPreviewVisible(true)}
+        onMouseLeave={hidePreview}
       >
-        <img
-          className="block aspect-[488/680] w-full rounded-[4.75%/3.4%] object-cover"
-          src={trimmedImageUrl}
-          alt=""
-          loading="lazy"
-        />
+        {link}
       </span>
-    </span>
+      {isPreviewVisible && previewPosition
+        ? createPortal(
+            <span
+              className={`pointer-events-none fixed z-50 rounded-[5.75%/4.4%] bg-black/80 p-1 shadow-2xl shadow-black/70 ${
+                previewPosition.placement === "above"
+                  ? "origin-bottom"
+                  : "origin-top"
+              }`}
+              style={{
+                left: previewPosition.left,
+                top: previewPosition.top,
+                width: previewPosition.width,
+              }}
+              aria-hidden="true"
+            >
+              <img
+                className="block aspect-[488/680] w-full rounded-[4.75%/3.4%] object-cover"
+                src={trimmedImageUrl}
+                alt=""
+                loading="lazy"
+              />
+            </span>,
+            document.body
+          )
+        : null}
+    </>
   )
+}
+
+function getSimulationResultCardPreviewPosition(
+  triggerRect: DOMRect
+): SimulationResultCardPreviewPosition {
+  const viewportWidth = window.innerWidth
+  const viewportHeight = window.innerHeight
+  const previewWidth = window.matchMedia("(min-width: 640px)").matches
+    ? SIMULATION_RESULT_CARD_PREVIEW_WIDTH_SM_PX
+    : SIMULATION_RESULT_CARD_PREVIEW_WIDTH_PX
+  const previewContentWidth =
+    previewWidth - SIMULATION_RESULT_CARD_PREVIEW_PADDING_PX
+  const previewHeight =
+    previewContentWidth * SIMULATION_RESULT_CARD_PREVIEW_IMAGE_HEIGHT_RATIO +
+    SIMULATION_RESULT_CARD_PREVIEW_PADDING_PX
+  const spaceBelow =
+    viewportHeight -
+    triggerRect.bottom -
+    SIMULATION_RESULT_CARD_PREVIEW_MARGIN_PX
+  const spaceAbove = triggerRect.top - SIMULATION_RESULT_CARD_PREVIEW_MARGIN_PX
+  const placement =
+    spaceBelow >= previewHeight || spaceBelow >= spaceAbove ? "below" : "above"
+  const preferredTop =
+    placement === "below"
+      ? triggerRect.bottom + SIMULATION_RESULT_CARD_PREVIEW_GAP_PX
+      : triggerRect.top - previewHeight - SIMULATION_RESULT_CARD_PREVIEW_GAP_PX
+  const maxTop =
+    viewportHeight - SIMULATION_RESULT_CARD_PREVIEW_MARGIN_PX - previewHeight
+  const preferredLeft =
+    triggerRect.left + triggerRect.width / 2 - previewWidth / 2
+  const maxLeft =
+    viewportWidth - SIMULATION_RESULT_CARD_PREVIEW_MARGIN_PX - previewWidth
+
+  return {
+    left: clampSimulationResultCardPreviewValue(
+      preferredLeft,
+      SIMULATION_RESULT_CARD_PREVIEW_MARGIN_PX,
+      maxLeft
+    ),
+    placement,
+    top: clampSimulationResultCardPreviewValue(
+      preferredTop,
+      SIMULATION_RESULT_CARD_PREVIEW_MARGIN_PX,
+      maxTop
+    ),
+    width: previewWidth,
+  }
+}
+
+function clampSimulationResultCardPreviewValue(
+  value: number,
+  min: number,
+  max: number
+) {
+  if (max < min) {
+    return min
+  }
+
+  return Math.min(Math.max(value, min), max)
 }
 
 function SimulationResultCardImageLinks({
