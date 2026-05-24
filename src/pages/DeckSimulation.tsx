@@ -4191,6 +4191,7 @@ function SimulationResultsPanel({
                           >
                             {getSimulationTimelineStepNodeContent({
                               step,
+                              isSelected,
                               stepNumber: stepIndex + 1,
                             })}
                           </span>
@@ -4504,9 +4505,11 @@ function getSimulationTimelineStepNodeClassName(
 }
 
 function getSimulationTimelineStepNodeContent({
+  isSelected,
   step,
   stepNumber,
 }: {
+  isSelected: boolean
   step: SimulationResultsDisplayTimelineStep
   stepNumber: number
 }) {
@@ -4518,7 +4521,14 @@ function getSimulationTimelineStepNodeContent({
     return <Plus className="size-4" />
   }
 
-  if (isActiveSimulationResultsTimelineStep(step)) {
+  if (
+    isSimulationTimelineResultStep(step) &&
+    isActiveSimulationResultsTimelineStep(step)
+  ) {
+    if (isSelected) {
+      return getSimulationTimelineSelectedActiveStepNodeContent(step)
+    }
+
     return <LoaderCircle className="size-4 animate-spin" />
   }
 
@@ -4531,6 +4541,28 @@ function getSimulationTimelineStepNodeContent({
   }
 
   return stepNumber
+}
+
+function getSimulationTimelineSelectedActiveStepNodeContent(
+  step: SimulationResultsTimelineStep
+) {
+  if (step.status === "cancel_requested") {
+    return <Square className="size-3.5" fill="currentColor" />
+  }
+
+  if (step.kind === "opening_hand") {
+    return <Hand className="size-4" />
+  }
+
+  if (step.kind === "turn") {
+    return <Swords className="size-4" />
+  }
+
+  if (step.kind === "report") {
+    return <BookCopy className="size-4" />
+  }
+
+  return <Hourglass className="size-4" />
 }
 
 function getSimulationTimelineStepConnectorClassName({
