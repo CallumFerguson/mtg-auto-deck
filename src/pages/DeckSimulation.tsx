@@ -4185,7 +4185,8 @@ function SimulationResultsPanel({
                           />
                           <span
                             className={getSimulationTimelineStepNodeClassName(
-                              step
+                              step,
+                              isSelected
                             )}
                           >
                             {getSimulationTimelineStepNodeContent({
@@ -4457,10 +4458,23 @@ function getSimulationTimelineStepButtonClassName(
 }
 
 function getSimulationTimelineStepNodeClassName(
-  step: SimulationResultsDisplayTimelineStep
+  step: SimulationResultsDisplayTimelineStep,
+  isSelected: boolean
 ) {
   const baseClassName =
     "relative z-10 grid size-9 shrink-0 place-items-center rounded-full border-2 bg-background text-xs font-semibold transition-all"
+
+  if (isSelected) {
+    if (step.status === "failed") {
+      return `${baseClassName} border-destructive bg-destructive text-background shadow-[inset_0_0_0_2px_var(--background)]`
+    }
+
+    if (step.status === "cancelled") {
+      return `${baseClassName} border-muted-foreground bg-muted-foreground text-background shadow-[inset_0_0_0_2px_var(--background)]`
+    }
+
+    return `${baseClassName} border-primary bg-primary text-primary-foreground shadow-[inset_0_0_0_2px_var(--background)]`
+  }
 
   if (step.status === "starting_turn") {
     return `${baseClassName} border-primary text-primary`
