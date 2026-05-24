@@ -6018,6 +6018,7 @@ type SimulationGameStateZone = {
 type SimulationGameStateZoneCardPresenceItem = {
   card: SimulationGameStateZoneCard
   cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
+  isEnteringPlaceholder: boolean
   isExiting: boolean
   key: string
 }
@@ -6057,6 +6058,7 @@ const SIMULATION_RESULT_CARD_PREVIEW_WIDTH_PX = 160
 const SIMULATION_RESULT_CARD_PREVIEW_WIDTH_SM_PX = 192
 const SIMULATION_RESULT_CARD_PREVIEW_IMAGE_HEIGHT_RATIO = 680 / 488
 const SIMULATION_GAME_STATE_CARD_EXIT_ANIMATION_MS = 250
+const SIMULATION_GAME_STATE_CARD_MOVE_ANIMATION_MS = 250
 const SIMULATION_GAME_STATE_CARD_TAP_ANIMATION_MS = 250
 
 function SimulationFinalOutputBlock({
@@ -6264,6 +6266,11 @@ function SimulationGameStateZoneCardGrid({
     getSimulationGameStateCardMentionsSignature(cardMentions)
   const syncSignature = `${cardSignature}\u001d${cardMentionsSignature}`
   const lastSyncSignatureRef = useRef(syncSignature)
+  const cardGridElementRef = useRef<HTMLDivElement | null>(null)
+  const cardLayoutElementsRef = useRef(new Map<string, HTMLDivElement>())
+  const previousCardGridWidthRef = useRef<number | null>(null)
+  const previousCardLayoutRectsRef = useRef(new Map<string, DOMRect>())
+  const shouldSkipNextPositionAnimationRef = useRef(false)
   const [visibleCards, setVisibleCards] = useState<
     SimulationGameStateZoneCardPresenceItem[]
   >(() =>
@@ -6273,99 +6280,254 @@ function SimulationGameStateZoneCardGrid({
       isExiting: false,
     })
   )
+  const visibleCardsRef = useRef(visibleCards)
+  const readCurrentCardLayoutRects = useCallback(() => {
+    const nextRects = new Map<string, DOMRect>()
+
+    for (const [cardKey, element] of cardLayoutElementsRef.current) {
+      nextRects.set(cardKey, element.getBoundingClientRect())
+    }
+
+    return nextRects
+  }, [])
+
+  useEffect(() => {
+    visibleCardsRef.current = visibleCards
+  }, [visibleCards])
+
+  useEffect(() => {
+    const gridElement = cardGridElementRef.current
+
+    if (!gridElement) {
+      return
+    }
+
+    previousCardGridWidthRef.current = gridElement.getBoundingClientRect().width
+
+    let refreshFrameId: number | null = null
+
+    const refreshCardLayoutBaseline = () => {
+      if (refreshFrameId !== null) {
+        window.cancelAnimationFrame(refreshFrameId)
+      }
+
+      refreshFrameId = window.requestAnimationFrame(() => {
+        refreshFrameId = null
+        previousCardLayoutRectsRef.current = readCurrentCardLayoutRects()
+        shouldSkipNextPositionAnimationRef.current = false
+      })
+    }
+
+    const handleGridWidth = (width: number) => {
+      const previousWidth = previousCardGridWidthRef.current
+      previousCardGridWidthRef.current = width
+
+      if (previousWidth === null || Math.abs(width - previousWidth) < 0.5) {
+        return
+      }
+
+      shouldSkipNextPositionAnimationRef.current = true
+      refreshCardLayoutBaseline()
+    }
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.target === gridElement) {
+          handleGridWidth(entry.contentRect.width)
+          break
+        }
+      }
+    })
+
+    resizeObserver.observe(gridElement)
+
+    const handleWindowResize = () => {
+      handleGridWidth(gridElement.getBoundingClientRect().width)
+    }
+
+    window.addEventListener("resize", handleWindowResize)
+
+    return () => {
+      resizeObserver.disconnect()
+      window.removeEventListener("resize", handleWindowResize)
+
+      if (refreshFrameId !== null) {
+        window.cancelAnimationFrame(refreshFrameId)
+      }
+    }
+  }, [readCurrentCardLayoutRects])
 
   useEffect(() => {
     if (lastSyncSignatureRef.current === syncSignature) {
       return
     }
 
+    let syncTimeoutId: number | null = null
+    let moveTimeoutId: number | null = null
     let enterTimeoutId: number | null = null
-    const timeoutId = window.setTimeout(() => {
+
+    syncTimeoutId = window.setTimeout(() => {
       lastSyncSignatureRef.current = syncSignature
 
-      setVisibleCards((currentCards) => {
-        const currentActiveCardKeys = new Set(
-          currentCards
-            .filter((card) => !card.isExiting)
-            .map((card) => card.key)
-        )
-        const nextItems = getSimulationGameStateZoneCardPresenceItems({
-          cardMentions,
-          cards,
-          isExiting: false,
+      const currentCards = visibleCardsRef.current
+      const currentActiveCardKeys = new Set(
+        currentCards
+          .filter((card) => !card.isExiting && !card.isEnteringPlaceholder)
+          .map((card) => card.key)
+      )
+      const nextItems = getSimulationGameStateZoneCardPresenceItems({
+        cardMentions,
+        cards,
+        isExiting: false,
+      })
+      const nextCardKeys = new Set(nextItems.map((card) => card.key))
+      const enteringCardKeys = new Set(
+        nextItems
+          .filter((item) => !currentActiveCardKeys.has(item.key))
+          .map((item) => item.key)
+      )
+      const hasExitingCards = currentCards.some(
+        (card) => !card.isEnteringPlaceholder && !nextCardKeys.has(card.key)
+      )
+      const hasEnteringCards = enteringCardKeys.size > 0
+
+      const setVisibleCardsSnapshot = (
+        nextVisibleCards: SimulationGameStateZoneCardPresenceItem[]
+      ) => {
+        visibleCardsRef.current = nextVisibleCards
+        setVisibleCards(nextVisibleCards)
+      }
+
+      const startMovePhase = () => {
+        const movePhaseItems = getSimulationGameStateZoneCardMovePhaseItems({
+          enteringCardKeys,
+          nextItems,
         })
-        const nextCardKeys = new Set(nextItems.map((card) => card.key))
-        const enteringItems = nextItems.filter(
-          (item) => !currentActiveCardKeys.has(item.key)
-        )
-        const stableItems = nextItems.filter((item) =>
-          currentActiveCardKeys.has(item.key)
-        )
-        const exitingItems = currentCards
-          .filter((item) => !nextCardKeys.has(item.key))
-          .map((item) =>
-            item.isExiting
-              ? item
-              : {
-                ...item,
-                isExiting: true,
-              }
-          )
 
-        if (enteringItems.length > 0) {
-          enterTimeoutId = window.setTimeout(() => {
-            setVisibleCards(nextItems)
-          }, SIMULATION_GAME_STATE_CARD_EXIT_ANIMATION_MS)
+        setVisibleCardsSnapshot(movePhaseItems)
 
-          return [...stableItems, ...exitingItems]
+        if (!hasEnteringCards) {
+          return
         }
 
-        return [...nextItems, ...exitingItems]
-      })
+        enterTimeoutId = window.setTimeout(() => {
+          setVisibleCardsSnapshot(nextItems)
+        }, SIMULATION_GAME_STATE_CARD_MOVE_ANIMATION_MS)
+      }
+
+      if (hasExitingCards) {
+        setVisibleCardsSnapshot(
+          getSimulationGameStateZoneCardExitPhaseItems({
+            currentCards,
+            nextItems,
+          })
+        )
+
+        moveTimeoutId = window.setTimeout(
+          startMovePhase,
+          SIMULATION_GAME_STATE_CARD_EXIT_ANIMATION_MS
+        )
+        return
+      }
+
+      if (hasEnteringCards) {
+        startMovePhase()
+        return
+      }
+
+      setVisibleCardsSnapshot(nextItems)
     }, 0)
 
     return () => {
-      window.clearTimeout(timeoutId)
+      if (syncTimeoutId !== null) {
+        window.clearTimeout(syncTimeoutId)
+      }
+      if (moveTimeoutId !== null) {
+        window.clearTimeout(moveTimeoutId)
+      }
       if (enterTimeoutId !== null) {
         window.clearTimeout(enterTimeoutId)
       }
     }
   }, [cardMentions, cards, syncSignature])
 
-  useEffect(() => {
-    if (!visibleCards.some((card) => card.isExiting)) {
+  useLayoutEffect(() => {
+    const nextRects = readCurrentCardLayoutRects()
+
+    if (shouldSkipNextPositionAnimationRef.current) {
+      previousCardLayoutRectsRef.current = nextRects
+      shouldSkipNextPositionAnimationRef.current = false
       return
     }
 
-    const timeoutId = window.setTimeout(() => {
-      setVisibleCards((currentCards) =>
-        currentCards.filter((card) => !card.isExiting)
-      )
-    }, SIMULATION_GAME_STATE_CARD_EXIT_ANIMATION_MS)
+    for (const card of visibleCards) {
+      if (card.isExiting || card.isEnteringPlaceholder) {
+        continue
+      }
 
-    return () => {
-      window.clearTimeout(timeoutId)
+      const element = cardLayoutElementsRef.current.get(card.key)
+      const previousRect = previousCardLayoutRectsRef.current.get(card.key)
+      const nextRect = nextRects.get(card.key)
+
+      if (!element || !previousRect || !nextRect) {
+        continue
+      }
+
+      const translateX = previousRect.left - nextRect.left
+      const translateY = previousRect.top - nextRect.top
+
+      if (Math.abs(translateX) < 0.5 && Math.abs(translateY) < 0.5) {
+        continue
+      }
+
+      element.style.transition = "none"
+      element.style.transform = `translate(${translateX}px, ${translateY}px)`
+
+      window.requestAnimationFrame(() => {
+        element.style.transition = ""
+        element.style.transform = ""
+      })
     }
-  }, [visibleCards])
+
+    previousCardLayoutRectsRef.current = nextRects
+  }, [readCurrentCardLayoutRects, visibleCards])
 
   return (
-    <div className="mt-2 grid min-w-0 grid-cols-[repeat(auto-fill,minmax(5.5rem,1fr))] gap-3 sm:grid-cols-[repeat(auto-fill,minmax(6.25rem,1fr))] 2xl:grid-cols-[repeat(auto-fill,minmax(7rem,1fr))]">
+    <div
+      ref={cardGridElementRef}
+      className="mt-2 grid min-w-0 grid-cols-[repeat(auto-fill,minmax(5.5rem,1fr))] gap-3 sm:grid-cols-[repeat(auto-fill,minmax(6.25rem,1fr))] 2xl:grid-cols-[repeat(auto-fill,minmax(7rem,1fr))]"
+    >
       {visibleCards.length === 0 ? (
         <SimulationGameStateEmptyCardPlaceholder />
       ) : (
         visibleCards.map((card) => (
           <div
             key={card.key}
-            className={
-              card.isExiting
-                ? "simulation-game-state-card-presence simulation-game-state-card-exit"
-                : "simulation-game-state-card-presence simulation-game-state-card-enter"
-            }
+            ref={(element) => {
+              if (element) {
+                cardLayoutElementsRef.current.set(card.key, element)
+              } else {
+                cardLayoutElementsRef.current.delete(card.key)
+              }
+            }}
+            className="simulation-game-state-card-layout"
           >
-            <SimulationGameStateZoneCardView
-              card={card.card}
-              cardMentions={card.cardMentions}
-            />
+            {card.isEnteringPlaceholder ? (
+              <SimulationGameStateEnteringCardPlaceholder />
+            ) : (
+              <div
+                className={
+                  card.isExiting
+                    ? "simulation-game-state-card-presence simulation-game-state-card-exit"
+                    : "simulation-game-state-card-presence simulation-game-state-card-enter"
+                }
+              >
+                <SimulationGameStateZoneCardView
+                  card={card.card}
+                  cardMentions={card.cardMentions}
+                />
+              </div>
+            )}
           </div>
         ))
       )}
@@ -6381,6 +6543,15 @@ function SimulationGameStateEmptyCardPlaceholder() {
     >
       empty
     </div>
+  )
+}
+
+function SimulationGameStateEnteringCardPlaceholder() {
+  return (
+    <div
+      className="aspect-[488/680] min-w-0 select-none rounded-[5.75%/4.4%] opacity-0"
+      aria-hidden="true"
+    />
   )
 }
 
@@ -6523,10 +6694,60 @@ function getSimulationGameStateZoneCardPresenceItems({
     return {
       card,
       cardMentions,
+      isEnteringPlaceholder: false,
       isExiting,
       key: getSimulationGameStateZoneCardKey(card, copyIndex),
     }
   })
+}
+
+function getSimulationGameStateZoneCardExitPhaseItems({
+  currentCards,
+  nextItems,
+}: {
+  currentCards: readonly SimulationGameStateZoneCardPresenceItem[]
+  nextItems: readonly SimulationGameStateZoneCardPresenceItem[]
+}): SimulationGameStateZoneCardPresenceItem[] {
+  const nextItemsByKey = new Map(nextItems.map((item) => [item.key, item]))
+
+  return currentCards.flatMap((item) => {
+    const nextItem = nextItemsByKey.get(item.key)
+
+    if (item.isEnteringPlaceholder) {
+      return nextItem ? [{ ...nextItem, isEnteringPlaceholder: true }] : []
+    }
+
+    if (nextItem) {
+      return [nextItem]
+    }
+
+    return [
+      item.isExiting
+        ? item
+        : {
+          ...item,
+          isEnteringPlaceholder: false,
+          isExiting: true,
+        },
+    ]
+  })
+}
+
+function getSimulationGameStateZoneCardMovePhaseItems({
+  enteringCardKeys,
+  nextItems,
+}: {
+  enteringCardKeys: ReadonlySet<string>
+  nextItems: readonly SimulationGameStateZoneCardPresenceItem[]
+}): SimulationGameStateZoneCardPresenceItem[] {
+  return nextItems.map((item) =>
+    enteringCardKeys.has(item.key)
+      ? {
+        ...item,
+        isEnteringPlaceholder: true,
+      }
+      : item
+  )
 }
 
 function getSimulationGameStateZoneCardKey(

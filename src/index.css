@@ -171,9 +171,14 @@
     vertical-align: -0.15em;
   }
 
+  .simulation-game-state-card-layout,
   .simulation-game-state-card-presence {
     min-width: 0;
     will-change: opacity, transform;
+  }
+
+  .simulation-game-state-card-layout {
+    transition: transform 0.25s ease-out;
   }
 
   .simulation-game-state-card-enter {
