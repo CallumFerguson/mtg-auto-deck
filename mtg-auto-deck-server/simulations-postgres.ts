@@ -498,6 +498,7 @@ export type SimulationSummary = {
   autoGenerateReport: boolean
   reasoningSummariesEnabled: boolean
   useFlexServiceTier: boolean
+  simulatedTurnCount: number
   completedLlmRunCount: number
   activeLlmRunCount: number
   status: SimulationStatus
@@ -1437,6 +1438,7 @@ type SimulationSummaryRow = {
   auto_generate_report: boolean
   reasoning_summaries_enabled: boolean
   use_flex_service_tier: boolean
+  simulated_turn_count: number
   completed_llm_run_count: number
   active_llm_run_count: number
   status: SimulationStatus
@@ -1524,6 +1526,15 @@ const SIMULATION_SUMMARY_ACTIVE_RUN_COUNT_SQL = `
   )
 `
 
+const SIMULATION_SUMMARY_SIMULATED_TURN_COUNT_SQL = `
+  COALESCE((
+    SELECT MAX(turn_run.turn_number)::integer
+    FROM simulation_turn_llm_runs turn_run
+    WHERE turn_run.simulation_id = simulations.id
+      AND turn_run.outdated = false
+  ), 0)
+`
+
 function mapSimulationSummaryRow(
   simulation: SimulationSummaryRow
 ): SimulationSummary {
@@ -1539,6 +1550,7 @@ function mapSimulationSummaryRow(
     autoGenerateReport: simulation.auto_generate_report,
     reasoningSummariesEnabled: simulation.reasoning_summaries_enabled,
     useFlexServiceTier: simulation.use_flex_service_tier,
+    simulatedTurnCount: simulation.simulated_turn_count,
     completedLlmRunCount: simulation.completed_llm_run_count,
     activeLlmRunCount: simulation.active_llm_run_count,
     status: simulation.status,
@@ -1564,6 +1576,7 @@ export async function listSimulationsForDeck(
         auto_generate_report,
         reasoning_summaries_enabled,
         use_flex_service_tier,
+        ${SIMULATION_SUMMARY_SIMULATED_TURN_COUNT_SQL} AS simulated_turn_count,
         ${SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL} AS completed_llm_run_count,
         ${SIMULATION_SUMMARY_ACTIVE_RUN_COUNT_SQL} AS active_llm_run_count,
         status,
@@ -1697,6 +1710,7 @@ export async function createSimulation(
         auto_generate_report,
         reasoning_summaries_enabled,
         use_flex_service_tier,
+        0::integer AS simulated_turn_count,
         0::integer AS completed_llm_run_count,
         0::integer AS active_llm_run_count,
         status,
@@ -1741,6 +1755,7 @@ export async function getSimulationSummary(
         auto_generate_report,
         reasoning_summaries_enabled,
         use_flex_service_tier,
+        ${SIMULATION_SUMMARY_SIMULATED_TURN_COUNT_SQL} AS simulated_turn_count,
         ${SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL} AS completed_llm_run_count,
         ${SIMULATION_SUMMARY_ACTIVE_RUN_COUNT_SQL} AS active_llm_run_count,
         status,
@@ -1866,6 +1881,7 @@ export async function updateSimulation(
         auto_generate_report,
         reasoning_summaries_enabled,
         use_flex_service_tier,
+        ${SIMULATION_SUMMARY_SIMULATED_TURN_COUNT_SQL} AS simulated_turn_count,
         ${SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL} AS completed_llm_run_count,
         ${SIMULATION_SUMMARY_ACTIVE_RUN_COUNT_SQL} AS active_llm_run_count,
         status,

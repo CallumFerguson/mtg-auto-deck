@@ -300,7 +300,12 @@ async function loadLlmRunFullPrompt({
 }
 
 function getSimulationLabel(simulation: Simulation) {
-  return `${simulation.id.slice(0, 8)} - ${simulation.completedLlmRunCount} runs`
+  const turnLabel =
+    simulation.simulatedTurnCount === 1
+      ? "1 turn"
+      : `${simulation.simulatedTurnCount} turns`
+
+  return `${simulation.id.slice(0, 8)} - ${turnLabel}`
 }
 
 function getSimulationRunCountFromResults(resultsInfo: SimulationResultsInfo) {
@@ -309,6 +314,19 @@ function getSimulationRunCountFromResults(resultsInfo: SimulationResultsInfo) {
     resultsInfo.turnLlmRuns.filter(isCountedTurnRun).length +
     resultsInfo.reportLlmRuns.filter(isCountedReportRun).length
   )
+}
+
+function getSimulationTurnCountFromResults(resultsInfo: SimulationResultsInfo) {
+  return resultsInfo.turnLlmRuns.reduce((turnCount, run) => {
+    if (
+      run.outdated === true ||
+      typeof run.turnNumber !== "number"
+    ) {
+      return turnCount
+    }
+
+    return Math.max(turnCount, run.turnNumber)
+  }, 0)
 }
 
 function getActiveLlmRunCountFromResults(resultsInfo: SimulationResultsInfo) {
@@ -1198,7 +1216,7 @@ export function DeckSimulation({
 
   return (
     <>
-      <div className="grid h-full min-h-0 min-w-[56rem] grid-cols-[18rem_minmax(0,1fr)] overflow-hidden">
+      <div className="grid h-full min-h-0 min-w-[52rem] grid-cols-[14rem_minmax(0,1fr)] overflow-hidden">
         <aside className="simulation-sidebar-surface min-h-0 min-w-0 border-r border-border">
           <nav
             className="simulation-scrollbar h-full overflow-y-auto"
@@ -2916,6 +2934,8 @@ function SimulationDetails({
               getActiveLlmRunCountFromResults(updatedResultsInfo),
             completedLlmRunCount:
               getSimulationRunCountFromResults(updatedResultsInfo),
+            simulatedTurnCount:
+              getSimulationTurnCountFromResults(updatedResultsInfo),
           })
         }
 

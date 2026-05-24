@@ -53,6 +53,7 @@ export type Simulation = {
   autoGenerateReport: boolean
   reasoningSummariesEnabled: boolean
   useFlexServiceTier: boolean
+  simulatedTurnCount: number
   completedLlmRunCount: number
   activeLlmRunCount: number
   status: SimulationStatus
