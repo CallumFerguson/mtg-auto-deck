@@ -170,4 +170,43 @@
     margin-inline: 0.08em;
     vertical-align: -0.15em;
   }
+
+  .simulation-game-state-card-tapped {
+    animation: simulation-game-state-card-tap 0.3s ease-out both;
+    transform: rotate(7.5deg);
+    transform-origin: center;
+  }
+
+  .simulation-game-state-card-tap-dim,
+  .simulation-game-state-card-tap-icon {
+    animation: simulation-game-state-card-tap-overlay 0.3s ease-out both;
+  }
+
+  @keyframes simulation-game-state-card-tap {
+    from {
+      transform: rotate(0deg);
+    }
+
+    to {
+      transform: rotate(7.5deg);
+    }
+  }
+
+  @keyframes simulation-game-state-card-tap-overlay {
+    from {
+      opacity: 0;
+    }
+
+    to {
+      opacity: 1;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .simulation-game-state-card-tapped,
+    .simulation-game-state-card-tap-dim,
+    .simulation-game-state-card-tap-icon {
+      animation: none;
+    }
+  }
 }

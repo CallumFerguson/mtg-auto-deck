@@ -6281,17 +6281,18 @@ function SimulationGameStateZoneCardView({
       {isTapped ? (
         <>
           <span
-            className="pointer-events-none absolute inset-0 bg-black/35"
+            className="simulation-game-state-card-tap-dim pointer-events-none absolute inset-0 bg-black/35"
             aria-hidden="true"
           />
           <span
-            className="pointer-events-none absolute inset-0 grid place-items-center text-sky-50/95 drop-shadow-[0_0.25rem_0.75rem_rgba(0,0,0,0.85)]"
+            className="simulation-game-state-card-tap-icon pointer-events-none absolute inset-0 grid place-items-center text-sky-50/95 drop-shadow-[0_0.25rem_0.75rem_rgba(0,0,0,0.85)]"
             aria-hidden="true"
           >
             <img
-              className="size-[72%] object-contain opacity-65 brightness-0 invert"
+              className="size-[72%] select-none object-contain opacity-65 brightness-0 invert"
               src={tapIconUrl}
               alt=""
+              draggable={false}
             />
           </span>
         </>
@@ -6300,7 +6301,7 @@ function SimulationGameStateZoneCardView({
   )
   const className = [
     "relative block min-w-0 overflow-hidden rounded-[5.75%/4.4%] border border-border bg-black/40 shadow-lg shadow-black/20 outline-none focus-visible:ring-2 focus-visible:ring-sky-400",
-    isTapped ? "rotate-[7.5deg]" : null,
+    isTapped ? "simulation-game-state-card-tapped" : null,
   ]
     .filter(Boolean)
     .join(" ")
