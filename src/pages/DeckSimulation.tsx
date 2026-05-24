@@ -6279,10 +6279,16 @@ function SimulationGameStateZoneCardGrid({
       return
     }
 
+    let enterTimeoutId: number | null = null
     const timeoutId = window.setTimeout(() => {
       lastSyncSignatureRef.current = syncSignature
 
       setVisibleCards((currentCards) => {
+        const currentActiveCardKeys = new Set(
+          currentCards
+            .filter((card) => !card.isExiting)
+            .map((card) => card.key)
+        )
         const nextCardKeys = new Set(
           cards.map(getSimulationGameStateZoneCardKey)
         )
@@ -6291,6 +6297,12 @@ function SimulationGameStateZoneCardGrid({
           cards,
           isExiting: false,
         })
+        const enteringItems = nextItems.filter(
+          (item) => !currentActiveCardKeys.has(item.key)
+        )
+        const stableItems = nextItems.filter((item) =>
+          currentActiveCardKeys.has(item.key)
+        )
         const exitingItems = currentCards
           .filter((item) => !nextCardKeys.has(item.key))
           .map((item) =>
@@ -6302,12 +6314,23 @@ function SimulationGameStateZoneCardGrid({
               }
           )
 
+        if (enteringItems.length > 0) {
+          enterTimeoutId = window.setTimeout(() => {
+            setVisibleCards(nextItems)
+          }, SIMULATION_GAME_STATE_CARD_EXIT_ANIMATION_MS)
+
+          return [...stableItems, ...exitingItems]
+        }
+
         return [...nextItems, ...exitingItems]
       })
     }, 0)
 
     return () => {
       window.clearTimeout(timeoutId)
+      if (enterTimeoutId !== null) {
+        window.clearTimeout(enterTimeoutId)
+      }
     }
   }, [cardMentions, cards, syncSignature])
 
