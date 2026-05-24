@@ -15,6 +15,7 @@ import {
 import ReactMarkdown from "react-markdown"
 import { createPortal } from "react-dom"
 import { useNavigate } from "react-router-dom"
+import tapIconUrl from "mana-font/svg/tap.svg"
 import {
   BookCopy,
   Bug,
@@ -6285,10 +6286,14 @@ function SimulationGameStateZoneCardView({
             aria-hidden="true"
           />
           <span
-            className="pointer-events-none absolute top-1.5 right-1.5 grid size-7 place-items-center rounded-full bg-black/75 text-sky-50 shadow-md shadow-black/50"
+            className="pointer-events-none absolute inset-0 grid place-items-center text-sky-50/95 drop-shadow-[0_0.25rem_0.75rem_rgba(0,0,0,0.85)]"
             aria-hidden="true"
           >
-            <span className="ms ms-cost ms-shadow ms-tap text-lg" />
+            <img
+              className="size-[72%] object-contain opacity-65 brightness-0 invert"
+              src={tapIconUrl}
+              alt=""
+            />
           </span>
         </>
       ) : null}
