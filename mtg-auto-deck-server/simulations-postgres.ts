@@ -3735,7 +3735,34 @@ function getFinalParsedOutputCardMentions(
   return [
     ...getArrayCardMentions(payloadRecord.keptHand, "payload.keptHand"),
     ...getTurnActionCardMentions(payloadRecord.turnActions),
+    ...getGameStateZoneCardMentions(payloadRecord.gameState),
   ]
+}
+
+function getGameStateZoneCardMentions(
+  value: unknown
+): LlmRunChunkCardMentionRequest[] {
+  if (!isJsonObject(value) || !isJsonObject(value.zones)) {
+    return []
+  }
+
+  return Object.entries(value.zones).flatMap(([zoneName, zoneCards]) => {
+    if (!Array.isArray(zoneCards)) {
+      return []
+    }
+
+    return zoneCards.flatMap((card, index) => {
+      if (!isJsonObject(card)) {
+        return []
+      }
+
+      return getMentionFromCardName(
+        card.name,
+        `payload.gameState.zones.${zoneName}[${index}].name`,
+        index
+      )
+    })
+  })
 }
 
 function getTurnActionCardMentions(

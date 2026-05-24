@@ -3909,6 +3909,7 @@ function SimulationResultsPanel({
     const isUsageLimitFailure = isUsageLimitFailureMessage(
       emptyRunFailureMessage
     )
+    const finalParsedOutput = getSimulationFinalParsedOutput(run)
 
     return (
       <section
@@ -3918,19 +3919,15 @@ function SimulationResultsPanel({
         className="grid gap-3 rounded-md border border-border bg-background/35 p-3"
         role={panelId ? "region" : undefined}
       >
-        {hasGameState(run.gameState) && !getSimulationFinalParsedOutput(run) ? (
+        {hasGameState(run.gameState) && !finalParsedOutput ? (
           <div className="grid gap-2">
             {hasTurnActions(run.turnActions) ? (
-              <SimulationTurnActionsBlock turnActions={run.turnActions} />
+              <SimulationTurnActionsSurface turnActions={run.turnActions} />
             ) : null}
-            <details className={simulationResultChunkSurfaceClassName}>
-              <summary className={simulationResultChunkSummaryClassName}>
-                Game state
-              </summary>
-              <pre className={simulationResultChunkPreClassName}>
-                {formatGameStateJson(run.gameState)}
-              </pre>
-            </details>
+            <SimulationGameStateZonesBlock
+              cardMentions={getSimulationRunGameStateCardMentions(run.chunks)}
+              gameState={run.gameState}
+            />
           </div>
         ) : null}
 
@@ -5957,11 +5954,41 @@ const simulationResultSummaryMarkdownClassName =
 type SimulationResultCardMention =
   SimulationDebugLlmRunChunk["cardMentions"][number]
 
+type SimulationGameStateZoneCard = {
+  index: number
+  name: string
+  notes: string | null
+  tapped: boolean | null
+  zoneKey: string
+}
+
+type SimulationGameStateZone = {
+  cards: SimulationGameStateZoneCard[]
+  key: string
+  label: string
+}
+
 type SimulationResultCardPreviewPosition = {
   left: number
   placement: "above" | "below"
   top: number
   width: number
+}
+
+const GAME_STATE_ZONE_ORDER = [
+  "hand",
+  "command",
+  "battlefield",
+  "graveyard",
+  "exile",
+] as const
+
+const GAME_STATE_ZONE_LABELS: Record<string, string> = {
+  battlefield: "Battlefield",
+  command: "Command",
+  exile: "Exile",
+  graveyard: "Graveyard",
+  hand: "Hand",
 }
 
 const SIMULATION_RESULT_CARD_PREVIEW_GAP_PX = 8
@@ -5978,6 +6005,21 @@ function SimulationFinalOutputBlock({
   cardMentions?: SimulationDebugLlmRunChunk["cardMentions"]
   finalOutput: ParsedSimulationFinalOutput
 }) {
+  if (finalOutput.type === "turn") {
+    return (
+      <div className="grid gap-2">
+        <SimulationTurnActionsSurface
+          cardMentions={cardMentions}
+          turnActions={finalOutput.turnActions}
+        />
+        <SimulationGameStateZonesBlock
+          cardMentions={cardMentions}
+          gameState={finalOutput.gameState}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className={`grid gap-3 p-3 ${simulationResultChunkSurfaceClassName}`}>
       {finalOutput.type === "opening_hand" ? (
@@ -5992,21 +6034,6 @@ function SimulationFinalOutputBlock({
             cardMentions
           )}
         />
-      ) : finalOutput.type === "turn" ? (
-        <Fragment>
-          <SimulationTurnActionsBlock
-            cardMentions={cardMentions}
-            turnActions={finalOutput.turnActions}
-          />
-          <details className={simulationResultChunkSurfaceClassName}>
-            <summary className={simulationResultChunkSummaryClassName}>
-              Game state
-            </summary>
-            <pre className={simulationResultChunkPreClassName}>
-              {formatGameStateJson(finalOutput.gameState)}
-            </pre>
-          </details>
-        </Fragment>
       ) : (
         <SimulationReportMarkdown report={finalOutput.report} />
       )}
@@ -6124,6 +6151,227 @@ function SimulationTurnActionsBlock({
         ))}
       </div>
     </section>
+  )
+}
+
+function SimulationTurnActionsSurface({
+  cardMentions = [],
+  turnActions,
+}: {
+  cardMentions?: SimulationDebugLlmRunChunk["cardMentions"]
+  turnActions: Record<TurnPhaseChange, string[]>
+}) {
+  return (
+    <div className={`grid gap-3 p-3 ${simulationResultChunkSurfaceClassName}`}>
+      <SimulationTurnActionsBlock
+        cardMentions={cardMentions}
+        turnActions={turnActions}
+      />
+    </div>
+  )
+}
+
+function SimulationGameStateZonesBlock({
+  cardMentions = [],
+  gameState,
+}: {
+  cardMentions?: SimulationDebugLlmRunChunk["cardMentions"]
+  gameState: unknown
+}) {
+  const zones = getSimulationGameStateZones(gameState)
+
+  if (zones.length === 0) {
+    return null
+  }
+
+  return (
+    <section
+      className={`grid gap-3 p-3 ${simulationResultChunkSurfaceClassName}`}
+    >
+      {zones.map((zone) => (
+        <div key={zone.key} className="min-w-0">
+          <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            {zone.label}
+          </p>
+          {zone.cards.length > 0 ? (
+            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
+              {zone.cards.map((card) => (
+                <SimulationGameStateZoneCardPill
+                  key={`${card.zoneKey}-${card.index}-${card.name}`}
+                  card={card}
+                  cardMentions={cardMentions}
+                />
+              ))}
+            </div>
+          ) : (
+            <p className="mt-2 text-sm text-muted-foreground">empty</p>
+          )}
+        </div>
+      ))}
+    </section>
+  )
+}
+
+function SimulationGameStateZoneCardPill({
+  card,
+  cardMentions,
+}: {
+  card: SimulationGameStateZoneCard
+  cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
+}) {
+  const mention = getGameStateZoneCardMention(cardMentions, card)
+  const href = mention ? getStrictResolvedCardMentionScryfallUrl(mention) : null
+  const imageUrl = href ? mention?.defaultImageUrl : null
+
+  return (
+    <SimulationResultCardPill
+      href={href}
+      imageUrl={imageUrl}
+      label={card.name}
+      title={getSimulationGameStateZoneCardTitle(card)}
+    />
+  )
+}
+
+function getSimulationGameStateZones(
+  gameState: unknown
+): SimulationGameStateZone[] {
+  const gameStateRecord = getSimulationUnknownRecord(gameState)
+  const zonesRecord = getSimulationUnknownRecord(gameStateRecord?.zones)
+
+  if (!zonesRecord) {
+    return []
+  }
+
+  const zoneKeys = Object.keys(zonesRecord).filter((zoneKey) =>
+    Array.isArray(zonesRecord[zoneKey])
+  )
+  const zoneKeySet = new Set(zoneKeys)
+  const orderedZoneKeys = [
+    ...GAME_STATE_ZONE_ORDER.filter((zoneKey) => zoneKeySet.has(zoneKey)),
+    ...zoneKeys.filter(
+      (zoneKey) =>
+        !GAME_STATE_ZONE_ORDER.includes(
+          zoneKey as (typeof GAME_STATE_ZONE_ORDER)[number]
+        )
+    ),
+  ]
+
+  return orderedZoneKeys.map((zoneKey) => ({
+    cards: getSimulationGameStateZoneCards(zonesRecord[zoneKey], zoneKey),
+    key: zoneKey,
+    label: getSimulationGameStateZoneLabel(zoneKey),
+  }))
+}
+
+function getSimulationGameStateZoneCards(
+  value: unknown,
+  zoneKey: string
+): SimulationGameStateZoneCard[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.flatMap((card, index) => {
+    const cardRecord = getSimulationUnknownRecord(card)
+
+    if (!cardRecord) {
+      return []
+    }
+
+    const name = cardRecord.name
+
+    if (typeof name !== "string" || !name.trim()) {
+      return []
+    }
+
+    const notes = cardRecord.notes
+
+    return [
+      {
+        index,
+        name: name.trim(),
+        notes: typeof notes === "string" && notes.trim() ? notes.trim() : null,
+        tapped:
+          typeof cardRecord.tapped === "boolean" ? cardRecord.tapped : null,
+        zoneKey,
+      },
+    ]
+  })
+}
+
+function getSimulationUnknownRecord(
+  value: unknown
+): Record<string, unknown> | null {
+  return hasGameState(value) ? value : null
+}
+
+function getSimulationGameStateZoneLabel(zoneKey: string) {
+  const knownLabel = GAME_STATE_ZONE_LABELS[zoneKey]
+
+  if (knownLabel) {
+    return knownLabel
+  }
+
+  return zoneKey
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase())
+}
+
+function getGameStateZoneCardMention(
+  cardMentions: SimulationDebugLlmRunChunk["cardMentions"],
+  card: SimulationGameStateZoneCard
+) {
+  const sourcePath = getGameStateZoneCardSourcePath(card)
+
+  return (
+    cardMentions.find(
+      (mention) =>
+        mention.sourcePath === sourcePath &&
+        mention.position === card.index &&
+        mention.requestedName === card.name
+    ) ?? null
+  )
+}
+
+function getGameStateZoneCardSourcePath(card: SimulationGameStateZoneCard) {
+  return `payload.gameState.zones.${card.zoneKey}[${card.index}].name`
+}
+
+function getStrictResolvedCardMentionScryfallUrl(
+  mention: SimulationResultCardMention
+) {
+  if (
+    mention.resolutionStatus !== "exact" &&
+    mention.resolutionStatus !== "face_exact"
+  ) {
+    return null
+  }
+
+  return mention.scryfallUri?.trim() || null
+}
+
+function getSimulationGameStateZoneCardTitle(
+  card: SimulationGameStateZoneCard
+) {
+  const details = [
+    card.tapped === true ? "tapped" : card.tapped === false ? "untapped" : null,
+    card.notes,
+  ].filter(Boolean)
+
+  return details.length > 0
+    ? `${card.name} (${details.join(" / ")})`
+    : card.name
+}
+
+function getSimulationRunGameStateCardMentions(
+  chunks: readonly SimulationDebugLlmRunChunk[]
+) {
+  return (
+    [...chunks]
+      .reverse()
+      .find((chunk) => chunk.kind === "final_parsed_output")?.cardMentions ??
+    []
   )
 }
 
@@ -6710,7 +6958,6 @@ function SimulationResultCardPill({
 
   useLayoutEffect(() => {
     if (!isPreviewVisible || !trimmedImageUrl) {
-      setPreviewPosition(null)
       return
     }
 

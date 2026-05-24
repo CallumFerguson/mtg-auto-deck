@@ -675,7 +675,7 @@ test("extracts card mentions from turn final parsed output actions", () => {
             "Ignore **bold text**, * *, and an unfinished *card reference.",
           ],
         }),
-        gameState: createTurnGameState(),
+        gameState: createTurnGameState({ battlefield: [], hand: [] }),
         error: null,
       },
     }),
@@ -694,6 +694,72 @@ test("extracts card mentions from turn final parsed output actions", () => {
         sourcePath: "payload.turnActions.precombat_main[0]",
         position: 1,
         requestedName: "Sol Ring",
+      },
+    ]
+  )
+})
+
+test("extracts card mentions from turn final parsed output game state zones", () => {
+  assert.deepEqual(
+    extractLlmRunChunkCardMentionRequests({
+      kind: "final_parsed_output",
+      mcpFunctionName: null,
+      mcpFunctionOutput: null,
+      payload: {
+        turnActions: createTurnActions({
+          draw: [],
+          precombat_main: [],
+        }),
+        gameState: {
+          zones: {
+            hand: [
+              createGameStateCard("Forest"),
+              createGameStateCard("Forest"),
+            ],
+            command: [createGameStateCard("Aesi, Tyrant of Gyre Strait")],
+            battlefield: [
+              createGameStateCard("Sol Ring"),
+              { tapped: false, notes: null },
+              createGameStateCard("Command Tower"),
+            ],
+            graveyard: [],
+            exile: [],
+            stash: [createGameStateCard("Arcane Signet")],
+          },
+        },
+        error: null,
+      },
+    }),
+    [
+      {
+        sourcePath: "payload.gameState.zones.hand[0].name",
+        position: 0,
+        requestedName: "Forest",
+      },
+      {
+        sourcePath: "payload.gameState.zones.hand[1].name",
+        position: 1,
+        requestedName: "Forest",
+      },
+      {
+        sourcePath: "payload.gameState.zones.command[0].name",
+        position: 0,
+        requestedName: "Aesi, Tyrant of Gyre Strait",
+      },
+      {
+        sourcePath: "payload.gameState.zones.battlefield[0].name",
+        position: 0,
+        requestedName: "Sol Ring",
+      },
+      {
+        sourcePath: "payload.gameState.zones.battlefield[2].name",
+        position: 2,
+        requestedName: "Command Tower",
+      },
+      {
+        sourcePath: "payload.gameState.zones.stash[0].name",
+        position: 0,
+        requestedName: "Arcane Signet",
       },
     ]
   )
