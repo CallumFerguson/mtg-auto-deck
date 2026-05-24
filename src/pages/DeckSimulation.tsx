@@ -6196,7 +6196,6 @@ function SimulationGameStatePane({
       aria-label="Game state"
     >
       <section className="grid gap-4 p-5">
-        <h2 className="text-sm font-semibold text-foreground">Game state</h2>
         {gameState && hasRenderableGameState ? (
           <SimulationGameStateZonesBlock
             cardMentions={gameState.cardMentions}
