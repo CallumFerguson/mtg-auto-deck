@@ -133,12 +133,12 @@ type OpeningHandCardOption = {
 
 type SimulationResultsAction =
   | {
-      kind: "opening_hand"
-    }
+    kind: "opening_hand"
+  }
   | {
-      kind: "turn"
-      turnNumber: number
-    }
+    kind: "turn"
+    turnNumber: number
+  }
 
 type SimulationResultsNextTurnTimelineStep = {
   id: string
@@ -1209,11 +1209,10 @@ export function DeckSimulation({
           >
             <div className="simulation-sidebar-surface sticky top-0 z-10 px-2 pt-2 pb-1">
               <button
-                className={`flex h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm font-medium transition-colors ${
-                  isNewSimulationSelected
-                    ? "bg-accent text-accent-foreground"
-                    : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
-                }`}
+                className={`flex h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm font-medium transition-colors ${isNewSimulationSelected
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+                  }`}
                 type="button"
                 aria-pressed={isNewSimulationSelected}
                 onClick={() => {
@@ -1226,9 +1225,8 @@ export function DeckSimulation({
                 New simulation
               </button>
               <div
-                className={`absolute right-0 bottom-0 left-0 border-b border-border transition-opacity ${
-                  isSimulationListScrolled ? "opacity-100" : "opacity-0"
-                }`}
+                className={`absolute right-0 bottom-0 left-0 border-b border-border transition-opacity ${isSimulationListScrolled ? "opacity-100" : "opacity-0"
+                  }`}
               />
             </div>
 
@@ -1256,12 +1254,11 @@ export function DeckSimulation({
                   {simulations.map((simulation) => (
                     <li key={simulation.id} className="group relative">
                       <button
-                        className={`h-11 w-full rounded-md pr-11 pl-3 text-left text-sm font-medium transition-colors ${
-                          !isNewSimulationSelected &&
+                        className={`h-11 w-full rounded-md pr-11 pl-3 text-left text-sm font-medium transition-colors ${!isNewSimulationSelected &&
                           selectedSimulationId === simulation.id
-                            ? "bg-accent text-accent-foreground"
-                            : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
-                        }`}
+                          ? "bg-accent text-accent-foreground"
+                          : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+                          }`}
                         type="button"
                         aria-pressed={
                           !isNewSimulationSelected &&
@@ -1276,14 +1273,13 @@ export function DeckSimulation({
                         {getSimulationLabel(simulation)}
                       </button>
                       {simulation.activeLlmRunCount > 0 &&
-                      (isNewSimulationSelected ||
-                        selectedSimulationId !== simulation.id) ? (
+                        (isNewSimulationSelected ||
+                          selectedSimulationId !== simulation.id) ? (
                         <div
-                          className={`pointer-events-none absolute inset-y-0 right-1 flex items-center px-2 text-muted-foreground transition-opacity group-hover:opacity-0 ${
-                            openSimulationMenuId === simulation.id
-                              ? "opacity-0"
-                              : "opacity-100"
-                          }`}
+                          className={`pointer-events-none absolute inset-y-0 right-1 flex items-center px-2 text-muted-foreground transition-opacity group-hover:opacity-0 ${openSimulationMenuId === simulation.id
+                            ? "opacity-0"
+                            : "opacity-100"
+                            }`}
                           aria-hidden="true"
                         >
                           <svg
@@ -1305,11 +1301,10 @@ export function DeckSimulation({
                         </div>
                       ) : null}
                       <div
-                        className={`absolute inset-y-0 right-1 flex items-center opacity-0 transition-opacity group-hover:opacity-100 ${
-                          openSimulationMenuId === simulation.id
-                            ? "opacity-100"
-                            : ""
-                        }`}
+                        className={`absolute inset-y-0 right-1 flex items-center opacity-0 transition-opacity group-hover:opacity-100 ${openSimulationMenuId === simulation.id
+                          ? "opacity-100"
+                          : ""
+                          }`}
                       >
                         <Button
                           type="button"
@@ -1393,11 +1388,10 @@ export function DeckSimulation({
                         </legend>
                         <div className="grid gap-2 sm:grid-cols-2">
                           <label
-                            className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
-                              seedMode === "random"
-                                ? "border-ring bg-accent text-accent-foreground"
-                                : "border-border bg-background/35 text-muted-foreground"
-                            }`}
+                            className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${seedMode === "random"
+                              ? "border-ring bg-accent text-accent-foreground"
+                              : "border-border bg-background/35 text-muted-foreground"
+                              }`}
                           >
                             <input
                               className="size-4 accent-sky-300"
@@ -1409,11 +1403,10 @@ export function DeckSimulation({
                             Random seed
                           </label>
                           <label
-                            className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
-                              seedMode === "set"
-                                ? "border-ring bg-accent text-accent-foreground"
-                                : "border-border bg-background/35 text-muted-foreground"
-                            }`}
+                            className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${seedMode === "set"
+                              ? "border-ring bg-accent text-accent-foreground"
+                              : "border-border bg-background/35 text-muted-foreground"
+                              }`}
                           >
                             <input
                               className="size-4 accent-sky-300"
@@ -1426,375 +1419,369 @@ export function DeckSimulation({
                           </label>
                         </div>
 
-                      {seedMode === "set" ? (
-                        <div className="grid gap-3 rounded-md border border-border bg-background/35 p-3">
-                          {savedSeedLoadError ? (
-                            <div className="grid gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2">
-                              <p className="text-sm text-destructive">
-                                {savedSeedLoadError}
-                              </p>
+                        {seedMode === "set" ? (
+                          <div className="grid gap-3 rounded-md border border-border bg-background/35 p-3">
+                            {savedSeedLoadError ? (
+                              <div className="grid gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2">
+                                <p className="text-sm text-destructive">
+                                  {savedSeedLoadError}
+                                </p>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={() => void loadSavedSeeds()}
+                                >
+                                  <RefreshCw data-icon="inline-start" />
+                                  Try again
+                                </Button>
+                              </div>
+                            ) : null}
+
+                            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                              <label
+                                className="grid gap-2 text-sm font-medium"
+                                htmlFor="saved-seed"
+                              >
+                                <span>Saved seed</span>
+                                <select
+                                  id="saved-seed"
+                                  className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground transition-colors outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
+                                  value={selectedSavedSeedId}
+                                  disabled={
+                                    isLoadingSavedSeeds || savedSeeds.length === 0
+                                  }
+                                  onChange={(event) =>
+                                    setSelectedSavedSeedId(event.target.value)
+                                  }
+                                >
+                                  {isLoadingSavedSeeds ? (
+                                    <option value="">
+                                      Loading saved seeds...
+                                    </option>
+                                  ) : savedSeeds.length === 0 ? (
+                                    <option value="">No saved seeds yet</option>
+                                  ) : null}
+                                  {savedSeeds.map((seed) => (
+                                    <option key={seed.id} value={seed.id}>
+                                      {seed.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+
                               <Button
                                 type="button"
                                 variant="outline"
-                                onClick={() => void loadSavedSeeds()}
+                                onClick={() => setIsCreateSeedModalOpen(true)}
                               >
-                                <RefreshCw data-icon="inline-start" />
-                                Try again
+                                <Plus data-icon="inline-start" />
+                                New seed
                               </Button>
                             </div>
-                          ) : null}
 
-                          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-                            <label
-                              className="grid gap-2 text-sm font-medium"
-                              htmlFor="saved-seed"
-                            >
-                              <span>Saved seed</span>
-                              <select
-                                id="saved-seed"
-                                className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground transition-colors outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
-                                value={selectedSavedSeedId}
-                                disabled={
-                                  isLoadingSavedSeeds || savedSeeds.length === 0
-                                }
-                                onChange={(event) =>
-                                  setSelectedSavedSeedId(event.target.value)
-                                }
-                              >
-                                {isLoadingSavedSeeds ? (
-                                  <option value="">
-                                    Loading saved seeds...
-                                  </option>
-                                ) : savedSeeds.length === 0 ? (
-                                  <option value="">No saved seeds yet</option>
-                                ) : null}
-                                {savedSeeds.map((seed) => (
-                                  <option key={seed.id} value={seed.id}>
-                                    {seed.name}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
+                            {selectedSavedSeed ? (
+                              <dl className="grid gap-1 text-sm">
+                                <dt className="text-muted-foreground">
+                                  Seed value
+                                </dt>
+                                <dd className="rounded-md bg-muted/30 px-3 py-2 font-medium break-all text-foreground">
+                                  {selectedSavedSeed.seed}
+                                </dd>
+                              </dl>
+                            ) : !isLoadingSavedSeeds ? (
+                              <p className="text-sm text-muted-foreground">
+                                Choose a saved seed, or make a new one.
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </fieldset>
 
+                      <div className="grid gap-3">
+                        <label
+                          className="text-sm font-medium text-foreground"
+                          htmlFor="model-preset"
+                        >
+                          Model preset
+                        </label>
+                        {modelPresetLoadError ? (
+                          <div className="grid gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2">
+                            <p className="text-sm text-destructive">
+                              {modelPresetLoadError}
+                            </p>
                             <Button
                               type="button"
                               variant="outline"
-                              onClick={() => setIsCreateSeedModalOpen(true)}
+                              onClick={() => void loadModelPresets()}
                             >
-                              <Plus data-icon="inline-start" />
-                              New seed
+                              <RefreshCw data-icon="inline-start" />
+                              Try again
                             </Button>
                           </div>
-
-                          {selectedSavedSeed ? (
-                            <dl className="grid gap-1 text-sm">
-                              <dt className="text-muted-foreground">
-                                Seed value
-                              </dt>
-                              <dd className="rounded-md bg-muted/30 px-3 py-2 font-medium break-all text-foreground">
-                                {selectedSavedSeed.seed}
-                              </dd>
-                            </dl>
-                          ) : !isLoadingSavedSeeds ? (
-                            <p className="text-sm text-muted-foreground">
-                              Choose a saved seed, or make a new one.
-                            </p>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </fieldset>
-
-                    <div className="grid gap-3">
-                      <label
-                        className="text-sm font-medium text-foreground"
-                        htmlFor="model-preset"
-                      >
-                        Model preset
-                      </label>
-                      {modelPresetLoadError ? (
-                        <div className="grid gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2">
-                          <p className="text-sm text-destructive">
-                            {modelPresetLoadError}
-                          </p>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => void loadModelPresets()}
-                          >
-                            <RefreshCw data-icon="inline-start" />
-                            Try again
-                          </Button>
-                        </div>
-                      ) : null}
-                      <select
-                        id="model-preset"
-                        className="h-9 w-full rounded-md border border-input bg-background/60 px-3 text-sm text-foreground transition-colors outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
-                        value={selectedModelPresetId}
-                        disabled={
-                          isLoadingModelPresets || modelPresets.length === 0
-                        }
-                        onChange={(event) =>
-                          setSelectedModelPresetId(event.target.value)
-                        }
-                      >
-                        {isLoadingModelPresets ? (
-                          <option value="">Loading model presets...</option>
-                        ) : modelPresets.length === 0 ? (
-                          <option value="">No enabled model presets</option>
-                        ) : defaultModelPresetId === null ? (
-                          <option value="">Choose a model preset</option>
                         ) : null}
-                        {modelPresets.map((preset) => (
-                          <option key={preset.id} value={preset.id}>
-                            {getLlmModelPresetLabel(preset)}
-                            {preset.isDefault ? " (default)" : ""}
-                          </option>
-                        ))}
-                      </select>
-                      {!isLoadingModelPresets && modelPresets.length === 0 ? (
-                        <p className="rounded-md border border-amber-300/35 bg-amber-400/10 px-3 py-2 text-sm text-amber-100">
-                          Ask an admin to add or enable a model preset before
-                          creating simulations.
-                        </p>
-                      ) : null}
-                      <FlexServiceTierSwitch
-                        checked={
-                          selectedModelPresetSupportsFlex && useFlexServiceTier
-                        }
-                        disabled={!selectedModelPresetSupportsFlex}
-                        label="Flex processing"
-                        activeWarning="Simulation may be slower and has a higher chance of failing."
-                        onCheckedChange={handleCreateSimulationUseFlexChange}
-                      />
-                    </div>
-
-                    <div className="grid gap-3">
-                      <label
-                        className="text-sm font-medium text-foreground"
-                        htmlFor="turns-to-simulate"
-                      >
-                        Turns to simulate
-                      </label>
-                      <select
-                        id="turns-to-simulate"
-                        className="no-number-spinner h-9 w-full rounded-md border border-input bg-background/60 px-3 text-sm text-foreground transition-colors outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/30 sm:max-w-36"
-                        value={turnsToSimulate}
-                        onChange={(event) =>
-                          setTurnsToSimulate(event.target.value)
-                        }
-                      >
-                        {Array.from({ length: 11 }, (_, turnCount) => (
-                          <option key={turnCount} value={turnCount}>
-                            {turnCount}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div
-                      className={`flex items-center gap-3 rounded-md border px-3 py-3 text-sm transition-colors ${
-                        canAutoGenerateReport && autoGenerateReport
-                          ? "border-ring bg-accent text-accent-foreground"
-                          : "border-border bg-background/35 text-muted-foreground"
-                      } ${
-                        canAutoGenerateReport
-                          ? ""
-                          : "cursor-not-allowed opacity-50"
-                      }`}
-                    >
-                      <button
-                        className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus:ring-3 focus:ring-ring/25 focus:outline-none disabled:cursor-not-allowed ${
-                          canAutoGenerateReport && autoGenerateReport
-                            ? "border-sky-300/70 bg-sky-500/70"
-                            : "border-border bg-muted/55"
-                        }`}
-                        type="button"
-                        role="switch"
-                        aria-checked={
-                          canAutoGenerateReport && autoGenerateReport
-                        }
-                        aria-label="Auto-generate report after final turn"
-                        disabled={!canAutoGenerateReport}
-                        onClick={() =>
-                          setAutoGenerateReport((currentValue) => !currentValue)
-                        }
-                      >
-                        <span
-                          className={`absolute top-1/2 left-1 size-4 -translate-y-1/2 rounded-full bg-foreground shadow-sm shadow-black/30 transition-transform ${
-                            canAutoGenerateReport && autoGenerateReport
-                              ? "translate-x-5"
-                              : "translate-x-0"
-                          }`}
+                        <select
+                          id="model-preset"
+                          className="h-9 w-full rounded-md border border-input bg-background/60 px-3 text-sm text-foreground transition-colors outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
+                          value={selectedModelPresetId}
+                          disabled={
+                            isLoadingModelPresets || modelPresets.length === 0
+                          }
+                          onChange={(event) =>
+                            setSelectedModelPresetId(event.target.value)
+                          }
+                        >
+                          {isLoadingModelPresets ? (
+                            <option value="">Loading model presets...</option>
+                          ) : modelPresets.length === 0 ? (
+                            <option value="">No enabled model presets</option>
+                          ) : defaultModelPresetId === null ? (
+                            <option value="">Choose a model preset</option>
+                          ) : null}
+                          {modelPresets.map((preset) => (
+                            <option key={preset.id} value={preset.id}>
+                              {getLlmModelPresetLabel(preset)}
+                              {preset.isDefault ? " (default)" : ""}
+                            </option>
+                          ))}
+                        </select>
+                        {!isLoadingModelPresets && modelPresets.length === 0 ? (
+                          <p className="rounded-md border border-amber-300/35 bg-amber-400/10 px-3 py-2 text-sm text-amber-100">
+                            Ask an admin to add or enable a model preset before
+                            creating simulations.
+                          </p>
+                        ) : null}
+                        <FlexServiceTierSwitch
+                          checked={
+                            selectedModelPresetSupportsFlex && useFlexServiceTier
+                          }
+                          disabled={!selectedModelPresetSupportsFlex}
+                          label="Flex processing"
+                          activeWarning="Simulation may be slower and has a higher chance of failing."
+                          onCheckedChange={handleCreateSimulationUseFlexChange}
                         />
-                      </button>
-                      <span className="font-medium">
-                        Auto-generate report after final turn
-                      </span>
-                    </div>
-
-                    <ReasoningSummariesSwitch
-                      checked={reasoningSummariesEnabled}
-                      onCheckedChange={setReasoningSummariesEnabled}
-                    />
-
-                    <fieldset className="grid gap-3">
-                      <legend className="text-sm font-medium text-foreground">
-                        Opening hand
-                      </legend>
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <label
-                          className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
-                            openingHandMode === "simulate"
-                              ? "border-ring bg-accent text-accent-foreground"
-                              : "border-border bg-background/35 text-muted-foreground"
-                          }`}
-                        >
-                          <input
-                            className="size-4 accent-sky-300"
-                            type="radio"
-                            name="opening-hand-mode"
-                            checked={openingHandMode === "simulate"}
-                            onChange={() => setOpeningHandMode("simulate")}
-                          />
-                          Simulate opening hand
-                        </label>
-                        <label
-                          className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
-                            openingHandMode === "provide"
-                              ? "border-ring bg-accent text-accent-foreground"
-                              : "border-border bg-background/35 text-muted-foreground"
-                          }`}
-                        >
-                          <input
-                            className="size-4 accent-sky-300"
-                            type="radio"
-                            name="opening-hand-mode"
-                            checked={openingHandMode === "provide"}
-                            onChange={() => setOpeningHandMode("provide")}
-                          />
-                          Provide opening hand
-                        </label>
                       </div>
 
-                      {openingHandMode === "provide" ? (
-                        <div className="grid gap-3 rounded-md border border-border bg-background/35 p-3">
-                          {startingHandLoadError ? (
-                            <div className="grid gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2">
-                              <p className="text-sm text-destructive">
-                                {startingHandLoadError}
-                              </p>
+                      <div className="grid gap-3">
+                        <label
+                          className="text-sm font-medium text-foreground"
+                          htmlFor="turns-to-simulate"
+                        >
+                          Turns to simulate
+                        </label>
+                        <select
+                          id="turns-to-simulate"
+                          className="no-number-spinner h-9 w-full rounded-md border border-input bg-background/60 px-3 text-sm text-foreground transition-colors outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/30 sm:max-w-36"
+                          value={turnsToSimulate}
+                          onChange={(event) =>
+                            setTurnsToSimulate(event.target.value)
+                          }
+                        >
+                          {Array.from({ length: 11 }, (_, turnCount) => (
+                            <option key={turnCount} value={turnCount}>
+                              {turnCount}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div
+                        className={`flex items-center gap-3 rounded-md border px-3 py-3 text-sm transition-colors ${canAutoGenerateReport && autoGenerateReport
+                          ? "border-ring bg-accent text-accent-foreground"
+                          : "border-border bg-background/35 text-muted-foreground"
+                          } ${canAutoGenerateReport
+                            ? ""
+                            : "cursor-not-allowed opacity-50"
+                          }`}
+                      >
+                        <button
+                          className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus:ring-3 focus:ring-ring/25 focus:outline-none disabled:cursor-not-allowed ${canAutoGenerateReport && autoGenerateReport
+                            ? "border-sky-300/70 bg-sky-500/70"
+                            : "border-border bg-muted/55"
+                            }`}
+                          type="button"
+                          role="switch"
+                          aria-checked={
+                            canAutoGenerateReport && autoGenerateReport
+                          }
+                          aria-label="Auto-generate report after final turn"
+                          disabled={!canAutoGenerateReport}
+                          onClick={() =>
+                            setAutoGenerateReport((currentValue) => !currentValue)
+                          }
+                        >
+                          <span
+                            className={`absolute top-1/2 left-1 size-4 -translate-y-1/2 rounded-full bg-foreground shadow-sm shadow-black/30 transition-transform ${canAutoGenerateReport && autoGenerateReport
+                              ? "translate-x-5"
+                              : "translate-x-0"
+                              }`}
+                          />
+                        </button>
+                        <span className="font-medium">
+                          Auto-generate report after final turn
+                        </span>
+                      </div>
+
+                      <ReasoningSummariesSwitch
+                        checked={reasoningSummariesEnabled}
+                        onCheckedChange={setReasoningSummariesEnabled}
+                      />
+
+                      <fieldset className="grid gap-3">
+                        <legend className="text-sm font-medium text-foreground">
+                          Opening hand
+                        </legend>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <label
+                            className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${openingHandMode === "simulate"
+                              ? "border-ring bg-accent text-accent-foreground"
+                              : "border-border bg-background/35 text-muted-foreground"
+                              }`}
+                          >
+                            <input
+                              className="size-4 accent-sky-300"
+                              type="radio"
+                              name="opening-hand-mode"
+                              checked={openingHandMode === "simulate"}
+                              onChange={() => setOpeningHandMode("simulate")}
+                            />
+                            Simulate opening hand
+                          </label>
+                          <label
+                            className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${openingHandMode === "provide"
+                              ? "border-ring bg-accent text-accent-foreground"
+                              : "border-border bg-background/35 text-muted-foreground"
+                              }`}
+                          >
+                            <input
+                              className="size-4 accent-sky-300"
+                              type="radio"
+                              name="opening-hand-mode"
+                              checked={openingHandMode === "provide"}
+                              onChange={() => setOpeningHandMode("provide")}
+                            />
+                            Provide opening hand
+                          </label>
+                        </div>
+
+                        {openingHandMode === "provide" ? (
+                          <div className="grid gap-3 rounded-md border border-border bg-background/35 p-3">
+                            {startingHandLoadError ? (
+                              <div className="grid gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2">
+                                <p className="text-sm text-destructive">
+                                  {startingHandLoadError}
+                                </p>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={() => void loadStartingHands()}
+                                >
+                                  <RefreshCw data-icon="inline-start" />
+                                  Try again
+                                </Button>
+                              </div>
+                            ) : null}
+
+                            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                              <label
+                                className="grid gap-2 text-sm font-medium"
+                                htmlFor="saved-opening-hand"
+                              >
+                                <span>Starting hand</span>
+                                <select
+                                  id="saved-opening-hand"
+                                  className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground transition-colors outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
+                                  value={selectedOpeningHandId}
+                                  disabled={
+                                    isLoadingStartingHands ||
+                                    startingHands.length === 0
+                                  }
+                                  onChange={(event) =>
+                                    setSelectedOpeningHandId(event.target.value)
+                                  }
+                                >
+                                  {isLoadingStartingHands ? (
+                                    <option value="">
+                                      Loading starting hands...
+                                    </option>
+                                  ) : startingHands.length === 0 ? (
+                                    <option value="">
+                                      No starting hands yet
+                                    </option>
+                                  ) : null}
+                                  {startingHands.map((hand) => (
+                                    <option key={hand.id} value={hand.id}>
+                                      {hand.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+
                               <Button
                                 type="button"
                                 variant="outline"
-                                onClick={() => void loadStartingHands()}
+                                onClick={() => setIsCreateHandModalOpen(true)}
                               >
-                                <RefreshCw data-icon="inline-start" />
-                                Try again
+                                <Plus data-icon="inline-start" />
+                                New starting hand
                               </Button>
                             </div>
-                          ) : null}
 
-                          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-                            <label
-                              className="grid gap-2 text-sm font-medium"
-                              htmlFor="saved-opening-hand"
-                            >
-                              <span>Starting hand</span>
-                              <select
-                                id="saved-opening-hand"
-                                className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground transition-colors outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
-                                value={selectedOpeningHandId}
-                                disabled={
-                                  isLoadingStartingHands ||
-                                  startingHands.length === 0
-                                }
-                                onChange={(event) =>
-                                  setSelectedOpeningHandId(event.target.value)
-                                }
-                              >
-                                {isLoadingStartingHands ? (
-                                  <option value="">
-                                    Loading starting hands...
-                                  </option>
-                                ) : startingHands.length === 0 ? (
-                                  <option value="">
-                                    No starting hands yet
-                                  </option>
-                                ) : null}
-                                {startingHands.map((hand) => (
-                                  <option key={hand.id} value={hand.id}>
-                                    {hand.name}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={() => setIsCreateHandModalOpen(true)}
-                            >
-                              <Plus data-icon="inline-start" />
-                              New starting hand
-                            </Button>
-                          </div>
-
-                          {selectedOpeningHand ? (
-                            <div className="grid gap-2">
-                              <p className="text-sm text-sky-300">
-                                {countStartingHandCards(selectedOpeningHand)}{" "}
-                                cards selected
+                            {selectedOpeningHand ? (
+                              <div className="grid gap-2">
+                                <p className="text-sm text-sky-300">
+                                  {countStartingHandCards(selectedOpeningHand)}{" "}
+                                  cards selected
+                                </p>
+                                <ul className="grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
+                                  {selectedOpeningHand.cards.map((card) => (
+                                    <li
+                                      key={card.deckCardId}
+                                      className="rounded-md bg-muted/30 px-3 py-2"
+                                    >
+                                      {card.quantity > 1 ? (
+                                        <span className="mr-2 text-sky-300">
+                                          {card.quantity}x
+                                        </span>
+                                      ) : null}
+                                      {card.name}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ) : !isLoadingStartingHands ? (
+                              <p className="text-sm text-muted-foreground">
+                                Choose a saved starting hand, or make a new one.
                               </p>
-                              <ul className="grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
-                                {selectedOpeningHand.cards.map((card) => (
-                                  <li
-                                    key={card.deckCardId}
-                                    className="rounded-md bg-muted/30 px-3 py-2"
-                                  >
-                                    {card.quantity > 1 ? (
-                                      <span className="mr-2 text-sky-300">
-                                        {card.quantity}x
-                                      </span>
-                                    ) : null}
-                                    {card.name}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          ) : !isLoadingStartingHands ? (
-                            <p className="text-sm text-muted-foreground">
-                              Choose a saved starting hand, or make a new one.
-                            </p>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </fieldset>
-                  </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </fieldset>
+                    </div>
 
-                  <div>
-                    <Button
-                      type="button"
-                      disabled={!canStartSimulation || isCreatingSimulation}
-                      onClick={() => void handleStartSimulation()}
-                    >
-                      <Dices data-icon="inline-start" />
-                      {isCreatingSimulation
-                        ? "Creating..."
-                        : "Start simulation"}
-                    </Button>
-                  </div>
+                    <div>
+                      <Button
+                        type="button"
+                        disabled={!canStartSimulation || isCreatingSimulation}
+                        onClick={() => void handleStartSimulation()}
+                      >
+                        <Dices data-icon="inline-start" />
+                        {isCreatingSimulation
+                          ? "Creating..."
+                          : "Start simulation"}
+                      </Button>
+                    </div>
 
-                  {createSimulationError ? (
-                    <p
-                      className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-                      role="alert"
-                    >
-                      {createSimulationError}
-                    </p>
-                  ) : null}
+                    {createSimulationError ? (
+                      <p
+                        className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                        role="alert"
+                      >
+                        {createSimulationError}
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
               </div>
-            </div>
             </div>
           ) : selectedSimulation ? (
             <SimulationDetails
@@ -1988,18 +1975,16 @@ function ReasoningSummariesSwitch({
 }) {
   return (
     <div
-      className={`flex items-center gap-3 rounded-md border px-3 py-3 text-sm transition-colors ${
-        checked
-          ? "border-ring bg-accent text-accent-foreground"
-          : "border-border bg-background/35 text-muted-foreground"
-      } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+      className={`flex items-center gap-3 rounded-md border px-3 py-3 text-sm transition-colors ${checked
+        ? "border-ring bg-accent text-accent-foreground"
+        : "border-border bg-background/35 text-muted-foreground"
+        } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
     >
       <button
-        className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus:ring-3 focus:ring-ring/25 focus:outline-none disabled:cursor-not-allowed ${
-          checked
-            ? "border-sky-300/70 bg-sky-500/70"
-            : "border-border bg-muted/55"
-        }`}
+        className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus:ring-3 focus:ring-ring/25 focus:outline-none disabled:cursor-not-allowed ${checked
+          ? "border-sky-300/70 bg-sky-500/70"
+          : "border-border bg-muted/55"
+          }`}
         type="button"
         role="switch"
         aria-checked={checked}
@@ -2008,9 +1993,8 @@ function ReasoningSummariesSwitch({
         onClick={() => onCheckedChange(!checked)}
       >
         <span
-          className={`absolute top-1/2 left-1 size-4 -translate-y-1/2 rounded-full bg-foreground shadow-sm shadow-black/30 transition-transform ${
-            checked ? "translate-x-5" : "translate-x-0"
-          }`}
+          className={`absolute top-1/2 left-1 size-4 -translate-y-1/2 rounded-full bg-foreground shadow-sm shadow-black/30 transition-transform ${checked ? "translate-x-5" : "translate-x-0"
+            }`}
         />
       </button>
       <span className="font-medium">Reasoning summaries</span>
@@ -2035,18 +2019,16 @@ function FlexServiceTierSwitch({
 
   return (
     <div
-      className={`flex items-start gap-3 rounded-md border px-3 py-3 text-sm transition-colors ${
-        checked
-          ? "border-ring bg-accent text-accent-foreground"
-          : "border-border bg-background/35 text-muted-foreground"
-      } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+      className={`flex items-start gap-3 rounded-md border px-3 py-3 text-sm transition-colors ${checked
+        ? "border-ring bg-accent text-accent-foreground"
+        : "border-border bg-background/35 text-muted-foreground"
+        } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
     >
       <button
-        className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus:ring-3 focus:ring-ring/25 focus:outline-none disabled:cursor-not-allowed ${
-          checked
-            ? "border-sky-300/70 bg-sky-500/70"
-            : "border-border bg-muted/55"
-        }`}
+        className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus:ring-3 focus:ring-ring/25 focus:outline-none disabled:cursor-not-allowed ${checked
+          ? "border-sky-300/70 bg-sky-500/70"
+          : "border-border bg-muted/55"
+          }`}
         type="button"
         role="switch"
         aria-checked={checked}
@@ -2055,9 +2037,8 @@ function FlexServiceTierSwitch({
         onClick={() => onCheckedChange(!checked)}
       >
         <span
-          className={`absolute top-1/2 left-1 size-4 -translate-y-1/2 rounded-full bg-foreground shadow-sm shadow-black/30 transition-transform ${
-            checked ? "translate-x-5" : "translate-x-0"
-          }`}
+          className={`absolute top-1/2 left-1 size-4 -translate-y-1/2 rounded-full bg-foreground shadow-sm shadow-black/30 transition-transform ${checked ? "translate-x-5" : "translate-x-0"
+            }`}
         />
       </button>
       <span className="grid gap-1">
@@ -2812,9 +2793,9 @@ function SimulationDetails({
         turnLlmRuns: currentResultsInfo.turnLlmRuns.map((run) =>
           run.llmRunId === evaluation.turnLlmRunId
             ? {
-                ...run,
-                turnEvaluation: evaluation,
-              }
+              ...run,
+              turnEvaluation: evaluation,
+            }
             : run
         ),
       }
@@ -2835,9 +2816,9 @@ function SimulationDetails({
         openingHandLlmRuns: currentResultsInfo.openingHandLlmRuns.map((run) =>
           run.llmRunId === evaluation.openingHandLlmRunId
             ? {
-                ...run,
-                openingHandEvaluation: evaluation,
-              }
+              ...run,
+              openingHandEvaluation: evaluation,
+            }
             : run
         ),
       }
@@ -3685,9 +3666,9 @@ function SimulationResultsPanel({
 
       return run
         ? {
-            resultKind: "opening_hand" as const,
-            run,
-          }
+          resultKind: "opening_hand" as const,
+          run,
+        }
         : null
     }
 
@@ -3698,9 +3679,9 @@ function SimulationResultsPanel({
 
     return run
       ? {
-          resultKind: "turn" as const,
-          run,
-        }
+        resultKind: "turn" as const,
+        run,
+      }
       : null
   }, [
     evaluationRunSelection,
@@ -3917,6 +3898,8 @@ function SimulationResultsPanel({
       run.failureMessage ? run.failureMessage : null,
       run.outdated ? "outdated" : null,
     ].filter(Boolean)
+    const shouldShowRunMetadata = !run.isActive && runMetadata.length > 0
+    const shouldShowRunActions = run.canEvaluate || run.canRerun
     const hasLiveReport =
       run.resultKind === "report" &&
       !run.hasFinalParsedOutputChunk &&
@@ -3935,103 +3918,6 @@ function SimulationResultsPanel({
         className="grid gap-3 rounded-md border border-border bg-background/35 p-3"
         role={panelId ? "region" : undefined}
       >
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="min-w-0">
-            <p className="text-xs text-muted-foreground">
-              {runMetadata.join(" / ")}
-            </p>
-          </div>
-          <div className="flex shrink-0 items-center gap-1">
-            {run.canEvaluate ? (
-              <Button
-                className={
-                  (
-                    run.resultKind === "opening_hand"
-                      ? run.openingHandEvaluation
-                      : run.turnEvaluation
-                  )
-                    ? "text-emerald-300 hover:text-emerald-200"
-                    : ""
-                }
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                aria-label={
-                  run.resultKind === "opening_hand"
-                    ? `Evaluate opening hand attempt ${run.attemptNumber}`
-                    : `Evaluate turn ${run.turnNumber}`
-                }
-                title={
-                  run.resultKind === "opening_hand"
-                    ? `Evaluate opening hand attempt ${run.attemptNumber}`
-                    : `Evaluate turn ${run.turnNumber}`
-                }
-                onClick={() => {
-                  if (!canContinueWithModelPreset()) {
-                    return
-                  }
-
-                  setEvaluationRunSelection({
-                    llmRunId: run.llmRunId,
-                    resultKind:
-                      run.resultKind === "opening_hand"
-                        ? "opening_hand"
-                        : "turn",
-                  })
-                }}
-              >
-                <ClipboardCheck />
-              </Button>
-            ) : null}
-            {run.canRerun ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                disabled={isStartingSimulationRun}
-                aria-label={
-                  run.resultKind === "opening_hand"
-                    ? "Rerun opening hand"
-                    : run.resultKind === "report"
-                      ? "Rerun report"
-                      : `Rerun turn ${run.turnNumber}`
-                }
-                title={
-                  run.resultKind === "opening_hand"
-                    ? "Rerun opening hand"
-                    : run.resultKind === "report"
-                      ? "Rerun report"
-                      : `Rerun turn ${run.turnNumber}`
-                }
-                onClick={() => {
-                  if (!canContinueWithModelPreset()) {
-                    return
-                  }
-
-                  setSelectedTimelineStepIdPreference(null)
-                  onKeepResultsScrolledToBottom()
-
-                  if (run.resultKind === "opening_hand") {
-                    onStartOpeningHandRun()
-                    return
-                  }
-
-                  if (run.resultKind === "report") {
-                    onStartReportRun()
-                    return
-                  }
-
-                  if (typeof run.turnNumber === "number") {
-                    onStartTurnRun(run.turnNumber)
-                  }
-                }}
-              >
-                <RefreshCw />
-              </Button>
-            ) : null}
-          </div>
-        </div>
-
         {hasGameState(run.gameState) && !getSimulationFinalParsedOutput(run) ? (
           <div className="grid gap-2">
             {hasTurnActions(run.turnActions) ? (
@@ -4049,8 +3935,8 @@ function SimulationResultsPanel({
         ) : null}
 
         {run.resultEntries.length > 0 ||
-        finishedThinkingStatus ||
-        hasLiveReport ? (
+          finishedThinkingStatus ||
+          hasLiveReport ? (
           <SimulationResultChunkCards
             run={run}
             entries={run.resultEntries}
@@ -4075,13 +3961,12 @@ function SimulationResultsPanel({
           />
         ) : run.resultEntries.length === 0 && !hasGameState(run.gameState) ? (
           <div
-            className={`rounded-md border px-3 py-2 text-sm ${
-              isUsageLimitFailure
-                ? "border-amber-300/30 bg-amber-400/10 text-amber-100"
-                : emptyRunFailureMessage
-                  ? "border-destructive/40 bg-destructive/10 text-destructive"
-                  : "border-border bg-black/20 text-muted-foreground"
-            }`}
+            className={`rounded-md border px-3 py-2 text-sm ${isUsageLimitFailure
+              ? "border-amber-300/30 bg-amber-400/10 text-amber-100"
+              : emptyRunFailureMessage
+                ? "border-destructive/40 bg-destructive/10 text-destructive"
+                : "border-border bg-black/20 text-muted-foreground"
+              }`}
             role={
               isUsageLimitFailure
                 ? "status"
@@ -4103,6 +3988,109 @@ function SimulationResultsPanel({
             )}
           </div>
         ) : null}
+
+        {shouldShowRunMetadata || shouldShowRunActions ? (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            {shouldShowRunMetadata ? (
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground">
+                  {runMetadata.join(" / ")}
+                </p>
+              </div>
+            ) : (
+              <div className="min-w-0" aria-hidden="true" />
+            )}
+            <div className="flex shrink-0 items-center gap-1">
+              {run.canEvaluate ? (
+                <Button
+                  className={
+                    (
+                      run.resultKind === "opening_hand"
+                        ? run.openingHandEvaluation
+                        : run.turnEvaluation
+                    )
+                      ? "text-emerald-300 hover:text-emerald-200"
+                      : ""
+                  }
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
+                  aria-label={
+                    run.resultKind === "opening_hand"
+                      ? `Evaluate opening hand attempt ${run.attemptNumber}`
+                      : `Evaluate turn ${run.turnNumber}`
+                  }
+                  title={
+                    run.resultKind === "opening_hand"
+                      ? `Evaluate opening hand attempt ${run.attemptNumber}`
+                      : `Evaluate turn ${run.turnNumber}`
+                  }
+                  onClick={() => {
+                    if (!canContinueWithModelPreset()) {
+                      return
+                    }
+
+                    setEvaluationRunSelection({
+                      llmRunId: run.llmRunId,
+                      resultKind:
+                        run.resultKind === "opening_hand"
+                          ? "opening_hand"
+                          : "turn",
+                    })
+                  }}
+                >
+                  <ClipboardCheck />
+                </Button>
+              ) : null}
+              {run.canRerun ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
+                  disabled={isStartingSimulationRun}
+                  aria-label={
+                    run.resultKind === "opening_hand"
+                      ? "Rerun opening hand"
+                      : run.resultKind === "report"
+                        ? "Rerun report"
+                        : `Rerun turn ${run.turnNumber}`
+                  }
+                  title={
+                    run.resultKind === "opening_hand"
+                      ? "Rerun opening hand"
+                      : run.resultKind === "report"
+                        ? "Rerun report"
+                        : `Rerun turn ${run.turnNumber}`
+                  }
+                  onClick={() => {
+                    if (!canContinueWithModelPreset()) {
+                      return
+                    }
+
+                    setSelectedTimelineStepIdPreference(null)
+                    onKeepResultsScrolledToBottom()
+
+                    if (run.resultKind === "opening_hand") {
+                      onStartOpeningHandRun()
+                      return
+                    }
+
+                    if (run.resultKind === "report") {
+                      onStartReportRun()
+                      return
+                    }
+
+                    if (typeof run.turnNumber === "number") {
+                      onStartTurnRun(run.turnNumber)
+                    }
+                  }}
+                >
+                  <RefreshCw />
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
       </section>
     )
   }
@@ -4115,7 +4103,7 @@ function SimulationResultsPanel({
             <div className="mx-auto w-full max-w-5xl">
               <div
                 aria-label="Simulation timeline"
-                className="simulation-scrollbar simulation-scrollbar-no-gutter overflow-x-auto pb-1"
+                className="simulation-scrollbar simulation-scrollbar-no-gutter overflow-x-auto"
                 role="group"
               >
                 <div className="flex min-w-max items-start">
@@ -5058,9 +5046,8 @@ function getEvaluationModelPresetLabel(
     return "Evaluation model preset unavailable"
   }
 
-  return `${getLlmModelPresetLabel(evaluation.llmModelPreset)}${
-    evaluation.llmModelPreset.isEnabled ? "" : " (disabled)"
-  }`
+  return `${getLlmModelPresetLabel(evaluation.llmModelPreset)}${evaluation.llmModelPreset.isEnabled ? "" : " (disabled)"
+    }`
 }
 
 function TurnEvaluationMetric({
@@ -5266,9 +5253,9 @@ function SimulationResultThinkingStatus({
     activeToolCallName === null
       ? null
       : getKnownSimulationResultToolLabel({
-          mcpFunctionName: activeToolCallName,
-          state: "active",
-        })
+        mcpFunctionName: activeToolCallName,
+        state: "active",
+      })
   const activeElapsedText =
     runStartTimeMs === null || isFinished || isPending
       ? null
@@ -5402,8 +5389,8 @@ function SimulationRunActivityPanel({
     runStartTimeMs === null
       ? null
       : formatMinutesSeconds(
-          (runFinishedTimeMs ?? currentTimeMs) - runStartTimeMs
-        )
+        (runFinishedTimeMs ?? currentTimeMs) - runStartTimeMs
+      )
   const terminalActivityStatus = useMemo(
     () =>
       getSimulationRunTerminalActivityStatus({
@@ -5596,9 +5583,8 @@ function SimulationRunActivityPanel({
 
   return (
     <div
-      className={`h-full min-h-0 shrink-0 overflow-hidden transition-[width] duration-300 ease-out motion-reduce:transition-none ${
-        isOpen ? "w-[clamp(18rem,30vw,24rem)]" : "w-0"
-      }`}
+      className={`h-full min-h-0 shrink-0 overflow-hidden transition-[width] duration-300 ease-out motion-reduce:transition-none ${isOpen ? "w-[clamp(18rem,30vw,24rem)]" : "w-0"
+        }`}
       onTransitionEnd={handlePanelTransitionEnd}
     >
       <aside
@@ -5780,15 +5766,15 @@ function SimulationRunActivityTerminalStatus({
 
 type SimulationRunActivityTimelineItem =
   | {
-      id: string
-      type: "reasoning"
-      block: Extract<SimulationRunActivityBlock, { type: "reasoning" }>
-    }
+    id: string
+    type: "reasoning"
+    block: Extract<SimulationRunActivityBlock, { type: "reasoning" }>
+  }
   | {
-      id: string
-      type: "tool_call_group"
-      blocks: Extract<SimulationRunActivityBlock, { type: "tool_call" }>[]
-    }
+    id: string
+    type: "tool_call_group"
+    blocks: Extract<SimulationRunActivityBlock, { type: "tool_call" }>[]
+  }
 
 function getSimulationRunActivityTimelineItems(
   blocks: readonly SimulationRunActivityBlock[]
@@ -6191,19 +6177,19 @@ function SimulationLoggedActionText({
 
 type SimulationLoggedActionTextToken =
   | {
-      text: string
-      type: "text"
-    }
+    text: string
+    type: "text"
+  }
   | {
-      className: string
-      text: string
-      type: "mana"
-    }
+    className: string
+    text: string
+    type: "mana"
+  }
   | {
-      cardName: string
-      position: number
-      type: "card"
-    }
+    cardName: string
+    position: number
+    type: "card"
+  }
 
 function getSimulationLoggedActionTextTokens(
   text: string
@@ -6217,7 +6203,7 @@ function getSimulationLoggedActionTextTokens(
     const cardToken = findNextActionCardToken(text, index, cardPosition)
     const nextToken =
       cardToken !== null &&
-      (manaToken === null || cardToken.startIndex < manaToken.startIndex)
+        (manaToken === null || cardToken.startIndex < manaToken.startIndex)
         ? cardToken
         : manaToken
 
@@ -6758,28 +6744,27 @@ function SimulationResultCardPill({
       </span>
       {isPreviewVisible && previewPosition
         ? createPortal(
-            <span
-              className={`pointer-events-none fixed z-50 rounded-[5.75%/4.4%] bg-black/80 p-1 shadow-2xl shadow-black/70 ${
-                previewPosition.placement === "above"
-                  ? "origin-bottom"
-                  : "origin-top"
+          <span
+            className={`pointer-events-none fixed z-50 rounded-[5.75%/4.4%] bg-black/80 p-1 shadow-2xl shadow-black/70 ${previewPosition.placement === "above"
+              ? "origin-bottom"
+              : "origin-top"
               }`}
-              style={{
-                left: previewPosition.left,
-                top: previewPosition.top,
-                width: previewPosition.width,
-              }}
-              aria-hidden="true"
-            >
-              <img
-                className="block aspect-[488/680] w-full rounded-[4.75%/3.4%] object-cover"
-                src={trimmedImageUrl}
-                alt=""
-                loading="lazy"
-              />
-            </span>,
-            document.body
-          )
+            style={{
+              left: previewPosition.left,
+              top: previewPosition.top,
+              width: previewPosition.width,
+            }}
+            aria-hidden="true"
+          >
+            <img
+              className="block aspect-[488/680] w-full rounded-[4.75%/3.4%] object-cover"
+              src={trimmedImageUrl}
+              alt=""
+              loading="lazy"
+            />
+          </span>,
+          document.body
+        )
         : null}
     </>
   )
@@ -6979,7 +6964,7 @@ function isMcpCallFailure(chunk: SimulationDebugLlmRunChunk) {
 
   return (
     getPayloadString(asPayloadRecord(chunk.payload).item, "status") ===
-      "failed" || getMcpCallErrorPayload(chunk) !== null
+    "failed" || getMcpCallErrorPayload(chunk) !== null
   )
 }
 
@@ -7170,7 +7155,7 @@ function SimulationDebugRunGroup({
             </div>
 
             {run.provider === "openrouter" &&
-            (run.openrouterGenerations?.length ?? 0) > 0 ? (
+              (run.openrouterGenerations?.length ?? 0) > 0 ? (
               <OpenRouterGenerationsTable
                 deckId={deckId}
                 generations={run.openrouterGenerations ?? []}
@@ -7231,19 +7216,19 @@ function SimulationDebugRunGroup({
 
 type OpenRouterGenerationLookupState =
   | {
-      status: "loading"
-    }
+    status: "loading"
+  }
   | {
-      status: "loaded"
-      providerName: string | null
-      providerEntry: unknown | null
-      providerSlug: string | null
-      result: unknown
-    }
+    status: "loaded"
+    providerName: string | null
+    providerEntry: unknown | null
+    providerSlug: string | null
+    result: unknown
+  }
   | {
-      status: "error"
-      error: string
-    }
+    status: "error"
+    error: string
+  }
 
 function OpenRouterGenerationsTable({
   deckId,
@@ -7966,13 +7951,12 @@ function CreateStartingHandModal({
                     return (
                       <li key={card.id}>
                         <label
-                          className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
-                            isSelected
-                              ? "bg-accent text-accent-foreground"
-                              : isDisabled
-                                ? "text-muted-foreground/55"
-                                : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
-                          }`}
+                          className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${isSelected
+                            ? "bg-accent text-accent-foreground"
+                            : isDisabled
+                              ? "text-muted-foreground/55"
+                              : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+                            }`}
                         >
                           <input
                             className="size-4 accent-sky-300"
