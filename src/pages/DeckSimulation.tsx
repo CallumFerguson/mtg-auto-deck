@@ -3033,13 +3033,13 @@ function SimulationDetails({
       turnRunError={turnRunError}
     />
   ) : (
-    <div className="flex h-full min-h-0 min-w-0 overflow-hidden">
+    <SimulationResultsShell activityPanel={activityPanel} gameState={null}>
       <main
         ref={resultsPanelRef}
         className="simulation-scrollbar h-full min-h-0 min-w-0 flex-1 overflow-y-auto"
         onScroll={handleResultsScroll}
       >
-        <section className="mx-auto grid w-full max-w-5xl gap-4 px-5 py-6">
+        <section className="grid w-full gap-4 p-5">
           {resultsError ? (
             <p
               className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
@@ -3060,6 +3060,35 @@ function SimulationDetails({
           ) : null}
         </section>
       </main>
+    </SimulationResultsShell>
+  )
+}
+
+function SimulationResultsShell({
+  activityPanel,
+  children,
+  gameState,
+  header = null,
+}: {
+  activityPanel: ReactNode
+  children: ReactNode
+  gameState: SimulationGameStateDisplay | null
+  header?: ReactNode
+}) {
+  return (
+    <div className="flex h-full min-h-0 min-w-0 overflow-hidden">
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        {header}
+        <div className="grid min-h-0 min-w-0 flex-1 grid-rows-[minmax(12rem,42svh)_minmax(0,1fr)] overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] lg:grid-rows-1">
+          <section
+            className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden bg-background"
+            aria-label="Simulation results"
+          >
+            {children}
+          </section>
+          <SimulationGameStatePane gameState={gameState} />
+        </div>
+      </div>
 
       {activityPanel}
     </div>
@@ -3858,6 +3887,10 @@ function SimulationResultsPanel({
   const selectedTimelinePanelId = selectedTimelineStep
     ? getSimulationTimelineStepPanelId(selectedTimelineStep.id)
     : undefined
+  const selectedGameState =
+    selectedTimelineStep?.kind === "preset_opening_hand"
+      ? getStartingHandGameStateDisplay(startingHand)
+      : getSimulationRunGameStateDisplay(selectedTimelineRun)
 
   useEffect(() => {
     if (!selectedTimelineStepId) {
@@ -3930,6 +3963,12 @@ function SimulationResultsPanel({
       emptyRunFailureMessage
     )
     const finalParsedOutput = getSimulationFinalParsedOutput(run)
+    const directTurnActions =
+      hasGameState(run.gameState) &&
+      !finalParsedOutput &&
+      hasTurnActions(run.turnActions)
+        ? run.turnActions
+        : null
 
     return (
       <section
@@ -3939,16 +3978,8 @@ function SimulationResultsPanel({
         className="grid gap-3 rounded-md border border-border bg-background/35 p-3"
         role={panelId ? "region" : undefined}
       >
-        {hasGameState(run.gameState) && !finalParsedOutput ? (
-          <div className="grid gap-2">
-            {hasTurnActions(run.turnActions) ? (
-              <SimulationTurnActionsSurface turnActions={run.turnActions} />
-            ) : null}
-            <SimulationGameStateZonesBlock
-              cardMentions={getSimulationRunGameStateCardMentions(run.chunks)}
-              gameState={run.gameState}
-            />
-          </div>
+        {directTurnActions ? (
+          <SimulationTurnActionsSurface turnActions={directTurnActions} />
         ) : null}
 
         {run.resultEntries.length > 0 ||
@@ -3976,7 +4007,7 @@ function SimulationResultsPanel({
             runStartTimeMs={getSimulationRunStartTimeMs(run)}
             stopSimulationError={stopSimulationError}
           />
-        ) : run.resultEntries.length === 0 && !hasGameState(run.gameState) ? (
+        ) : run.resultEntries.length === 0 && directTurnActions === null ? (
           <div
             className={`rounded-md border px-3 py-2 text-sm ${isUsageLimitFailure
               ? "border-amber-300/30 bg-amber-400/10 text-amber-100"
@@ -4112,197 +4143,193 @@ function SimulationResultsPanel({
     )
   }
 
-  return (
-    <>
-      <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
-        {displayedTimelineSteps.length > 0 ? (
-          <header className="relative w-full shrink-0 bg-background px-5 py-3">
-            <div className="mx-auto w-full max-w-5xl">
-              <div
-                aria-label="Simulation timeline"
-                className="simulation-scrollbar simulation-scrollbar-no-gutter overflow-x-auto"
-                role="group"
-              >
-                <div className="flex min-w-max items-start">
-                  {displayedTimelineSteps.map((step, stepIndex) => {
-                    const isResultStep = isSimulationTimelineResultStep(step)
-                    const isSelected =
-                      isResultStep && step.id === selectedTimelineStepId
-                    const panelId = isResultStep
-                      ? getSimulationTimelineStepPanelId(step.id)
-                      : undefined
-                    const isFirstStep = stepIndex === 0
-                    const isLastStep =
-                      stepIndex === displayedTimelineSteps.length - 1
-                    const stepDescription =
-                      getSimulationTimelineStepDescription(step)
+  function renderTimelineHeader() {
+    if (displayedTimelineSteps.length === 0) {
+      return null
+    }
 
-                    return (
-                      <button
-                        key={step.id}
-                        ref={(element) => {
-                          if (element) {
-                            timelineStepButtonRefs.current.set(
-                              step.id,
-                              element
-                            )
-                          } else {
-                            timelineStepButtonRefs.current.delete(step.id)
-                          }
-                        }}
-                        aria-label={`${step.label}, ${stepDescription}`}
-                        aria-controls={panelId}
-                        aria-current={isSelected ? "step" : undefined}
-                        className={getSimulationTimelineStepButtonClassName(
+    return (
+      <header className="relative w-full shrink-0 bg-background px-5 py-3">
+        <div className="w-full">
+          <div
+            aria-label="Simulation timeline"
+            className="simulation-scrollbar simulation-scrollbar-no-gutter overflow-x-auto"
+            role="group"
+          >
+            <div className="flex min-w-max items-start">
+              {displayedTimelineSteps.map((step, stepIndex) => {
+                const isResultStep = isSimulationTimelineResultStep(step)
+                const isSelected =
+                  isResultStep && step.id === selectedTimelineStepId
+                const panelId = isResultStep
+                  ? getSimulationTimelineStepPanelId(step.id)
+                  : undefined
+                const isFirstStep = stepIndex === 0
+                const isLastStep =
+                  stepIndex === displayedTimelineSteps.length - 1
+                const stepDescription =
+                  getSimulationTimelineStepDescription(step)
+
+                return (
+                  <button
+                    key={step.id}
+                    ref={(element) => {
+                      if (element) {
+                        timelineStepButtonRefs.current.set(step.id, element)
+                      } else {
+                        timelineStepButtonRefs.current.delete(step.id)
+                      }
+                    }}
+                    aria-label={`${step.label}, ${stepDescription}`}
+                    aria-controls={panelId}
+                    aria-current={isSelected ? "step" : undefined}
+                    className={getSimulationTimelineStepButtonClassName(
+                      step,
+                      isSelected
+                    )}
+                    id={
+                      isResultStep
+                        ? getSimulationTimelineStepTabId(step.id)
+                        : undefined
+                    }
+                    disabled={
+                      step.kind === "simulate_turn" &&
+                      step.status === "starting_turn"
+                    }
+                    type="button"
+                    onClick={() => {
+                      if (step.kind === "simulate_turn") {
+                        if (step.status === "starting_turn") {
+                          return
+                        }
+
+                        if (!canContinueWithModelPreset()) {
+                          return
+                        }
+
+                        setSelectedTimelineStepIdPreference(null)
+                        onKeepResultsScrolledToBottom()
+                        onStartTurnRun(step.turnNumber)
+                        return
+                      }
+
+                      if (isResultStep) {
+                        setSelectedTimelineStepIdPreference(step.id)
+                        onKeepResultsScrolledToBottom()
+                      }
+                    }}
+                  >
+                    <span className="flex w-full items-center" aria-hidden="true">
+                      <span
+                        className={getSimulationTimelineStepConnectorClassName({
+                          isHidden: isFirstStep,
+                        })}
+                      />
+                      <span
+                        className={getSimulationTimelineStepNodeClassName(
                           step,
                           isSelected
                         )}
-                        id={
-                          isResultStep
-                            ? getSimulationTimelineStepTabId(step.id)
-                            : undefined
-                        }
-                        disabled={
-                          step.kind === "simulate_turn" &&
-                          step.status === "starting_turn"
-                        }
-                        type="button"
-                        onClick={() => {
-                          if (step.kind === "simulate_turn") {
-                            if (step.status === "starting_turn") {
-                              return
-                            }
-
-                            if (!canContinueWithModelPreset()) {
-                              return
-                            }
-
-                            setSelectedTimelineStepIdPreference(null)
-                            onKeepResultsScrolledToBottom()
-                            onStartTurnRun(step.turnNumber)
-                            return
-                          }
-
-                          if (isResultStep) {
-                            setSelectedTimelineStepIdPreference(step.id)
-                            onKeepResultsScrolledToBottom()
-                          }
-                        }}
                       >
-                        <span
-                          className="flex w-full items-center"
-                          aria-hidden="true"
-                        >
-                          <span
-                            className={getSimulationTimelineStepConnectorClassName(
-                              {
-                                isHidden: isFirstStep,
-                              }
-                            )}
-                          />
-                          <span
-                            className={getSimulationTimelineStepNodeClassName(
-                              step,
-                              isSelected
-                            )}
-                          >
-                            {getSimulationTimelineStepNodeContent({
-                              step,
-                              isSelected,
-                              stepNumber: stepIndex + 1,
-                            })}
-                          </span>
-                          <span
-                            className={getSimulationTimelineStepConnectorClassName(
-                              {
-                                isHidden: isLastStep,
-                              }
-                            )}
-                          />
-                        </span>
-                        <span className="grid w-full justify-items-center gap-0.5 px-1 text-center">
-                          <span
-                            className={getSimulationTimelineStepLabelClassName(
-                              isSelected
-                            )}
-                          >
-                            {step.label}
-                          </span>
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            </div>
-            <div
-              className="pointer-events-none absolute right-0 bottom-0 left-0 border-b border-border/80"
-              aria-hidden="true"
-            />
-          </header>
-        ) : null}
-
-        <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-          <main
-            ref={resultsPanelRef}
-            className="simulation-scrollbar h-full min-h-0 min-w-0 flex-1 overflow-y-auto"
-            onScroll={onResultsScroll}
-          >
-            <section className="mx-auto grid w-full max-w-5xl gap-3 p-5">
-              {resultsError ? (
-                <p
-                  className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-                  role="alert"
-                >
-                  {resultsError}
-                </p>
-              ) : null}
-
-              {timelineSteps.length === 0 ? (
-                <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
-                  No opening hand or turn runs have been saved for this
-                  simulation yet.
-                </p>
-              ) : null}
-
-              {selectedTimelineStep?.kind === "preset_opening_hand" ? (
-                <div
-                  id={selectedTimelinePanelId}
-                  aria-labelledby={getSimulationTimelineStepTabId(
-                    selectedTimelineStep.id
-                  )}
-                  role="region"
-                >
-                  <SimulationPresetStartingHandBlock
-                    isLoadingStartingHand={isLoadingStartingHand}
-                    startingHand={startingHand}
-                    startingHandLoadError={startingHandLoadError}
-                  />
-                </div>
-              ) : selectedTimelineRun ? (
-                renderSimulationRunDetail(
-                  selectedTimelineRun,
-                  selectedTimelinePanelId,
-                  selectedTimelineStep
-                    ? getSimulationTimelineStepTabId(selectedTimelineStep.id)
-                    : undefined
+                        {getSimulationTimelineStepNodeContent({
+                          step,
+                          isSelected,
+                          stepNumber: stepIndex + 1,
+                        })}
+                      </span>
+                      <span
+                        className={getSimulationTimelineStepConnectorClassName({
+                          isHidden: isLastStep,
+                        })}
+                      />
+                    </span>
+                    <span className="grid w-full justify-items-center gap-0.5 px-1 text-center">
+                      <span
+                        className={getSimulationTimelineStepLabelClassName(
+                          isSelected
+                        )}
+                      >
+                        {step.label}
+                      </span>
+                    </span>
+                  </button>
                 )
-              ) : null}
-
-              {actionError ? (
-                <p
-                  className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-                  role="alert"
-                >
-                  {actionError}
-                </p>
-              ) : null}
-            </section>
-          </main>
-
-          {activityPanel}
+              })}
+            </div>
+          </div>
         </div>
-      </div>
+        <div
+          className="pointer-events-none absolute right-0 bottom-0 left-0 border-b border-border/80"
+          aria-hidden="true"
+        />
+      </header>
+    )
+  }
+
+  return (
+    <>
+      <SimulationResultsShell
+        activityPanel={activityPanel}
+        gameState={selectedGameState}
+        header={renderTimelineHeader()}
+      >
+        <main
+          ref={resultsPanelRef}
+          className="simulation-scrollbar h-full min-h-0 min-w-0 flex-1 overflow-y-auto"
+          onScroll={onResultsScroll}
+        >
+          <section className="grid w-full gap-3 p-5">
+            {resultsError ? (
+              <p
+                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                role="alert"
+              >
+                {resultsError}
+              </p>
+            ) : null}
+
+            {timelineSteps.length === 0 ? (
+              <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+                No opening hand or turn runs have been saved for this
+                simulation yet.
+              </p>
+            ) : null}
+
+            {selectedTimelineStep?.kind === "preset_opening_hand" ? (
+              <div
+                id={selectedTimelinePanelId}
+                aria-labelledby={getSimulationTimelineStepTabId(
+                  selectedTimelineStep.id
+                )}
+                role="region"
+              >
+                <SimulationPresetStartingHandBlock
+                  isLoadingStartingHand={isLoadingStartingHand}
+                  startingHand={startingHand}
+                  startingHandLoadError={startingHandLoadError}
+                />
+              </div>
+            ) : selectedTimelineRun ? (
+              renderSimulationRunDetail(
+                selectedTimelineRun,
+                selectedTimelinePanelId,
+                selectedTimelineStep
+                  ? getSimulationTimelineStepTabId(selectedTimelineStep.id)
+                  : undefined
+              )
+            ) : null}
+
+            {actionError ? (
+              <p
+                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                role="alert"
+              >
+                {actionError}
+              </p>
+            ) : null}
+          </section>
+        </main>
+      </SimulationResultsShell>
       {isAdmin && evaluationRun?.resultKind === "opening_hand" ? (
         <OpeningHandEvaluationModal
           defaultModelPresetId={defaultModelPresetId}
@@ -5988,6 +6015,11 @@ type SimulationGameStateZone = {
   label: string
 }
 
+type SimulationGameStateDisplay = {
+  cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
+  gameState: unknown
+}
+
 type SimulationResultCardPreviewPosition = {
   left: number
   placement: "above" | "below"
@@ -5996,9 +6028,9 @@ type SimulationResultCardPreviewPosition = {
 }
 
 const GAME_STATE_ZONE_ORDER = [
+  "battlefield",
   "hand",
   "command",
-  "battlefield",
   "graveyard",
   "exile",
 ] as const
@@ -6027,16 +6059,10 @@ function SimulationFinalOutputBlock({
 }) {
   if (finalOutput.type === "turn") {
     return (
-      <div className="grid gap-2">
-        <SimulationTurnActionsSurface
-          cardMentions={cardMentions}
-          turnActions={finalOutput.turnActions}
-        />
-        <SimulationGameStateZonesBlock
-          cardMentions={cardMentions}
-          gameState={finalOutput.gameState}
-        />
-      </div>
+      <SimulationTurnActionsSurface
+        cardMentions={cardMentions}
+        turnActions={finalOutput.turnActions}
+      />
     )
   }
 
@@ -6044,16 +6070,6 @@ function SimulationFinalOutputBlock({
     <div className={`grid gap-3 p-3 ${simulationResultChunkSurfaceClassName}`}>
       {finalOutput.type === "opening_hand" ? (
         <SimulationResultSummaryMarkdown summary={finalOutput.summary} />
-      ) : null}
-
-      {finalOutput.type === "opening_hand" ? (
-        <SimulationOpeningHandCardsBlock
-          label="Kept hand"
-          mentions={getOpeningHandFinalOutputCardMentions(
-            finalOutput.keptHand,
-            cardMentions
-          )}
-        />
       ) : (
         <SimulationReportMarkdown report={finalOutput.report} />
       )}
@@ -6098,13 +6114,6 @@ function SimulationPresetStartingHandBlock({
     <div className={`grid gap-3 p-3 ${simulationResultChunkSurfaceClassName}`}>
       <p className="text-sm leading-6 text-muted-foreground">{statusText}</p>
 
-      {startingHand ? (
-        <SimulationOpeningHandCardsBlock
-          label="Preset hand"
-          mentions={getStartingHandCardMentions(startingHand)}
-        />
-      ) : null}
-
       {!startingHand && startingHandLoadError ? (
         <p
           className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
@@ -6113,25 +6122,6 @@ function SimulationPresetStartingHandBlock({
           {startingHandLoadError}
         </p>
       ) : null}
-    </div>
-  )
-}
-
-function SimulationOpeningHandCardsBlock({
-  label,
-  mentions,
-}: {
-  label: string
-  mentions: SimulationResultCardMention[]
-}) {
-  return (
-    <div>
-      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        {label}
-      </p>
-      <div className="mt-2">
-        <SimulationResultCardImageLinks mentions={mentions} />
-      </div>
     </div>
   )
 }
@@ -6191,6 +6181,37 @@ function SimulationTurnActionsSurface({
   )
 }
 
+function SimulationGameStatePane({
+  gameState,
+}: {
+  gameState: SimulationGameStateDisplay | null
+}) {
+  const hasRenderableGameState =
+    gameState !== null &&
+    getSimulationGameStateZones(gameState.gameState).length > 0
+
+  return (
+    <aside
+      className="simulation-scrollbar min-h-0 min-w-0 overflow-y-auto border-t border-border bg-background/70 lg:border-t-0 lg:border-l"
+      aria-label="Game state"
+    >
+      <section className="grid gap-4 p-5">
+        <h2 className="text-sm font-semibold text-foreground">Game state</h2>
+        {gameState && hasRenderableGameState ? (
+          <SimulationGameStateZonesBlock
+            cardMentions={gameState.cardMentions}
+            gameState={gameState.gameState}
+          />
+        ) : (
+          <div className="grid min-h-40 place-items-center rounded-md border border-border bg-black/20 px-4 py-8 text-center text-sm text-muted-foreground">
+            No game state available.
+          </div>
+        )}
+      </section>
+    </aside>
+  )
+}
+
 function SimulationGameStateZonesBlock({
   cardMentions = [],
   gameState,
@@ -6214,9 +6235,9 @@ function SimulationGameStateZonesBlock({
             {zone.label}
           </p>
           {zone.cards.length > 0 ? (
-            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2">
+            <div className="mt-2 grid min-w-0 grid-cols-[repeat(auto-fill,minmax(5.5rem,1fr))] gap-3 sm:grid-cols-[repeat(auto-fill,minmax(6.25rem,1fr))] 2xl:grid-cols-[repeat(auto-fill,minmax(7rem,1fr))]">
               {zone.cards.map((card) => (
-                <SimulationGameStateZoneCardPill
+                <SimulationGameStateZoneCardView
                   key={`${card.zoneKey}-${card.index}-${card.name}`}
                   card={card}
                   cardMentions={cardMentions}
@@ -6232,7 +6253,7 @@ function SimulationGameStateZonesBlock({
   )
 }
 
-function SimulationGameStateZoneCardPill({
+function SimulationGameStateZoneCardView({
   card,
   cardMentions,
 }: {
@@ -6241,15 +6262,50 @@ function SimulationGameStateZoneCardPill({
 }) {
   const mention = getGameStateZoneCardMention(cardMentions, card)
   const href = mention ? getStrictResolvedCardMentionScryfallUrl(mention) : null
-  const imageUrl = href ? mention?.defaultImageUrl : null
+  const imageUrl = href ? mention?.defaultImageUrl?.trim() || null : null
+  const title = getSimulationGameStateZoneCardTitle(card)
+  const content = (
+    <>
+      {imageUrl ? (
+        <img
+          className="block aspect-[488/680] w-full object-cover"
+          src={imageUrl}
+          alt={card.name}
+          loading="lazy"
+        />
+      ) : (
+        <span className="flex aspect-[488/680] w-full items-center justify-center bg-gradient-to-b from-sky-950/35 to-black/50 px-2 text-center text-xs font-semibold leading-4 break-words text-sky-50">
+          {card.name}
+        </span>
+      )}
+      {card.tapped === true ? (
+        <span className="absolute top-1.5 right-1.5 rounded-sm bg-black/75 px-1.5 py-0.5 text-[0.625rem] font-semibold tracking-wide text-amber-100 uppercase shadow-md shadow-black/40">
+          Tapped
+        </span>
+      ) : null}
+    </>
+  )
+  const className =
+    "relative block min-w-0 overflow-hidden rounded-[5.75%/4.4%] border border-border bg-black/40 shadow-lg shadow-black/20 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-sky-400 hover:border-sky-300/60"
+
+  if (href) {
+    return (
+      <a
+        className={className}
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        title={title}
+      >
+        {content}
+      </a>
+    )
+  }
 
   return (
-    <SimulationResultCardPill
-      href={href}
-      imageUrl={imageUrl}
-      label={card.name}
-      title={getSimulationGameStateZoneCardTitle(card)}
-    />
+    <div className={className} title={title}>
+      {content}
+    </div>
   )
 }
 
@@ -6393,6 +6449,84 @@ function getSimulationRunGameStateCardMentions(
       .find((chunk) => chunk.kind === "final_parsed_output")?.cardMentions ??
     []
   )
+}
+
+function getSimulationRunGameStateDisplay(
+  run: Pick<SimulationDebugLlmRun, "chunks" | "gameState" | "phase"> | null
+): SimulationGameStateDisplay | null {
+  if (!run) {
+    return null
+  }
+
+  const finalOutput = getSimulationFinalParsedOutput(run)
+
+  if (run.phase === "opening_hand") {
+    if (finalOutput?.type !== "opening_hand") {
+      return null
+    }
+
+    return getOpeningHandGameStateDisplay(
+      getOpeningHandFinalOutputCardMentions(
+        finalOutput.keptHand,
+        getSimulationRunGameStateCardMentions(run.chunks)
+      )
+    )
+  }
+
+  if (run.phase !== "turn") {
+    return null
+  }
+
+  const gameState =
+    finalOutput?.type === "turn" ? finalOutput.gameState : run.gameState
+
+  if (!hasGameState(gameState)) {
+    return null
+  }
+
+  return {
+    cardMentions: getSimulationRunGameStateCardMentions(run.chunks),
+    gameState,
+  }
+}
+
+function getStartingHandGameStateDisplay(
+  startingHand: StartingHand | null
+): SimulationGameStateDisplay | null {
+  if (!startingHand) {
+    return null
+  }
+
+  return getOpeningHandGameStateDisplay(getStartingHandCardMentions(startingHand))
+}
+
+function getOpeningHandGameStateDisplay(
+  mentions: SimulationResultCardMention[]
+): SimulationGameStateDisplay {
+  return {
+    cardMentions: mentions.map((mention, index) => ({
+      ...mention,
+      position: index,
+      sourcePath: getOpeningHandGameStateCardSourcePath(index),
+    })),
+    gameState: {
+      zones: {
+        battlefield: [],
+        hand: mentions.map((mention) => ({
+          name: getCardMentionDisplayName(mention),
+          notes: null,
+          tapped: null,
+        })),
+        command: [],
+        graveyard: [],
+        exile: [],
+      },
+    },
+  }
+}
+
+function getOpeningHandGameStateCardSourcePath(index: number) {
+  return `payload.gameState.zones.hand[${index}].name`
 }
 
 function getTurnActionCardMentions(
