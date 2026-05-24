@@ -177,33 +177,33 @@
   }
 
   .simulation-game-state-card-enter {
-    animation: simulation-game-state-card-enter 0.3s ease-out both;
+    animation: simulation-game-state-card-enter 0.25s ease-out both;
   }
 
   .simulation-game-state-card-exit {
-    animation: simulation-game-state-card-exit 0.3s ease-in both;
+    animation: simulation-game-state-card-exit 0.25s ease-in both;
     pointer-events: none;
   }
 
   .simulation-game-state-card-tapped {
-    animation: simulation-game-state-card-tap 0.3s ease-out both;
+    animation: simulation-game-state-card-tap 0.25s ease-out both;
     transform: rotate(7.5deg);
     transform-origin: center;
   }
 
   .simulation-game-state-card-untapping {
-    animation: simulation-game-state-card-untap 0.3s ease-out both;
+    animation: simulation-game-state-card-untap 0.25s ease-out both;
     transform: rotate(0deg);
     transform-origin: center;
   }
 
   .simulation-game-state-card-tap-overlay-enter {
-    animation: simulation-game-state-card-tap-overlay 0.3s ease-out both;
+    animation: simulation-game-state-card-tap-overlay 0.25s ease-out both;
     opacity: 1;
   }
 
   .simulation-game-state-card-tap-overlay-exit {
-    animation: simulation-game-state-card-untap-overlay 0.3s ease-out both;
+    animation: simulation-game-state-card-untap-overlay 0.25s ease-out both;
     opacity: 0;
   }
 

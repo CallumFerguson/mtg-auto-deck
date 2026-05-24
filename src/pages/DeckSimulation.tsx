@@ -6056,8 +6056,8 @@ const SIMULATION_RESULT_CARD_PREVIEW_PADDING_PX = 8
 const SIMULATION_RESULT_CARD_PREVIEW_WIDTH_PX = 160
 const SIMULATION_RESULT_CARD_PREVIEW_WIDTH_SM_PX = 192
 const SIMULATION_RESULT_CARD_PREVIEW_IMAGE_HEIGHT_RATIO = 680 / 488
-const SIMULATION_GAME_STATE_CARD_EXIT_ANIMATION_MS = 300
-const SIMULATION_GAME_STATE_CARD_TAP_ANIMATION_MS = 300
+const SIMULATION_GAME_STATE_CARD_EXIT_ANIMATION_MS = 250
+const SIMULATION_GAME_STATE_CARD_TAP_ANIMATION_MS = 250
 
 function SimulationFinalOutputBlock({
   cardMentions = [],
@@ -6289,14 +6289,12 @@ function SimulationGameStateZoneCardGrid({
             .filter((card) => !card.isExiting)
             .map((card) => card.key)
         )
-        const nextCardKeys = new Set(
-          cards.map(getSimulationGameStateZoneCardKey)
-        )
         const nextItems = getSimulationGameStateZoneCardPresenceItems({
           cardMentions,
           cards,
           isExiting: false,
         })
+        const nextCardKeys = new Set(nextItems.map((card) => card.key))
         const enteringItems = nextItems.filter(
           (item) => !currentActiveCardKeys.has(item.key)
         )
@@ -6511,33 +6509,53 @@ function getSimulationGameStateZoneCardPresenceItems({
   isExiting,
 }: {
   cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
-  cards: SimulationGameStateZoneCard[]
+  cards: readonly SimulationGameStateZoneCard[]
   isExiting: boolean
 }): SimulationGameStateZoneCardPresenceItem[] {
-  return cards.map((card) => ({
-    card,
-    cardMentions,
-    isExiting,
-    key: getSimulationGameStateZoneCardKey(card),
-  }))
+  const cardNameCounts = new Map<string, number>()
+
+  return cards.map((card) => {
+    const cardNameKey = getSimulationGameStateZoneCardNameKey(card)
+    const copyIndex = cardNameCounts.get(cardNameKey) ?? 0
+
+    cardNameCounts.set(cardNameKey, copyIndex + 1)
+
+    return {
+      card,
+      cardMentions,
+      isExiting,
+      key: getSimulationGameStateZoneCardKey(card, copyIndex),
+    }
+  })
 }
 
 function getSimulationGameStateZoneCardKey(
+  card: SimulationGameStateZoneCard,
+  copyIndex: number
+) {
+  return `${card.zoneKey}-${getSimulationGameStateZoneCardNameKey(card)}-${copyIndex}`
+}
+
+function getSimulationGameStateZoneCardNameKey(
   card: SimulationGameStateZoneCard
 ) {
-  return `${card.zoneKey}-${card.index}-${card.name}`
+  return card.name.trim().toLocaleLowerCase()
 }
 
 function getSimulationGameStateZoneCardsSignature(
   cards: readonly SimulationGameStateZoneCard[]
 ) {
-  return cards
-    .map((card) =>
+  return getSimulationGameStateZoneCardPresenceItems({
+    cardMentions: [],
+    cards,
+    isExiting: false,
+  })
+    .map((item) =>
       [
-        getSimulationGameStateZoneCardKey(card),
-        card.name,
-        String(card.tapped),
-        card.notes ?? "",
+        item.key,
+        item.card.name,
+        String(item.card.tapped),
+        item.card.notes ?? "",
       ].join("\u001f")
     )
     .join("\u001e")
