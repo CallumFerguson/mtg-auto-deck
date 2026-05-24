@@ -171,15 +171,64 @@
     vertical-align: -0.15em;
   }
 
+  .simulation-game-state-card-presence {
+    min-width: 0;
+    will-change: opacity, transform;
+  }
+
+  .simulation-game-state-card-enter {
+    animation: simulation-game-state-card-enter 0.3s ease-out both;
+  }
+
+  .simulation-game-state-card-exit {
+    animation: simulation-game-state-card-exit 0.3s ease-in both;
+    pointer-events: none;
+  }
+
   .simulation-game-state-card-tapped {
     animation: simulation-game-state-card-tap 0.3s ease-out both;
     transform: rotate(7.5deg);
     transform-origin: center;
   }
 
-  .simulation-game-state-card-tap-dim,
-  .simulation-game-state-card-tap-icon {
+  .simulation-game-state-card-untapping {
+    animation: simulation-game-state-card-untap 0.3s ease-out both;
+    transform: rotate(0deg);
+    transform-origin: center;
+  }
+
+  .simulation-game-state-card-tap-overlay-enter {
     animation: simulation-game-state-card-tap-overlay 0.3s ease-out both;
+    opacity: 1;
+  }
+
+  .simulation-game-state-card-tap-overlay-exit {
+    animation: simulation-game-state-card-untap-overlay 0.3s ease-out both;
+    opacity: 0;
+  }
+
+  @keyframes simulation-game-state-card-enter {
+    from {
+      opacity: 0;
+      transform: translateY(0.75rem);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes simulation-game-state-card-exit {
+    from {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    to {
+      opacity: 0;
+      transform: translateY(-0.75rem);
+    }
   }
 
   @keyframes simulation-game-state-card-tap {
@@ -189,6 +238,16 @@
 
     to {
       transform: rotate(7.5deg);
+    }
+  }
+
+  @keyframes simulation-game-state-card-untap {
+    from {
+      transform: rotate(7.5deg);
+    }
+
+    to {
+      transform: rotate(0deg);
     }
   }
 
@@ -202,10 +261,23 @@
     }
   }
 
+  @keyframes simulation-game-state-card-untap-overlay {
+    from {
+      opacity: 1;
+    }
+
+    to {
+      opacity: 0;
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
+    .simulation-game-state-card-enter,
+    .simulation-game-state-card-exit,
     .simulation-game-state-card-tapped,
-    .simulation-game-state-card-tap-dim,
-    .simulation-game-state-card-tap-icon {
+    .simulation-game-state-card-untapping,
+    .simulation-game-state-card-tap-overlay-enter,
+    .simulation-game-state-card-tap-overlay-exit {
       animation: none;
     }
   }

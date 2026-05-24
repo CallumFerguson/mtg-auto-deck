@@ -6015,6 +6015,13 @@ type SimulationGameStateZone = {
   label: string
 }
 
+type SimulationGameStateZoneCardPresenceItem = {
+  card: SimulationGameStateZoneCard
+  cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
+  isExiting: boolean
+  key: string
+}
+
 type SimulationGameStateDisplay = {
   cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
   gameState: unknown
@@ -6049,6 +6056,8 @@ const SIMULATION_RESULT_CARD_PREVIEW_PADDING_PX = 8
 const SIMULATION_RESULT_CARD_PREVIEW_WIDTH_PX = 160
 const SIMULATION_RESULT_CARD_PREVIEW_WIDTH_SM_PX = 192
 const SIMULATION_RESULT_CARD_PREVIEW_IMAGE_HEIGHT_RATIO = 680 / 488
+const SIMULATION_GAME_STATE_CARD_EXIT_ANIMATION_MS = 300
+const SIMULATION_GAME_STATE_CARD_TAP_ANIMATION_MS = 300
 
 function SimulationFinalOutputBlock({
   cardMentions = [],
@@ -6233,22 +6242,124 @@ function SimulationGameStateZonesBlock({
           <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
             {zone.label}
           </p>
-          {zone.cards.length > 0 ? (
-            <div className="mt-2 grid min-w-0 grid-cols-[repeat(auto-fill,minmax(5.5rem,1fr))] gap-3 sm:grid-cols-[repeat(auto-fill,minmax(6.25rem,1fr))] 2xl:grid-cols-[repeat(auto-fill,minmax(7rem,1fr))]">
-              {zone.cards.map((card) => (
-                <SimulationGameStateZoneCardView
-                  key={`${card.zoneKey}-${card.index}-${card.name}`}
-                  card={card}
-                  cardMentions={cardMentions}
-                />
-              ))}
-            </div>
-          ) : (
-            <p className="mt-2 text-sm text-muted-foreground">empty</p>
-          )}
+          <SimulationGameStateZoneCardGrid
+            cardMentions={cardMentions}
+            cards={zone.cards}
+          />
         </div>
       ))}
     </section>
+  )
+}
+
+function SimulationGameStateZoneCardGrid({
+  cardMentions,
+  cards,
+}: {
+  cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
+  cards: SimulationGameStateZoneCard[]
+}) {
+  const cardSignature = getSimulationGameStateZoneCardsSignature(cards)
+  const cardMentionsSignature =
+    getSimulationGameStateCardMentionsSignature(cardMentions)
+  const syncSignature = `${cardSignature}\u001d${cardMentionsSignature}`
+  const lastSyncSignatureRef = useRef(syncSignature)
+  const [visibleCards, setVisibleCards] = useState<
+    SimulationGameStateZoneCardPresenceItem[]
+  >(() =>
+    getSimulationGameStateZoneCardPresenceItems({
+      cardMentions,
+      cards,
+      isExiting: false,
+    })
+  )
+
+  useEffect(() => {
+    if (lastSyncSignatureRef.current === syncSignature) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      lastSyncSignatureRef.current = syncSignature
+
+      setVisibleCards((currentCards) => {
+        const nextCardKeys = new Set(
+          cards.map(getSimulationGameStateZoneCardKey)
+        )
+        const nextItems = getSimulationGameStateZoneCardPresenceItems({
+          cardMentions,
+          cards,
+          isExiting: false,
+        })
+        const exitingItems = currentCards
+          .filter((item) => !nextCardKeys.has(item.key))
+          .map((item) =>
+            item.isExiting
+              ? item
+              : {
+                ...item,
+                isExiting: true,
+              }
+          )
+
+        return [...nextItems, ...exitingItems]
+      })
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [cardMentions, cards, syncSignature])
+
+  useEffect(() => {
+    if (!visibleCards.some((card) => card.isExiting)) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setVisibleCards((currentCards) =>
+        currentCards.filter((card) => !card.isExiting)
+      )
+    }, SIMULATION_GAME_STATE_CARD_EXIT_ANIMATION_MS)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [visibleCards])
+
+  return (
+    <div className="mt-2 grid min-w-0 grid-cols-[repeat(auto-fill,minmax(5.5rem,1fr))] gap-3 sm:grid-cols-[repeat(auto-fill,minmax(6.25rem,1fr))] 2xl:grid-cols-[repeat(auto-fill,minmax(7rem,1fr))]">
+      {visibleCards.length === 0 ? (
+        <SimulationGameStateEmptyCardPlaceholder />
+      ) : (
+        visibleCards.map((card) => (
+          <div
+            key={card.key}
+            className={
+              card.isExiting
+                ? "simulation-game-state-card-presence simulation-game-state-card-exit"
+                : "simulation-game-state-card-presence simulation-game-state-card-enter"
+            }
+          >
+            <SimulationGameStateZoneCardView
+              card={card.card}
+              cardMentions={card.cardMentions}
+            />
+          </div>
+        ))
+      )}
+    </div>
+  )
+}
+
+function SimulationGameStateEmptyCardPlaceholder() {
+  return (
+    <div
+      className="flex aspect-[488/680] min-w-0 select-none items-center justify-center rounded-[5.75%/4.4%] border border-dashed border-border bg-black/20 px-2 text-center text-xs font-semibold tracking-wide text-muted-foreground uppercase shadow-lg shadow-black/10"
+      aria-label="Empty zone"
+    >
+      empty
+    </div>
   )
 }
 
@@ -6259,11 +6370,46 @@ function SimulationGameStateZoneCardView({
   card: SimulationGameStateZoneCard
   cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
 }) {
+  const isTapped = card.tapped === true
+  const previousIsTappedRef = useRef(isTapped)
+  const [visualTapState, setVisualTapState] = useState<
+    "tapped" | "untapping" | "untapped"
+  >(() => (isTapped ? "tapped" : "untapped"))
   const mention = getGameStateZoneCardMention(cardMentions, card)
   const href = mention ? getStrictResolvedCardMentionScryfallUrl(mention) : null
   const imageUrl = href ? mention?.defaultImageUrl?.trim() || null : null
-  const isTapped = card.tapped === true
+  const shouldShowTapOverlay = visualTapState !== "untapped"
   const title = getSimulationGameStateZoneCardTitle(card)
+
+  useEffect(() => {
+    if (previousIsTappedRef.current === isTapped) {
+      return
+    }
+
+    previousIsTappedRef.current = isTapped
+
+    let finishUntapTimeoutId: number | null = null
+    const updateTapStateTimeoutId = window.setTimeout(() => {
+      if (isTapped) {
+        setVisualTapState("tapped")
+        return
+      }
+
+      setVisualTapState("untapping")
+
+      finishUntapTimeoutId = window.setTimeout(() => {
+        setVisualTapState("untapped")
+      }, SIMULATION_GAME_STATE_CARD_TAP_ANIMATION_MS)
+    }, 0)
+
+    return () => {
+      window.clearTimeout(updateTapStateTimeoutId)
+      if (finishUntapTimeoutId !== null) {
+        window.clearTimeout(finishUntapTimeoutId)
+      }
+    }
+  }, [isTapped])
+
   const content = (
     <>
       {imageUrl ? (
@@ -6278,14 +6424,20 @@ function SimulationGameStateZoneCardView({
           {card.name}
         </span>
       )}
-      {isTapped ? (
+      {shouldShowTapOverlay ? (
         <>
           <span
-            className="simulation-game-state-card-tap-dim pointer-events-none absolute inset-0 bg-black/35"
+            className={`simulation-game-state-card-tap-dim pointer-events-none absolute inset-0 bg-black/35 ${visualTapState === "untapping"
+              ? "simulation-game-state-card-tap-overlay-exit"
+              : "simulation-game-state-card-tap-overlay-enter"
+              }`}
             aria-hidden="true"
           />
           <span
-            className="simulation-game-state-card-tap-icon pointer-events-none absolute inset-0 grid place-items-center text-sky-50/95 drop-shadow-[0_0.25rem_0.75rem_rgba(0,0,0,0.85)]"
+            className={`simulation-game-state-card-tap-icon pointer-events-none absolute inset-0 grid place-items-center text-sky-50/95 drop-shadow-[0_0.25rem_0.75rem_rgba(0,0,0,0.85)] ${visualTapState === "untapping"
+              ? "simulation-game-state-card-tap-overlay-exit"
+              : "simulation-game-state-card-tap-overlay-enter"
+              }`}
             aria-hidden="true"
           >
             <img
@@ -6301,7 +6453,10 @@ function SimulationGameStateZoneCardView({
   )
   const className = [
     "relative block min-w-0 overflow-hidden rounded-[5.75%/4.4%] border border-border bg-black/40 shadow-lg shadow-black/20 outline-none focus-visible:ring-2 focus-visible:ring-sky-400",
-    isTapped ? "simulation-game-state-card-tapped" : null,
+    visualTapState === "tapped" ? "simulation-game-state-card-tapped" : null,
+    visualTapState === "untapping"
+      ? "simulation-game-state-card-untapping"
+      : null,
   ]
     .filter(Boolean)
     .join(" ")
@@ -6325,6 +6480,62 @@ function SimulationGameStateZoneCardView({
       {content}
     </div>
   )
+}
+
+function getSimulationGameStateZoneCardPresenceItems({
+  cardMentions,
+  cards,
+  isExiting,
+}: {
+  cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
+  cards: SimulationGameStateZoneCard[]
+  isExiting: boolean
+}): SimulationGameStateZoneCardPresenceItem[] {
+  return cards.map((card) => ({
+    card,
+    cardMentions,
+    isExiting,
+    key: getSimulationGameStateZoneCardKey(card),
+  }))
+}
+
+function getSimulationGameStateZoneCardKey(
+  card: SimulationGameStateZoneCard
+) {
+  return `${card.zoneKey}-${card.index}-${card.name}`
+}
+
+function getSimulationGameStateZoneCardsSignature(
+  cards: readonly SimulationGameStateZoneCard[]
+) {
+  return cards
+    .map((card) =>
+      [
+        getSimulationGameStateZoneCardKey(card),
+        card.name,
+        String(card.tapped),
+        card.notes ?? "",
+      ].join("\u001f")
+    )
+    .join("\u001e")
+}
+
+function getSimulationGameStateCardMentionsSignature(
+  cardMentions: readonly SimulationResultCardMention[]
+) {
+  return cardMentions
+    .map((mention) =>
+      [
+        mention.sourcePath,
+        String(mention.position),
+        mention.requestedName,
+        mention.resolutionStatus,
+        mention.resolvedName ?? "",
+        mention.scryfallUri ?? "",
+        mention.defaultImageUrl ?? "",
+      ].join("\u001f")
+    )
+    .join("\u001e")
 }
 
 function getSimulationGameStateZones(
