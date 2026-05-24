@@ -3948,7 +3948,6 @@ function SimulationResultsPanel({
       run.model,
       getLlmRunEstimatedPriceText(run),
       finishedDurationText ? `took ${finishedDurationText}` : null,
-      run.failureMessage ? run.failureMessage : null,
       run.outdated ? "outdated" : null,
     ].filter(Boolean)
     const shouldShowRunMetadata = !run.isActive && runMetadata.length > 0
@@ -4038,17 +4037,17 @@ function SimulationResultsPanel({
         ) : null}
 
         {shouldShowRunMetadata || shouldShowRunActions ? (
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2">
             {shouldShowRunMetadata ? (
               <div className="min-w-0">
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs break-words text-muted-foreground">
                   {runMetadata.join(" / ")}
                 </p>
               </div>
             ) : (
               <div className="min-w-0" aria-hidden="true" />
             )}
-            <div className="flex shrink-0 items-center gap-1">
+            <div className="flex shrink-0 items-center justify-end gap-1">
               {run.canEvaluate ? (
                 <Button
                   className={
@@ -6286,7 +6285,7 @@ function SimulationGameStateZoneCardView({
     </>
   )
   const className =
-    "relative block min-w-0 overflow-hidden rounded-[5.75%/4.4%] border border-border bg-black/40 shadow-lg shadow-black/20 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-sky-400 hover:border-sky-300/60"
+    "relative block min-w-0 overflow-hidden rounded-[5.75%/4.4%] border border-border bg-black/40 shadow-lg shadow-black/20 outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
 
   if (href) {
     return (
