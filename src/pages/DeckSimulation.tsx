@@ -690,6 +690,7 @@ function UsageLimitReachedNotice({
 export function DeckSimulation({
   canUpgradeUsage,
   cards,
+  commanders,
   deckId,
   isAdmin,
   onUpgradeUsage,
@@ -697,6 +698,7 @@ export function DeckSimulation({
 }: {
   canUpgradeUsage: boolean
   cards: DeckCard[]
+  commanders: DeckCard[]
   deckId: string
   isAdmin: boolean
   onUpgradeUsage: () => void
@@ -1805,6 +1807,7 @@ export function DeckSimulation({
           ) : selectedSimulation ? (
             <SimulationDetails
               canUpgradeUsage={canUpgradeUsage}
+              commanders={commanders}
               defaultModelPresetId={defaultModelPresetId}
               deckId={deckId}
               isAdmin={isAdmin}
@@ -2322,6 +2325,7 @@ function SimulationDetailsModal({
 
 function SimulationDetails({
   canUpgradeUsage,
+  commanders,
   defaultModelPresetId,
   deckId,
   isAdmin,
@@ -2335,6 +2339,7 @@ function SimulationDetails({
   startingHandLoadError,
 }: {
   canUpgradeUsage: boolean
+  commanders: DeckCard[]
   defaultModelPresetId: string | null
   deckId: string
   isAdmin: boolean
@@ -2999,6 +3004,7 @@ function SimulationDetails({
     <SimulationResultsPanel
       activityPanel={activityPanel}
       canUpgradeUsage={canUpgradeUsage}
+      commanders={commanders}
       defaultModelPresetId={defaultModelPresetId}
       deckId={deckId}
       hasUsableModelPreset={selectedModelPreset !== null}
@@ -3502,6 +3508,7 @@ function SimulationDebugModal({
 function SimulationResultsPanel({
   activityPanel,
   canUpgradeUsage,
+  commanders,
   defaultModelPresetId,
   deckId,
   hasUsableModelPreset,
@@ -3538,6 +3545,7 @@ function SimulationResultsPanel({
 }: {
   activityPanel: ReactNode
   canUpgradeUsage: boolean
+  commanders: DeckCard[]
   defaultModelPresetId: string | null
   deckId: string
   hasUsableModelPreset: boolean
@@ -3890,8 +3898,8 @@ function SimulationResultsPanel({
     : undefined
   const selectedGameState =
     selectedTimelineStep?.kind === "preset_opening_hand"
-      ? getStartingHandGameStateDisplay(startingHand)
-      : getSimulationRunGameStateDisplay(selectedTimelineRun)
+      ? getStartingHandGameStateDisplay(startingHand, commanders)
+      : getSimulationRunGameStateDisplay(selectedTimelineRun, commanders)
 
   useEffect(() => {
     if (!selectedTimelineStepId) {
@@ -6943,7 +6951,8 @@ function getSimulationRunGameStateCardMentions(
 }
 
 function getSimulationRunGameStateDisplay(
-  run: Pick<SimulationDebugLlmRun, "chunks" | "gameState" | "phase"> | null
+  run: Pick<SimulationDebugLlmRun, "chunks" | "gameState" | "phase"> | null,
+  commanders: readonly DeckCard[]
 ): SimulationGameStateDisplay | null {
   if (!run) {
     return null
@@ -6960,7 +6969,8 @@ function getSimulationRunGameStateDisplay(
       getOpeningHandFinalOutputCardMentions(
         finalOutput.keptHand,
         getSimulationRunGameStateCardMentions(run.chunks)
-      )
+      ),
+      getCommanderCardMentions(commanders)
     )
   }
 
@@ -6982,33 +6992,39 @@ function getSimulationRunGameStateDisplay(
 }
 
 function getStartingHandGameStateDisplay(
-  startingHand: StartingHand | null
+  startingHand: StartingHand | null,
+  commanders: readonly DeckCard[]
 ): SimulationGameStateDisplay | null {
   if (!startingHand) {
     return null
   }
 
-  return getOpeningHandGameStateDisplay(getStartingHandCardMentions(startingHand))
+  return getOpeningHandGameStateDisplay(
+    getStartingHandCardMentions(startingHand),
+    getCommanderCardMentions(commanders)
+  )
 }
 
 function getOpeningHandGameStateDisplay(
-  mentions: SimulationResultCardMention[]
+  handMentions: SimulationResultCardMention[],
+  commandMentions: SimulationResultCardMention[]
 ): SimulationGameStateDisplay {
+  const gameStateHandMentions = getOpeningHandGameStateCardMentions({
+    mentions: handMentions,
+    zoneKey: "hand",
+  })
+  const gameStateCommandMentions = getOpeningHandGameStateCardMentions({
+    mentions: commandMentions,
+    zoneKey: "command",
+  })
+
   return {
-    cardMentions: mentions.map((mention, index) => ({
-      ...mention,
-      position: index,
-      sourcePath: getOpeningHandGameStateCardSourcePath(index),
-    })),
+    cardMentions: [...gameStateHandMentions, ...gameStateCommandMentions],
     gameState: {
       zones: {
         battlefield: [],
-        hand: mentions.map((mention) => ({
-          name: getCardMentionDisplayName(mention),
-          notes: null,
-          tapped: null,
-        })),
-        command: [],
+        hand: getOpeningHandGameStateCards(gameStateHandMentions),
+        command: getOpeningHandGameStateCards(gameStateCommandMentions),
         graveyard: [],
         exile: [],
       },
@@ -7016,8 +7032,35 @@ function getOpeningHandGameStateDisplay(
   }
 }
 
-function getOpeningHandGameStateCardSourcePath(index: number) {
-  return `payload.gameState.zones.hand[${index}].name`
+function getOpeningHandGameStateCardMentions({
+  mentions,
+  zoneKey,
+}: {
+  mentions: readonly SimulationResultCardMention[]
+  zoneKey: "command" | "hand"
+}) {
+  return mentions.map((mention, index) => ({
+    ...mention,
+    position: index,
+    sourcePath: getOpeningHandGameStateCardSourcePath(zoneKey, index),
+  }))
+}
+
+function getOpeningHandGameStateCards(
+  mentions: readonly SimulationResultCardMention[]
+) {
+  return mentions.map((mention) => ({
+    name: getCardMentionDisplayName(mention),
+    notes: null,
+    tapped: null,
+  }))
+}
+
+function getOpeningHandGameStateCardSourcePath(
+  zoneKey: "command" | "hand",
+  index: number
+) {
+  return `payload.gameState.zones.${zoneKey}[${index}].name`
 }
 
 function getTurnActionCardMentions(
@@ -7834,6 +7877,26 @@ function getStartingHandCardMentions(startingHand: StartingHand) {
     for (let copyIndex = 0; copyIndex < card.quantity; copyIndex += 1) {
       mentions.push({
         sourcePath: "startingHand.cards",
+        position: mentions.length,
+        requestedName: card.name,
+        resolutionStatus: "exact",
+        resolvedName: card.name,
+        scryfallUri: card.scryfallUri,
+        defaultImageUrl: card.defaultImageUrl,
+      })
+    }
+  }
+
+  return mentions
+}
+
+function getCommanderCardMentions(commanders: readonly DeckCard[]) {
+  const mentions: SimulationResultCardMention[] = []
+
+  for (const card of commanders) {
+    for (let copyIndex = 0; copyIndex < card.quantity; copyIndex += 1) {
+      mentions.push({
+        sourcePath: "deck.commanders",
         position: mentions.length,
         requestedName: card.name,
         resolutionStatus: "exact",

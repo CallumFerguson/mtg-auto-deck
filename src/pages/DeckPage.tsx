@@ -248,6 +248,7 @@ export function DeckPage({
               <DeckSimulation
                 canUpgradeUsage={!isImpersonating}
                 cards={deck.cards}
+                commanders={deck.commanders}
                 deckId={deck.id}
                 isAdmin={shouldShowAdminOptions}
                 onUpgradeUsage={() => {
