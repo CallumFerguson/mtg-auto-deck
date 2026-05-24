@@ -3964,8 +3964,8 @@ function SimulationResultsPanel({
     const finalParsedOutput = getSimulationFinalParsedOutput(run)
     const directTurnActions =
       hasGameState(run.gameState) &&
-      !finalParsedOutput &&
-      hasTurnActions(run.turnActions)
+        !finalParsedOutput &&
+        hasTurnActions(run.turnActions)
         ? run.turnActions
         : null
 
@@ -6262,6 +6262,7 @@ function SimulationGameStateZoneCardView({
   const mention = getGameStateZoneCardMention(cardMentions, card)
   const href = mention ? getStrictResolvedCardMentionScryfallUrl(mention) : null
   const imageUrl = href ? mention?.defaultImageUrl?.trim() || null : null
+  const isTapped = card.tapped === true
   const title = getSimulationGameStateZoneCardTitle(card)
   const content = (
     <>
@@ -6277,15 +6278,28 @@ function SimulationGameStateZoneCardView({
           {card.name}
         </span>
       )}
-      {card.tapped === true ? (
-        <span className="absolute top-1.5 right-1.5 rounded-sm bg-black/75 px-1.5 py-0.5 text-[0.625rem] font-semibold tracking-wide text-amber-100 uppercase shadow-md shadow-black/40">
-          Tapped
-        </span>
+      {isTapped ? (
+        <>
+          <span
+            className="pointer-events-none absolute inset-0 bg-black/35"
+            aria-hidden="true"
+          />
+          <span
+            className="pointer-events-none absolute top-1.5 right-1.5 grid size-7 place-items-center rounded-full bg-black/75 text-sky-50 shadow-md shadow-black/50"
+            aria-hidden="true"
+          >
+            <span className="ms ms-cost ms-shadow ms-tap text-lg" />
+          </span>
+        </>
       ) : null}
     </>
   )
-  const className =
-    "relative block min-w-0 overflow-hidden rounded-[5.75%/4.4%] border border-border bg-black/40 shadow-lg shadow-black/20 outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+  const className = [
+    "relative block min-w-0 overflow-hidden rounded-[5.75%/4.4%] border border-border bg-black/40 shadow-lg shadow-black/20 outline-none focus-visible:ring-2 focus-visible:ring-sky-400",
+    isTapped ? "rotate-[7.5deg]" : null,
+  ]
+    .filter(Boolean)
+    .join(" ")
 
   if (href) {
     return (
