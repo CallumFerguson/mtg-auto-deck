@@ -3993,7 +3993,7 @@ function SimulationResultsPanel({
         key={run.llmRunId}
         id={panelId}
         aria-labelledby={tabId}
-        className="grid gap-3 rounded-md border border-border bg-background/35 p-3"
+        className="grid gap-3"
         role={panelId ? "region" : undefined}
       >
         {directTurnActions ? (
@@ -4296,7 +4296,7 @@ function SimulationResultsPanel({
           className="simulation-scrollbar h-full min-h-0 min-w-0 flex-1 overflow-y-auto"
           onScroll={onResultsScroll}
         >
-          <section className="grid w-full gap-3 p-5">
+          <section className="grid w-full gap-3 p-3">
             {resultsError ? (
               <p
                 className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
@@ -6178,9 +6178,6 @@ function SimulationTurnActionsBlock({
 
   return (
     <section className="grid gap-2">
-      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        Turn actions
-      </p>
       <div className="grid gap-2">
         {phaseEntries.map(({ actions, phaseChange }) => (
           <SimulationResultTurnPhaseActionEvent
@@ -6202,12 +6199,10 @@ function SimulationTurnActionsSurface({
   turnActions: Record<TurnPhaseChange, string[]>
 }) {
   return (
-    <div className={`grid gap-3 p-3 ${simulationResultChunkSurfaceClassName}`}>
-      <SimulationTurnActionsBlock
-        cardMentions={cardMentions}
-        turnActions={turnActions}
-      />
-    </div>
+    <SimulationTurnActionsBlock
+      cardMentions={cardMentions}
+      turnActions={turnActions}
+    />
   )
 }
 
@@ -7227,9 +7222,9 @@ function SimulationResultLoggedTurnActionEvent({
   }
 
   return (
-    <div className={`grid gap-2 p-3 ${simulationResultChunkSurfaceClassName}`}>
+    <div className={`grid gap-2 p-2 ${simulationResultChunkSurfaceClassName}`}>
       {actions.length > 0 ? (
-        <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-foreground/90">
+        <ul className="list-disc space-y-1 pl-4 text-sm leading-6 text-foreground/90">
           {actions.map((action, index) => (
             <li key={`${action.action}-${index}`}>
               <SimulationLoggedActionText
@@ -7507,7 +7502,7 @@ function SimulationResultTurnPhaseActionEvent({
 }) {
   return (
     <div
-      className={`grid gap-2 px-3 py-2 ${simulationResultChunkSurfaceClassName}`}
+      className={`grid gap-2 px-2 py-1.5 ${simulationResultChunkSurfaceClassName}`}
     >
       <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-sky-100">
         <span
@@ -7521,7 +7516,7 @@ function SimulationResultTurnPhaseActionEvent({
         </span>
       </div>
       {actions.length > 0 ? (
-        <ul className="list-disc space-y-1 pl-10 text-sm leading-6 text-foreground/90">
+        <ul className="list-disc space-y-1 pl-6 text-sm leading-6 text-foreground/90">
           {actions.map((action, index) => (
             <li key={`${action.action}-${index}`}>
               <SimulationLoggedActionText
