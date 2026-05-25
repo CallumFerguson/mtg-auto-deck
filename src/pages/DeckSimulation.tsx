@@ -6116,6 +6116,7 @@ const SIMULATION_RESULT_CARD_PREVIEW_IMAGE_HEIGHT_RATIO = 680 / 488
 const SIMULATION_GAME_STATE_CARD_EXIT_ANIMATION_MS = 250
 const SIMULATION_GAME_STATE_CARD_MOVE_ANIMATION_MS = 250
 const SIMULATION_GAME_STATE_CARD_TAP_ANIMATION_MS = 250
+const SIMULATION_GAME_STATE_CARD_SETTLE_FALLBACK_BUFFER_MS = 50
 
 function SimulationFinalOutputBlock({
   cardMentions = [],
@@ -6422,7 +6423,8 @@ function SimulationGameStateZoneCardGrid({
   const cardMentionsSignature =
     getSimulationGameStateCardMentionsSignature(cardMentions)
   const syncSignature = `${cardSignature}\u001d${cardMentionsSignature}`
-  const lastSyncSignatureRef = useRef(syncSignature)
+  const lastSettledSyncSignatureRef = useRef(syncSignature)
+  const latestAnimationTargetRef = useRef({ cardMentions, cards })
   const cardGridElementRef = useRef<HTMLDivElement | null>(null)
   const cardLayoutElementsRef = useRef(new Map<string, HTMLDivElement>())
   const previousCardGridWidthRef = useRef<number | null>(null)
@@ -6451,6 +6453,10 @@ function SimulationGameStateZoneCardGrid({
   useEffect(() => {
     visibleCardsRef.current = visibleCards
   }, [visibleCards])
+
+  useEffect(() => {
+    latestAnimationTargetRef.current = { cardMentions, cards }
+  }, [cardMentions, cards])
 
   useEffect(() => {
     const gridElement = cardGridElementRef.current
@@ -6515,28 +6521,54 @@ function SimulationGameStateZoneCardGrid({
   }, [readCurrentCardLayoutRects])
 
   useEffect(() => {
-    if (lastSyncSignatureRef.current === syncSignature) {
+    const { cardMentions: targetCardMentions, cards: targetCards } =
+      latestAnimationTargetRef.current
+    const nextItems = getSimulationGameStateZoneCardPresenceItems({
+      cardMentions: targetCardMentions,
+      cards: targetCards,
+      isExiting: false,
+    })
+
+    if (
+      lastSettledSyncSignatureRef.current === syncSignature &&
+      areSimulationGameStateZoneCardPresenceItemsSettled({
+        currentItems: visibleCardsRef.current,
+        nextItems,
+      })
+    ) {
       return
     }
 
     let syncTimeoutId: number | null = null
     let moveTimeoutId: number | null = null
     let enterTimeoutId: number | null = null
+    let settleTimeoutId: number | null = null
+    let didSettle = false
+
+    const setVisibleCardsSnapshot = (
+      nextVisibleCards: SimulationGameStateZoneCardPresenceItem[]
+    ) => {
+      visibleCardsRef.current = nextVisibleCards
+      setVisibleCards(nextVisibleCards)
+    }
+
+    const settleToTargetState = () => {
+      if (didSettle) {
+        return
+      }
+
+      didSettle = true
+      lastSettledSyncSignatureRef.current = syncSignature
+      setVisibleCardsSnapshot(nextItems)
+    }
 
     syncTimeoutId = window.setTimeout(() => {
-      lastSyncSignatureRef.current = syncSignature
-
       const currentCards = visibleCardsRef.current
       const currentActiveCardKeys = new Set(
         currentCards
           .filter((card) => !card.isExiting && !card.isEnteringPlaceholder)
           .map((card) => card.key)
       )
-      const nextItems = getSimulationGameStateZoneCardPresenceItems({
-        cardMentions,
-        cards,
-        isExiting: false,
-      })
       const nextCardKeys = new Set(nextItems.map((card) => card.key))
       const enteringCardKeys = new Set(
         nextItems
@@ -6548,14 +6580,11 @@ function SimulationGameStateZoneCardGrid({
       )
       const hasEnteringCards = enteringCardKeys.size > 0
 
-      const setVisibleCardsSnapshot = (
-        nextVisibleCards: SimulationGameStateZoneCardPresenceItem[]
-      ) => {
-        visibleCardsRef.current = nextVisibleCards
-        setVisibleCards(nextVisibleCards)
-      }
-
       const startMovePhase = () => {
+        if (didSettle) {
+          return
+        }
+
         const movePhaseItems = getSimulationGameStateZoneCardMovePhaseItems({
           enteringCardKeys,
           nextItems,
@@ -6564,13 +6593,27 @@ function SimulationGameStateZoneCardGrid({
         setVisibleCardsSnapshot(movePhaseItems)
 
         if (!hasEnteringCards) {
+          settleToTargetState()
           return
         }
 
         enterTimeoutId = window.setTimeout(() => {
-          setVisibleCardsSnapshot(nextItems)
+          settleToTargetState()
         }, SIMULATION_GAME_STATE_CARD_MOVE_ANIMATION_MS)
       }
+
+      if (!hasExitingCards && !hasEnteringCards) {
+        settleToTargetState()
+        return
+      }
+
+      settleTimeoutId = window.setTimeout(
+        settleToTargetState,
+        getSimulationGameStateCardSettleFallbackDelay({
+          hasEnteringCards,
+          hasExitingCards,
+        })
+      )
 
       if (hasExitingCards) {
         setVisibleCardsSnapshot(
@@ -6589,10 +6632,7 @@ function SimulationGameStateZoneCardGrid({
 
       if (hasEnteringCards) {
         startMovePhase()
-        return
       }
-
-      setVisibleCardsSnapshot(nextItems)
     }, 0)
 
     return () => {
@@ -6605,8 +6645,11 @@ function SimulationGameStateZoneCardGrid({
       if (enterTimeoutId !== null) {
         window.clearTimeout(enterTimeoutId)
       }
+      if (settleTimeoutId !== null) {
+        window.clearTimeout(settleTimeoutId)
+      }
     }
-  }, [cardMentions, cards, syncSignature])
+  }, [syncSignature])
 
   useLayoutEffect(() => {
     const nextRects = readCurrentCardLayoutRects()
@@ -6833,6 +6876,56 @@ function SimulationGameStateZoneCardView({
       {content}
     </div>
   )
+}
+
+function getSimulationGameStateCardSettleFallbackDelay({
+  hasEnteringCards,
+  hasExitingCards,
+}: {
+  hasEnteringCards: boolean
+  hasExitingCards: boolean
+}) {
+  return (
+    (hasExitingCards ? SIMULATION_GAME_STATE_CARD_EXIT_ANIMATION_MS : 0) +
+    (hasEnteringCards ? SIMULATION_GAME_STATE_CARD_MOVE_ANIMATION_MS : 0) +
+    SIMULATION_GAME_STATE_CARD_SETTLE_FALLBACK_BUFFER_MS
+  )
+}
+
+function areSimulationGameStateZoneCardPresenceItemsSettled({
+  currentItems,
+  nextItems,
+}: {
+  currentItems: readonly SimulationGameStateZoneCardPresenceItem[]
+  nextItems: readonly SimulationGameStateZoneCardPresenceItem[]
+}) {
+  if (currentItems.length !== nextItems.length) {
+    return false
+  }
+
+  return currentItems.every((currentItem, index) => {
+    const nextItem = nextItems[index]
+
+    return (
+      nextItem !== undefined &&
+      !currentItem.isEnteringPlaceholder &&
+      !currentItem.isExiting &&
+      getSimulationGameStateZoneCardPresenceItemSignature(currentItem) ===
+        getSimulationGameStateZoneCardPresenceItemSignature(nextItem)
+    )
+  })
+}
+
+function getSimulationGameStateZoneCardPresenceItemSignature(
+  item: SimulationGameStateZoneCardPresenceItem
+) {
+  return [
+    item.key,
+    item.card.name,
+    String(item.card.tapped),
+    item.card.notes ?? "",
+    getSimulationGameStateCardMentionsSignature(item.cardMentions),
+  ].join("\u001f")
 }
 
 function getSimulationGameStateZoneCardPresenceItems({
