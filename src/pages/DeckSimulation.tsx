@@ -86,6 +86,10 @@ import {
 } from "@/lib/llm-model-preset-types"
 import { getDeckSimulationPath } from "@/lib/navigation"
 import {
+  getPresetStartingHandLibraryCardCount,
+  getSimulationRunLibraryCardCount,
+} from "@/lib/simulation-game-state-library"
+import {
   getSimulationFinalParsedOutput,
   getSimulationFinalParsedOutputFromPayload,
   hasTurnActions,
@@ -1807,6 +1811,7 @@ export function DeckSimulation({
           ) : selectedSimulation ? (
             <SimulationDetails
               canUpgradeUsage={canUpgradeUsage}
+              cards={cards}
               commanders={commanders}
               defaultModelPresetId={defaultModelPresetId}
               deckId={deckId}
@@ -2325,6 +2330,7 @@ function SimulationDetailsModal({
 
 function SimulationDetails({
   canUpgradeUsage,
+  cards,
   commanders,
   defaultModelPresetId,
   deckId,
@@ -2339,6 +2345,7 @@ function SimulationDetails({
   startingHandLoadError,
 }: {
   canUpgradeUsage: boolean
+  cards: DeckCard[]
   commanders: DeckCard[]
   defaultModelPresetId: string | null
   deckId: string
@@ -3004,6 +3011,7 @@ function SimulationDetails({
     <SimulationResultsPanel
       activityPanel={activityPanel}
       canUpgradeUsage={canUpgradeUsage}
+      cards={cards}
       commanders={commanders}
       defaultModelPresetId={defaultModelPresetId}
       deckId={deckId}
@@ -3508,6 +3516,7 @@ function SimulationDebugModal({
 function SimulationResultsPanel({
   activityPanel,
   canUpgradeUsage,
+  cards,
   commanders,
   defaultModelPresetId,
   deckId,
@@ -3545,6 +3554,7 @@ function SimulationResultsPanel({
 }: {
   activityPanel: ReactNode
   canUpgradeUsage: boolean
+  cards: DeckCard[]
   commanders: DeckCard[]
   defaultModelPresetId: string | null
   deckId: string
@@ -3898,7 +3908,7 @@ function SimulationResultsPanel({
     : undefined
   const selectedGameState =
     selectedTimelineStep?.kind === "preset_opening_hand"
-      ? getStartingHandGameStateDisplay(startingHand, commanders)
+      ? getStartingHandGameStateDisplay(startingHand, cards, commanders)
       : getSimulationRunGameStateDisplay(selectedTimelineRun, commanders)
 
   useEffect(() => {
@@ -6034,6 +6044,7 @@ type SimulationGameStateZoneCardPresenceItem = {
 type SimulationGameStateDisplay = {
   cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
   gameState: unknown
+  libraryCardCount: number | null
 }
 
 type SimulationResultCardPreviewPosition = {
@@ -6207,7 +6218,8 @@ function SimulationGameStatePane({
 }) {
   const hasRenderableGameState =
     gameState !== null &&
-    getSimulationGameStateZones(gameState.gameState).length > 0
+    (getSimulationGameStateZones(gameState.gameState).length > 0 ||
+      gameState.libraryCardCount !== null)
 
   return (
     <aside
@@ -6219,6 +6231,7 @@ function SimulationGameStatePane({
           <SimulationGameStateZonesBlock
             cardMentions={gameState.cardMentions}
             gameState={gameState.gameState}
+            libraryCardCount={gameState.libraryCardCount}
           />
         ) : (
           <div className="grid min-h-40 place-items-center rounded-md border border-border bg-black/20 px-4 py-8 text-center text-sm text-muted-foreground">
@@ -6233,13 +6246,29 @@ function SimulationGameStatePane({
 function SimulationGameStateZonesBlock({
   cardMentions = [],
   gameState,
+  libraryCardCount,
 }: {
   cardMentions?: SimulationDebugLlmRunChunk["cardMentions"]
   gameState: unknown
+  libraryCardCount: number | null
 }) {
   const zones = getSimulationGameStateZones(gameState)
+  const commandZone = zones.find((zone) => zone.key === "command") ?? null
+  const standaloneZones = zones.filter((zone) => zone.key !== "command")
+  const shouldShowLibraryCommandRow =
+    libraryCardCount !== null || commandZone !== null
+  const libraryCommandRowInsertIndex = getLibraryCommandRowInsertIndex(
+    standaloneZones
+  )
+  const zonesBeforeLibraryCommandRow = standaloneZones.slice(
+    0,
+    libraryCommandRowInsertIndex
+  )
+  const zonesAfterLibraryCommandRow = standaloneZones.slice(
+    libraryCommandRowInsertIndex
+  )
 
-  if (zones.length === 0) {
+  if (standaloneZones.length === 0 && !shouldShowLibraryCommandRow) {
     return null
   }
 
@@ -6247,27 +6276,115 @@ function SimulationGameStateZonesBlock({
     <section
       className={`grid gap-3 p-3 ${simulationResultChunkSurfaceClassName}`}
     >
-      {zones.map((zone) => (
-        <div key={zone.key} className="min-w-0">
-          <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            {zone.label}
-          </p>
-          <SimulationGameStateZoneCardGrid
-            cardMentions={cardMentions}
-            cards={zone.cards}
-          />
+      {zonesBeforeLibraryCommandRow.map((zone) => (
+        <SimulationGameStateZoneBlock
+          key={zone.key}
+          cardMentions={cardMentions}
+          zone={zone}
+        />
+      ))}
+      {shouldShowLibraryCommandRow ? (
+        <div className="flex min-w-0 flex-wrap items-start gap-3">
+          {libraryCardCount !== null ? (
+            <SimulationGameStateLibraryZone
+              libraryCardCount={libraryCardCount}
+            />
+          ) : null}
+          {commandZone ? (
+            <SimulationGameStateZoneBlock
+              cardMentions={cardMentions}
+              isCompact={true}
+              zone={commandZone}
+            />
+          ) : null}
         </div>
+      ) : null}
+      {zonesAfterLibraryCommandRow.map((zone) => (
+        <SimulationGameStateZoneBlock
+          key={zone.key}
+          cardMentions={cardMentions}
+          zone={zone}
+        />
       ))}
     </section>
+  )
+}
+
+function getLibraryCommandRowInsertIndex(
+  zones: readonly SimulationGameStateZone[]
+) {
+  const handZoneIndex = zones.findIndex((zone) => zone.key === "hand")
+
+  if (handZoneIndex !== -1) {
+    return handZoneIndex + 1
+  }
+
+  const graveyardOrExileIndex = zones.findIndex(
+    (zone) => zone.key === "graveyard" || zone.key === "exile"
+  )
+
+  return graveyardOrExileIndex === -1 ? zones.length : graveyardOrExileIndex
+}
+
+function SimulationGameStateZoneBlock({
+  cardMentions,
+  isCompact = false,
+  zone,
+}: {
+  cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
+  isCompact?: boolean
+  zone: SimulationGameStateZone
+}) {
+  return (
+    <div className="min-w-0">
+      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        {zone.label}
+      </p>
+      <SimulationGameStateZoneCardGrid
+        cardMentions={cardMentions}
+        cards={zone.cards}
+        isCompact={isCompact}
+      />
+    </div>
+  )
+}
+
+function SimulationGameStateLibraryZone({
+  libraryCardCount,
+}: {
+  libraryCardCount: number
+}) {
+  return (
+    <div className="w-[5.5rem] min-w-0 sm:w-[6.25rem] 2xl:w-[7rem]">
+      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        Library ({libraryCardCount})
+      </p>
+      <div className="mt-2 min-w-0">
+        {libraryCardCount > 0 ? (
+          <img
+            className="block aspect-[488/680] w-full min-w-0 select-none rounded-[5.75%/4.4%] border border-border bg-black/40 object-cover shadow-lg shadow-black/20"
+            src="/card_back.webp"
+            alt={`${libraryCardCount} ${
+              libraryCardCount === 1 ? "card" : "cards"
+            } in library`}
+            draggable={false}
+          />
+        ) : (
+          <SimulationGameStateEmptyCardPlaceholder />
+        )}
+      </div>
+    </div>
   )
 }
 
 function SimulationGameStateZoneCardGrid({
   cardMentions,
   cards,
+  isCompact = false,
 }: {
   cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
   cards: SimulationGameStateZoneCard[]
+  isCompact?: boolean
 }) {
   const cardSignature = getSimulationGameStateZoneCardsSignature(cards)
   const cardMentionsSignature =
@@ -6503,7 +6620,11 @@ function SimulationGameStateZoneCardGrid({
   return (
     <div
       ref={cardGridElementRef}
-      className="mt-2 grid min-w-0 grid-cols-[repeat(auto-fill,minmax(5.5rem,1fr))] gap-3 sm:grid-cols-[repeat(auto-fill,minmax(6.25rem,1fr))] 2xl:grid-cols-[repeat(auto-fill,minmax(7rem,1fr))]"
+      className={
+        isCompact
+          ? "mt-2 grid min-w-0 auto-cols-[5.5rem] grid-flow-col gap-3 sm:auto-cols-[6.25rem] 2xl:auto-cols-[7rem]"
+          : "mt-2 grid min-w-0 grid-cols-[repeat(auto-fill,minmax(5.5rem,1fr))] gap-3 sm:grid-cols-[repeat(auto-fill,minmax(6.25rem,1fr))] 2xl:grid-cols-[repeat(auto-fill,minmax(7rem,1fr))]"
+      }
     >
       {visibleCards.length === 0 ? (
         <SimulationGameStateEmptyCardPlaceholder />
@@ -6818,8 +6939,8 @@ function getSimulationGameStateZones(
     return []
   }
 
-  const zoneKeys = Object.keys(zonesRecord).filter((zoneKey) =>
-    Array.isArray(zonesRecord[zoneKey])
+  const zoneKeys = Object.keys(zonesRecord).filter(
+    (zoneKey) => zoneKey !== "library" && Array.isArray(zonesRecord[zoneKey])
   )
   const zoneKeySet = new Set(zoneKeys)
   const orderedZoneKeys = [
@@ -6951,7 +7072,10 @@ function getSimulationRunGameStateCardMentions(
 }
 
 function getSimulationRunGameStateDisplay(
-  run: Pick<SimulationDebugLlmRun, "chunks" | "gameState" | "phase"> | null,
+  run: Pick<
+    SimulationDebugLlmRun,
+    "chunks" | "gameState" | "librarySnapshot" | "phase"
+  > | null,
   commanders: readonly DeckCard[]
 ): SimulationGameStateDisplay | null {
   if (!run) {
@@ -6970,7 +7094,8 @@ function getSimulationRunGameStateDisplay(
         finalOutput.keptHand,
         getSimulationRunGameStateCardMentions(run.chunks)
       ),
-      getCommanderCardMentions(commanders)
+      getCommanderCardMentions(commanders),
+      getSimulationRunLibraryCardCount(run)
     )
   }
 
@@ -6988,11 +7113,13 @@ function getSimulationRunGameStateDisplay(
   return {
     cardMentions: getSimulationRunGameStateCardMentions(run.chunks),
     gameState,
+    libraryCardCount: getSimulationRunLibraryCardCount(run),
   }
 }
 
 function getStartingHandGameStateDisplay(
   startingHand: StartingHand | null,
+  deckCards: readonly DeckCard[],
   commanders: readonly DeckCard[]
 ): SimulationGameStateDisplay | null {
   if (!startingHand) {
@@ -7001,13 +7128,18 @@ function getStartingHandGameStateDisplay(
 
   return getOpeningHandGameStateDisplay(
     getStartingHandCardMentions(startingHand),
-    getCommanderCardMentions(commanders)
+    getCommanderCardMentions(commanders),
+    getPresetStartingHandLibraryCardCount({
+      deckCards,
+      startingHand,
+    })
   )
 }
 
 function getOpeningHandGameStateDisplay(
   handMentions: SimulationResultCardMention[],
-  commandMentions: SimulationResultCardMention[]
+  commandMentions: SimulationResultCardMention[],
+  libraryCardCount: number | null
 ): SimulationGameStateDisplay {
   const gameStateHandMentions = getOpeningHandGameStateCardMentions({
     mentions: handMentions,
@@ -7029,6 +7161,7 @@ function getOpeningHandGameStateDisplay(
         exile: [],
       },
     },
+    libraryCardCount,
   }
 }
 

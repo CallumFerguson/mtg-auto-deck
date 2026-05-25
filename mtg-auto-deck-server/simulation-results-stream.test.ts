@@ -18,6 +18,40 @@ test("formats stream events as JSON SSE messages", () => {
   )
 })
 
+test("formats run library snapshots in stream events", () => {
+  const event: SimulationResultsStreamEvent = {
+    type: "llm_run_updated",
+    run: {
+      llmRunId: "turn-run",
+      llmModelPresetId: "preset-test",
+      phase: "turn",
+      provider: "openai",
+      model: "gpt-test",
+      estimatedPriceCents: null,
+      reasoningEffort: "low",
+      serviceTier: "priority",
+      status: "completed",
+      runtimeStreamKey: null,
+      attemptNumber: 1,
+      failureMessage: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      startedAt: "2026-01-01T00:00:01.000Z",
+      completedAt: "2026-01-01T00:00:02.000Z",
+      failedAt: null,
+      cancelledAt: null,
+      turnNumber: 1,
+      librarySnapshot: ["Forest", "Island"],
+      openrouterGenerations: [],
+      chunks: [],
+    },
+  }
+
+  assert.match(
+    formatSseEvent(event),
+    /"librarySnapshot":\["Forest","Island"\]/
+  )
+})
+
 test("publishes events to active simulation subscribers immediately", () => {
   const broadcaster = new SimulationResultsBroadcaster()
   const writer = createWriter()

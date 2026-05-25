@@ -204,6 +204,7 @@ export type SimulationDebugLlmRun = {
   turnNumber?: number
   turnActions?: unknown
   gameState?: unknown
+  librarySnapshot?: string[] | null
   report?: string
   outdated?: boolean
   openingHandIsValid?: boolean

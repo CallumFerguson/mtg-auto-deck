@@ -1,6 +1,10 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { getSimulationFinalParsedOutput } from "../src/lib/simulation-final-output.js"
+import {
+  getPresetStartingHandLibraryCardCount,
+  getSimulationRunLibraryCardCount,
+} from "../src/lib/simulation-game-state-library.js"
 import { formatDebugChunkBlocks } from "../src/lib/simulation-debug-chunks.js"
 import {
   formatSimulationRunClipboardText,
@@ -98,6 +102,34 @@ test("replaces synthetic chunks when a persisted run update arrives", () => {
 
   assert.equal(updatedResults?.turnLlmRuns[0].chunks[0].id, 20)
   assert.equal(updatedResults?.turnLlmRuns[0].status, "completed")
+})
+
+test("keeps library snapshots from persisted run updates", () => {
+  const results = createResults({
+    turnLlmRuns: [
+      createRun({
+        llmRunId: "turn-run",
+        phase: "turn",
+        turnNumber: 1,
+      }),
+    ],
+  })
+
+  const updatedResults = applySimulationResultsStreamEvent(results, {
+    type: "llm_run_updated",
+    run: createRun({
+      llmRunId: "turn-run",
+      phase: "turn",
+      librarySnapshot: ["Forest", "Island"],
+      status: "completed",
+      turnNumber: 1,
+    }),
+  })
+
+  assert.deepEqual(updatedResults?.turnLlmRuns[0].librarySnapshot, [
+    "Forest",
+    "Island",
+  ])
 })
 
 test("keeps card mentions from first streamed persisted chunks", () => {
@@ -1804,6 +1836,43 @@ test("builds a preset opening hand timeline step", () => {
   )
 })
 
+test("counts simulated run libraries from snapshots only", () => {
+  assert.equal(
+    getSimulationRunLibraryCardCount({
+      librarySnapshot: ["Forest", "Island", "Sol Ring"],
+    }),
+    3
+  )
+  assert.equal(getSimulationRunLibraryCardCount({ librarySnapshot: [] }), 0)
+  assert.equal(
+    getSimulationRunLibraryCardCount({ librarySnapshot: null }),
+    null
+  )
+  assert.equal(getSimulationRunLibraryCardCount({}), null)
+})
+
+test("counts preset opening hand libraries from deck library cards", () => {
+  assert.equal(
+    getPresetStartingHandLibraryCardCount({
+      deckCards: [{ quantity: 97 }, { quantity: 1 }],
+      startingHand: {
+        cards: [{ quantity: 2 }, { quantity: 5 }],
+      },
+    }),
+    91
+  )
+})
+
+test("does not infer preset library counts without a starting hand", () => {
+  assert.equal(
+    getPresetStartingHandLibraryCardCount({
+      deckCards: [{ quantity: 99 }],
+      startingHand: null,
+    }),
+    null
+  )
+})
+
 test("builds timeline steps in opening hand, turn, report order", () => {
   const steps = buildSimulationResultsTimelineSteps({
     hasPresetStartingHand: false,
@@ -1867,7 +1936,10 @@ test("prefers active timeline runs for fallback selection", () => {
     }),
   })
 
-  assert.equal(getFallbackSimulationResultsTimelineStepId(steps), "run:turn-run")
+  assert.equal(
+    getFallbackSimulationResultsTimelineStepId(steps),
+    "run:turn-run"
+  )
 })
 
 test("falls back to the latest visible timeline stage", () => {
@@ -1991,6 +2063,7 @@ function createRun(overrides: {
   createdAt?: string
   failedAt?: string | null
   failureMessage?: string | null
+  librarySnapshot?: string[] | null
   openrouterGenerations?: SimulationDebugLlmRun["openrouterGenerations"]
   provider?: string
   report?: string
@@ -2019,6 +2092,7 @@ function createRun(overrides: {
     completedAt: overrides.completedAt ?? null,
     failedAt: overrides.failedAt ?? null,
     cancelledAt: overrides.cancelledAt ?? null,
+    librarySnapshot: overrides.librarySnapshot,
     turnNumber: overrides.turnNumber,
     report: overrides.report,
     openrouterGenerations: overrides.openrouterGenerations ?? [],

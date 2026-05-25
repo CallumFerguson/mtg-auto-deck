@@ -420,6 +420,7 @@ export type SimulationDebugLlmRun = {
   turnNumber?: number
   turnActions?: unknown
   gameState?: unknown
+  librarySnapshot?: string[] | null
   report?: string
   outdated?: boolean
   openingHandIsValid?: boolean
@@ -5425,7 +5426,7 @@ export async function getSimulationDebugInfo(
     simulationId,
     tableName: "simulation_opening_hand_llm_runs",
     selectColumns:
-      "run.attempt_number, NULL::integer AS turn_number, NULL::jsonb AS turn_actions, NULL::jsonb AS game_state, NULL::text AS report, NULL::boolean AS outdated, run.opening_hand_is_valid",
+      "run.attempt_number, NULL::integer AS turn_number, NULL::jsonb AS turn_actions, NULL::jsonb AS game_state, run.library_snapshot, NULL::text AS report, NULL::boolean AS outdated, run.opening_hand_is_valid",
     orderBy: "run.attempt_number ASC",
   })
   await attachOpeningHandEvaluations(openingHandRuns)
@@ -5433,7 +5434,7 @@ export async function getSimulationDebugInfo(
     simulationId,
     tableName: "simulation_turn_llm_runs",
     selectColumns:
-      "run.attempt_number, run.turn_number, run.turn_actions, run.game_state, NULL::text AS report, run.outdated, NULL::boolean AS opening_hand_is_valid",
+      "run.attempt_number, run.turn_number, run.turn_actions, run.game_state, run.library_snapshot, NULL::text AS report, run.outdated, NULL::boolean AS opening_hand_is_valid",
     orderBy: "run.turn_number ASC, run.attempt_number ASC",
   })
   await attachTurnEvaluations(turnRuns)
@@ -5441,7 +5442,7 @@ export async function getSimulationDebugInfo(
     simulationId,
     tableName: "simulation_report_llm_runs",
     selectColumns:
-      "run.attempt_number, NULL::integer AS turn_number, NULL::jsonb AS turn_actions, NULL::jsonb AS game_state, run.report, run.outdated, NULL::boolean AS opening_hand_is_valid",
+      "run.attempt_number, NULL::integer AS turn_number, NULL::jsonb AS turn_actions, NULL::jsonb AS game_state, NULL::jsonb AS library_snapshot, run.report, run.outdated, NULL::boolean AS opening_hand_is_valid",
     orderBy: "run.attempt_number ASC",
   })
 
@@ -5743,7 +5744,7 @@ export async function getSimulationResultsInfo(
     simulationId,
     tableName: "simulation_opening_hand_llm_runs",
     selectColumns:
-      "run.attempt_number, NULL::integer AS turn_number, NULL::jsonb AS turn_actions, NULL::jsonb AS game_state, NULL::text AS report, NULL::boolean AS outdated, run.opening_hand_is_valid",
+      "run.attempt_number, NULL::integer AS turn_number, NULL::jsonb AS turn_actions, NULL::jsonb AS game_state, run.library_snapshot, NULL::text AS report, NULL::boolean AS outdated, run.opening_hand_is_valid",
     orderBy: "run.attempt_number ASC",
     excludeChunkKinds: SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
     additionalWhereSql: `
@@ -5759,7 +5760,7 @@ export async function getSimulationResultsInfo(
     simulationId,
     tableName: "simulation_turn_llm_runs",
     selectColumns:
-      "run.attempt_number, run.turn_number, run.turn_actions, run.game_state, NULL::text AS report, run.outdated, NULL::boolean AS opening_hand_is_valid",
+      "run.attempt_number, run.turn_number, run.turn_actions, run.game_state, run.library_snapshot, NULL::text AS report, run.outdated, NULL::boolean AS opening_hand_is_valid",
     orderBy: "run.turn_number ASC, run.attempt_number ASC",
     excludeChunkKinds: SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
     additionalWhereSql: "run.outdated = false",
@@ -5769,7 +5770,7 @@ export async function getSimulationResultsInfo(
     simulationId,
     tableName: "simulation_report_llm_runs",
     selectColumns:
-      "run.attempt_number, NULL::integer AS turn_number, NULL::jsonb AS turn_actions, NULL::jsonb AS game_state, run.report, run.outdated, NULL::boolean AS opening_hand_is_valid",
+      "run.attempt_number, NULL::integer AS turn_number, NULL::jsonb AS turn_actions, NULL::jsonb AS game_state, NULL::jsonb AS library_snapshot, run.report, run.outdated, NULL::boolean AS opening_hand_is_valid",
     orderBy: "run.attempt_number ASC",
     excludeChunkKinds: SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
     additionalWhereSql: "run.outdated = false",
@@ -6355,6 +6356,7 @@ type SimulationDebugLlmRunRow = {
   turn_number: number | null
   turn_actions: unknown | null
   game_state: unknown | null
+  library_snapshot: unknown | null
   report: string | null
   outdated: boolean | null
   opening_hand_is_valid: boolean | null
@@ -6522,6 +6524,10 @@ async function getSimulationDebugLlmRuns({
 
       if (row.game_state !== null) {
         run.gameState = row.game_state
+      }
+
+      if (row.phase === "opening_hand" || row.phase === "turn") {
+        run.librarySnapshot = asStringArray(row.library_snapshot)
       }
 
       if (row.report !== null) {
