@@ -105,6 +105,8 @@ import {
   buildSimulationResultsTimelineSteps,
   isActiveSimulationResultsTimelineStep,
   resolveSimulationResultsTimelineSelection,
+  shouldPreserveFinishedSimulationResultsTimelineSelection,
+  type SimulationResultsTimelineSelectionSnapshot,
   type SimulationResultsTimelineStep,
 } from "@/lib/simulation-results-timeline"
 import {
@@ -3885,6 +3887,8 @@ function SimulationResultsPanel({
   const [selectedTimelineStepIdPreference, setSelectedTimelineStepIdPreference] =
     useState<string | null>(null)
   const previousSelectedTimelineStepIdRef = useRef<string | null>(null)
+  const previousSelectedTimelineStepRef =
+    useRef<SimulationResultsTimelineSelectionSnapshot | null>(null)
   const timelineStepButtonRefs = useRef<Map<string, HTMLButtonElement>>(
     new Map()
   )
@@ -3893,10 +3897,20 @@ function SimulationResultsPanel({
   )
   const selectedTimelineStepId = resolveSimulationResultsTimelineSelection(
     timelineSteps,
-    selectedTimelineStepIdPreference
+    selectedTimelineStepIdPreference,
+    previousSelectedTimelineStepRef.current
   )
   const selectedTimelineStep =
     timelineSteps.find((step) => step.id === selectedTimelineStepId) ?? null
+  const selectedTimelineStepSnapshot = selectedTimelineStep
+    ? getSimulationTimelineStepSelectionSnapshot(selectedTimelineStep)
+    : null
+  const shouldLockFinishedTimelineStep =
+    selectedTimelineStepIdPreference === null &&
+    shouldPreserveFinishedSimulationResultsTimelineSelection(
+      previousSelectedTimelineStepRef.current,
+      selectedTimelineStep
+    )
   const selectedTimelineRun =
     selectedTimelineStep?.run === null
       ? null
@@ -3925,18 +3939,31 @@ function SimulationResultsPanel({
   }, [displayedTimelineSteps, selectedTimelineStepId])
 
   useLayoutEffect(() => {
-    if (previousSelectedTimelineStepIdRef.current === selectedTimelineStepId) {
-      return
-    }
+    const previousSelectedTimelineStepId =
+      previousSelectedTimelineStepIdRef.current
 
     previousSelectedTimelineStepIdRef.current = selectedTimelineStepId
+    previousSelectedTimelineStepRef.current = selectedTimelineStepSnapshot
+
+    if (shouldLockFinishedTimelineStep && selectedTimelineStepId) {
+      setSelectedTimelineStepIdPreference(selectedTimelineStepId)
+    }
+
+    if (previousSelectedTimelineStepId === selectedTimelineStepId) {
+      return
+    }
 
     if (!selectedTimelineStepId) {
       return
     }
 
     onKeepResultsScrolledToBottom()
-  }, [onKeepResultsScrolledToBottom, selectedTimelineStepId])
+  }, [
+    onKeepResultsScrolledToBottom,
+    selectedTimelineStepId,
+    selectedTimelineStepSnapshot,
+    shouldLockFinishedTimelineStep,
+  ])
 
   function renderSimulationRunDetail(
     run: (typeof runs)[number],
@@ -4375,6 +4402,16 @@ function SimulationResultsPanel({
 
 function getSimulationTimelineRunStepId(llmRunId: string) {
   return `run:${llmRunId}`
+}
+
+function getSimulationTimelineStepSelectionSnapshot(
+  step: SimulationResultsTimelineStep
+): SimulationResultsTimelineSelectionSnapshot {
+  return {
+    id: step.id,
+    kind: step.kind,
+    status: step.status,
+  }
 }
 
 function createNextTurnTimelineStep(

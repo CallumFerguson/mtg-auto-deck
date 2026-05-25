@@ -34,6 +34,12 @@ export type SimulationResultsTimelineStep =
       run: SimulationDebugLlmRun
     }
 
+export type SimulationResultsTimelineSelectionSnapshot = {
+  id: string
+  kind: SimulationResultsTimelineStepKind
+  status: SimulationResultsTimelineStepStatus
+}
+
 export function buildSimulationResultsTimelineSteps({
   hasPresetStartingHand,
   resultsInfo,
@@ -79,23 +85,44 @@ export function getFallbackSimulationResultsTimelineStepId(
 
 export function resolveSimulationResultsTimelineSelection(
   steps: readonly SimulationResultsTimelineStep[],
-  selectedStepId: string | null
+  selectedStepId: string | null,
+  previousSelection: SimulationResultsTimelineSelectionSnapshot | null = null
 ) {
   if (selectedStepId && steps.some((step) => step.id === selectedStepId)) {
     return selectedStepId
   }
 
+  const preservedStepId = getPreservedFinishedTimelineStepId(
+    steps,
+    previousSelection
+  )
+
+  if (preservedStepId) {
+    return preservedStepId
+  }
+
   return getFallbackSimulationResultsTimelineStepId(steps)
+}
+
+export function shouldPreserveFinishedSimulationResultsTimelineSelection(
+  previousSelection: SimulationResultsTimelineSelectionSnapshot | null,
+  currentStep: SimulationResultsTimelineStep | null
+) {
+  return Boolean(
+    previousSelection &&
+    currentStep &&
+    previousSelection.id === currentStep.id &&
+    (previousSelection.kind === "opening_hand" ||
+      previousSelection.kind === "turn") &&
+    isActiveSimulationResultsTimelineStatus(previousSelection.status) &&
+    !isActiveSimulationResultsTimelineStep(currentStep)
+  )
 }
 
 export function isActiveSimulationResultsTimelineStep(
   step: SimulationResultsTimelineStep
 ) {
-  return (
-    step.status === "pending" ||
-    step.status === "streaming" ||
-    step.status === "cancel_requested"
-  )
+  return isActiveSimulationResultsTimelineStatus(step.status)
 }
 
 function getPreferredSimulationResultsTimelineStep(
@@ -127,6 +154,35 @@ function findLastStepByKind(
   }
 
   return null
+}
+
+function getPreservedFinishedTimelineStepId(
+  steps: readonly SimulationResultsTimelineStep[],
+  previousSelection: SimulationResultsTimelineSelectionSnapshot | null
+) {
+  if (!previousSelection) {
+    return null
+  }
+
+  const currentStep =
+    steps.find((step) => step.id === previousSelection.id) ?? null
+
+  return shouldPreserveFinishedSimulationResultsTimelineSelection(
+    previousSelection,
+    currentStep
+  )
+    ? previousSelection.id
+    : null
+}
+
+function isActiveSimulationResultsTimelineStatus(
+  status: SimulationResultsTimelineStepStatus
+) {
+  return (
+    status === "pending" ||
+    status === "streaming" ||
+    status === "cancel_requested"
+  )
 }
 
 function createRunStep(

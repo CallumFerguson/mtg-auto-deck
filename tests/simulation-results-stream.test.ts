@@ -1942,6 +1942,101 @@ test("prefers active timeline runs for fallback selection", () => {
   )
 })
 
+test("preserves the current opening hand selection when auto-advance starts a turn", () => {
+  const steps = buildSimulationResultsTimelineSteps({
+    hasPresetStartingHand: false,
+    resultsInfo: createResults({
+      openingHandLlmRuns: [
+        createRun({
+          llmRunId: "opening-run",
+          phase: "opening_hand",
+          status: "completed",
+        }),
+      ],
+      turnLlmRuns: [
+        createRun({
+          llmRunId: "turn-run",
+          phase: "turn",
+          status: "streaming",
+          turnNumber: 1,
+        }),
+      ],
+    }),
+  })
+
+  assert.equal(
+    resolveSimulationResultsTimelineSelection(steps, null, {
+      id: "run:opening-run",
+      kind: "opening_hand",
+      status: "streaming",
+    }),
+    "run:opening-run"
+  )
+})
+
+test("preserves the current turn selection when auto-advance starts the next turn", () => {
+  const steps = buildSimulationResultsTimelineSteps({
+    hasPresetStartingHand: false,
+    resultsInfo: createResults({
+      turnLlmRuns: [
+        createRun({
+          llmRunId: "turn-1",
+          phase: "turn",
+          status: "completed",
+          turnNumber: 1,
+        }),
+        createRun({
+          llmRunId: "turn-2",
+          phase: "turn",
+          status: "streaming",
+          turnNumber: 2,
+        }),
+      ],
+    }),
+  })
+
+  assert.equal(
+    resolveSimulationResultsTimelineSelection(steps, null, {
+      id: "run:turn-1",
+      kind: "turn",
+      status: "streaming",
+    }),
+    "run:turn-1"
+  )
+})
+
+test("prefers an active timeline run when the previous selection was already finished", () => {
+  const steps = buildSimulationResultsTimelineSteps({
+    hasPresetStartingHand: false,
+    resultsInfo: createResults({
+      openingHandLlmRuns: [
+        createRun({
+          llmRunId: "opening-run",
+          phase: "opening_hand",
+          status: "completed",
+        }),
+      ],
+      turnLlmRuns: [
+        createRun({
+          llmRunId: "turn-run",
+          phase: "turn",
+          status: "streaming",
+          turnNumber: 1,
+        }),
+      ],
+    }),
+  })
+
+  assert.equal(
+    resolveSimulationResultsTimelineSelection(steps, null, {
+      id: "run:opening-run",
+      kind: "opening_hand",
+      status: "completed",
+    }),
+    "run:turn-run"
+  )
+})
+
 test("falls back to the latest visible timeline stage", () => {
   const steps = buildSimulationResultsTimelineSteps({
     hasPresetStartingHand: false,
