@@ -120,6 +120,7 @@ import {
   getSimulationRunActiveToolCallName,
   getSimulationResultEntries,
   hasSimulationRunFinalParsedOutputChunk,
+  isSimulationRunLatestChunkOutputDelta,
   type LoggedTurnAction,
   type SimulationRunActivityBlock,
   type SimulationResultEntry,
@@ -3978,6 +3979,7 @@ function SimulationResultsPanel({
         activeToolCallName={null}
         canStopSimulation={false}
         finishedDurationText={finishedDurationText}
+        isFinalizingTurn={false}
         isPending={false}
         isFinishedSuccessfully={run.status === "completed"}
         isFinished={true}
@@ -4042,6 +4044,9 @@ function SimulationResultsPanel({
             activeToolCallName={run.activeToolCallName}
             canStopSimulation={run.status !== "cancel_requested"}
             finishedDurationText={null}
+            isFinalizingTurn={isSimulationRunLatestChunkOutputDelta(
+              run.chunks
+            )}
             isPending={run.status === "pending"}
             isFinishedSuccessfully={false}
             isFinished={false}
@@ -5355,6 +5360,7 @@ function SimulationResultThinkingStatus({
   activeToolCallName,
   canStopSimulation,
   finishedDurationText,
+  isFinalizingTurn,
   isPending,
   isFinished,
   isFinishedSuccessfully,
@@ -5368,6 +5374,7 @@ function SimulationResultThinkingStatus({
   activeToolCallName: string | null
   canStopSimulation: boolean
   finishedDurationText: string | null
+  isFinalizingTurn: boolean
   isPending: boolean
   isFinished: boolean
   isFinishedSuccessfully: boolean
@@ -5413,6 +5420,8 @@ function SimulationResultThinkingStatus({
       ? "Pending"
       : activeToolCallName
         ? (activeToolCallLabel ?? `Calling tool: ${activeToolCallName}`)
+        : isFinalizingTurn
+          ? "Finalizing turn"
         : "Thinking"
 
   return (

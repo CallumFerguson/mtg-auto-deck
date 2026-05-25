@@ -101,6 +101,12 @@ export function getSimulationRunActiveToolCallName(
   return getActiveToolStartChunk(chunks)?.mcpFunctionName ?? null
 }
 
+export function isSimulationRunLatestChunkOutputDelta(
+  chunks: readonly SimulationDebugLlmRunChunk[]
+) {
+  return getLatestChunk(chunks)?.kind === "message_delta"
+}
+
 export function getSimulationRunActivityBlocks(
   chunks: readonly SimulationDebugLlmRunChunk[]
 ): SimulationRunActivityBlock[] {
@@ -310,15 +316,19 @@ function getCompletedToolCallPairs(
 function getActiveToolStartChunk(
   chunks: readonly SimulationDebugLlmRunChunk[]
 ) {
-  const latestChunk = chunks.reduce<SimulationDebugLlmRunChunk | null>(
+  const latestChunk = getLatestChunk(chunks)
+
+  return latestChunk?.kind === "mcp_call_start" ? latestChunk : null
+}
+
+function getLatestChunk(chunks: readonly SimulationDebugLlmRunChunk[]) {
+  return chunks.reduce<SimulationDebugLlmRunChunk | null>(
     (latestChunk, chunk) =>
       latestChunk === null || chunk.sequence > latestChunk.sequence
         ? chunk
         : latestChunk,
     null
   )
-
-  return latestChunk?.kind === "mcp_call_start" ? latestChunk : null
 }
 
 function findMatchingToolStartChunkIndex(

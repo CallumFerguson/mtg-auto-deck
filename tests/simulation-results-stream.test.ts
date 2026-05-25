@@ -14,6 +14,7 @@ import {
   getSimulationResultChunks,
   getSimulationRunThinkingPreview,
   hasSimulationRunFinalParsedOutputChunk,
+  isSimulationRunLatestChunkOutputDelta,
 } from "../src/lib/simulation-result-chunks.js"
 import {
   getKnownSimulationResultToolLabel,
@@ -1011,6 +1012,41 @@ test("clears active tool call name once a newer chunk arrives", () => {
   ])
 
   assert.equal(activeToolCallName, null)
+})
+
+test("detects when the latest run chunk is an output delta", () => {
+  assert.equal(
+    isSimulationRunLatestChunkOutputDelta([
+      createChunk({
+        id: 2,
+        outputDelta: "final",
+        sequence: 2,
+      }),
+      createChunk({
+        id: 1,
+        kind: "reasoning_delta",
+        reasoningDelta: "thinking",
+        sequence: 1,
+      }),
+    ]),
+    true
+  )
+
+  assert.equal(
+    isSimulationRunLatestChunkOutputDelta([
+      createChunk({
+        id: 1,
+        outputDelta: "final",
+        sequence: 1,
+      }),
+      createChunk({
+        id: 2,
+        kind: "output_done",
+        sequence: 2,
+      }),
+    ]),
+    false
+  )
 })
 
 test("keeps legacy turn action log chunks as regular result chunks", () => {
