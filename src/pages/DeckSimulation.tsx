@@ -6073,6 +6073,7 @@ type SimulationGameStateZone = {
 type SimulationGameStateZoneCardPresenceItem = {
   card: SimulationGameStateZoneCard
   cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
+  isEntering: boolean
   isEnteringPlaceholder: boolean
   isExiting: boolean
   key: string
@@ -6113,6 +6114,7 @@ const SIMULATION_RESULT_CARD_PREVIEW_PADDING_PX = 8
 const SIMULATION_RESULT_CARD_PREVIEW_WIDTH_PX = 160
 const SIMULATION_RESULT_CARD_PREVIEW_WIDTH_SM_PX = 192
 const SIMULATION_RESULT_CARD_PREVIEW_IMAGE_HEIGHT_RATIO = 680 / 488
+const SIMULATION_GAME_STATE_CARD_ENTER_ANIMATION_MS = 250
 const SIMULATION_GAME_STATE_CARD_EXIT_ANIMATION_MS = 250
 const SIMULATION_GAME_STATE_CARD_MOVE_ANIMATION_MS = 250
 const SIMULATION_GAME_STATE_CARD_TAP_ANIMATION_MS = 250
@@ -6286,148 +6288,15 @@ function SimulationGameStateZonesBlock({
   libraryCardCount: number | null
 }) {
   const zones = getSimulationGameStateZones(gameState)
-  const commandZone = zones.find((zone) => zone.key === "command") ?? null
-  const standaloneZones = zones.filter((zone) => zone.key !== "command")
-  const shouldShowLibraryCommandRow =
-    libraryCardCount !== null || commandZone !== null
-  const libraryCommandRowInsertIndex = getLibraryCommandRowInsertIndex(
-    standaloneZones
-  )
-  const zonesBeforeLibraryCommandRow = standaloneZones.slice(
-    0,
-    libraryCommandRowInsertIndex
-  )
-  const zonesAfterLibraryCommandRow = standaloneZones.slice(
-    libraryCommandRowInsertIndex
-  )
-
-  if (standaloneZones.length === 0 && !shouldShowLibraryCommandRow) {
-    return null
-  }
-
-  return (
-    <section
-      className={`grid gap-3 p-3 ${simulationResultChunkSurfaceClassName}`}
-    >
-      {zonesBeforeLibraryCommandRow.map((zone) => (
-        <SimulationGameStateZoneBlock
-          key={zone.key}
-          cardMentions={cardMentions}
-          zone={zone}
-        />
-      ))}
-      {shouldShowLibraryCommandRow ? (
-        <div className="flex min-w-0 flex-wrap items-start gap-3">
-          {libraryCardCount !== null ? (
-            <SimulationGameStateLibraryZone
-              libraryCardCount={libraryCardCount}
-            />
-          ) : null}
-          {commandZone ? (
-            <SimulationGameStateZoneBlock
-              cardMentions={cardMentions}
-              isCompact={true}
-              zone={commandZone}
-            />
-          ) : null}
-        </div>
-      ) : null}
-      {zonesAfterLibraryCommandRow.map((zone) => (
-        <SimulationGameStateZoneBlock
-          key={zone.key}
-          cardMentions={cardMentions}
-          zone={zone}
-        />
-      ))}
-    </section>
-  )
-}
-
-function getLibraryCommandRowInsertIndex(
-  zones: readonly SimulationGameStateZone[]
-) {
-  const handZoneIndex = zones.findIndex((zone) => zone.key === "hand")
-
-  if (handZoneIndex !== -1) {
-    return handZoneIndex + 1
-  }
-
-  const graveyardOrExileIndex = zones.findIndex(
-    (zone) => zone.key === "graveyard" || zone.key === "exile"
-  )
-
-  return graveyardOrExileIndex === -1 ? zones.length : graveyardOrExileIndex
-}
-
-function SimulationGameStateZoneBlock({
-  cardMentions,
-  isCompact = false,
-  zone,
-}: {
-  cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
-  isCompact?: boolean
-  zone: SimulationGameStateZone
-}) {
-  return (
-    <div className="min-w-0">
-      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        {zone.label}
-      </p>
-      <SimulationGameStateZoneCardGrid
-        cardMentions={cardMentions}
-        cards={zone.cards}
-        isCompact={isCompact}
-      />
-    </div>
-  )
-}
-
-function SimulationGameStateLibraryZone({
-  libraryCardCount,
-}: {
-  libraryCardCount: number
-}) {
-  return (
-    <div className="w-[5.5rem] min-w-0 sm:w-[6.25rem] 2xl:w-[7rem]">
-      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        Library ({libraryCardCount})
-      </p>
-      <div className="mt-2 min-w-0">
-        {libraryCardCount > 0 ? (
-          <img
-            className="block aspect-[488/680] w-full min-w-0 select-none rounded-[5.75%/4.4%] border border-border bg-black/40 object-cover shadow-lg shadow-black/20"
-            src="/card_back.webp"
-            alt={`${libraryCardCount} ${
-              libraryCardCount === 1 ? "card" : "cards"
-            } in library`}
-            draggable={false}
-          />
-        ) : (
-          <SimulationGameStateEmptyCardPlaceholder />
-        )}
-      </div>
-    </div>
-  )
-}
-
-function SimulationGameStateZoneCardGrid({
-  cardMentions,
-  cards,
-  isCompact = false,
-}: {
-  cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
-  cards: SimulationGameStateZoneCard[]
-  isCompact?: boolean
-}) {
-  const cardSignature = getSimulationGameStateZoneCardsSignature(cards)
+  const cardSignature = getSimulationGameStateZonesCardsSignature(zones)
   const cardMentionsSignature =
     getSimulationGameStateCardMentionsSignature(cardMentions)
   const syncSignature = `${cardSignature}\u001d${cardMentionsSignature}`
   const lastSettledSyncSignatureRef = useRef(syncSignature)
-  const latestAnimationTargetRef = useRef({ cardMentions, cards })
-  const cardGridElementRef = useRef<HTMLDivElement | null>(null)
+  const latestAnimationTargetRef = useRef({ cardMentions, zones })
+  const gameStateElementRef = useRef<HTMLElement | null>(null)
   const cardLayoutElementsRef = useRef(new Map<string, HTMLDivElement>())
-  const previousCardGridWidthRef = useRef<number | null>(null)
+  const previousGameStateWidthRef = useRef<number | null>(null)
   const previousCardLayoutRectsRef = useRef(new Map<string, DOMRect>())
   const shouldSkipNextPositionAnimationRef = useRef(false)
   const [visibleCards, setVisibleCards] = useState<
@@ -6435,8 +6304,8 @@ function SimulationGameStateZoneCardGrid({
   >(() =>
     getSimulationGameStateZoneCardPresenceItems({
       cardMentions,
-      cards,
       isExiting: false,
+      zones,
     })
   )
   const visibleCardsRef = useRef(visibleCards)
@@ -6449,23 +6318,35 @@ function SimulationGameStateZoneCardGrid({
 
     return nextRects
   }, [])
+  const handleCardLayoutElementChange = useCallback(
+    (cardKey: string, element: HTMLDivElement | null) => {
+      if (element) {
+        cardLayoutElementsRef.current.set(cardKey, element)
+        return
+      }
+
+      cardLayoutElementsRef.current.delete(cardKey)
+    },
+    []
+  )
 
   useEffect(() => {
     visibleCardsRef.current = visibleCards
   }, [visibleCards])
 
   useEffect(() => {
-    latestAnimationTargetRef.current = { cardMentions, cards }
-  }, [cardMentions, cards])
+    latestAnimationTargetRef.current = { cardMentions, zones }
+  }, [cardMentions, zones])
 
   useEffect(() => {
-    const gridElement = cardGridElementRef.current
+    const gameStateElement = gameStateElementRef.current
 
-    if (!gridElement) {
+    if (!gameStateElement) {
       return
     }
 
-    previousCardGridWidthRef.current = gridElement.getBoundingClientRect().width
+    previousGameStateWidthRef.current =
+      gameStateElement.getBoundingClientRect().width
 
     let refreshFrameId: number | null = null
 
@@ -6481,9 +6362,9 @@ function SimulationGameStateZoneCardGrid({
       })
     }
 
-    const handleGridWidth = (width: number) => {
-      const previousWidth = previousCardGridWidthRef.current
-      previousCardGridWidthRef.current = width
+    const handleGameStateWidth = (width: number) => {
+      const previousWidth = previousGameStateWidthRef.current
+      previousGameStateWidthRef.current = width
 
       if (previousWidth === null || Math.abs(width - previousWidth) < 0.5) {
         return
@@ -6495,17 +6376,17 @@ function SimulationGameStateZoneCardGrid({
 
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        if (entry.target === gridElement) {
-          handleGridWidth(entry.contentRect.width)
+        if (entry.target === gameStateElement) {
+          handleGameStateWidth(entry.contentRect.width)
           break
         }
       }
     })
 
-    resizeObserver.observe(gridElement)
+    resizeObserver.observe(gameStateElement)
 
     const handleWindowResize = () => {
-      handleGridWidth(gridElement.getBoundingClientRect().width)
+      handleGameStateWidth(gameStateElement.getBoundingClientRect().width)
     }
 
     window.addEventListener("resize", handleWindowResize)
@@ -6521,12 +6402,12 @@ function SimulationGameStateZoneCardGrid({
   }, [readCurrentCardLayoutRects])
 
   useEffect(() => {
-    const { cardMentions: targetCardMentions, cards: targetCards } =
+    const { cardMentions: targetCardMentions, zones: targetZones } =
       latestAnimationTargetRef.current
     const nextItems = getSimulationGameStateZoneCardPresenceItems({
       cardMentions: targetCardMentions,
-      cards: targetCards,
       isExiting: false,
+      zones: targetZones,
     })
 
     if (
@@ -6541,7 +6422,8 @@ function SimulationGameStateZoneCardGrid({
 
     let syncTimeoutId: number | null = null
     let moveTimeoutId: number | null = null
-    let enterTimeoutId: number | null = null
+    let enterPhaseTimeoutId: number | null = null
+    let settleEnteredTimeoutId: number | null = null
     let settleTimeoutId: number | null = null
     let didSettle = false
 
@@ -6580,6 +6462,24 @@ function SimulationGameStateZoneCardGrid({
       )
       const hasEnteringCards = enteringCardKeys.size > 0
 
+      const startEnterPhase = () => {
+        if (didSettle) {
+          return
+        }
+
+        setVisibleCardsSnapshot(
+          getSimulationGameStateZoneCardEnterPhaseItems({
+            enteringCardKeys,
+            nextItems,
+          })
+        )
+
+        settleEnteredTimeoutId = window.setTimeout(
+          settleToTargetState,
+          SIMULATION_GAME_STATE_CARD_ENTER_ANIMATION_MS
+        )
+      }
+
       const startMovePhase = () => {
         if (didSettle) {
           return
@@ -6597,9 +6497,10 @@ function SimulationGameStateZoneCardGrid({
           return
         }
 
-        enterTimeoutId = window.setTimeout(() => {
-          settleToTargetState()
-        }, SIMULATION_GAME_STATE_CARD_MOVE_ANIMATION_MS)
+        enterPhaseTimeoutId = window.setTimeout(
+          startEnterPhase,
+          SIMULATION_GAME_STATE_CARD_MOVE_ANIMATION_MS
+        )
       }
 
       if (!hasExitingCards && !hasEnteringCards) {
@@ -6642,8 +6543,11 @@ function SimulationGameStateZoneCardGrid({
       if (moveTimeoutId !== null) {
         window.clearTimeout(moveTimeoutId)
       }
-      if (enterTimeoutId !== null) {
-        window.clearTimeout(enterTimeoutId)
+      if (enterPhaseTimeoutId !== null) {
+        window.clearTimeout(enterPhaseTimeoutId)
+      }
+      if (settleEnteredTimeoutId !== null) {
+        window.clearTimeout(settleEnteredTimeoutId)
       }
       if (settleTimeoutId !== null) {
         window.clearTimeout(settleTimeoutId)
@@ -6661,7 +6565,7 @@ function SimulationGameStateZoneCardGrid({
     }
 
     for (const card of visibleCards) {
-      if (card.isExiting || card.isEnteringPlaceholder) {
+      if (card.isEntering || card.isExiting || card.isEnteringPlaceholder) {
         continue
       }
 
@@ -6692,9 +6596,159 @@ function SimulationGameStateZoneCardGrid({
     previousCardLayoutRectsRef.current = nextRects
   }, [readCurrentCardLayoutRects, visibleCards])
 
+  const visibleCardsByZone =
+    getSimulationGameStateZoneCardPresenceItemsByZone(visibleCards)
+  const renderZones = getSimulationGameStateRenderZones({
+    visibleCards,
+    zones,
+  })
+  const commandZone = renderZones.find((zone) => zone.key === "command") ?? null
+  const standaloneZones = renderZones.filter((zone) => zone.key !== "command")
+  const shouldShowLibraryCommandRow =
+    libraryCardCount !== null || commandZone !== null
+  const libraryCommandRowInsertIndex = getLibraryCommandRowInsertIndex(
+    standaloneZones
+  )
+  const zonesBeforeLibraryCommandRow = standaloneZones.slice(
+    0,
+    libraryCommandRowInsertIndex
+  )
+  const zonesAfterLibraryCommandRow = standaloneZones.slice(
+    libraryCommandRowInsertIndex
+  )
+
+  if (standaloneZones.length === 0 && !shouldShowLibraryCommandRow) {
+    return null
+  }
+
+  return (
+    <section
+      ref={gameStateElementRef}
+      className={`grid gap-3 p-3 ${simulationResultChunkSurfaceClassName}`}
+    >
+      {zonesBeforeLibraryCommandRow.map((zone) => (
+        <SimulationGameStateZoneBlock
+          key={zone.key}
+          onCardLayoutElementChange={handleCardLayoutElementChange}
+          visibleCards={visibleCardsByZone.get(zone.key) ?? []}
+          zone={zone}
+        />
+      ))}
+      {shouldShowLibraryCommandRow ? (
+        <div className="flex min-w-0 flex-wrap items-start gap-3">
+          {libraryCardCount !== null ? (
+            <SimulationGameStateLibraryZone
+              libraryCardCount={libraryCardCount}
+            />
+          ) : null}
+          {commandZone ? (
+            <SimulationGameStateZoneBlock
+              isCompact={true}
+              onCardLayoutElementChange={handleCardLayoutElementChange}
+              visibleCards={visibleCardsByZone.get(commandZone.key) ?? []}
+              zone={commandZone}
+            />
+          ) : null}
+        </div>
+      ) : null}
+      {zonesAfterLibraryCommandRow.map((zone) => (
+        <SimulationGameStateZoneBlock
+          key={zone.key}
+          onCardLayoutElementChange={handleCardLayoutElementChange}
+          visibleCards={visibleCardsByZone.get(zone.key) ?? []}
+          zone={zone}
+        />
+      ))}
+    </section>
+  )
+}
+
+function getLibraryCommandRowInsertIndex(
+  zones: readonly SimulationGameStateZone[]
+) {
+  const handZoneIndex = zones.findIndex((zone) => zone.key === "hand")
+
+  if (handZoneIndex !== -1) {
+    return handZoneIndex + 1
+  }
+
+  const graveyardOrExileIndex = zones.findIndex(
+    (zone) => zone.key === "graveyard" || zone.key === "exile"
+  )
+
+  return graveyardOrExileIndex === -1 ? zones.length : graveyardOrExileIndex
+}
+
+function SimulationGameStateZoneBlock({
+  isCompact = false,
+  onCardLayoutElementChange,
+  visibleCards,
+  zone,
+}: {
+  isCompact?: boolean
+  onCardLayoutElementChange: (
+    cardKey: string,
+    element: HTMLDivElement | null
+  ) => void
+  visibleCards: SimulationGameStateZoneCardPresenceItem[]
+  zone: SimulationGameStateZone
+}) {
+  return (
+    <div className="min-w-0">
+      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        {zone.label}
+      </p>
+      <SimulationGameStateZoneCardGrid
+        isCompact={isCompact}
+        onCardLayoutElementChange={onCardLayoutElementChange}
+        visibleCards={visibleCards}
+      />
+    </div>
+  )
+}
+
+function SimulationGameStateLibraryZone({
+  libraryCardCount,
+}: {
+  libraryCardCount: number
+}) {
+  return (
+    <div className="w-[5.5rem] min-w-0 sm:w-[6.25rem] 2xl:w-[7rem]">
+      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        Library ({libraryCardCount})
+      </p>
+      <div className="mt-2 min-w-0">
+        {libraryCardCount > 0 ? (
+          <img
+            className="block aspect-[488/680] w-full min-w-0 select-none rounded-[5.75%/4.4%] border border-border bg-black/40 object-cover shadow-lg shadow-black/20"
+            src="/card_back.webp"
+            alt={`${libraryCardCount} ${
+              libraryCardCount === 1 ? "card" : "cards"
+            } in library`}
+            draggable={false}
+          />
+        ) : (
+          <SimulationGameStateEmptyCardPlaceholder />
+        )}
+      </div>
+    </div>
+  )
+}
+
+function SimulationGameStateZoneCardGrid({
+  isCompact = false,
+  onCardLayoutElementChange,
+  visibleCards,
+}: {
+  isCompact?: boolean
+  onCardLayoutElementChange: (
+    cardKey: string,
+    element: HTMLDivElement | null
+  ) => void
+  visibleCards: SimulationGameStateZoneCardPresenceItem[]
+}) {
   return (
     <div
-      ref={cardGridElementRef}
       className={
         isCompact
           ? "mt-2 grid min-w-0 auto-cols-[5.5rem] grid-flow-col gap-3 sm:auto-cols-[6.25rem] 2xl:auto-cols-[7rem]"
@@ -6708,11 +6762,7 @@ function SimulationGameStateZoneCardGrid({
           <div
             key={card.key}
             ref={(element) => {
-              if (element) {
-                cardLayoutElementsRef.current.set(card.key, element)
-              } else {
-                cardLayoutElementsRef.current.delete(card.key)
-              }
+              onCardLayoutElementChange(card.key, element)
             }}
             className="simulation-game-state-card-layout"
           >
@@ -6723,7 +6773,9 @@ function SimulationGameStateZoneCardGrid({
                 className={
                   card.isExiting
                     ? "simulation-game-state-card-presence simulation-game-state-card-exit"
-                    : "simulation-game-state-card-presence simulation-game-state-card-enter"
+                    : card.isEntering
+                      ? "simulation-game-state-card-presence simulation-game-state-card-enter"
+                      : "simulation-game-state-card-presence"
                 }
               >
                 <SimulationGameStateZoneCardView
@@ -6887,7 +6939,10 @@ function getSimulationGameStateCardSettleFallbackDelay({
 }) {
   return (
     (hasExitingCards ? SIMULATION_GAME_STATE_CARD_EXIT_ANIMATION_MS : 0) +
-    (hasEnteringCards ? SIMULATION_GAME_STATE_CARD_MOVE_ANIMATION_MS : 0) +
+    (hasEnteringCards
+      ? SIMULATION_GAME_STATE_CARD_MOVE_ANIMATION_MS +
+        SIMULATION_GAME_STATE_CARD_ENTER_ANIMATION_MS
+      : 0) +
     SIMULATION_GAME_STATE_CARD_SETTLE_FALLBACK_BUFFER_MS
   )
 }
@@ -6908,6 +6963,7 @@ function areSimulationGameStateZoneCardPresenceItemsSettled({
 
     return (
       nextItem !== undefined &&
+      !currentItem.isEntering &&
       !currentItem.isEnteringPlaceholder &&
       !currentItem.isExiting &&
       getSimulationGameStateZoneCardPresenceItemSignature(currentItem) ===
@@ -6921,6 +6977,8 @@ function getSimulationGameStateZoneCardPresenceItemSignature(
 ) {
   return [
     item.key,
+    item.card.zoneKey,
+    String(item.card.index),
     item.card.name,
     String(item.card.tapped),
     item.card.notes ?? "",
@@ -6930,29 +6988,80 @@ function getSimulationGameStateZoneCardPresenceItemSignature(
 
 function getSimulationGameStateZoneCardPresenceItems({
   cardMentions,
-  cards,
   isExiting,
+  zones,
 }: {
   cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
-  cards: readonly SimulationGameStateZoneCard[]
   isExiting: boolean
+  zones: readonly SimulationGameStateZone[]
 }): SimulationGameStateZoneCardPresenceItem[] {
   const cardNameCounts = new Map<string, number>()
 
-  return cards.map((card) => {
-    const cardNameKey = getSimulationGameStateZoneCardNameKey(card)
-    const copyIndex = cardNameCounts.get(cardNameKey) ?? 0
+  return zones.flatMap((zone) =>
+    zone.cards.map((card) => {
+      const cardNameKey = getSimulationGameStateZoneCardNameKey(card)
+      const copyIndex = cardNameCounts.get(cardNameKey) ?? 0
 
-    cardNameCounts.set(cardNameKey, copyIndex + 1)
+      cardNameCounts.set(cardNameKey, copyIndex + 1)
 
-    return {
-      card,
-      cardMentions,
-      isEnteringPlaceholder: false,
-      isExiting,
-      key: getSimulationGameStateZoneCardKey(card, copyIndex),
+      return {
+        card,
+        cardMentions,
+        isEntering: false,
+        isEnteringPlaceholder: false,
+        isExiting,
+        key: getSimulationGameStateZoneCardKey(card, copyIndex),
+      }
+    })
+  )
+}
+
+function getSimulationGameStateZoneCardPresenceItemsByZone(
+  items: readonly SimulationGameStateZoneCardPresenceItem[]
+) {
+  const itemsByZone = new Map<string, SimulationGameStateZoneCardPresenceItem[]>()
+
+  for (const item of items) {
+    const zoneItems = itemsByZone.get(item.card.zoneKey) ?? []
+    zoneItems.push(item)
+    itemsByZone.set(item.card.zoneKey, zoneItems)
+  }
+
+  return itemsByZone
+}
+
+function getSimulationGameStateRenderZones({
+  visibleCards,
+  zones,
+}: {
+  visibleCards: readonly SimulationGameStateZoneCardPresenceItem[]
+  zones: readonly SimulationGameStateZone[]
+}) {
+  const zonesByKey = new Map(zones.map((zone) => [zone.key, zone]))
+
+  for (const item of visibleCards) {
+    if (!zonesByKey.has(item.card.zoneKey)) {
+      zonesByKey.set(item.card.zoneKey, {
+        cards: [],
+        key: item.card.zoneKey,
+        label: getSimulationGameStateZoneLabel(item.card.zoneKey),
+      })
     }
-  })
+  }
+
+  const zoneKeys = Array.from(zonesByKey.keys())
+  const zoneKeySet = new Set(zoneKeys)
+  const orderedZoneKeys = [
+    ...GAME_STATE_ZONE_ORDER.filter((zoneKey) => zoneKeySet.has(zoneKey)),
+    ...zoneKeys.filter(
+      (zoneKey) =>
+        !GAME_STATE_ZONE_ORDER.includes(
+          zoneKey as (typeof GAME_STATE_ZONE_ORDER)[number]
+        )
+    ),
+  ]
+
+  return orderedZoneKeys.flatMap((zoneKey) => zonesByKey.get(zoneKey) ?? [])
 }
 
 function getSimulationGameStateZoneCardExitPhaseItems({
@@ -6968,10 +7077,23 @@ function getSimulationGameStateZoneCardExitPhaseItems({
     const nextItem = nextItemsByKey.get(item.key)
 
     if (item.isEnteringPlaceholder) {
-      return nextItem ? [{ ...nextItem, isEnteringPlaceholder: true }] : []
+      return nextItem
+        ? [{ ...nextItem, isEntering: false, isEnteringPlaceholder: true }]
+        : []
     }
 
     if (nextItem) {
+      if (item.card.zoneKey !== nextItem.card.zoneKey) {
+        return [
+          {
+            ...item,
+            isEntering: false,
+            isEnteringPlaceholder: false,
+            isExiting: false,
+          },
+        ]
+      }
+
       return [nextItem]
     }
 
@@ -6980,6 +7102,7 @@ function getSimulationGameStateZoneCardExitPhaseItems({
         ? item
         : {
           ...item,
+          isEntering: false,
           isEnteringPlaceholder: false,
           isExiting: true,
         },
@@ -6998,7 +7121,26 @@ function getSimulationGameStateZoneCardMovePhaseItems({
     enteringCardKeys.has(item.key)
       ? {
         ...item,
+        isEntering: false,
         isEnteringPlaceholder: true,
+      }
+      : item
+  )
+}
+
+function getSimulationGameStateZoneCardEnterPhaseItems({
+  enteringCardKeys,
+  nextItems,
+}: {
+  enteringCardKeys: ReadonlySet<string>
+  nextItems: readonly SimulationGameStateZoneCardPresenceItem[]
+}): SimulationGameStateZoneCardPresenceItem[] {
+  return nextItems.map((item) =>
+    enteringCardKeys.has(item.key)
+      ? {
+        ...item,
+        isEntering: true,
+        isEnteringPlaceholder: false,
       }
       : item
   )
@@ -7008,7 +7150,7 @@ function getSimulationGameStateZoneCardKey(
   card: SimulationGameStateZoneCard,
   copyIndex: number
 ) {
-  return `${card.zoneKey}-${getSimulationGameStateZoneCardNameKey(card)}-${copyIndex}`
+  return `${getSimulationGameStateZoneCardNameKey(card)}-${copyIndex}`
 }
 
 function getSimulationGameStateZoneCardNameKey(
@@ -7017,17 +7159,19 @@ function getSimulationGameStateZoneCardNameKey(
   return card.name.trim().toLocaleLowerCase()
 }
 
-function getSimulationGameStateZoneCardsSignature(
-  cards: readonly SimulationGameStateZoneCard[]
+function getSimulationGameStateZonesCardsSignature(
+  zones: readonly SimulationGameStateZone[]
 ) {
   return getSimulationGameStateZoneCardPresenceItems({
     cardMentions: [],
-    cards,
     isExiting: false,
+    zones,
   })
     .map((item) =>
       [
         item.key,
+        item.card.zoneKey,
+        String(item.card.index),
         item.card.name,
         String(item.card.tapped),
         item.card.notes ?? "",

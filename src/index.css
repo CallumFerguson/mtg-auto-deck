@@ -277,6 +277,10 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
+    .simulation-game-state-card-layout {
+      transition: none;
+    }
+
     .simulation-game-state-card-enter,
     .simulation-game-state-card-exit,
     .simulation-game-state-card-tapped,
