@@ -3094,7 +3094,7 @@ function SimulationResultsShell({
     <div className="flex h-full min-h-0 min-w-0 overflow-hidden">
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {header}
-        <div className="grid min-h-0 min-w-0 flex-1 grid-rows-[minmax(12rem,42svh)_minmax(0,1fr)] overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] lg:grid-rows-1">
+        <div className="grid min-h-0 min-w-0 flex-1 grid-rows-[minmax(12rem,42svh)_minmax(0,1fr)] overflow-hidden lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:grid-rows-1">
           <section
             className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden bg-background"
             aria-label="Simulation results"
