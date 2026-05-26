@@ -10,9 +10,14 @@ export const BILLING_TIER_LIMITS = {
   pro: {
     maxConcurrentLlmRuns: 5,
   },
+  super_max: {
+    maxConcurrentLlmRuns: 10,
+  },
 } as const
 
 export type BillingTier = keyof typeof BILLING_TIER_LIMITS
+export type StripeBillingTier = "plus" | "pro"
+export type AdminGrantBillingTier = Exclude<BillingTier, "free">
 export type BillingUsageLimitWindowKind = "five_hour" | "weekly"
 
 export const BILLING_TIER_USAGE_LIMITS_USD = {
@@ -28,10 +33,21 @@ export const BILLING_TIER_USAGE_LIMITS_USD = {
     five_hour: 2.5,
     weekly: 5,
   },
+  super_max: {
+    five_hour: 5,
+    weekly: 10,
+  },
 } as const satisfies Record<
   BillingTier,
   Record<BillingUsageLimitWindowKind, number>
 >
+
+export const BILLING_TIER_RANKS = {
+  free: 0,
+  plus: 1,
+  pro: 2,
+  super_max: 3,
+} as const satisfies Record<BillingTier, number>
 
 export function getStripeSubscriptionPlans(): StripePlan[] {
   return [
@@ -46,6 +62,43 @@ export function getStripeSubscriptionPlans(): StripePlan[] {
       limits: BILLING_TIER_LIMITS.pro,
     },
   ]
+}
+
+export function getBillingTierRank(tier: BillingTier) {
+  return BILLING_TIER_RANKS[tier]
+}
+
+export function getHighestBillingTier(
+  tiers: readonly (BillingTier | null | undefined)[]
+): BillingTier {
+  return tiers.reduce<BillingTier>(
+    (highestTier, tier) =>
+      tier && getBillingTierRank(tier) > getBillingTierRank(highestTier)
+        ? tier
+        : highestTier,
+    "free"
+  )
+}
+
+export function normalizeBillingTier(value: string | null | undefined) {
+  const tier = value?.trim().toLowerCase()
+
+  return isBillingTier(tier) ? tier : null
+}
+
+export function isBillingTier(value: unknown): value is BillingTier {
+  return (
+    value === "free" ||
+    value === "plus" ||
+    value === "pro" ||
+    value === "super_max"
+  )
+}
+
+export function isAdminGrantBillingTier(
+  value: unknown
+): value is AdminGrantBillingTier {
+  return value === "plus" || value === "pro" || value === "super_max"
 }
 
 function getRequiredBillingEnvironmentVariable(environmentVariable: string) {

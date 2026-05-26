@@ -4066,6 +4066,50 @@ function asUnknownRecord(value: unknown): Record<string, unknown> {
 
 const LLM_RUN_QUEUE_ADVISORY_LOCK_ID = 836_417_052
 
+export function getLlmRunOwnerConcurrencyLimitSql() {
+  return `(
+    CASE
+      WHEN EXISTS (
+        SELECT 1
+        FROM admin_subscription_tier_grants active_admin_grant
+        WHERE active_admin_grant.user_id = llm_run.owner_user_id
+          AND active_admin_grant.revoked_at IS NULL
+          AND active_admin_grant.expires_at > now()
+          AND active_admin_grant.tier = 'super_max'
+      ) THEN $5::integer
+      WHEN EXISTS (
+        SELECT 1
+        FROM "subscription" active_subscription
+        WHERE active_subscription."referenceId" = llm_run.owner_user_id
+          AND active_subscription.status IN ('active', 'trialing')
+          AND lower(active_subscription.plan) = 'pro'
+      ) OR EXISTS (
+        SELECT 1
+        FROM admin_subscription_tier_grants active_admin_grant
+        WHERE active_admin_grant.user_id = llm_run.owner_user_id
+          AND active_admin_grant.revoked_at IS NULL
+          AND active_admin_grant.expires_at > now()
+          AND active_admin_grant.tier = 'pro'
+      ) THEN $4::integer
+      WHEN EXISTS (
+        SELECT 1
+        FROM "subscription" active_subscription
+        WHERE active_subscription."referenceId" = llm_run.owner_user_id
+          AND active_subscription.status IN ('active', 'trialing')
+          AND lower(active_subscription.plan) = 'plus'
+      ) OR EXISTS (
+        SELECT 1
+        FROM admin_subscription_tier_grants active_admin_grant
+        WHERE active_admin_grant.user_id = llm_run.owner_user_id
+          AND active_admin_grant.revoked_at IS NULL
+          AND active_admin_grant.expires_at > now()
+          AND active_admin_grant.tier = 'plus'
+      ) THEN $3::integer
+      ELSE $2::integer
+    END
+  )`
+}
+
 export async function claimNextQueuedLlmRun({
   maxConcurrentRuns,
 }: {
@@ -4154,25 +4198,7 @@ export async function claimNextQueuedLlmRun({
               FROM llm_runs active_run
               WHERE active_run.status = 'streaming'
                 AND active_run.owner_user_id IS NOT DISTINCT FROM llm_run.owner_user_id
-            ) < (
-              CASE
-                WHEN EXISTS (
-                  SELECT 1
-                  FROM "subscription" active_subscription
-                  WHERE active_subscription."referenceId" = llm_run.owner_user_id
-                    AND active_subscription.status IN ('active', 'trialing')
-                    AND lower(active_subscription.plan) = 'pro'
-                ) THEN $4::integer
-                WHEN EXISTS (
-                  SELECT 1
-                  FROM "subscription" active_subscription
-                  WHERE active_subscription."referenceId" = llm_run.owner_user_id
-                    AND active_subscription.status IN ('active', 'trialing')
-                    AND lower(active_subscription.plan) = 'plus'
-                ) THEN $3::integer
-                ELSE $2::integer
-              END
-            )
+            ) < ${getLlmRunOwnerConcurrencyLimitSql()}
           ORDER BY llm_run.queued_at ASC, llm_run.id ASC
           LIMIT 1
           FOR UPDATE OF llm_run SKIP LOCKED
@@ -4204,6 +4230,7 @@ export async function claimNextQueuedLlmRun({
         BILLING_TIER_LIMITS.free.maxConcurrentLlmRuns,
         BILLING_TIER_LIMITS.plus.maxConcurrentLlmRuns,
         BILLING_TIER_LIMITS.pro.maxConcurrentLlmRuns,
+        BILLING_TIER_LIMITS.super_max.maxConcurrentLlmRuns,
       ]
     )
     const run = result.rows[0]

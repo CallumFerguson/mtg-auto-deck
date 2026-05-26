@@ -6,6 +6,7 @@ import {
   useState,
   type CSSProperties,
   type Dispatch,
+  type FormEvent,
   type ReactNode,
   type SetStateAction,
 } from "react"
@@ -39,6 +40,12 @@ import { API_BASE_URL, apiFetch } from "@/lib/api"
 import { readApiError } from "@/lib/api-error"
 import type { AdminUser, AdminUsersResponse } from "@/lib/admin-types"
 import { authClient, type AuthUser } from "@/lib/auth-client"
+import {
+  BILLING_TIER_LABELS,
+  type AdminGrantBillingTier,
+  type BillingTier,
+  type BillingTierSummary,
+} from "@/lib/subscription-tiers"
 import {
   formatProviderLabel,
   getLlmModelPresetLabel,
@@ -102,6 +109,11 @@ const REASONING_EFFORT_OPTIONS: readonly ReasoningEffort[] = [
   "medium",
   "high",
   "xhigh",
+]
+const ADMIN_GRANT_TIER_OPTIONS: readonly AdminGrantBillingTier[] = [
+  "plus",
+  "pro",
+  "super_max",
 ]
 
 export function AdminDashboardPage({
@@ -338,15 +350,25 @@ function AdminUsersSection({
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [openUserMenuId, setOpenUserMenuId] = useState<string | null>(null)
+  const [userToManageAdminTier, setUserToManageAdminTier] =
+    useState<AdminUser | null>(null)
   const [userToDelete, setUserToDelete] = useState<AdminUser | null>(null)
   const [userToDemote, setUserToDemote] = useState<AdminUser | null>(null)
   const [userToPromote, setUserToPromote] = useState<AdminUser | null>(null)
+  const [adminTierGrantError, setAdminTierGrantError] = useState<string | null>(
+    null
+  )
   const [deleteUserError, setDeleteUserError] = useState<string | null>(null)
   const [demoteUserError, setDemoteUserError] = useState<string | null>(null)
   const [promoteUserError, setPromoteUserError] = useState<string | null>(null)
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null)
   const [demotingUserId, setDemotingUserId] = useState<string | null>(null)
   const [promotingUserId, setPromotingUserId] = useState<string | null>(null)
+  const [savingAdminTierGrantUserId, setSavingAdminTierGrantUserId] = useState<
+    string | null
+  >(null)
+  const [revokingAdminTierGrantUserId, setRevokingAdminTierGrantUserId] =
+    useState<string | null>(null)
   const [impersonateUserError, setImpersonateUserError] = useState<
     string | null
   >(null)
@@ -357,6 +379,7 @@ function AdminUsersSection({
   const loadUsers = useCallback(async () => {
     setIsLoading(true)
     setLoadError(null)
+    setAdminTierGrantError(null)
     setDemoteUserError(null)
     setImpersonateUserError(null)
     setPromoteUserError(null)
@@ -503,6 +526,121 @@ function AdminUsersSection({
     } finally {
       setPromotingUserId(null)
     }
+  }
+
+  async function handleSaveAdminTierGrant({
+    days,
+    tier,
+  }: {
+    days: number
+    tier: AdminGrantBillingTier
+  }) {
+    if (!userToManageAdminTier) {
+      return
+    }
+
+    setSavingAdminTierGrantUserId(userToManageAdminTier.id)
+    setAdminTierGrantError(null)
+
+    try {
+      const response = await apiFetch(
+        `${API_BASE_URL}/admin/users/${encodeURIComponent(
+          userToManageAdminTier.id
+        )}/admin-tier-grant`,
+        {
+          body: JSON.stringify({
+            days,
+            tier,
+          }),
+          headers: {
+            "Content-Type": "application/json",
+          },
+          method: "PUT",
+        }
+      )
+
+      if (!response.ok) {
+        setAdminTierGrantError(
+          await readApiError(
+            response,
+            `Could not update admin tier for ${userToManageAdminTier.email}.`
+          )
+        )
+        return
+      }
+
+      applyBillingTierSummaryToUser(
+        userToManageAdminTier.id,
+        (await response.json()) as BillingTierSummary
+      )
+      setUserToManageAdminTier(null)
+    } catch {
+      setAdminTierGrantError(
+        `Could not update admin tier for ${userToManageAdminTier.email}.`
+      )
+    } finally {
+      setSavingAdminTierGrantUserId(null)
+    }
+  }
+
+  async function handleRevokeAdminTierGrant() {
+    if (!userToManageAdminTier) {
+      return
+    }
+
+    setRevokingAdminTierGrantUserId(userToManageAdminTier.id)
+    setAdminTierGrantError(null)
+
+    try {
+      const response = await apiFetch(
+        `${API_BASE_URL}/admin/users/${encodeURIComponent(
+          userToManageAdminTier.id
+        )}/admin-tier-grant`,
+        {
+          method: "DELETE",
+        }
+      )
+
+      if (!response.ok) {
+        setAdminTierGrantError(
+          await readApiError(
+            response,
+            `Could not revoke admin tier for ${userToManageAdminTier.email}.`
+          )
+        )
+        return
+      }
+
+      applyBillingTierSummaryToUser(
+        userToManageAdminTier.id,
+        (await response.json()) as BillingTierSummary
+      )
+      setUserToManageAdminTier(null)
+    } catch {
+      setAdminTierGrantError(
+        `Could not revoke admin tier for ${userToManageAdminTier.email}.`
+      )
+    } finally {
+      setRevokingAdminTierGrantUserId(null)
+    }
+  }
+
+  function applyBillingTierSummaryToUser(
+    userId: string,
+    summary: BillingTierSummary
+  ) {
+    setUsers((currentUsers) =>
+      currentUsers.map((user) =>
+        user.id === userId
+          ? {
+              ...user,
+              activeAdminTierGrant: summary.adminGrant,
+              effectiveTier: summary.effectiveTier,
+              stripeTier: summary.stripeTier,
+            }
+          : user
+      )
+    )
   }
 
   async function handleImpersonateUser(user: AdminUser) {
@@ -656,6 +794,12 @@ function AdminUsersSection({
                         menuId={`desktop-${user.id}`}
                         openUserMenuId={openUserMenuId}
                         promotingUserId={promotingUserId}
+                        revokingAdminTierGrantUserId={
+                          revokingAdminTierGrantUserId
+                        }
+                        savingAdminTierGrantUserId={
+                          savingAdminTierGrantUserId
+                        }
                         setOpenUserMenuId={setOpenUserMenuId}
                         user={user}
                         onDeleteUser={(selectedUser) => {
@@ -669,6 +813,10 @@ function AdminUsersSection({
                         onImpersonateUser={(selectedUser) =>
                           void handleImpersonateUser(selectedUser)
                         }
+                        onManageAdminTier={(selectedUser) => {
+                          setAdminTierGrantError(null)
+                          setUserToManageAdminTier(selectedUser)
+                        }}
                         onPromoteUser={(selectedUser) => {
                           setPromoteUserError(null)
                           setUserToPromote(selectedUser)
@@ -706,6 +854,10 @@ function AdminUsersSection({
                       menuId={`mobile-${user.id}`}
                       openUserMenuId={openUserMenuId}
                       promotingUserId={promotingUserId}
+                      revokingAdminTierGrantUserId={
+                        revokingAdminTierGrantUserId
+                      }
+                      savingAdminTierGrantUserId={savingAdminTierGrantUserId}
                       setOpenUserMenuId={setOpenUserMenuId}
                       user={user}
                       onDeleteUser={(selectedUser) => {
@@ -719,6 +871,10 @@ function AdminUsersSection({
                       onImpersonateUser={(selectedUser) =>
                         void handleImpersonateUser(selectedUser)
                       }
+                      onManageAdminTier={(selectedUser) => {
+                        setAdminTierGrantError(null)
+                        setUserToManageAdminTier(selectedUser)
+                      }}
                       onPromoteUser={(selectedUser) => {
                         setPromoteUserError(null)
                         setUserToPromote(selectedUser)
@@ -749,6 +905,21 @@ function AdminUsersSection({
       ) : (
         <AdminPanelMessage>No users found.</AdminPanelMessage>
       )}
+
+      {userToManageAdminTier ? (
+        <ManageAdminTierGrantModal
+          error={adminTierGrantError}
+          isRevoking={revokingAdminTierGrantUserId === userToManageAdminTier.id}
+          isSaving={savingAdminTierGrantUserId === userToManageAdminTier.id}
+          user={userToManageAdminTier}
+          onClose={() => {
+            setUserToManageAdminTier(null)
+            setAdminTierGrantError(null)
+          }}
+          onRevoke={() => void handleRevokeAdminTierGrant()}
+          onSave={(input) => void handleSaveAdminTierGrant(input)}
+        />
+      ) : null}
 
       {userToDelete ? (
         <DeleteAdminUserModal
@@ -1586,9 +1757,12 @@ function AdminUserActionsMenu({
   onDeleteUser,
   onDemoteUser,
   onImpersonateUser,
+  onManageAdminTier,
   onPromoteUser,
   openUserMenuId,
   promotingUserId,
+  revokingAdminTierGrantUserId,
+  savingAdminTierGrantUserId,
   setOpenUserMenuId,
   user,
 }: {
@@ -1600,9 +1774,12 @@ function AdminUserActionsMenu({
   onDeleteUser: (user: AdminUser) => void
   onDemoteUser: (user: AdminUser) => void
   onImpersonateUser: (user: AdminUser) => void
+  onManageAdminTier: (user: AdminUser) => void
   onPromoteUser: (user: AdminUser) => void
   openUserMenuId: string | null
   promotingUserId: string | null
+  revokingAdminTierGrantUserId: string | null
+  savingAdminTierGrantUserId: string | null
   setOpenUserMenuId: Dispatch<SetStateAction<string | null>>
   user: AdminUser
 }) {
@@ -1616,12 +1793,19 @@ function AdminUserActionsMenu({
   const isDemotingUser = demotingUserId === user.id
   const isImpersonatingUser = impersonatingUserId === user.id
   const isPromotingUser = promotingUserId === user.id
+  const isManagingAdminTier =
+    savingAdminTierGrantUserId === user.id ||
+    revokingAdminTierGrantUserId === user.id
   const isOpen = openUserMenuId === menuId
   const canDemote = canDemoteUser(user)
   const canImpersonate = canImpersonateUser(user, currentUserId)
   const canPromote = canPromoteUser(user, currentUserId)
   const isWorking =
-    isDeleting || isDemotingUser || isImpersonatingUser || isPromotingUser
+    isDeleting ||
+    isDemotingUser ||
+    isImpersonatingUser ||
+    isManagingAdminTier ||
+    isPromotingUser
 
   const updateMenuPosition = useCallback(() => {
     const trigger = triggerRef.current
@@ -1789,6 +1973,19 @@ function AdminUserActionsMenu({
                     {isImpersonatingUser ? "Impersonating..." : "Impersonate"}
                   </button>
                 ) : null}
+                <button
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-sky-100 transition-colors hover:bg-sky-400/10 hover:text-sky-100 focus:bg-sky-400/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                  type="button"
+                  role="menuitem"
+                  disabled={isWorking}
+                  onClick={() => {
+                    setOpenUserMenuId(null)
+                    onManageAdminTier(user)
+                  }}
+                >
+                  <Star data-icon="inline-start" />
+                  {isManagingAdminTier ? "Saving tier..." : "Manage admin tier"}
+                </button>
                 {canPromote ? (
                   <button
                     className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-emerald-100 transition-colors hover:bg-emerald-400/10 hover:text-emerald-100 focus:bg-emerald-400/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
@@ -1839,6 +2036,205 @@ function AdminUserActionsMenu({
             document.body
           )
         : null}
+    </div>
+  )
+}
+
+function ManageAdminTierGrantModal({
+  error,
+  isRevoking,
+  isSaving,
+  onClose,
+  onRevoke,
+  onSave,
+  user,
+}: {
+  error: string | null
+  isRevoking: boolean
+  isSaving: boolean
+  onClose: () => void
+  onRevoke: () => void
+  onSave: (input: { days: number; tier: AdminGrantBillingTier }) => void
+  user: AdminUser
+}) {
+  const [days, setDays] = useState("30")
+  const [localError, setLocalError] = useState<string | null>(null)
+  const [tier, setTier] = useState<AdminGrantBillingTier>(
+    user.activeAdminTierGrant?.tier ?? "plus"
+  )
+  const isWorking = isSaving || isRevoking
+  const activeGrant = user.activeAdminTierGrant
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const parsedDays = Number(days)
+
+    if (!Number.isInteger(parsedDays) || parsedDays < 1 || parsedDays > 3650) {
+      setLocalError("Days must be a whole number from 1 to 3650.")
+      return
+    }
+
+    setLocalError(null)
+    onSave({
+      days: parsedDays,
+      tier,
+    })
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 py-6 backdrop-blur-sm"
+      role="presentation"
+      onMouseDown={isWorking ? undefined : onClose}
+    >
+      <section
+        aria-labelledby="manage-admin-tier-title"
+        className="max-h-[calc(100svh-3rem)] w-full max-w-xl overflow-y-auto rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
+        role="dialog"
+        aria-modal="true"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-3">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-sky-300/30 bg-sky-400/10 text-sky-300">
+                <Star className="size-4" aria-hidden="true" />
+              </div>
+              <h2
+                id="manage-admin-tier-title"
+                className="text-xl font-semibold"
+              >
+                Manage admin tier
+              </h2>
+            </div>
+            <p className="text-sm break-words text-muted-foreground">
+              {user.email}
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Close"
+            title="Close"
+            onClick={onClose}
+            disabled={isWorking}
+          >
+            <X />
+          </Button>
+        </header>
+
+        <div className="grid gap-5 px-5 py-5">
+          <dl className="grid gap-3 sm:grid-cols-3">
+            <AdminTierMetric label="Stripe tier" tier={user.stripeTier} />
+            <AdminTierMetric
+              label="Admin grant"
+              tier={activeGrant?.tier ?? null}
+              detail={
+                activeGrant
+                  ? `Expires ${formatDateTime(activeGrant.expiresAt)}`
+                  : "No active grant"
+              }
+            />
+            <AdminTierMetric
+              label="Effective tier"
+              tier={user.effectiveTier}
+            />
+          </dl>
+
+          <form className="grid gap-4" onSubmit={handleSubmit}>
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
+              <AdminFormField label="Tier">
+                <select
+                  className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-3 focus:ring-ring/30"
+                  value={tier}
+                  disabled={isWorking}
+                  onChange={(event) =>
+                    setTier(event.target.value as AdminGrantBillingTier)
+                  }
+                >
+                  {ADMIN_GRANT_TIER_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {BILLING_TIER_LABELS[option]}
+                    </option>
+                  ))}
+                </select>
+              </AdminFormField>
+              <AdminFormField label="Days">
+                <input
+                  className="no-number-spinner h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/30"
+                  type="number"
+                  min="1"
+                  max="3650"
+                  step="1"
+                  value={days}
+                  disabled={isWorking}
+                  onChange={(event) => setDays(event.target.value)}
+                />
+              </AdminFormField>
+            </div>
+
+            {localError || error ? (
+              <p
+                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                role="alert"
+              >
+                {localError ?? error}
+              </p>
+            ) : null}
+
+            <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isWorking}
+                onClick={onClose}
+              >
+                Cancel
+              </Button>
+              {activeGrant ? (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  disabled={isWorking}
+                  onClick={onRevoke}
+                >
+                  <ShieldMinus data-icon="inline-start" />
+                  {isRevoking ? "Revoking..." : "Revoke grant"}
+                </Button>
+              ) : null}
+              <Button type="submit" disabled={isWorking}>
+                <ShieldCheck data-icon="inline-start" />
+                {isSaving ? "Saving..." : "Save grant"}
+              </Button>
+            </div>
+          </form>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function AdminTierMetric({
+  detail,
+  label,
+  tier,
+}: {
+  detail?: string
+  label: string
+  tier: BillingTier | null
+}) {
+  return (
+    <div className="rounded-md border border-border bg-background/35 px-3 py-3">
+      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+      <dd className="mt-1 text-sm font-semibold text-foreground">
+        {tier ? BILLING_TIER_LABELS[tier] : "None"}
+      </dd>
+      {detail ? (
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          {detail}
+        </p>
+      ) : null}
     </div>
   )
 }
@@ -2197,6 +2593,19 @@ function formatOptionalCost(value: number | null) {
 
 function formatUsdCost(value: number) {
   return `$${(Number.isFinite(value) ? value : 0).toFixed(2)}`
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    return "unknown"
+  }
+
+  return date.toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  })
 }
 
 function AdminCostSummary({

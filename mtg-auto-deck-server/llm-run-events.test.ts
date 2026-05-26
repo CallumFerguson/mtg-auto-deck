@@ -39,6 +39,7 @@ import {
   extractLlmRunChunkCardMentionRequests,
   getInsertedLlmRunGeneratedDeltaCharCount,
   getInitialSimulationStatus,
+  getLlmRunOwnerConcurrencyLimitSql,
   getOpeningHandCompletionDecision,
   getSimulationCreationDecision,
   getTurnCompletionDecision,
@@ -82,7 +83,12 @@ import {
 } from "./llm-config.js"
 import { buildCreateLlmModelPresetInsertQuery } from "./llm-model-presets-postgres.js"
 import { canClaimQueuedLlmRunWithCapacity } from "./llm-run-queue.js"
-import { BILLING_TIER_LIMITS } from "./subscription-tiers.js"
+import {
+  BILLING_TIER_LIMITS,
+  BILLING_TIER_USAGE_LIMITS_USD,
+  getHighestBillingTier,
+  getStripeSubscriptionPlans,
+} from "./subscription-tiers.js"
 import {
   buildUsageWindowSpentUsdQuery,
   getPreferredUsageCostUsd,
@@ -92,6 +98,10 @@ import {
   roundUsageRemainingPercent,
 } from "./usage-limits-postgres.js"
 import { buildListAdminUsersQuery } from "./admin-users-postgres.js"
+import {
+  buildUserBillingTierSummaryQuery,
+  toUserBillingTierSummary,
+} from "./billing-tiers-postgres.js"
 import {
   buildOpeningHandEvaluationInputText,
   buildTurnEvaluationInputText,
@@ -1087,6 +1097,57 @@ test("rounds usage remaining percentage with protected endpoints", () => {
   assert.equal(roundUsageRemainingPercent({ limitUsd: 1, spentUsd: 0.37 }), 63)
 })
 
+test("defines Super Max as the highest admin-only billing tier", () => {
+  assert.deepEqual(
+    {
+      free: BILLING_TIER_LIMITS.free.maxConcurrentLlmRuns,
+      plus: BILLING_TIER_LIMITS.plus.maxConcurrentLlmRuns,
+      pro: BILLING_TIER_LIMITS.pro.maxConcurrentLlmRuns,
+      superMax: BILLING_TIER_LIMITS.super_max.maxConcurrentLlmRuns,
+    },
+    {
+      free: 1,
+      plus: 2,
+      pro: 5,
+      superMax: 10,
+    }
+  )
+  assert.deepEqual(BILLING_TIER_USAGE_LIMITS_USD.super_max, {
+    five_hour: 5,
+    weekly: 10,
+  })
+  assert.equal(getHighestBillingTier(["free", "plus"]), "plus")
+  assert.equal(getHighestBillingTier(["pro", "plus"]), "pro")
+  assert.equal(getHighestBillingTier(["pro", "super_max"]), "super_max")
+})
+
+test("keeps Super Max out of Stripe subscription plans", () => {
+  const previousPlusPriceId = process.env.STRIPE_PLUS_PRICE_ID
+  const previousProPriceId = process.env.STRIPE_PRO_PRICE_ID
+
+  process.env.STRIPE_PLUS_PRICE_ID = "price_plus"
+  process.env.STRIPE_PRO_PRICE_ID = "price_pro"
+
+  try {
+    assert.deepEqual(
+      getStripeSubscriptionPlans().map((plan) => plan.name),
+      ["plus", "pro"]
+    )
+  } finally {
+    if (previousPlusPriceId === undefined) {
+      delete process.env.STRIPE_PLUS_PRICE_ID
+    } else {
+      process.env.STRIPE_PLUS_PRICE_ID = previousPlusPriceId
+    }
+
+    if (previousProPriceId === undefined) {
+      delete process.env.STRIPE_PRO_PRICE_ID
+    } else {
+      process.env.STRIPE_PRO_PRICE_ID = previousProPriceId
+    }
+  }
+})
+
 test("resolves first-spend usage window reset behavior", () => {
   const now = new Date("2026-05-15T12:00:00.000Z")
   const durationMs = 5 * 60 * 60 * 1000
@@ -1191,7 +1252,11 @@ test("builds admin user LLM cost aggregate query", () => {
   )
   const normalizedSql = query.text.replace(/\s+/g, " ")
 
-  assert.deepEqual(query.values, [new Date("2026-05-16T09:30:00.000Z")])
+  assert.deepEqual(query.values, [
+    new Date("2026-05-16T09:30:00.000Z"),
+    ["active", "trialing"],
+    new Date("2026-05-16T10:30:00.000Z"),
+  ])
   assert.match(
     normalizedSql,
     /COALESCE\(openrouter_reported_cost_usd, estimated_cost_usd\) AS cost_usd/
@@ -1205,6 +1270,63 @@ test("builds admin user LLM cost aggregate query", () => {
   assert.match(
     normalizedSql,
     /ORDER BY COALESCE\(user_llm_costs\.recent_llm_run_cost_usd, 0\) DESC, COALESCE\(user_llm_costs\.total_llm_run_cost_usd, 0\) DESC, lower\(app_user\.email\) ASC/
+  )
+  assert.match(normalizedSql, /active_admin_grants AS/)
+  assert.match(normalizedSql, /expires_at > \$3/)
+  assert.match(normalizedSql, /WHEN active_admin_grants\.tier = 'super_max'/)
+  assert.match(normalizedSql, /COALESCE\(active_stripe_tiers\.stripe_tier, 'free'\) AS "stripeTier"/)
+})
+
+test("builds billing tier summary query with active admin grants", () => {
+  const now = new Date("2026-05-16T10:30:00.000Z")
+  const query = buildUserBillingTierSummaryQuery("user-1", now)
+  const normalizedSql = query.text.replace(/\s+/g, " ")
+
+  assert.deepEqual(query.values, ["user-1", ["active", "trialing"], now])
+  assert.match(normalizedSql, /FROM "subscription"/)
+  assert.match(normalizedSql, /lower\(plan\) IN \('plus', 'pro'\)/)
+  assert.match(normalizedSql, /FROM admin_subscription_tier_grants/)
+  assert.match(normalizedSql, /revoked_at IS NULL/)
+  assert.match(normalizedSql, /expires_at > \$3/)
+  assert.match(normalizedSql, /WHEN 'super_max' THEN 3/)
+})
+
+test("resolves effective billing tier from Stripe and admin grant rows", () => {
+  assert.deepEqual(
+    toUserBillingTierSummary({
+      admin_grant_expires_at: null,
+      admin_grant_granted_at: null,
+      admin_grant_granted_by_admin_user_id: null,
+      admin_grant_id: null,
+      admin_grant_tier: null,
+      stripe_tier: "pro",
+    }),
+    {
+      adminGrant: null,
+      effectiveTier: "pro",
+      stripeTier: "pro",
+    }
+  )
+  assert.deepEqual(
+    toUserBillingTierSummary({
+      admin_grant_expires_at: new Date("2026-06-01T00:00:00.000Z"),
+      admin_grant_granted_at: new Date("2026-05-01T00:00:00.000Z"),
+      admin_grant_granted_by_admin_user_id: "admin-1",
+      admin_grant_id: "grant-1",
+      admin_grant_tier: "super_max",
+      stripe_tier: "plus",
+    }),
+    {
+      adminGrant: {
+        expiresAt: "2026-06-01T00:00:00.000Z",
+        grantedAt: "2026-05-01T00:00:00.000Z",
+        grantedByAdminUserId: "admin-1",
+        id: "grant-1",
+        tier: "super_max",
+      },
+      effectiveTier: "super_max",
+      stripeTier: "plus",
+    }
   )
 })
 
@@ -1458,11 +1580,13 @@ test("checks LLM run queue capacity before claiming", () => {
       free: BILLING_TIER_LIMITS.free.maxConcurrentLlmRuns,
       plus: BILLING_TIER_LIMITS.plus.maxConcurrentLlmRuns,
       pro: BILLING_TIER_LIMITS.pro.maxConcurrentLlmRuns,
+      superMax: BILLING_TIER_LIMITS.super_max.maxConcurrentLlmRuns,
     },
     {
       free: 1,
       plus: 2,
       pro: 5,
+      superMax: 10,
     }
   )
   assert.equal(
@@ -1533,6 +1657,28 @@ test("checks LLM run queue capacity before claiming", () => {
   )
   assert.equal(
     canClaimQueuedLlmRunWithCapacity({
+      activeOwnerUserIds: Array.from({ length: 9 }, () => "user-1"),
+      candidateMaxConcurrentRuns:
+        BILLING_TIER_LIMITS.super_max.maxConcurrentLlmRuns,
+      candidateOwnerUserId: "user-1",
+      candidateQueuedAt: "2026-01-01T00:00:00.000Z",
+      maxConcurrentRuns: 50,
+    }),
+    true
+  )
+  assert.equal(
+    canClaimQueuedLlmRunWithCapacity({
+      activeOwnerUserIds: Array.from({ length: 10 }, () => "user-1"),
+      candidateMaxConcurrentRuns:
+        BILLING_TIER_LIMITS.super_max.maxConcurrentLlmRuns,
+      candidateOwnerUserId: "user-1",
+      candidateQueuedAt: "2026-01-01T00:00:00.000Z",
+      maxConcurrentRuns: 50,
+    }),
+    false
+  )
+  assert.equal(
+    canClaimQueuedLlmRunWithCapacity({
       activeOwnerUserIds: [null],
       candidateMaxConcurrentRuns: BILLING_TIER_LIMITS.free.maxConcurrentLlmRuns,
       candidateOwnerUserId: null,
@@ -1551,6 +1697,18 @@ test("checks LLM run queue capacity before claiming", () => {
     }),
     false
   )
+})
+
+test("builds LLM run owner concurrency SQL from effective billing tier", () => {
+  const normalizedSql = getLlmRunOwnerConcurrencyLimitSql().replace(/\s+/g, " ")
+
+  assert.match(normalizedSql, /FROM admin_subscription_tier_grants/)
+  assert.match(normalizedSql, /active_admin_grant\.revoked_at IS NULL/)
+  assert.match(normalizedSql, /active_admin_grant\.expires_at > now\(\)/)
+  assert.match(normalizedSql, /active_admin_grant\.tier = 'super_max'/)
+  assert.match(normalizedSql, /THEN \$5::integer/)
+  assert.match(normalizedSql, /lower\(active_subscription\.plan\) = 'pro'/)
+  assert.match(normalizedSql, /lower\(active_subscription\.plan\) = 'plus'/)
 })
 
 test("validates provider-specific LLM config requirements with presets", () => {

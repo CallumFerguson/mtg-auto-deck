@@ -17,6 +17,8 @@ import {
   AUTO_ADMIN_EMAIL_ENVIRONMENT_VARIABLE,
 } from "./admin-users-postgres.js"
 import {
+  getBillingTierRank,
+  getHighestBillingTier,
   getStripeSubscriptionPlans,
   type BillingTier,
 } from "./subscription-tiers.js"
@@ -448,6 +450,7 @@ export async function refreshStripeBillingForUser({
   return {
     activeSubscriptionCount: activeConfiguredSubscriptions.length,
     billingTier,
+    stripeTier: billingTier,
     stripeCustomerId: selectedSnapshot.customer.id,
   }
 }
@@ -883,32 +886,8 @@ function isActiveBillingSubscriptionStatus(status: string) {
   return ACTIVE_BILLING_SUBSCRIPTION_STATUSES.has(status)
 }
 
-function getHighestBillingTier(tiers: readonly BillingTier[]): BillingTier {
-  if (tiers.includes("pro")) {
-    return "pro"
-  }
-
-  if (tiers.includes("plus")) {
-    return "plus"
-  }
-
-  return "free"
-}
-
 function getHighestBillingTierRank(tiers: readonly BillingTier[]) {
   return getBillingTierRank(getHighestBillingTier(tiers))
-}
-
-function getBillingTierRank(tier: BillingTier) {
-  if (tier === "pro") {
-    return 2
-  }
-
-  if (tier === "plus") {
-    return 1
-  }
-
-  return 0
 }
 
 function getStripeSubscriptionScheduleId(

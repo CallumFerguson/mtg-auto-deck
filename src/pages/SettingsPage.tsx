@@ -75,20 +75,21 @@ export function SettingsPage({
   const [pendingBillingAction, setPendingBillingAction] =
     useState<PendingBillingAction>(null)
   const {
-    billingTier,
+    activeAdminTierGrant,
     billingTierError,
     hasLoadedBillingTier,
     refreshBillingTier,
+    stripeBillingTier,
   } = useBillingTier()
   const { refreshUsageLimits } = useUsageLimits()
   const isBillingRefreshDisabled =
     isImpersonating || isRefreshingBilling || pendingBillingAction !== null
-  const billingTierLabel =
+  const stripeBillingTierLabel =
     !hasLoadedBillingTier && !billingTierError
       ? "Loading..."
       : !hasLoadedBillingTier && billingTierError
         ? "Unavailable"
-        : BILLING_TIER_LABELS[billingTier]
+        : BILLING_TIER_LABELS[stripeBillingTier]
 
   useBillingTierPolling(true)
   useUsageLimitsPolling(true)
@@ -202,14 +203,10 @@ export function SettingsPage({
 
     try {
       const refreshResult = await refreshStripeBilling()
-      const [nextBillingTier] = await Promise.all([
-        refreshBillingTier(),
-        refreshUsageLimits(),
-      ])
-      const refreshedTier = nextBillingTier ?? refreshResult.billingTier
+      await Promise.all([refreshBillingTier(), refreshUsageLimits()])
 
       setBillingNotice(
-        `Billing refreshed. Current tier: ${BILLING_TIER_LABELS[refreshedTier]}.`
+        `Billing refreshed. Stripe tier: ${BILLING_TIER_LABELS[refreshResult.stripeTier]}.`
       )
     } catch (error) {
       setBillingActionError(
@@ -321,7 +318,7 @@ export function SettingsPage({
                     <p className="mt-1 text-xs text-sky-100">
                       Current tier:{" "}
                       <span className="font-semibold text-foreground">
-                        {billingTierLabel}
+                        {stripeBillingTierLabel}
                       </span>
                     </p>
                   </div>
@@ -343,7 +340,7 @@ export function SettingsPage({
               </div>
 
               <BillingActions
-                billingTier={billingTier}
+                billingTier={stripeBillingTier}
                 isBillingTierReady={hasLoadedBillingTier}
                 isImpersonating={isImpersonating}
                 isRefreshingBilling={isRefreshingBilling}
@@ -352,6 +349,28 @@ export function SettingsPage({
                 pendingBillingAction={pendingBillingAction}
               />
             </div>
+
+            {activeAdminTierGrant ? (
+              <div className="border-t border-border px-5 py-5">
+                <div className="flex min-w-0 items-start gap-4">
+                  <ShieldCheck
+                    className="mt-1 size-6 shrink-0 text-foreground"
+                    aria-hidden
+                  />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-foreground">
+                      Admin-granted tier
+                    </p>
+                    <p className="mt-1 text-xs text-sky-100">
+                      <span className="font-semibold text-foreground">
+                        {BILLING_TIER_LABELS[activeAdminTierGrant.tier]}
+                      </span>{" "}
+                      until {formatDateTime(activeAdminTierGrant.expiresAt)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : null}
 
             <div className="border-t border-border px-5 py-5">
               <div className="flex min-w-0 items-start gap-4">
@@ -454,7 +473,7 @@ export function SettingsPage({
       {isUpgradeModalOpen ? (
         <UpgradeSubscriptionModal
           error={billingActionError}
-          currentTier={billingTier}
+          currentTier={stripeBillingTier}
           isSaving={
             pendingBillingAction === "plus" || pendingBillingAction === "pro"
           }
@@ -715,6 +734,19 @@ function ErrorMessage({ error }: { error: string | null }) {
       {error}
     </p>
   ) : null
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    return "an unknown time"
+  }
+
+  return date.toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  })
 }
 
 function isInvalidPasswordError(error: unknown) {

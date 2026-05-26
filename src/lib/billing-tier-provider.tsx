@@ -7,16 +7,15 @@ import {
   type ReactNode,
 } from "react"
 
-import { authClient } from "@/lib/auth-client"
-import { getAuthErrorMessage } from "@/lib/billing"
+import { API_BASE_URL, apiFetch } from "@/lib/api"
+import { readApiError } from "@/lib/api-error"
 import {
   BillingTierContext,
   type BillingTierContextValue,
 } from "@/lib/billing-tier-state"
 import {
-  getActiveBillingSubscription,
-  getBillingTierFromSubscription,
-  type BillingSubscription,
+  type ActiveAdminSubscriptionTierGrant,
+  type BillingTierSummary,
   type BillingTier,
 } from "@/lib/subscription-tiers"
 
@@ -31,19 +30,25 @@ export function BillingTierProvider({
 }) {
   const requestIdRef = useRef(0)
   const prefetchedUserIdRef = useRef<string | null>(null)
+  const [activeAdminTierGrant, setActiveAdminTierGrant] =
+    useState<ActiveAdminSubscriptionTierGrant | null>(null)
   const [billingTier, setBillingTier] = useState<BillingTier>("free")
   const [billingTierError, setBillingTierError] = useState<string | null>(null)
   const [hasLoadedBillingTier, setHasLoadedBillingTier] = useState(false)
   const [isBillingTierLoading, setIsBillingTierLoading] = useState(false)
   const [pollingRequestCount, setPollingRequestCount] = useState(0)
+  const [stripeBillingTier, setStripeBillingTier] =
+    useState<BillingTier>("free")
 
   useEffect(() => {
     requestIdRef.current += 1
+    setActiveAdminTierGrant(null)
     setBillingTier("free")
     setBillingTierError(null)
     setHasLoadedBillingTier(false)
     setIsBillingTierLoading(false)
     prefetchedUserIdRef.current = null
+    setStripeBillingTier("free")
   }, [userId])
 
   const refreshBillingTier = useCallback(async () => {
@@ -51,10 +56,12 @@ export function BillingTierProvider({
     requestIdRef.current = requestId
 
     if (!userId) {
+      setActiveAdminTierGrant(null)
       setBillingTier("free")
       setBillingTierError(null)
       setHasLoadedBillingTier(false)
       setIsBillingTierLoading(false)
+      setStripeBillingTier("free")
       return "free"
     }
 
@@ -62,32 +69,27 @@ export function BillingTierProvider({
     setBillingTierError(null)
 
     try {
-      const result = await authClient.subscription.list({
-        query: {},
+      const response = await apiFetch(`${API_BASE_URL}/billing/tier`, {
+        cache: "no-store",
       })
 
-      if (result.error) {
+      if (!response.ok) {
         throw new Error(
-          getAuthErrorMessage(
-            result.error,
-            "Subscription could not be loaded."
-          )
+          await readApiError(response, "Subscription could not be loaded.")
         )
       }
 
-      const subscriptions: BillingSubscription[] = Array.isArray(result.data)
-        ? result.data
-        : []
-      const activeSubscription = getActiveBillingSubscription(subscriptions)
-      const nextBillingTier = getBillingTierFromSubscription(activeSubscription)
+      const summary = (await response.json()) as BillingTierSummary
 
       if (requestIdRef.current === requestId) {
-        setBillingTier(nextBillingTier)
+        setActiveAdminTierGrant(summary.adminGrant)
+        setBillingTier(summary.effectiveTier)
         setBillingTierError(null)
         setHasLoadedBillingTier(true)
+        setStripeBillingTier(summary.stripeTier)
       }
 
-      return nextBillingTier
+      return summary.effectiveTier
     } catch (error) {
       if (requestIdRef.current === requestId) {
         setBillingTierError(
@@ -139,20 +141,24 @@ export function BillingTierProvider({
 
   const contextValue = useMemo<BillingTierContextValue>(
     () => ({
+      activeAdminTierGrant,
       beginBillingTierPolling,
       billingTier,
       billingTierError,
       hasLoadedBillingTier,
       isBillingTierLoading,
       refreshBillingTier,
+      stripeBillingTier,
     }),
     [
+      activeAdminTierGrant,
       beginBillingTierPolling,
       billingTier,
       billingTierError,
       hasLoadedBillingTier,
       isBillingTierLoading,
       refreshBillingTier,
+      stripeBillingTier,
     ]
   )
 

@@ -38,3 +38,5 @@ mtg-auto-deck-server/prompt-logs/
 *.njsproj
 *.sln
 *.sw?
+
+.codex-temp/

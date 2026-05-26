@@ -3886,7 +3886,10 @@ function SimulationResultsPanel({
   const canStartOpeningHandRun = simulation.startingHandId === null
   const hasPresetStartingHand = simulation.startingHandId !== null
   const shouldShowUsageUpgradeAction =
-    !readOnly && canUpgradeUsage && hasLoadedBillingTier && billingTier !== "pro"
+    !readOnly &&
+    canUpgradeUsage &&
+    hasLoadedBillingTier &&
+    (billingTier === "free" || billingTier === "plus")
   const isOpeningHandRunning = resultsInfo.openingHandLlmRuns.some((run) =>
     isActiveLlmRunStatus(run.status)
   )

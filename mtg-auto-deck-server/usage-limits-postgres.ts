@@ -1,5 +1,6 @@
 import type { QueryResultRow } from "pg"
 
+import { getUserBillingTierSummary } from "./billing-tiers-postgres.js"
 import {
   BILLING_TIER_USAGE_LIMITS_USD,
   type BillingTier,
@@ -63,7 +64,6 @@ type UsageLimitWindowSpend = {
 
 const FIVE_HOURS_MS = 5 * 60 * 60 * 1000
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
-const ACTIVE_BILLING_SUBSCRIPTION_STATUSES = ["active", "trialing"]
 
 export const USAGE_LIMIT_OUT_OF_USAGE_MESSAGE =
   "Out of usage limits. Wait until your usage limits reset, then try again."
@@ -314,26 +314,7 @@ async function getUserBillingTierWithClient(
   client: Queryable,
   ownerUserId: string
 ): Promise<BillingTier> {
-  const result = await client.query<{ plan: string }>(
-    `
-      SELECT lower(plan) AS plan
-      FROM "subscription"
-      WHERE "referenceId" = $1
-        AND status = ANY($2::text[])
-        AND lower(plan) IN ('plus', 'pro')
-      ORDER BY
-        CASE lower(plan)
-          WHEN 'pro' THEN 2
-          WHEN 'plus' THEN 1
-          ELSE 0
-        END DESC
-      LIMIT 1
-    `,
-    [ownerUserId, ACTIVE_BILLING_SUBSCRIPTION_STATUSES]
-  )
-  const plan = result.rows[0]?.plan
-
-  return plan === "plus" || plan === "pro" ? plan : "free"
+  return (await getUserBillingTierSummary(client, ownerUserId)).effectiveTier
 }
 
 async function getUsageWindowsByKind(

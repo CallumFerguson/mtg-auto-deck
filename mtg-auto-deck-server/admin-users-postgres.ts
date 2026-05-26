@@ -1,9 +1,21 @@
 import { queryDatabase, withDatabaseTransaction } from "./db.js"
+import {
+  ACTIVE_BILLING_SUBSCRIPTION_STATUSES,
+  type ActiveAdminSubscriptionTierGrant,
+} from "./billing-tiers-postgres.js"
+import {
+  getHighestBillingTier,
+  isAdminGrantBillingTier,
+  normalizeBillingTier,
+  type BillingTier,
+} from "./subscription-tiers.js"
 
 export type AdminUserSummary = {
+  activeAdminTierGrant: ActiveAdminSubscriptionTierGrant | null
   id: string
   email: string
   emailVerified: boolean
+  effectiveTier: BillingTier
   name: string
   role: string | null
   banned: boolean
@@ -11,6 +23,7 @@ export type AdminUserSummary = {
   banExpires: string | null
   recentLlmRunCostUsd: number
   totalLlmRunCostUsd: number
+  stripeTier: BillingTier
   createdAt: string
   updatedAt: string
 }
@@ -45,7 +58,14 @@ type AdminUserRow = {
   banned: boolean | null
   banReason: string | null
   banExpires: Date | null
+  activeAdminTierGrantExpiresAt: Date | null
+  activeAdminTierGrantGrantedAt: Date | null
+  activeAdminTierGrantGrantedByAdminUserId: string | null
+  activeAdminTierGrantId: string | null
+  activeAdminTierGrantTier: string | null
+  effectiveTier: string
   recentLlmRunCostUsd: string | number
+  stripeTier: string
   totalLlmRunCostUsd: string | number
   createdAt: Date
   updatedAt: Date
@@ -179,6 +199,43 @@ export function buildListAdminUsersQuery(now: Date) {
           ) AS recent_llm_run_cost_usd
         FROM priced_llm_runs
         GROUP BY owner_user_id
+      ),
+      active_stripe_tiers AS (
+        SELECT DISTINCT ON ("referenceId")
+          "referenceId" AS owner_user_id,
+          lower(plan) AS stripe_tier
+        FROM "subscription"
+        WHERE status = ANY($2::text[])
+          AND lower(plan) IN ('plus', 'pro')
+        ORDER BY
+          "referenceId" ASC,
+          CASE lower(plan)
+            WHEN 'pro' THEN 2
+            WHEN 'plus' THEN 1
+            ELSE 0
+          END DESC
+      ),
+      active_admin_grants AS (
+        SELECT DISTINCT ON (user_id)
+          user_id,
+          id,
+          tier,
+          expires_at,
+          created_at,
+          granted_by_admin_user_id
+        FROM admin_subscription_tier_grants
+        WHERE revoked_at IS NULL
+          AND expires_at > $3
+        ORDER BY
+          user_id ASC,
+          CASE tier
+            WHEN 'super_max' THEN 3
+            WHEN 'pro' THEN 2
+            WHEN 'plus' THEN 1
+            ELSE 0
+          END DESC,
+          expires_at DESC,
+          created_at DESC
       )
       SELECT
         app_user.id,
@@ -189,6 +246,18 @@ export function buildListAdminUsersQuery(now: Date) {
         app_user.banned,
         app_user."banReason" AS "banReason",
         app_user."banExpires" AS "banExpires",
+        COALESCE(active_stripe_tiers.stripe_tier, 'free') AS "stripeTier",
+        active_admin_grants.id AS "activeAdminTierGrantId",
+        active_admin_grants.tier AS "activeAdminTierGrantTier",
+        active_admin_grants.expires_at AS "activeAdminTierGrantExpiresAt",
+        active_admin_grants.created_at AS "activeAdminTierGrantGrantedAt",
+        active_admin_grants.granted_by_admin_user_id AS "activeAdminTierGrantGrantedByAdminUserId",
+        CASE
+          WHEN active_admin_grants.tier = 'super_max' THEN 'super_max'
+          WHEN active_stripe_tiers.stripe_tier = 'pro' OR active_admin_grants.tier = 'pro' THEN 'pro'
+          WHEN active_stripe_tiers.stripe_tier = 'plus' OR active_admin_grants.tier = 'plus' THEN 'plus'
+          ELSE 'free'
+        END AS "effectiveTier",
         COALESCE(user_llm_costs.recent_llm_run_cost_usd, 0) AS "recentLlmRunCostUsd",
         COALESCE(user_llm_costs.total_llm_run_cost_usd, 0) AS "totalLlmRunCostUsd",
         app_user."createdAt" AS "createdAt",
@@ -196,12 +265,16 @@ export function buildListAdminUsersQuery(now: Date) {
       FROM "user" app_user
       LEFT JOIN user_llm_costs
         ON user_llm_costs.owner_user_id = app_user.id
+      LEFT JOIN active_stripe_tiers
+        ON active_stripe_tiers.owner_user_id = app_user.id
+      LEFT JOIN active_admin_grants
+        ON active_admin_grants.user_id = app_user.id
       ORDER BY
         COALESCE(user_llm_costs.recent_llm_run_cost_usd, 0) DESC,
         COALESCE(user_llm_costs.total_llm_run_cost_usd, 0) DESC,
         lower(app_user.email) ASC
     `,
-    values: [recentStartedAt],
+    values: [recentStartedAt, ACTIVE_BILLING_SUBSCRIPTION_STATUSES, now],
   }
 }
 
@@ -338,19 +411,46 @@ export async function deleteAdminUser(
 }
 
 function toAdminUserSummary(row: AdminUserRow): AdminUserSummary {
+  const stripeTier = normalizeBillingTier(row.stripeTier) ?? "free"
+  const activeAdminTierGrant = toActiveAdminTierGrant(row)
+
   return {
+    activeAdminTierGrant,
     id: row.id,
     email: row.email,
     emailVerified: row.emailVerified,
+    effectiveTier:
+      normalizeBillingTier(row.effectiveTier) ??
+      getHighestBillingTier([stripeTier, activeAdminTierGrant?.tier ?? null]),
     name: row.name ?? "",
     role: row.role,
     banned: row.banned ?? false,
     banReason: row.banReason,
     banExpires: formatDate(row.banExpires),
     recentLlmRunCostUsd: toNumber(row.recentLlmRunCostUsd),
+    stripeTier,
     totalLlmRunCostUsd: toNumber(row.totalLlmRunCostUsd),
     createdAt: formatDate(row.createdAt) ?? "",
     updatedAt: formatDate(row.updatedAt) ?? "",
+  }
+}
+
+function toActiveAdminTierGrant(
+  row: AdminUserRow
+): ActiveAdminSubscriptionTierGrant | null {
+  if (
+    !row.activeAdminTierGrantId ||
+    !isAdminGrantBillingTier(row.activeAdminTierGrantTier)
+  ) {
+    return null
+  }
+
+  return {
+    expiresAt: formatDate(row.activeAdminTierGrantExpiresAt) ?? "",
+    grantedAt: formatDate(row.activeAdminTierGrantGrantedAt) ?? "",
+    grantedByAdminUserId: row.activeAdminTierGrantGrantedByAdminUserId,
+    id: row.activeAdminTierGrantId,
+    tier: row.activeAdminTierGrantTier,
   }
 }
 

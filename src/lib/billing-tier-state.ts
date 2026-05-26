@@ -1,14 +1,19 @@
 import { createContext, useContext, useEffect } from "react"
 
-import type { BillingTier } from "@/lib/subscription-tiers"
+import type {
+  ActiveAdminSubscriptionTierGrant,
+  BillingTier,
+} from "@/lib/subscription-tiers"
 
 export type BillingTierContextValue = {
+  activeAdminTierGrant: ActiveAdminSubscriptionTierGrant | null
   beginBillingTierPolling: () => () => void
   billingTier: BillingTier
   billingTierError: string | null
   hasLoadedBillingTier: boolean
   isBillingTierLoading: boolean
   refreshBillingTier: () => Promise<BillingTier | null>
+  stripeBillingTier: BillingTier
 }
 
 export const BillingTierContext =

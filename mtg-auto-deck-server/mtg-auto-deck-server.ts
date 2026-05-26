@@ -18,6 +18,16 @@ import {
   refreshStripeBillingForUser,
 } from "./auth.js"
 import {
+  ensureAdminSubscriptionTierGrantsSchema,
+  getUserBillingTierSummary,
+  revokeAdminSubscriptionTierGrant,
+  setAdminSubscriptionTierGrant,
+} from "./billing-tiers-postgres.js"
+import {
+  isAdminGrantBillingTier,
+  type AdminGrantBillingTier,
+} from "./subscription-tiers.js"
+import {
   AUTO_ADMIN_EMAIL_ENVIRONMENT_VARIABLE,
   deleteAdminUser,
   getConfiguredAutoAdminEmail,
@@ -41,6 +51,7 @@ import {
   closeDatabasePool,
   queryDatabase,
   verifyDatabaseConnection,
+  withDatabaseTransaction,
 } from "./db.js"
 import {
   buildSimulateTurnPrompt,
@@ -407,6 +418,13 @@ const updateLlmModelPresetEnabledSchema = z.object({
 })
 const setDefaultLlmModelPresetSchema = z.object({
   presetId: z.uuid().nullable(),
+})
+const adminSubscriptionTierGrantSchema = z.object({
+  days: z.number().int().min(1).max(3650),
+  tier: z
+    .string()
+    .trim()
+    .refine(isAdminGrantBillingTier),
 })
 const createTurnLlmRunSchema = z.object({
   turnNumber: z.number().int().positive(),
@@ -5030,6 +5048,7 @@ async function main() {
   const queueConfig = getLlmRunQueueConfig()
   await verifyDatabaseConnection()
   await ensureAuthSchema()
+  await ensureAdminSubscriptionTierGrantsSchema({ query: queryDatabase })
   await promoteConfiguredAutoAdminUserOnStartup()
   await ensureFreshScryfallOracleCards()
   await ensureDecksSchema()
@@ -5472,6 +5491,21 @@ async function main() {
     }
   })
 
+  app.get("/billing/tier", async (req: Request, res: Response) => {
+    const user = getAuthenticatedUser(req)
+
+    try {
+      res.status(200).json(
+        await getUserBillingTierSummary({ query: queryDatabase }, user.id)
+      )
+    } catch (error) {
+      console.error("Failed to load billing tier:", error)
+      res.status(500).json({
+        error: "Billing tier could not be loaded.",
+      })
+    }
+  })
+
   app.get("/admin/users", async (req: Request, res: Response) => {
     if (!requireAdminUser(req, res)) {
       return
@@ -5501,6 +5535,105 @@ async function main() {
       })
     }
   })
+
+  app.put(
+    "/admin/users/:userId/admin-tier-grant",
+    async (req: Request, res: Response) => {
+      const adminUser = requireAdminUser(req, res)
+
+      if (!adminUser) {
+        return
+      }
+
+      const userId = String(req.params.userId).trim()
+
+      if (!userId) {
+        res.status(400).json({
+          error: "User ID is required.",
+        })
+        return
+      }
+
+      const parsedBody = adminSubscriptionTierGrantSchema.safeParse(req.body)
+
+      if (!parsedBody.success) {
+        res.status(400).json({
+          error:
+            "Tier must be plus, pro, or super_max, and days must be an integer from 1 to 3650.",
+        })
+        return
+      }
+
+      try {
+        const billingTierSummary = await withDatabaseTransaction((client) =>
+          setAdminSubscriptionTierGrant(client, {
+            adminUserId: adminUser.id,
+            days: parsedBody.data.days,
+            targetUserId: userId,
+            tier: parsedBody.data.tier as AdminGrantBillingTier,
+          })
+        )
+
+        if (!billingTierSummary) {
+          res.status(404).json({
+            error: "User not found.",
+          })
+          return
+        }
+
+        nudgeLlmRunQueue()
+        res.status(200).json(billingTierSummary)
+      } catch (error) {
+        console.error("Failed to set admin subscription tier grant:", error)
+        res.status(500).json({
+          error: "Admin subscription tier could not be saved.",
+        })
+      }
+    }
+  )
+
+  app.delete(
+    "/admin/users/:userId/admin-tier-grant",
+    async (req: Request, res: Response) => {
+      const adminUser = requireAdminUser(req, res)
+
+      if (!adminUser) {
+        return
+      }
+
+      const userId = String(req.params.userId).trim()
+
+      if (!userId) {
+        res.status(400).json({
+          error: "User ID is required.",
+        })
+        return
+      }
+
+      try {
+        const billingTierSummary = await withDatabaseTransaction((client) =>
+          revokeAdminSubscriptionTierGrant(client, {
+            adminUserId: adminUser.id,
+            targetUserId: userId,
+          })
+        )
+
+        if (!billingTierSummary) {
+          res.status(404).json({
+            error: "User not found.",
+          })
+          return
+        }
+
+        res.status(200).json(billingTierSummary)
+      } catch (error) {
+        console.error("Failed to revoke admin subscription tier grant:", error)
+        res.status(500).json({
+          error: "Admin subscription tier could not be revoked.",
+        })
+      }
+    }
+  )
 
   app.delete("/admin/users/:userId", async (req: Request, res: Response) => {
     const adminUser = requireAdminUser(req, res)

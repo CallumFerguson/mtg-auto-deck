@@ -58,6 +58,7 @@ export async function refreshStripeBilling() {
   return (await response.json()) as {
     activeSubscriptionCount: number
     billingTier: BillingTier
+    stripeTier: BillingTier
     stripeCustomerId: string
   }
 }
