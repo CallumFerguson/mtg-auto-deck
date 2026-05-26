@@ -809,10 +809,7 @@ export function PublicSimulationPage({
             }
             onUpgradeUsage={() => {}}
             readOnly={true}
-            resultsStreamUrl={`${API_BASE_URL}/public/simulations/${encodeURIComponent(
-              simulationId
-            )}/results/stream`}
-            resultsStreamWithCredentials={false}
+            shouldStreamResults={false}
             simulation={publicSimulation.simulation}
             startingHand={publicSimulation.startingHand}
             startingHandLoadError={null}
@@ -2600,6 +2597,7 @@ function SimulationDetails({
   readOnly = false,
   resultsStreamUrl,
   resultsStreamWithCredentials = true,
+  shouldStreamResults = true,
   simulation,
   startingHand,
   startingHandLoadError,
@@ -2619,6 +2617,7 @@ function SimulationDetails({
   readOnly?: boolean
   resultsStreamUrl?: string
   resultsStreamWithCredentials?: boolean
+  shouldStreamResults?: boolean
   simulation: Simulation
   startingHand: StartingHand | null
   startingHandLoadError: string | null
@@ -3136,6 +3135,13 @@ function SimulationDetails({
   }
 
   useEffect(() => {
+    if (!shouldStreamResults) {
+      resultsEventSourceRef.current?.close()
+      resultsEventSourceRef.current = null
+      setIsLoadingResults(false)
+      return
+    }
+
     const streamUrl =
       resultsStreamUrl ??
       `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/results/stream`
@@ -3274,6 +3280,7 @@ function SimulationDetails({
     resultsStreamUrl,
     resultsStreamWithCredentials,
     resultsStreamRestartKey,
+    shouldStreamResults,
     simulation.id,
   ])
 
