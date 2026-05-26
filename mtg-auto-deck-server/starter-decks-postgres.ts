@@ -144,19 +144,6 @@ type CopiedLlmRunChunkRow = {
   copied_llm_run_chunk_id: string | number
 }
 
-type LlmRunChunkCardMentionRow = {
-  llm_run_chunk_id: string | number
-  source_path: string
-  position: number
-  requested_name: string
-  normalized_name: string
-  oracle_id: string | null
-  resolution_status: string
-  resolved_name: string | null
-  default_image_url: string | null
-  created_at: Date
-}
-
 type OpeningHandEvaluationRow = {
   simulation_id: string
   opening_hand_llm_run_id: string
@@ -1214,15 +1201,10 @@ async function copyLlmRunChildren({
   llmRunIdMap: Map<string, string>
 }) {
   for (const [sourceLlmRunId, copiedLlmRunId] of llmRunIdMap.entries()) {
-    const chunkIdMap = await copyLlmRunChunks({
+    await copyLlmRunChunks({
       client,
       copiedLlmRunId,
       sourceLlmRunId,
-    })
-
-    await copyLlmRunChunkCardMentions({
-      chunkIdMap,
-      client,
     })
   }
 }
@@ -1299,80 +1281,6 @@ async function copyLlmRunChunks({
       String(row.copied_llm_run_chunk_id),
     ])
   )
-}
-
-async function copyLlmRunChunkCardMentions({
-  chunkIdMap,
-  client,
-}: {
-  chunkIdMap: Map<string, string>
-  client: Queryable
-}) {
-  const sourceChunkIds = Array.from(chunkIdMap.keys())
-
-  if (sourceChunkIds.length === 0) {
-    return
-  }
-
-  const result = await client.query<LlmRunChunkCardMentionRow>(
-    `
-      /* starter-copy:list-llm-run-chunk-card-mentions */
-      SELECT
-        llm_run_chunk_id,
-        source_path,
-        position,
-        requested_name,
-        normalized_name,
-        oracle_id,
-        resolution_status,
-        resolved_name,
-        default_image_url,
-        created_at
-      FROM llm_run_chunk_card_mentions
-      WHERE llm_run_chunk_id = ANY($1::bigint[])
-      ORDER BY llm_run_chunk_id ASC, position ASC, id ASC
-    `,
-    [sourceChunkIds]
-  )
-
-  for (const mention of result.rows) {
-    await client.query(
-      `
-        /* starter-copy:copy-llm-run-chunk-card-mention */
-        INSERT INTO llm_run_chunk_card_mentions (
-          llm_run_chunk_id,
-          source_path,
-          position,
-          requested_name,
-          normalized_name,
-          oracle_id,
-          resolution_status,
-          resolved_name,
-          default_image_url,
-          created_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        ON CONFLICT (
-          llm_run_chunk_id,
-          source_path,
-          position,
-          requested_name
-        ) DO NOTHING
-      `,
-      [
-        getMappedId(chunkIdMap, mention.llm_run_chunk_id, "LLM chunk"),
-        mention.source_path,
-        mention.position,
-        mention.requested_name,
-        mention.normalized_name,
-        mention.oracle_id,
-        mention.resolution_status,
-        mention.resolved_name,
-        mention.default_image_url,
-        mention.created_at,
-      ]
-    )
-  }
 }
 
 async function copySimulationEvaluations({

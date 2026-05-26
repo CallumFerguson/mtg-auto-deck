@@ -18,7 +18,6 @@ export type TurnPhaseChange = (typeof TURN_PHASE_CHANGES)[number]
 
 export type LoggedTurnAction = {
   action: string
-  cardMentions?: SimulationDebugLlmRunChunk["cardMentions"]
   phaseChange: TurnPhaseChange | null
 }
 

@@ -6,7 +6,6 @@ import {
   formatPreferredLlmRunCostAsCents,
   getOpenRouterReportedCostUsd,
 } from "./llm-pricing.js"
-import { normalizeScryfallCardNameForExactMatch } from "./scryfall-postgres.js"
 import type { LlmProvider, ReasoningEffort } from "./llm-config.js"
 import { BILLING_TIER_LIMITS } from "./subscription-tiers.js"
 import {
@@ -179,21 +178,6 @@ export type LlmRunChunkInput = {
   payload?: unknown | null
 }
 
-export type LlmRunChunkCardMentionResolutionStatus =
-  | "exact"
-  | "face_exact"
-  | "missing"
-
-export type SimulationDebugLlmRunChunkCardMention = {
-  sourcePath: string
-  position: number
-  requestedName: string
-  resolutionStatus: LlmRunChunkCardMentionResolutionStatus
-  resolvedName: string | null
-  scryfallUri: string | null
-  defaultImageUrl: string | null
-}
-
 export type RecordOpenRouterLlmRunGenerationInput = {
   llmRunId: string
   openrouterTurnIndex: number
@@ -219,7 +203,6 @@ export type SimulationDebugLlmRunChunk = {
   reasoningDelta: string | null
   outputDelta: string | null
   payload: unknown | null
-  cardMentions: SimulationDebugLlmRunChunkCardMention[]
   receivedAt: string
 }
 
@@ -833,11 +816,12 @@ export async function ensureSimulationsSchema() {
     "other",
   ])
   await createEnumType("llm_chunk_kind", LLM_CHUNK_KINDS)
-  await createEnumType("llm_run_chunk_card_mention_resolution_status", [
-    "exact",
-    "face_exact",
-    "missing",
-  ])
+  await queryDatabase(`
+    DROP TABLE IF EXISTS llm_run_chunk_card_mentions
+  `)
+  await queryDatabase(`
+    DROP TYPE IF EXISTS llm_run_chunk_card_mention_resolution_status
+  `)
 
   await queryDatabase(`
     CREATE TABLE IF NOT EXISTS simulations (
@@ -1105,25 +1089,6 @@ export async function ensureSimulationsSchema() {
     )
   `)
   await queryDatabase(`
-    CREATE TABLE IF NOT EXISTS llm_run_chunk_card_mentions (
-      id bigserial PRIMARY KEY,
-
-      llm_run_chunk_id bigint NOT NULL REFERENCES llm_run_chunks(id) ON DELETE CASCADE,
-      source_path text NOT NULL,
-      position integer NOT NULL CHECK (position >= 0),
-      requested_name text NOT NULL CHECK (btrim(requested_name) <> ''),
-      normalized_name text NOT NULL,
-      oracle_id uuid REFERENCES scryfall_oracle_cards(oracle_id) ON DELETE SET NULL,
-      resolution_status llm_run_chunk_card_mention_resolution_status NOT NULL,
-      resolved_name text,
-      default_image_url text,
-
-      created_at timestamptz NOT NULL DEFAULT now(),
-
-      UNIQUE (llm_run_chunk_id, source_path, position, requested_name)
-    )
-  `)
-  await queryDatabase(`
     ALTER TABLE llm_run_chunks
     ADD COLUMN IF NOT EXISTS mcp_function_reason text
   `)
@@ -1381,14 +1346,6 @@ export async function ensureSimulationsSchema() {
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS llm_run_chunks_llm_run_id_sequence_idx
       ON llm_run_chunks (llm_run_id, sequence)
-  `)
-  await queryDatabase(`
-    CREATE INDEX IF NOT EXISTS llm_run_chunk_card_mentions_chunk_id_idx
-      ON llm_run_chunk_card_mentions (llm_run_chunk_id, position)
-  `)
-  await queryDatabase(`
-    CREATE INDEX IF NOT EXISTS llm_run_chunk_card_mentions_oracle_id_idx
-      ON llm_run_chunk_card_mentions (oracle_id)
   `)
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS simulation_opening_hand_llm_runs_simulation_id_idx
@@ -3149,7 +3106,7 @@ export async function appendLlmRunChunks(
   })
 }
 
-export async function appendLlmRunChunkWithResolvedCardMentions(
+export async function appendLlmRunChunk(
   llmRunId: string,
   chunk: LlmRunChunkInput
 ): Promise<SimulationDebugLlmRunChunk | null> {
@@ -3165,7 +3122,7 @@ export async function appendLlmRunChunkWithResolvedCardMentions(
       return null
     }
 
-    return mapInsertedLlmRunChunkRow(insertedChunk, insertedChunk.cardMentions)
+    return mapInsertedLlmRunChunkRow(insertedChunk)
   })
 }
 
@@ -3232,19 +3189,14 @@ async function appendLlmRunChunksWithClient(
         insertQuery.values
       )
     : { rows: [] as InsertedLlmRunChunkRow[] }
-  const insertedChunks = result.rows.map((row) => ({
-    ...row,
-    cardMentions: [] as SimulationDebugLlmRunChunkCardMention[],
-  }))
 
   await incrementRunningLlmRunCostFromInsertedChunks(
     client,
     llmRunId,
-    [...mergeResult.appendedDeltaChunks, ...insertedChunks]
+    [...mergeResult.appendedDeltaChunks, ...result.rows]
   )
-  await insertLlmRunChunkCardMentions(client, insertedChunks)
 
-  return insertedChunks
+  return result.rows
 }
 
 export type LlmRunDeltaChunkKind = Extract<
@@ -3655,472 +3607,8 @@ type InsertedLlmRunChunkRow = {
   received_at: Date
 }
 
-type InsertedLlmRunChunkWithMentions = InsertedLlmRunChunkRow & {
-  cardMentions: SimulationDebugLlmRunChunkCardMention[]
-}
-
-export type LlmRunChunkCardMentionRequest = {
-  sourcePath: string
-  position: number
-  requestedName: string
-}
-
-type LlmRunChunkCardMentionInsert = LlmRunChunkCardMentionRequest & {
-  llmRunChunkId: number
-  normalizedName: string
-  oracleId: string | null
-  resolutionStatus: LlmRunChunkCardMentionResolutionStatus
-  resolvedName: string | null
-  scryfallUri: string | null
-  defaultImageUrl: string | null
-}
-
-type ResolvedCardMentionRow = {
-  normalized_name: string
-  oracle_id: string
-  resolved_name: string
-  scryfall_uri: string
-  default_image_url: string | null
-  resolution_status: LlmRunChunkCardMentionResolutionStatus
-}
-
-async function insertLlmRunChunkCardMentions(
-  client: DatabaseTransactionClient,
-  chunks: InsertedLlmRunChunkWithMentions[]
-) {
-  const mentionRequests = chunks.flatMap((chunk) =>
-    extractLlmRunChunkCardMentionRequests({
-      kind: chunk.kind,
-      mcpFunctionName: chunk.mcp_function_name,
-      mcpFunctionOutput: chunk.mcp_function_output,
-      payload: chunk.payload,
-    }).map((mention) => ({
-      ...mention,
-      llmRunChunkId: Number(chunk.id),
-      normalizedName: normalizeScryfallCardNameForExactMatch(
-        mention.requestedName
-      ),
-    }))
-  )
-
-  if (mentionRequests.length === 0) {
-    return
-  }
-
-  const mentionInserts = await resolveLlmRunChunkCardMentions(
-    client,
-    mentionRequests
-  )
-
-  if (mentionInserts.length === 0) {
-    return
-  }
-
-  const values: unknown[] = []
-  const valuePlaceholders = mentionInserts.map((mention, index) => {
-    const offset = index * 9
-
-    values.push(
-      mention.llmRunChunkId,
-      mention.sourcePath,
-      mention.position,
-      mention.requestedName,
-      mention.normalizedName,
-      mention.oracleId,
-      mention.resolutionStatus,
-      mention.resolvedName,
-      mention.defaultImageUrl
-    )
-
-    return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}::llm_run_chunk_card_mention_resolution_status, $${offset + 8}, $${offset + 9})`
-  })
-
-  await client.query(
-    `
-      INSERT INTO llm_run_chunk_card_mentions (
-        llm_run_chunk_id,
-        source_path,
-        position,
-        requested_name,
-        normalized_name,
-        oracle_id,
-        resolution_status,
-        resolved_name,
-        default_image_url
-      )
-      VALUES ${valuePlaceholders.join(", ")}
-      ON CONFLICT (llm_run_chunk_id, source_path, position, requested_name) DO NOTHING
-    `,
-    values
-  )
-
-  const chunksById = new Map(chunks.map((chunk) => [Number(chunk.id), chunk]))
-
-  for (const mention of mentionInserts) {
-    chunksById.get(mention.llmRunChunkId)?.cardMentions.push({
-      sourcePath: mention.sourcePath,
-      position: mention.position,
-      requestedName: mention.requestedName,
-      resolutionStatus: mention.resolutionStatus,
-      resolvedName: mention.resolvedName,
-      scryfallUri: mention.scryfallUri,
-      defaultImageUrl: mention.defaultImageUrl,
-    })
-  }
-}
-
-async function resolveLlmRunChunkCardMentions(
-  client: DatabaseTransactionClient,
-  requests: readonly (LlmRunChunkCardMentionRequest & {
-    llmRunChunkId: number
-    normalizedName: string
-  })[]
-): Promise<LlmRunChunkCardMentionInsert[]> {
-  const normalizedNames = Array.from(
-    new Set(requests.map((request) => request.normalizedName))
-  ).filter(Boolean)
-  const resolvedCardsByNormalizedName = await getResolvedCardsByNormalizedName(
-    client,
-    normalizedNames
-  )
-
-  return requests.map((request) => {
-    const resolvedCard = resolvedCardsByNormalizedName.get(
-      request.normalizedName
-    )
-
-    return {
-      ...request,
-      oracleId: resolvedCard?.oracle_id ?? null,
-      resolutionStatus: resolvedCard?.resolution_status ?? "missing",
-      resolvedName: resolvedCard?.resolved_name ?? null,
-      scryfallUri: resolvedCard?.scryfall_uri ?? null,
-      defaultImageUrl: resolvedCard?.default_image_url ?? null,
-    }
-  })
-}
-
-async function getResolvedCardsByNormalizedName(
-  client: DatabaseTransactionClient,
-  normalizedNames: readonly string[]
-) {
-  const resolvedCardsByNormalizedName = new Map<
-    string,
-    ResolvedCardMentionRow
-  >()
-
-  if (normalizedNames.length === 0) {
-    return resolvedCardsByNormalizedName
-  }
-
-  const result = await client.query<ResolvedCardMentionRow>(
-    `
-      WITH requested AS (
-        SELECT DISTINCT unnest($1::text[]) AS normalized_name
-      ),
-      matches AS (
-        SELECT
-          requested.normalized_name,
-          card.oracle_id,
-          card.name AS resolved_name,
-          card.scryfall_uri,
-          card.default_image_url,
-          'exact'::llm_run_chunk_card_mention_resolution_status AS resolution_status,
-          0 AS match_priority,
-          CASE
-            WHEN card.layout NOT IN ('art_series', 'emblem', 'token')
-              AND COALESCE(card.type_line, '') NOT ILIKE 'Token%'
-              AND card.games && ARRAY['arena', 'mtgo', 'paper']::text[]
-              AND card.legalities->>'commander' IN ('banned', 'legal')
-              THEN 0
-            WHEN card.layout NOT IN ('art_series', 'emblem', 'token')
-              AND COALESCE(card.type_line, '') NOT ILIKE 'Token%'
-              AND card.games && ARRAY['arena', 'mtgo', 'paper']::text[]
-              THEN 1
-            ELSE 2
-          END AS card_priority
-        FROM requested
-        JOIN scryfall_oracle_cards card
-          ON card.normalized_name = requested.normalized_name
-
-        UNION ALL
-
-        SELECT
-          requested.normalized_name,
-          card.oracle_id,
-          card.name AS resolved_name,
-          card.scryfall_uri,
-          COALESCE(face.default_image_url, card.default_image_url) AS default_image_url,
-          'face_exact'::llm_run_chunk_card_mention_resolution_status AS resolution_status,
-          1 AS match_priority,
-          CASE
-            WHEN card.layout NOT IN ('art_series', 'emblem', 'token')
-              AND COALESCE(card.type_line, '') NOT ILIKE 'Token%'
-              AND card.games && ARRAY['arena', 'mtgo', 'paper']::text[]
-              AND card.legalities->>'commander' IN ('banned', 'legal')
-              THEN 0
-            WHEN card.layout NOT IN ('art_series', 'emblem', 'token')
-              AND COALESCE(card.type_line, '') NOT ILIKE 'Token%'
-              AND card.games && ARRAY['arena', 'mtgo', 'paper']::text[]
-              THEN 1
-            ELSE 2
-          END AS card_priority
-        FROM requested
-        JOIN scryfall_card_faces face
-          ON face.normalized_name = requested.normalized_name
-        JOIN scryfall_oracle_cards card
-          ON card.oracle_id = face.oracle_id
-      )
-      SELECT DISTINCT ON (normalized_name)
-        normalized_name,
-        oracle_id,
-        resolved_name,
-        scryfall_uri,
-        default_image_url,
-        resolution_status
-      FROM matches
-      ORDER BY normalized_name, card_priority ASC, match_priority ASC, resolved_name ASC
-    `,
-    [normalizedNames]
-  )
-
-  for (const row of result.rows) {
-    resolvedCardsByNormalizedName.set(row.normalized_name, row)
-  }
-
-  return resolvedCardsByNormalizedName
-}
-
-export function extractLlmRunChunkCardMentionRequests(
-  chunk: Pick<
-    LlmRunChunkInput,
-    "kind" | "mcpFunctionName" | "mcpFunctionOutput" | "payload"
-  >
-): LlmRunChunkCardMentionRequest[] {
-  if (chunk.kind === "final_parsed_output") {
-    return getFinalParsedOutputCardMentions(chunk.payload)
-  }
-
-  if (chunk.kind === "mcp_call_complete") {
-    const toolOutputData = getToolOutputDataRecord(chunk.mcpFunctionOutput)
-
-    switch (chunk.mcpFunctionName) {
-      case "draw_starting_hand":
-      case "mulligan":
-      case "draw_card_from_top":
-      case "draw_card_from_bottom":
-        return getArrayCardMentions(toolOutputData.cards, "data.cards")
-      case "return_card_to_library":
-        return getSingleCardMention(toolOutputData.card, "data.card")
-      case "return_cards_to_library":
-        return getArrayCardMentions(toolOutputData.cards, "data.cards")
-      case "take_cards_from_library":
-        return getTakeCardsMatchMentions(toolOutputData.matches)
-      default:
-        return []
-    }
-  }
-
-  return []
-}
-
-function getFinalParsedOutputCardMentions(
-  payload: unknown
-): LlmRunChunkCardMentionRequest[] {
-  const payloadRecord = asUnknownRecord(payload)
-
-  return [
-    ...getArrayCardMentions(payloadRecord.keptHand, "payload.keptHand"),
-    ...getTurnActionCardMentions(payloadRecord.turnActions),
-    ...getGameStateZoneCardMentions(payloadRecord.gameState),
-  ]
-}
-
-function getGameStateZoneCardMentions(
-  value: unknown
-): LlmRunChunkCardMentionRequest[] {
-  if (!isJsonObject(value) || !isJsonObject(value.zones)) {
-    return []
-  }
-
-  return Object.entries(value.zones).flatMap(([zoneName, zoneCards]) => {
-    if (!Array.isArray(zoneCards)) {
-      return []
-    }
-
-    return zoneCards.flatMap((card, index) => {
-      if (!isJsonObject(card)) {
-        return []
-      }
-
-      return getMentionFromCardName(
-        card.name,
-        `payload.gameState.zones.${zoneName}[${index}].name`,
-        index
-      )
-    })
-  })
-}
-
-function getTurnActionCardMentions(
-  value: unknown
-): LlmRunChunkCardMentionRequest[] {
-  if (!isTurnActionsObject(value)) {
-    return []
-  }
-
-  return TURN_PHASE_CHANGES.flatMap((phaseChange) =>
-    value[phaseChange].flatMap((action, actionIndex) =>
-      getSingleAsteriskCardMentions(
-        action,
-        getTurnActionSourcePath(phaseChange, actionIndex)
-      )
-    )
-  )
-}
-
-function getSingleAsteriskCardMentions(
-  text: string,
-  sourcePath: string
-): LlmRunChunkCardMentionRequest[] {
-  const mentions: LlmRunChunkCardMentionRequest[] = []
-  let searchIndex = 0
-
-  while (searchIndex < text.length) {
-    const startIndex = findNextSingleAsteriskIndex(text, searchIndex)
-
-    if (startIndex === -1) {
-      break
-    }
-
-    const endIndex = findNextSingleAsteriskIndex(text, startIndex + 1)
-
-    if (endIndex === -1) {
-      break
-    }
-
-    const requestedName = text.slice(startIndex + 1, endIndex).trim()
-
-    if (requestedName && !requestedName.includes("*")) {
-      mentions.push({
-        sourcePath,
-        position: mentions.length,
-        requestedName,
-      })
-    }
-
-    searchIndex = endIndex + 1
-  }
-
-  return mentions
-}
-
-function findNextSingleAsteriskIndex(text: string, startIndex: number) {
-  for (let index = startIndex; index < text.length; index += 1) {
-    if (
-      text[index] === "*" &&
-      text[index - 1] !== "*" &&
-      text[index + 1] !== "*"
-    ) {
-      return index
-    }
-  }
-
-  return -1
-}
-
-function getTurnActionSourcePath(
-  phaseChange: TurnPhaseChange,
-  actionIndex: number
-) {
-  return `payload.turnActions.${phaseChange}[${actionIndex}]`
-}
-
-function getToolOutputDataRecord(output: unknown) {
-  const outputRecord = asUnknownRecord(output)
-  const dataRecord = asUnknownRecord(outputRecord.data)
-
-  if (Object.hasOwn(outputRecord, "data") && dataRecord !== EMPTY_RECORD) {
-    return dataRecord
-  }
-
-  return outputRecord
-}
-
-function getArrayCardMentions(
-  value: unknown,
-  sourcePath: string
-): LlmRunChunkCardMentionRequest[] {
-  if (!Array.isArray(value)) {
-    return []
-  }
-
-  return value.flatMap((cardName, index) =>
-    getMentionFromCardName(cardName, sourcePath, index)
-  )
-}
-
-function getSingleCardMention(
-  value: unknown,
-  sourcePath: string
-): LlmRunChunkCardMentionRequest[] {
-  return getMentionFromCardName(value, sourcePath, 0)
-}
-
-function getTakeCardsMatchMentions(
-  value: unknown
-): LlmRunChunkCardMentionRequest[] {
-  if (!Array.isArray(value)) {
-    return []
-  }
-
-  return value.flatMap((match, index) => {
-    const matchRecord = asUnknownRecord(match)
-    const foundCardMentions = getMentionFromCardName(
-      matchRecord.foundCard,
-      "data.matches[*].foundCard",
-      index
-    )
-
-    if (foundCardMentions.length > 0) {
-      return foundCardMentions
-    }
-
-    return getMentionFromCardName(
-      matchRecord.requestedCard,
-      "data.matches[*].requestedCard",
-      index
-    )
-  })
-}
-
-function getMentionFromCardName(
-  value: unknown,
-  sourcePath: string,
-  position: number
-): LlmRunChunkCardMentionRequest[] {
-  if (typeof value !== "string") {
-    return []
-  }
-
-  const requestedName = value.trim()
-
-  if (!requestedName) {
-    return []
-  }
-
-  return [
-    {
-      sourcePath,
-      position,
-      requestedName,
-    },
-  ]
-}
-
 function mapInsertedLlmRunChunkRow(
-  row: InsertedLlmRunChunkRow,
-  cardMentions: SimulationDebugLlmRunChunkCardMention[] = []
+  row: InsertedLlmRunChunkRow
 ): SimulationDebugLlmRunChunk {
   return {
     id: Number(row.id),
@@ -4132,7 +3620,6 @@ function mapInsertedLlmRunChunkRow(
     reasoningDelta: row.reasoning_delta,
     outputDelta: row.output_delta,
     payload: row.payload,
-    cardMentions,
     receivedAt: row.received_at.toISOString(),
   }
 }
@@ -5849,16 +5336,8 @@ async function getLlmRunEvaluationChunks(llmRunId: string) {
     reasoningDelta: row.reasoning_delta,
     outputDelta: row.output_delta,
     payload: row.payload,
-    cardMentions: [],
     receivedAt: row.received_at.toISOString(),
   }))
-  const cardMentionsByChunkId = await getCardMentionsByLlmRunChunkIds(
-    chunks.map((chunk) => chunk.id)
-  )
-
-  for (const chunk of chunks) {
-    chunk.cardMentions = cardMentionsByChunkId.get(chunk.id) ?? []
-  }
 
   return chunks
 }
@@ -6763,23 +6242,12 @@ async function getSimulationDebugLlmRuns({
         reasoningDelta: row.reasoning_delta,
         outputDelta: row.output_delta,
         payload: row.payload,
-        cardMentions: [],
         receivedAt: row.received_at?.toISOString() ?? "",
       })
     }
   }
 
   const runs = Array.from(runsById.values())
-  const cardMentionsByChunkId = await getCardMentionsByLlmRunChunkIds(
-    runs.flatMap((run) => run.chunks.map((chunk) => chunk.id))
-  )
-
-  for (const run of runs) {
-    for (const chunk of run.chunks) {
-      chunk.cardMentions = cardMentionsByChunkId.get(chunk.id) ?? []
-    }
-  }
-
   const openRouterGenerationsByRunId =
     await getOpenRouterGenerationsByLlmRunIds(
       runs
@@ -6867,64 +6335,6 @@ function mapOpeningHandEvaluationRow(
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   }
-}
-
-async function getCardMentionsByLlmRunChunkIds(chunkIds: readonly number[]) {
-  const cardMentionsByChunkId = new Map<
-    number,
-    SimulationDebugLlmRunChunkCardMention[]
-  >()
-
-  if (chunkIds.length === 0) {
-    return cardMentionsByChunkId
-  }
-
-  const result = await queryDatabase<{
-    llm_run_chunk_id: string
-    source_path: string
-    position: number
-    requested_name: string
-    resolution_status: LlmRunChunkCardMentionResolutionStatus
-    resolved_name: string | null
-    scryfall_uri: string | null
-    default_image_url: string | null
-  }>(
-    `
-      SELECT
-        mention.llm_run_chunk_id,
-        mention.source_path,
-        mention.position,
-        mention.requested_name,
-        mention.resolution_status,
-        mention.resolved_name,
-        card.scryfall_uri,
-        mention.default_image_url
-      FROM llm_run_chunk_card_mentions mention
-      LEFT JOIN scryfall_oracle_cards card
-        ON card.oracle_id = mention.oracle_id
-      WHERE mention.llm_run_chunk_id = ANY($1::bigint[])
-      ORDER BY mention.llm_run_chunk_id ASC, mention.source_path ASC, mention.position ASC, mention.id ASC
-    `,
-    [chunkIds]
-  )
-
-  for (const row of result.rows) {
-    const chunkId = Number(row.llm_run_chunk_id)
-    const cardMentions = cardMentionsByChunkId.get(chunkId) ?? []
-
-    cardMentions.push({
-      sourcePath: row.source_path,
-      position: row.position,
-      requestedName: row.requested_name,
-      resolutionStatus: row.resolution_status,
-      resolvedName: row.resolved_name,
-      scryfallUri: row.scryfall_uri,
-      defaultImageUrl: row.default_image_url,
-    })
-    cardMentionsByChunkId.set(chunkId, cardMentions)
-  }
-
-  return cardMentionsByChunkId
 }
 
 async function getOpenRouterGenerationsByLlmRunIds(

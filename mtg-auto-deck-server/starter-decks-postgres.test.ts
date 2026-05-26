@@ -159,20 +159,6 @@ type FakeChunk = {
   received_at: Date
 }
 
-type FakeMention = {
-  id: number
-  llm_run_chunk_id: number
-  source_path: string
-  position: number
-  requested_name: string
-  normalized_name: string
-  oracle_id: string | null
-  resolution_status: "exact" | "face_exact" | "missing"
-  resolved_name: string | null
-  default_image_url: string | null
-  created_at: Date
-}
-
 type FakeOpeningEvaluation = {
   id: number
   simulation_id: string
@@ -207,7 +193,6 @@ class FakeStarterDeckCopyClient {
   simulationIdSequence = 1
   llmRunIdSequence = 1
   chunkIdSequence = 1000
-  mentionIdSequence = 1000
   starterDeckCopyIdSequence = 1
 
   decks: FakeDeck[] = []
@@ -221,7 +206,6 @@ class FakeStarterDeckCopyClient {
   turnRuns: FakeTurnRun[] = []
   reportRuns: FakeReportRun[] = []
   chunks: FakeChunk[] = []
-  mentions: FakeMention[] = []
   openingEvaluations: FakeOpeningEvaluation[] = []
   turnEvaluations: FakeTurnEvaluation[] = []
   starterDeckCopies: {
@@ -317,16 +301,6 @@ class FakeStarterDeckCopyClient {
 
       case "copy-llm-run-chunks":
         return this.copyLlmRunChunks<T>(values) as QueryResult<T>
-
-      case "list-llm-run-chunk-card-mentions":
-        return this.result<T>(
-          this.mentions.filter((mention) =>
-            getNumberArray(values[0]).includes(mention.llm_run_chunk_id)
-          )
-        )
-
-      case "copy-llm-run-chunk-card-mention":
-        return this.copyChunkMention<T>(values)
 
       case "list-opening-hand-evaluations":
         return this.result<T>(
@@ -663,25 +637,6 @@ class FakeStarterDeckCopyClient {
     return this.result(rows as T[])
   }
 
-  copyChunkMention<T>(values: unknown[]) {
-    this.mentions.push({
-      created_at: getDate(values[9]),
-      default_image_url: getStringOrNull(values[8]),
-      id: this.mentionIdSequence,
-      llm_run_chunk_id: getNumber(values[0]),
-      normalized_name: getString(values[4]),
-      oracle_id: getStringOrNull(values[5]),
-      position: getNumber(values[2]),
-      requested_name: getString(values[3]),
-      resolution_status: getMentionResolutionStatus(values[6]),
-      resolved_name: getStringOrNull(values[7]),
-      source_path: getString(values[1]),
-    })
-    this.mentionIdSequence += 1
-
-    return this.result<T>([])
-  }
-
   copyOpeningEvaluation<T>(values: unknown[]) {
     this.openingEvaluations.push({
       created_at: getDate(values[7]),
@@ -849,13 +804,6 @@ test("starter deck copy clones deck data, presets, terminal history, and remaps 
   assert.ok(copiedChunk)
   assert.equal(copiedChunk.sequence, 1)
   assert.equal(copiedChunk.mcp_function_name, "draw_starting_hand")
-
-  const copiedMention = db.mentions.find(
-    (mention) => mention.llm_run_chunk_id === copiedChunk.id
-  )
-
-  assert.ok(copiedMention)
-  assert.equal(copiedMention.requested_name, "Sol Ring")
 
   assert.equal(
     db.openingEvaluations.some(
@@ -1139,19 +1087,6 @@ function createStarterDeckFixture() {
     received_at: now,
     sequence: 1,
   })
-  db.mentions.push({
-    created_at: now,
-    default_image_url: "https://example.test/sol-ring.png",
-    id: 20,
-    llm_run_chunk_id: 10,
-    normalized_name: "sol ring",
-    oracle_id: "22222222-2222-4222-8222-222222222222",
-    position: 0,
-    requested_name: "Sol Ring",
-    resolution_status: "exact",
-    resolved_name: "Sol Ring",
-    source_path: "data.cards",
-  })
   db.openingEvaluations.push({
     created_at: now,
     evaluation_json: {
@@ -1349,14 +1284,6 @@ function getStringArray(value: unknown) {
   return value.map(getString)
 }
 
-function getNumberArray(value: unknown) {
-  if (!Array.isArray(value)) {
-    assert.fail("Expected number array")
-  }
-
-  return value.map(getNumber)
-}
-
 function getJsonObject(value: unknown) {
   if (typeof value !== "string") {
     assert.fail(`Expected JSON string, received ${typeof value}`)
@@ -1445,10 +1372,3 @@ function getLlmRunPhase(value: unknown) {
   return phase as FakeLlmRun["phase"]
 }
 
-function getMentionResolutionStatus(value: unknown) {
-  const status = getString(value)
-
-  assert.equal(["exact", "face_exact", "missing"].includes(status), true)
-
-  return status as FakeMention["resolution_status"]
-}

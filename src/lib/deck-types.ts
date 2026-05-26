@@ -95,16 +95,6 @@ export type StopSimulationResponse = {
   cancelRequestedLlmRunIds: string[]
 }
 
-export type SimulationDebugLlmRunChunkCardMention = {
-  sourcePath: string
-  position: number
-  requestedName: string
-  resolutionStatus: "exact" | "face_exact" | "missing"
-  resolvedName: string | null
-  scryfallUri: string | null
-  defaultImageUrl: string | null
-}
-
 export type SimulationDebugLlmRunChunk = {
   id: number | null
   sequence: number
@@ -115,7 +105,6 @@ export type SimulationDebugLlmRunChunk = {
   reasoningDelta: string | null
   outputDelta: string | null
   payload: unknown | null
-  cardMentions: SimulationDebugLlmRunChunkCardMention[]
   receivedAt: string
 }
 

@@ -133,6 +133,13 @@ import {
   type TurnPhaseChange,
 } from "@/lib/simulation-result-chunks"
 import {
+  EMPTY_SIMULATION_CARD_LOOKUP,
+  createSimulationCardLookup,
+  getSimulationResultToolCardNames,
+  resolveSimulationCard,
+  type SimulationCardLookup,
+} from "@/lib/simulation-card-resolution"
+import {
   getKnownSimulationResultToolLabel,
   getKnownSimulationResultToolLabelForChunk,
   getSimulationResultToolReasonForChunk,
@@ -147,12 +154,12 @@ type OpeningHandCardOption = {
 
 type SimulationResultsAction =
   | {
-    kind: "opening_hand"
-  }
+      kind: "opening_hand"
+    }
   | {
-    kind: "turn"
-    turnNumber: number
-  }
+      kind: "turn"
+      turnNumber: number
+    }
 
 type SimulationResultsNextTurnTimelineStep = {
   id: string
@@ -336,10 +343,7 @@ function getSimulationRunCountFromResults(resultsInfo: SimulationResultsInfo) {
 
 function getSimulationTurnCountFromResults(resultsInfo: SimulationResultsInfo) {
   return resultsInfo.turnLlmRuns.reduce((turnCount, run) => {
-    if (
-      run.outdated === true ||
-      typeof run.turnNumber !== "number"
-    ) {
+    if (run.outdated === true || typeof run.turnNumber !== "number") {
       return turnCount
     }
 
@@ -720,9 +724,7 @@ export function PublicSimulationPage({
 
     try {
       const response = await apiFetch(
-        `${API_BASE_URL}/public/simulations/${encodeURIComponent(
-          simulationId
-        )}`
+        `${API_BASE_URL}/public/simulations/${encodeURIComponent(simulationId)}`
       )
 
       if (!response.ok) {
@@ -730,9 +732,9 @@ export function PublicSimulationPage({
           response.status === 404
             ? "Public simulation could not be found."
             : await readApiError(
-              response,
-              "Public simulation could not be loaded."
-            )
+                response,
+                "Public simulation could not be loaded."
+              )
         )
         return
       }
@@ -1363,10 +1365,11 @@ export function DeckSimulation({
           >
             <div className="simulation-sidebar-surface sticky top-0 z-10 px-2 pt-2 pb-1">
               <button
-                className={`flex h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm font-medium transition-colors ${isNewSimulationSelected
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
-                  }`}
+                className={`flex h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm font-medium transition-colors ${
+                  isNewSimulationSelected
+                    ? "bg-accent text-accent-foreground"
+                    : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+                }`}
                 type="button"
                 aria-pressed={isNewSimulationSelected}
                 onClick={() => {
@@ -1379,8 +1382,9 @@ export function DeckSimulation({
                 New simulation
               </button>
               <div
-                className={`absolute right-0 bottom-0 left-0 border-b border-border transition-opacity ${isSimulationListScrolled ? "opacity-100" : "opacity-0"
-                  }`}
+                className={`absolute right-0 bottom-0 left-0 border-b border-border transition-opacity ${
+                  isSimulationListScrolled ? "opacity-100" : "opacity-0"
+                }`}
               />
             </div>
 
@@ -1408,11 +1412,12 @@ export function DeckSimulation({
                   {simulations.map((simulation) => (
                     <li key={simulation.id} className="group relative">
                       <button
-                        className={`h-11 w-full rounded-md pr-11 pl-3 text-left text-sm font-medium transition-colors ${!isNewSimulationSelected &&
+                        className={`h-11 w-full rounded-md pr-11 pl-3 text-left text-sm font-medium transition-colors ${
+                          !isNewSimulationSelected &&
                           selectedSimulationId === simulation.id
-                          ? "bg-accent text-accent-foreground"
-                          : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
-                          }`}
+                            ? "bg-accent text-accent-foreground"
+                            : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+                        }`}
                         type="button"
                         aria-pressed={
                           !isNewSimulationSelected &&
@@ -1427,13 +1432,14 @@ export function DeckSimulation({
                         {getSimulationLabel(simulation)}
                       </button>
                       {simulation.activeLlmRunCount > 0 &&
-                        (isNewSimulationSelected ||
-                          selectedSimulationId !== simulation.id) ? (
+                      (isNewSimulationSelected ||
+                        selectedSimulationId !== simulation.id) ? (
                         <div
-                          className={`pointer-events-none absolute inset-y-0 right-1 flex items-center px-2 text-muted-foreground transition-opacity group-hover:opacity-0 ${openSimulationMenuId === simulation.id
-                            ? "opacity-0"
-                            : "opacity-100"
-                            }`}
+                          className={`pointer-events-none absolute inset-y-0 right-1 flex items-center px-2 text-muted-foreground transition-opacity group-hover:opacity-0 ${
+                            openSimulationMenuId === simulation.id
+                              ? "opacity-0"
+                              : "opacity-100"
+                          }`}
                           aria-hidden="true"
                         >
                           <svg
@@ -1455,10 +1461,11 @@ export function DeckSimulation({
                         </div>
                       ) : null}
                       <div
-                        className={`absolute inset-y-0 right-1 flex items-center opacity-0 transition-opacity group-hover:opacity-100 ${openSimulationMenuId === simulation.id
-                          ? "opacity-100"
-                          : ""
-                          }`}
+                        className={`absolute inset-y-0 right-1 flex items-center opacity-0 transition-opacity group-hover:opacity-100 ${
+                          openSimulationMenuId === simulation.id
+                            ? "opacity-100"
+                            : ""
+                        }`}
                       >
                         <Button
                           type="button"
@@ -1542,10 +1549,11 @@ export function DeckSimulation({
                         </legend>
                         <div className="grid gap-2 sm:grid-cols-2">
                           <label
-                            className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${seedMode === "random"
-                              ? "border-ring bg-accent text-accent-foreground"
-                              : "border-border bg-background/35 text-muted-foreground"
-                              }`}
+                            className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
+                              seedMode === "random"
+                                ? "border-ring bg-accent text-accent-foreground"
+                                : "border-border bg-background/35 text-muted-foreground"
+                            }`}
                           >
                             <input
                               className="size-4 accent-sky-300"
@@ -1557,10 +1565,11 @@ export function DeckSimulation({
                             Random seed
                           </label>
                           <label
-                            className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${seedMode === "set"
-                              ? "border-ring bg-accent text-accent-foreground"
-                              : "border-border bg-background/35 text-muted-foreground"
-                              }`}
+                            className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
+                              seedMode === "set"
+                                ? "border-ring bg-accent text-accent-foreground"
+                                : "border-border bg-background/35 text-muted-foreground"
+                            }`}
                           >
                             <input
                               className="size-4 accent-sky-300"
@@ -1602,7 +1611,8 @@ export function DeckSimulation({
                                   className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground transition-colors outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
                                   value={selectedSavedSeedId}
                                   disabled={
-                                    isLoadingSavedSeeds || savedSeeds.length === 0
+                                    isLoadingSavedSeeds ||
+                                    savedSeeds.length === 0
                                   }
                                   onChange={(event) =>
                                     setSelectedSavedSeedId(event.target.value)
@@ -1706,7 +1716,8 @@ export function DeckSimulation({
                         ) : null}
                         <FlexServiceTierSwitch
                           checked={
-                            selectedModelPresetSupportsFlex && useFlexServiceTier
+                            selectedModelPresetSupportsFlex &&
+                            useFlexServiceTier
                           }
                           disabled={!selectedModelPresetSupportsFlex}
                           label="Flex processing"
@@ -1739,19 +1750,22 @@ export function DeckSimulation({
                       </div>
 
                       <div
-                        className={`flex items-center gap-3 rounded-md border px-3 py-3 text-sm transition-colors ${canAutoGenerateReport && autoGenerateReport
-                          ? "border-ring bg-accent text-accent-foreground"
-                          : "border-border bg-background/35 text-muted-foreground"
-                          } ${canAutoGenerateReport
+                        className={`flex items-center gap-3 rounded-md border px-3 py-3 text-sm transition-colors ${
+                          canAutoGenerateReport && autoGenerateReport
+                            ? "border-ring bg-accent text-accent-foreground"
+                            : "border-border bg-background/35 text-muted-foreground"
+                        } ${
+                          canAutoGenerateReport
                             ? ""
                             : "cursor-not-allowed opacity-50"
-                          }`}
+                        }`}
                       >
                         <button
-                          className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus:ring-3 focus:ring-ring/25 focus:outline-none disabled:cursor-not-allowed ${canAutoGenerateReport && autoGenerateReport
-                            ? "border-sky-300/70 bg-sky-500/70"
-                            : "border-border bg-muted/55"
-                            }`}
+                          className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus:ring-3 focus:ring-ring/25 focus:outline-none disabled:cursor-not-allowed ${
+                            canAutoGenerateReport && autoGenerateReport
+                              ? "border-sky-300/70 bg-sky-500/70"
+                              : "border-border bg-muted/55"
+                          }`}
                           type="button"
                           role="switch"
                           aria-checked={
@@ -1760,14 +1774,17 @@ export function DeckSimulation({
                           aria-label="Auto-generate report after final turn"
                           disabled={!canAutoGenerateReport}
                           onClick={() =>
-                            setAutoGenerateReport((currentValue) => !currentValue)
+                            setAutoGenerateReport(
+                              (currentValue) => !currentValue
+                            )
                           }
                         >
                           <span
-                            className={`absolute top-1/2 left-1 size-4 -translate-y-1/2 rounded-full bg-foreground shadow-sm shadow-black/30 transition-transform ${canAutoGenerateReport && autoGenerateReport
-                              ? "translate-x-5"
-                              : "translate-x-0"
-                              }`}
+                            className={`absolute top-1/2 left-1 size-4 -translate-y-1/2 rounded-full bg-foreground shadow-sm shadow-black/30 transition-transform ${
+                              canAutoGenerateReport && autoGenerateReport
+                                ? "translate-x-5"
+                                : "translate-x-0"
+                            }`}
                           />
                         </button>
                         <span className="font-medium">
@@ -1786,10 +1803,11 @@ export function DeckSimulation({
                         </legend>
                         <div className="grid gap-2 sm:grid-cols-2">
                           <label
-                            className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${openingHandMode === "simulate"
-                              ? "border-ring bg-accent text-accent-foreground"
-                              : "border-border bg-background/35 text-muted-foreground"
-                              }`}
+                            className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
+                              openingHandMode === "simulate"
+                                ? "border-ring bg-accent text-accent-foreground"
+                                : "border-border bg-background/35 text-muted-foreground"
+                            }`}
                           >
                             <input
                               className="size-4 accent-sky-300"
@@ -1801,10 +1819,11 @@ export function DeckSimulation({
                             Simulate opening hand
                           </label>
                           <label
-                            className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${openingHandMode === "provide"
-                              ? "border-ring bg-accent text-accent-foreground"
-                              : "border-border bg-background/35 text-muted-foreground"
-                              }`}
+                            className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
+                              openingHandMode === "provide"
+                                ? "border-ring bg-accent text-accent-foreground"
+                                : "border-border bg-background/35 text-muted-foreground"
+                            }`}
                           >
                             <input
                               className="size-4 accent-sky-300"
@@ -2131,16 +2150,18 @@ function ReasoningSummariesSwitch({
 }) {
   return (
     <div
-      className={`flex items-center gap-3 rounded-md border px-3 py-3 text-sm transition-colors ${checked
-        ? "border-ring bg-accent text-accent-foreground"
-        : "border-border bg-background/35 text-muted-foreground"
-        } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+      className={`flex items-center gap-3 rounded-md border px-3 py-3 text-sm transition-colors ${
+        checked
+          ? "border-ring bg-accent text-accent-foreground"
+          : "border-border bg-background/35 text-muted-foreground"
+      } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
     >
       <button
-        className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus:ring-3 focus:ring-ring/25 focus:outline-none disabled:cursor-not-allowed ${checked
-          ? "border-sky-300/70 bg-sky-500/70"
-          : "border-border bg-muted/55"
-          }`}
+        className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus:ring-3 focus:ring-ring/25 focus:outline-none disabled:cursor-not-allowed ${
+          checked
+            ? "border-sky-300/70 bg-sky-500/70"
+            : "border-border bg-muted/55"
+        }`}
         type="button"
         role="switch"
         aria-checked={checked}
@@ -2149,8 +2170,9 @@ function ReasoningSummariesSwitch({
         onClick={() => onCheckedChange(!checked)}
       >
         <span
-          className={`absolute top-1/2 left-1 size-4 -translate-y-1/2 rounded-full bg-foreground shadow-sm shadow-black/30 transition-transform ${checked ? "translate-x-5" : "translate-x-0"
-            }`}
+          className={`absolute top-1/2 left-1 size-4 -translate-y-1/2 rounded-full bg-foreground shadow-sm shadow-black/30 transition-transform ${
+            checked ? "translate-x-5" : "translate-x-0"
+          }`}
         />
       </button>
       <span className="font-medium">Reasoning summaries</span>
@@ -2175,16 +2197,18 @@ function FlexServiceTierSwitch({
 
   return (
     <div
-      className={`flex items-start gap-3 rounded-md border px-3 py-3 text-sm transition-colors ${checked
-        ? "border-ring bg-accent text-accent-foreground"
-        : "border-border bg-background/35 text-muted-foreground"
-        } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+      className={`flex items-start gap-3 rounded-md border px-3 py-3 text-sm transition-colors ${
+        checked
+          ? "border-ring bg-accent text-accent-foreground"
+          : "border-border bg-background/35 text-muted-foreground"
+      } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
     >
       <button
-        className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus:ring-3 focus:ring-ring/25 focus:outline-none disabled:cursor-not-allowed ${checked
-          ? "border-sky-300/70 bg-sky-500/70"
-          : "border-border bg-muted/55"
-          }`}
+        className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus:ring-3 focus:ring-ring/25 focus:outline-none disabled:cursor-not-allowed ${
+          checked
+            ? "border-sky-300/70 bg-sky-500/70"
+            : "border-border bg-muted/55"
+        }`}
         type="button"
         role="switch"
         aria-checked={checked}
@@ -2193,8 +2217,9 @@ function FlexServiceTierSwitch({
         onClick={() => onCheckedChange(!checked)}
       >
         <span
-          className={`absolute top-1/2 left-1 size-4 -translate-y-1/2 rounded-full bg-foreground shadow-sm shadow-black/30 transition-transform ${checked ? "translate-x-5" : "translate-x-0"
-            }`}
+          className={`absolute top-1/2 left-1 size-4 -translate-y-1/2 rounded-full bg-foreground shadow-sm shadow-black/30 transition-transform ${
+            checked ? "translate-x-5" : "translate-x-0"
+          }`}
         />
       </button>
       <span className="grid gap-1">
@@ -3099,9 +3124,9 @@ function SimulationDetails({
         turnLlmRuns: currentResultsInfo.turnLlmRuns.map((run) =>
           run.llmRunId === evaluation.turnLlmRunId
             ? {
-              ...run,
-              turnEvaluation: evaluation,
-            }
+                ...run,
+                turnEvaluation: evaluation,
+              }
             : run
         ),
       }
@@ -3122,9 +3147,9 @@ function SimulationDetails({
         openingHandLlmRuns: currentResultsInfo.openingHandLlmRuns.map((run) =>
           run.llmRunId === evaluation.openingHandLlmRunId
             ? {
-              ...run,
-              openingHandEvaluation: evaluation,
-            }
+                ...run,
+                openingHandEvaluation: evaluation,
+              }
             : run
         ),
       }
@@ -3145,12 +3170,9 @@ function SimulationDetails({
     const streamUrl =
       resultsStreamUrl ??
       `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/results/stream`
-    const eventSource = new EventSource(
-      streamUrl,
-      {
-        withCredentials: resultsStreamWithCredentials,
-      }
-    )
+    const eventSource = new EventSource(streamUrl, {
+      withCredentials: resultsStreamWithCredentials,
+    })
     let isStreamClosed = false
 
     resultsEventSourceRef.current?.close()
@@ -3371,11 +3393,13 @@ function SimulationDetails({
 
 function SimulationResultsShell({
   activityPanel,
+  cardLookup = EMPTY_SIMULATION_CARD_LOOKUP,
   children,
   gameState,
   header = null,
 }: {
   activityPanel: ReactNode
+  cardLookup?: SimulationCardLookup
   children: ReactNode
   gameState: SimulationGameStateDisplay | null
   header?: ReactNode
@@ -3391,7 +3415,10 @@ function SimulationResultsShell({
           >
             {children}
           </section>
-          <SimulationGameStatePane gameState={gameState} />
+          <SimulationGameStatePane
+            cardLookup={cardLookup}
+            gameState={gameState}
+          />
         </div>
       </div>
 
@@ -3883,6 +3910,10 @@ function SimulationResultsPanel({
   turnRunError: string | null
 }) {
   const { billingTier, hasLoadedBillingTier } = useBillingTier()
+  const cardLookup = useMemo(
+    () => createSimulationCardLookup({ cards, commanders }),
+    [cards, commanders]
+  )
   const canStartOpeningHandRun = simulation.startingHandId === null
   const hasPresetStartingHand = simulation.startingHandId !== null
   const shouldShowUsageUpgradeAction =
@@ -4030,9 +4061,9 @@ function SimulationResultsPanel({
 
       return run
         ? {
-          resultKind: "opening_hand" as const,
-          run,
-        }
+            resultKind: "opening_hand" as const,
+            run,
+          }
         : null
     }
 
@@ -4043,9 +4074,9 @@ function SimulationResultsPanel({
 
     return run
       ? {
-        resultKind: "turn" as const,
-        run,
-      }
+          resultKind: "turn" as const,
+          run,
+        }
       : null
   }, [
     evaluationRunSelection,
@@ -4154,35 +4185,36 @@ function SimulationResultsPanel({
       }),
     [hasPresetStartingHand, resultsInfo]
   )
-  const displayedTimelineSteps = useMemo<SimulationResultsDisplayTimelineStep[]>(
-    () => {
-      const steps: SimulationResultsDisplayTimelineStep[] = [...timelineSteps]
+  const displayedTimelineSteps = useMemo<
+    SimulationResultsDisplayTimelineStep[]
+  >(() => {
+    const steps: SimulationResultsDisplayTimelineStep[] = [...timelineSteps]
 
-      if (renderedSimulationAction?.kind === "turn") {
-        const turnNumber = renderedSimulationAction.turnNumber
+    if (renderedSimulationAction?.kind === "turn") {
+      const turnNumber = renderedSimulationAction.turnNumber
 
-        if (!hasSimulationTimelineTurnStep(timelineSteps, turnNumber)) {
-          steps.push(createNextTurnTimelineStep(turnNumber, isStartingTurnRun))
-        }
+      if (!hasSimulationTimelineTurnStep(timelineSteps, turnNumber)) {
+        steps.push(createNextTurnTimelineStep(turnNumber, isStartingTurnRun))
       }
+    }
 
-      const reportTimelineStep = getReportTimelineStep(canStartReportRun)
+    const reportTimelineStep = getReportTimelineStep(canStartReportRun)
 
-      if (reportTimelineStep) {
-        steps.push(reportTimelineStep)
-      }
+    if (reportTimelineStep) {
+      steps.push(reportTimelineStep)
+    }
 
-      return steps
-    },
-    [
-      canStartReportRun,
-      isStartingTurnRun,
-      renderedSimulationAction,
-      timelineSteps,
-    ]
-  )
-  const [selectedTimelineStepIdPreference, setSelectedTimelineStepIdPreference] =
-    useState<string | null>(null)
+    return steps
+  }, [
+    canStartReportRun,
+    isStartingTurnRun,
+    renderedSimulationAction,
+    timelineSteps,
+  ])
+  const [
+    selectedTimelineStepIdPreference,
+    setSelectedTimelineStepIdPreference,
+  ] = useState<string | null>(null)
   const previousSelectedTimelineStepIdRef = useRef<string | null>(null)
   const previousSelectedTimelineStepRef =
     useRef<SimulationResultsTimelineSelectionSnapshot | null>(null)
@@ -4227,12 +4259,10 @@ function SimulationResultsPanel({
       return
     }
 
-    timelineStepButtonRefs.current
-      .get(selectedTimelineStepId)
-      ?.scrollIntoView({
-        block: "nearest",
-        inline: "center",
-      })
+    timelineStepButtonRefs.current.get(selectedTimelineStepId)?.scrollIntoView({
+      block: "nearest",
+      inline: "center",
+    })
   }, [displayedTimelineSteps, selectedTimelineStepId])
 
   useLayoutEffect(() => {
@@ -4308,8 +4338,8 @@ function SimulationResultsPanel({
     const finalParsedOutput = getSimulationFinalParsedOutput(run)
     const directTurnActions =
       hasGameState(run.gameState) &&
-        !finalParsedOutput &&
-        hasTurnActions(run.turnActions)
+      !finalParsedOutput &&
+      hasTurnActions(run.turnActions)
         ? run.turnActions
         : null
 
@@ -4322,13 +4352,17 @@ function SimulationResultsPanel({
         role={panelId ? "region" : undefined}
       >
         {directTurnActions ? (
-          <SimulationTurnActionsSurface turnActions={directTurnActions} />
+          <SimulationTurnActionsSurface
+            cardLookup={cardLookup}
+            turnActions={directTurnActions}
+          />
         ) : null}
 
         {run.resultEntries.length > 0 ||
-          finishedThinkingStatus ||
-          hasLiveReport ? (
+        finishedThinkingStatus ||
+        hasLiveReport ? (
           <SimulationResultChunkCards
+            cardLookup={cardLookup}
             run={run}
             entries={run.resultEntries}
             finishedThinkingStatus={finishedThinkingStatus}
@@ -4340,9 +4374,7 @@ function SimulationResultsPanel({
             activeToolCallName={run.activeToolCallName}
             canStopSimulation={!readOnly && run.status !== "cancel_requested"}
             finishedDurationText={null}
-            isFinalizingTurn={isSimulationRunLatestChunkOutputDelta(
-              run.chunks
-            )}
+            isFinalizingTurn={isSimulationRunLatestChunkOutputDelta(run.chunks)}
             isPending={run.status === "pending"}
             isFinishedSuccessfully={false}
             isFinished={false}
@@ -4355,12 +4387,13 @@ function SimulationResultsPanel({
           />
         ) : run.resultEntries.length === 0 && directTurnActions === null ? (
           <div
-            className={`rounded-md border px-3 py-2 text-sm ${isUsageLimitFailure
-              ? "border-amber-300/30 bg-amber-400/10 text-amber-100"
-              : emptyRunFailureMessage
-                ? "border-destructive/40 bg-destructive/10 text-destructive"
-                : "border-border bg-black/20 text-muted-foreground"
-              }`}
+            className={`rounded-md border px-3 py-2 text-sm ${
+              isUsageLimitFailure
+                ? "border-amber-300/30 bg-amber-400/10 text-amber-100"
+                : emptyRunFailureMessage
+                  ? "border-destructive/40 bg-destructive/10 text-destructive"
+                  : "border-border bg-black/20 text-muted-foreground"
+            }`}
             role={
               isUsageLimitFailure
                 ? "status"
@@ -4565,7 +4598,10 @@ function SimulationResultsPanel({
                       }
                     }}
                   >
-                    <span className="flex w-full items-center" aria-hidden="true">
+                    <span
+                      className="flex w-full items-center"
+                      aria-hidden="true"
+                    >
                       <span
                         className={getSimulationTimelineStepConnectorClassName({
                           isHidden: isFirstStep,
@@ -4616,6 +4652,7 @@ function SimulationResultsPanel({
     <>
       <SimulationResultsShell
         activityPanel={activityPanel}
+        cardLookup={cardLookup}
         gameState={selectedGameState}
         header={renderTimelineHeader()}
       >
@@ -4636,8 +4673,8 @@ function SimulationResultsPanel({
 
             {timelineSteps.length === 0 ? (
               <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
-                No opening hand or turn runs have been saved for this
-                simulation yet.
+                No opening hand or turn runs have been saved for this simulation
+                yet.
               </p>
             ) : null}
 
@@ -4969,8 +5006,7 @@ function getSimulationTimelineStepConnectorClassName({
   isHidden,
 }: {
   isHidden: boolean
-}
-) {
+}) {
   const baseClassName = "h-px flex-1 transition-colors"
 
   if (isHidden) {
@@ -5492,8 +5528,9 @@ function getEvaluationModelPresetLabel(
     return "Evaluation model preset unavailable"
   }
 
-  return `${getLlmModelPresetLabel(evaluation.llmModelPreset)}${evaluation.llmModelPreset.isEnabled ? "" : " (disabled)"
-    }`
+  return `${getLlmModelPresetLabel(evaluation.llmModelPreset)}${
+    evaluation.llmModelPreset.isEnabled ? "" : " (disabled)"
+  }`
 }
 
 function TurnEvaluationMetric({
@@ -5565,10 +5602,12 @@ const simulationResultChunkPreClassName =
 const showSimulationResultCardImageToggle = false
 
 function SimulationResultChunkCards({
+  cardLookup,
   entries,
   finishedThinkingStatus,
   run,
 }: {
+  cardLookup: SimulationCardLookup
   entries: SimulationResultEntry[]
   finishedThinkingStatus: ReactNode | null
   run: SimulationDebugLlmRun
@@ -5604,14 +5643,14 @@ function SimulationResultChunkCards({
       if (finalOutput) {
         return (
           <SimulationFinalOutputBlock
+            cardLookup={cardLookup}
             finalOutput={finalOutput}
-            cardMentions={chunk.cardMentions}
           />
         )
       }
     }
 
-    return <SimulationResultEvent chunk={chunk} />
+    return <SimulationResultEvent cardLookup={cardLookup} chunk={chunk} />
   }
 
   return (
@@ -5701,9 +5740,9 @@ function SimulationResultThinkingStatus({
     activeToolCallName === null
       ? null
       : getKnownSimulationResultToolLabel({
-        mcpFunctionName: activeToolCallName,
-        state: "active",
-      })
+          mcpFunctionName: activeToolCallName,
+          state: "active",
+        })
   const activeElapsedText =
     runStartTimeMs === null || isFinished || isPending
       ? null
@@ -5718,7 +5757,7 @@ function SimulationResultThinkingStatus({
         ? (activeToolCallLabel ?? `Calling tool: ${activeToolCallName}`)
         : isFinalizingTurn
           ? "Finalizing turn"
-        : "Thinking"
+          : "Thinking"
 
   return (
     <div className="grid gap-2 py-1 select-none">
@@ -5839,8 +5878,8 @@ function SimulationRunActivityPanel({
     runStartTimeMs === null
       ? null
       : formatMinutesSeconds(
-        (runFinishedTimeMs ?? currentTimeMs) - runStartTimeMs
-      )
+          (runFinishedTimeMs ?? currentTimeMs) - runStartTimeMs
+        )
   const terminalActivityStatus = useMemo(
     () =>
       getSimulationRunTerminalActivityStatus({
@@ -6033,8 +6072,9 @@ function SimulationRunActivityPanel({
 
   return (
     <div
-      className={`h-full min-h-0 shrink-0 overflow-hidden transition-[width] duration-300 ease-out motion-reduce:transition-none ${isOpen ? "w-[clamp(18rem,30vw,24rem)]" : "w-0"
-        }`}
+      className={`h-full min-h-0 shrink-0 overflow-hidden transition-[width] duration-300 ease-out motion-reduce:transition-none ${
+        isOpen ? "w-[clamp(18rem,30vw,24rem)]" : "w-0"
+      }`}
       onTransitionEnd={handlePanelTransitionEnd}
     >
       <aside
@@ -6216,15 +6256,15 @@ function SimulationRunActivityTerminalStatus({
 
 type SimulationRunActivityTimelineItem =
   | {
-    id: string
-    type: "reasoning"
-    block: Extract<SimulationRunActivityBlock, { type: "reasoning" }>
-  }
+      id: string
+      type: "reasoning"
+      block: Extract<SimulationRunActivityBlock, { type: "reasoning" }>
+    }
   | {
-    id: string
-    type: "tool_call_group"
-    blocks: Extract<SimulationRunActivityBlock, { type: "tool_call" }>[]
-  }
+      id: string
+      type: "tool_call_group"
+      blocks: Extract<SimulationRunActivityBlock, { type: "tool_call" }>[]
+    }
 
 function getSimulationRunActivityTimelineItems(
   blocks: readonly SimulationRunActivityBlock[]
@@ -6358,9 +6398,6 @@ const simulationActivityMarkdownClassName =
 const simulationResultSummaryMarkdownClassName =
   "min-w-0 space-y-2 text-sm leading-6 break-words text-muted-foreground [&_a]:text-sky-300 [&_a]:underline [&_code]:rounded-sm [&_code]:bg-muted/45 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-sky-100 [&_ol]:list-decimal [&_ol]:pl-5 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-black/30 [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_strong]:text-foreground/90 [&_ul]:list-disc [&_ul]:pl-5"
 
-type SimulationResultCardMention =
-  SimulationDebugLlmRunChunk["cardMentions"][number]
-
 type SimulationGameStateZoneCard = {
   index: number
   name: string
@@ -6377,7 +6414,6 @@ type SimulationGameStateZone = {
 
 type SimulationGameStateZoneCardPresenceItem = {
   card: SimulationGameStateZoneCard
-  cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
   isEntering: boolean
   isEnteringPlaceholder: boolean
   isExiting: boolean
@@ -6385,7 +6421,6 @@ type SimulationGameStateZoneCardPresenceItem = {
 }
 
 type SimulationGameStateDisplay = {
-  cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
   gameState: unknown
   libraryCardCount: number | null
 }
@@ -6426,16 +6461,16 @@ const SIMULATION_GAME_STATE_CARD_TAP_ANIMATION_MS = 250
 const SIMULATION_GAME_STATE_CARD_SETTLE_FALLBACK_BUFFER_MS = 50
 
 function SimulationFinalOutputBlock({
-  cardMentions = [],
+  cardLookup,
   finalOutput,
 }: {
-  cardMentions?: SimulationDebugLlmRunChunk["cardMentions"]
+  cardLookup: SimulationCardLookup
   finalOutput: ParsedSimulationFinalOutput
 }) {
   if (finalOutput.type === "turn") {
     return (
       <SimulationTurnActionsSurface
-        cardMentions={cardMentions}
+        cardLookup={cardLookup}
         turnActions={finalOutput.turnActions}
       />
     )
@@ -6502,21 +6537,16 @@ function SimulationPresetStartingHandBlock({
 }
 
 function SimulationTurnActionsBlock({
-  cardMentions = [],
+  cardLookup,
   turnActions,
 }: {
-  cardMentions?: SimulationDebugLlmRunChunk["cardMentions"]
+  cardLookup: SimulationCardLookup
   turnActions: Record<TurnPhaseChange, string[]>
 }) {
   const phaseEntries = TURN_PHASE_CHANGES.map((phaseChange) => ({
     phaseChange,
-    actions: turnActions[phaseChange].map((action, actionIndex) => ({
+    actions: turnActions[phaseChange].map((action) => ({
       action,
-      cardMentions: getTurnActionCardMentions(
-        cardMentions,
-        phaseChange,
-        actionIndex
-      ),
       phaseChange: null,
     })),
   }))
@@ -6526,6 +6556,7 @@ function SimulationTurnActionsBlock({
       <div className="grid gap-2">
         {phaseEntries.map(({ actions, phaseChange }) => (
           <SimulationResultTurnPhaseActionEvent
+            cardLookup={cardLookup}
             key={phaseChange}
             actions={actions}
             phaseChange={phaseChange}
@@ -6537,23 +6568,25 @@ function SimulationTurnActionsBlock({
 }
 
 function SimulationTurnActionsSurface({
-  cardMentions = [],
+  cardLookup,
   turnActions,
 }: {
-  cardMentions?: SimulationDebugLlmRunChunk["cardMentions"]
+  cardLookup: SimulationCardLookup
   turnActions: Record<TurnPhaseChange, string[]>
 }) {
   return (
     <SimulationTurnActionsBlock
-      cardMentions={cardMentions}
+      cardLookup={cardLookup}
       turnActions={turnActions}
     />
   )
 }
 
 function SimulationGameStatePane({
+  cardLookup,
   gameState,
 }: {
+  cardLookup: SimulationCardLookup
   gameState: SimulationGameStateDisplay | null
 }) {
   const hasRenderableGameState =
@@ -6569,7 +6602,7 @@ function SimulationGameStatePane({
       <section className="grid gap-4 p-5">
         {gameState && hasRenderableGameState ? (
           <SimulationGameStateZonesBlock
-            cardMentions={gameState.cardMentions}
+            cardLookup={cardLookup}
             gameState={gameState.gameState}
             libraryCardCount={gameState.libraryCardCount}
           />
@@ -6584,21 +6617,18 @@ function SimulationGameStatePane({
 }
 
 function SimulationGameStateZonesBlock({
-  cardMentions = [],
+  cardLookup,
   gameState,
   libraryCardCount,
 }: {
-  cardMentions?: SimulationDebugLlmRunChunk["cardMentions"]
+  cardLookup: SimulationCardLookup
   gameState: unknown
   libraryCardCount: number | null
 }) {
   const zones = getSimulationGameStateZones(gameState)
-  const cardSignature = getSimulationGameStateZonesCardsSignature(zones)
-  const cardMentionsSignature =
-    getSimulationGameStateCardMentionsSignature(cardMentions)
-  const syncSignature = `${cardSignature}\u001d${cardMentionsSignature}`
+  const syncSignature = getSimulationGameStateZonesCardsSignature(zones)
   const lastSettledSyncSignatureRef = useRef(syncSignature)
-  const latestAnimationTargetRef = useRef({ cardMentions, zones })
+  const latestAnimationTargetRef = useRef({ zones })
   const gameStateElementRef = useRef<HTMLElement | null>(null)
   const cardLayoutElementsRef = useRef(new Map<string, HTMLDivElement>())
   const previousGameStateWidthRef = useRef<number | null>(null)
@@ -6608,7 +6638,6 @@ function SimulationGameStateZonesBlock({
     SimulationGameStateZoneCardPresenceItem[]
   >(() =>
     getSimulationGameStateZoneCardPresenceItems({
-      cardMentions,
       isExiting: false,
       zones,
     })
@@ -6640,8 +6669,8 @@ function SimulationGameStateZonesBlock({
   }, [visibleCards])
 
   useEffect(() => {
-    latestAnimationTargetRef.current = { cardMentions, zones }
-  }, [cardMentions, zones])
+    latestAnimationTargetRef.current = { zones }
+  }, [zones])
 
   useEffect(() => {
     const gameStateElement = gameStateElementRef.current
@@ -6707,10 +6736,8 @@ function SimulationGameStateZonesBlock({
   }, [readCurrentCardLayoutRects])
 
   useEffect(() => {
-    const { cardMentions: targetCardMentions, zones: targetZones } =
-      latestAnimationTargetRef.current
+    const { zones: targetZones } = latestAnimationTargetRef.current
     const nextItems = getSimulationGameStateZoneCardPresenceItems({
-      cardMentions: targetCardMentions,
       isExiting: false,
       zones: targetZones,
     })
@@ -6911,9 +6938,8 @@ function SimulationGameStateZonesBlock({
   const standaloneZones = renderZones.filter((zone) => zone.key !== "command")
   const shouldShowLibraryCommandRow =
     libraryCardCount !== null || commandZone !== null
-  const libraryCommandRowInsertIndex = getLibraryCommandRowInsertIndex(
-    standaloneZones
-  )
+  const libraryCommandRowInsertIndex =
+    getLibraryCommandRowInsertIndex(standaloneZones)
   const zonesBeforeLibraryCommandRow = standaloneZones.slice(
     0,
     libraryCommandRowInsertIndex
@@ -6934,6 +6960,7 @@ function SimulationGameStateZonesBlock({
       {zonesBeforeLibraryCommandRow.map((zone) => (
         <SimulationGameStateZoneBlock
           key={zone.key}
+          cardLookup={cardLookup}
           onCardLayoutElementChange={handleCardLayoutElementChange}
           visibleCards={visibleCardsByZone.get(zone.key) ?? []}
           zone={zone}
@@ -6949,6 +6976,7 @@ function SimulationGameStateZonesBlock({
           {commandZone ? (
             <SimulationGameStateZoneBlock
               isCompact={true}
+              cardLookup={cardLookup}
               onCardLayoutElementChange={handleCardLayoutElementChange}
               visibleCards={visibleCardsByZone.get(commandZone.key) ?? []}
               zone={commandZone}
@@ -6959,6 +6987,7 @@ function SimulationGameStateZonesBlock({
       {zonesAfterLibraryCommandRow.map((zone) => (
         <SimulationGameStateZoneBlock
           key={zone.key}
+          cardLookup={cardLookup}
           onCardLayoutElementChange={handleCardLayoutElementChange}
           visibleCards={visibleCardsByZone.get(zone.key) ?? []}
           zone={zone}
@@ -6985,11 +7014,13 @@ function getLibraryCommandRowInsertIndex(
 }
 
 function SimulationGameStateZoneBlock({
+  cardLookup,
   isCompact = false,
   onCardLayoutElementChange,
   visibleCards,
   zone,
 }: {
+  cardLookup: SimulationCardLookup
   isCompact?: boolean
   onCardLayoutElementChange: (
     cardKey: string,
@@ -7004,6 +7035,7 @@ function SimulationGameStateZoneBlock({
         {zone.label}
       </p>
       <SimulationGameStateZoneCardGrid
+        cardLookup={cardLookup}
         isCompact={isCompact}
         onCardLayoutElementChange={onCardLayoutElementChange}
         visibleCards={visibleCards}
@@ -7025,7 +7057,7 @@ function SimulationGameStateLibraryZone({
       <div className="mt-2 min-w-0">
         {libraryCardCount > 0 ? (
           <img
-            className="block aspect-[488/680] w-full min-w-0 select-none rounded-[5.75%/4.4%] border border-border bg-black/40 object-cover shadow-lg shadow-black/20"
+            className="block aspect-[488/680] w-full min-w-0 rounded-[5.75%/4.4%] border border-border bg-black/40 object-cover shadow-lg shadow-black/20 select-none"
             src="/card_back.webp"
             alt={`${libraryCardCount} ${
               libraryCardCount === 1 ? "card" : "cards"
@@ -7041,10 +7073,12 @@ function SimulationGameStateLibraryZone({
 }
 
 function SimulationGameStateZoneCardGrid({
+  cardLookup,
   isCompact = false,
   onCardLayoutElementChange,
   visibleCards,
 }: {
+  cardLookup: SimulationCardLookup
   isCompact?: boolean
   onCardLayoutElementChange: (
     cardKey: string,
@@ -7085,7 +7119,7 @@ function SimulationGameStateZoneCardGrid({
               >
                 <SimulationGameStateZoneCardView
                   card={card.card}
-                  cardMentions={card.cardMentions}
+                  cardLookup={cardLookup}
                 />
               </div>
             )}
@@ -7099,7 +7133,7 @@ function SimulationGameStateZoneCardGrid({
 function SimulationGameStateEmptyCardPlaceholder() {
   return (
     <div
-      className="flex aspect-[488/680] min-w-0 select-none items-center justify-center rounded-[5.75%/4.4%] border border-dashed border-border bg-black/20 px-2 text-center text-xs font-semibold tracking-wide text-muted-foreground uppercase shadow-lg shadow-black/10"
+      className="flex aspect-[488/680] min-w-0 items-center justify-center rounded-[5.75%/4.4%] border border-dashed border-border bg-black/20 px-2 text-center text-xs font-semibold tracking-wide text-muted-foreground uppercase shadow-lg shadow-black/10 select-none"
       aria-label="Empty zone"
     >
       empty
@@ -7110,7 +7144,7 @@ function SimulationGameStateEmptyCardPlaceholder() {
 function SimulationGameStateEnteringCardPlaceholder() {
   return (
     <div
-      className="aspect-[488/680] min-w-0 select-none rounded-[5.75%/4.4%] opacity-0"
+      className="aspect-[488/680] min-w-0 rounded-[5.75%/4.4%] opacity-0 select-none"
       aria-hidden="true"
     />
   )
@@ -7118,19 +7152,19 @@ function SimulationGameStateEnteringCardPlaceholder() {
 
 function SimulationGameStateZoneCardView({
   card,
-  cardMentions,
+  cardLookup,
 }: {
   card: SimulationGameStateZoneCard
-  cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
+  cardLookup: SimulationCardLookup
 }) {
   const isTapped = card.tapped === true
   const previousIsTappedRef = useRef(isTapped)
   const [visualTapState, setVisualTapState] = useState<
     "tapped" | "untapping" | "untapped"
   >(() => (isTapped ? "tapped" : "untapped"))
-  const mention = getGameStateZoneCardMention(cardMentions, card)
-  const href = mention ? getStrictResolvedCardMentionScryfallUrl(mention) : null
-  const imageUrl = href ? mention?.defaultImageUrl?.trim() || null : null
+  const resolvedCard = resolveSimulationCard(cardLookup, card.name)
+  const href = resolvedCard?.scryfallUri.trim() || null
+  const imageUrl = href ? resolvedCard?.defaultImageUrl?.trim() || null : null
   const shouldShowTapOverlay = visualTapState !== "untapped"
   const title = getSimulationGameStateZoneCardTitle(card)
 
@@ -7173,28 +7207,30 @@ function SimulationGameStateZoneCardView({
           loading="lazy"
         />
       ) : (
-        <span className="flex aspect-[488/680] w-full items-center justify-center bg-gradient-to-b from-sky-950/35 to-black/50 px-2 text-center text-xs font-semibold leading-4 break-words text-sky-50">
+        <span className="flex aspect-[488/680] w-full items-center justify-center bg-gradient-to-b from-sky-950/35 to-black/50 px-2 text-center text-xs leading-4 font-semibold break-words text-sky-50">
           {card.name}
         </span>
       )}
       {shouldShowTapOverlay ? (
         <>
           <span
-            className={`simulation-game-state-card-tap-dim pointer-events-none absolute inset-0 bg-black/35 ${visualTapState === "untapping"
-              ? "simulation-game-state-card-tap-overlay-exit"
-              : "simulation-game-state-card-tap-overlay-enter"
-              }`}
+            className={`simulation-game-state-card-tap-dim pointer-events-none absolute inset-0 bg-black/35 ${
+              visualTapState === "untapping"
+                ? "simulation-game-state-card-tap-overlay-exit"
+                : "simulation-game-state-card-tap-overlay-enter"
+            }`}
             aria-hidden="true"
           />
           <span
-            className={`simulation-game-state-card-tap-icon pointer-events-none absolute inset-0 grid place-items-center text-sky-50/95 drop-shadow-[0_0.25rem_0.75rem_rgba(0,0,0,0.85)] ${visualTapState === "untapping"
-              ? "simulation-game-state-card-tap-overlay-exit"
-              : "simulation-game-state-card-tap-overlay-enter"
-              }`}
+            className={`simulation-game-state-card-tap-icon pointer-events-none absolute inset-0 grid place-items-center text-sky-50/95 drop-shadow-[0_0.25rem_0.75rem_rgba(0,0,0,0.85)] ${
+              visualTapState === "untapping"
+                ? "simulation-game-state-card-tap-overlay-exit"
+                : "simulation-game-state-card-tap-overlay-enter"
+            }`}
             aria-hidden="true"
           >
             <img
-              className="size-[72%] select-none object-contain opacity-65 brightness-0 invert"
+              className="size-[72%] object-contain opacity-65 brightness-0 invert select-none"
               src={tapIconUrl}
               alt=""
               draggable={false}
@@ -7287,16 +7323,13 @@ function getSimulationGameStateZoneCardPresenceItemSignature(
     item.card.name,
     String(item.card.tapped),
     item.card.notes ?? "",
-    getSimulationGameStateCardMentionsSignature(item.cardMentions),
   ].join("\u001f")
 }
 
 function getSimulationGameStateZoneCardPresenceItems({
-  cardMentions,
   isExiting,
   zones,
 }: {
-  cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
   isExiting: boolean
   zones: readonly SimulationGameStateZone[]
 }): SimulationGameStateZoneCardPresenceItem[] {
@@ -7311,7 +7344,6 @@ function getSimulationGameStateZoneCardPresenceItems({
 
       return {
         card,
-        cardMentions,
         isEntering: false,
         isEnteringPlaceholder: false,
         isExiting,
@@ -7324,7 +7356,10 @@ function getSimulationGameStateZoneCardPresenceItems({
 function getSimulationGameStateZoneCardPresenceItemsByZone(
   items: readonly SimulationGameStateZoneCardPresenceItem[]
 ) {
-  const itemsByZone = new Map<string, SimulationGameStateZoneCardPresenceItem[]>()
+  const itemsByZone = new Map<
+    string,
+    SimulationGameStateZoneCardPresenceItem[]
+  >()
 
   for (const item of items) {
     const zoneItems = itemsByZone.get(item.card.zoneKey) ?? []
@@ -7406,11 +7441,11 @@ function getSimulationGameStateZoneCardExitPhaseItems({
       item.isExiting
         ? item
         : {
-          ...item,
-          isEntering: false,
-          isEnteringPlaceholder: false,
-          isExiting: true,
-        },
+            ...item,
+            isEntering: false,
+            isEnteringPlaceholder: false,
+            isExiting: true,
+          },
     ]
   })
 }
@@ -7425,10 +7460,10 @@ function getSimulationGameStateZoneCardMovePhaseItems({
   return nextItems.map((item) =>
     enteringCardKeys.has(item.key)
       ? {
-        ...item,
-        isEntering: false,
-        isEnteringPlaceholder: true,
-      }
+          ...item,
+          isEntering: false,
+          isEnteringPlaceholder: true,
+        }
       : item
   )
 }
@@ -7443,10 +7478,10 @@ function getSimulationGameStateZoneCardEnterPhaseItems({
   return nextItems.map((item) =>
     enteringCardKeys.has(item.key)
       ? {
-        ...item,
-        isEntering: true,
-        isEnteringPlaceholder: false,
-      }
+          ...item,
+          isEntering: true,
+          isEnteringPlaceholder: false,
+        }
       : item
   )
 }
@@ -7468,7 +7503,6 @@ function getSimulationGameStateZonesCardsSignature(
   zones: readonly SimulationGameStateZone[]
 ) {
   return getSimulationGameStateZoneCardPresenceItems({
-    cardMentions: [],
     isExiting: false,
     zones,
   })
@@ -7480,24 +7514,6 @@ function getSimulationGameStateZonesCardsSignature(
         item.card.name,
         String(item.card.tapped),
         item.card.notes ?? "",
-      ].join("\u001f")
-    )
-    .join("\u001e")
-}
-
-function getSimulationGameStateCardMentionsSignature(
-  cardMentions: readonly SimulationResultCardMention[]
-) {
-  return cardMentions
-    .map((mention) =>
-      [
-        mention.sourcePath,
-        String(mention.position),
-        mention.requestedName,
-        mention.resolutionStatus,
-        mention.resolvedName ?? "",
-        mention.scryfallUri ?? "",
-        mention.defaultImageUrl ?? "",
       ].join("\u001f")
     )
     .join("\u001e")
@@ -7588,39 +7604,6 @@ function getSimulationGameStateZoneLabel(zoneKey: string) {
     .replace(/\b\w/g, (character) => character.toUpperCase())
 }
 
-function getGameStateZoneCardMention(
-  cardMentions: SimulationDebugLlmRunChunk["cardMentions"],
-  card: SimulationGameStateZoneCard
-) {
-  const sourcePath = getGameStateZoneCardSourcePath(card)
-
-  return (
-    cardMentions.find(
-      (mention) =>
-        mention.sourcePath === sourcePath &&
-        mention.position === card.index &&
-        mention.requestedName === card.name
-    ) ?? null
-  )
-}
-
-function getGameStateZoneCardSourcePath(card: SimulationGameStateZoneCard) {
-  return `payload.gameState.zones.${card.zoneKey}[${card.index}].name`
-}
-
-function getStrictResolvedCardMentionScryfallUrl(
-  mention: SimulationResultCardMention
-) {
-  if (
-    mention.resolutionStatus !== "exact" &&
-    mention.resolutionStatus !== "face_exact"
-  ) {
-    return null
-  }
-
-  return mention.scryfallUri?.trim() || null
-}
-
 function getSimulationGameStateZoneCardTitle(
   card: SimulationGameStateZoneCard
 ) {
@@ -7632,17 +7615,6 @@ function getSimulationGameStateZoneCardTitle(
   return details.length > 0
     ? `${card.name} (${details.join(" / ")})`
     : card.name
-}
-
-function getSimulationRunGameStateCardMentions(
-  chunks: readonly SimulationDebugLlmRunChunk[]
-) {
-  return (
-    [...chunks]
-      .reverse()
-      .find((chunk) => chunk.kind === "final_parsed_output")?.cardMentions ??
-    []
-  )
 }
 
 function getSimulationRunGameStateDisplay(
@@ -7664,11 +7636,8 @@ function getSimulationRunGameStateDisplay(
     }
 
     return getOpeningHandGameStateDisplay(
-      getOpeningHandFinalOutputCardMentions(
-        finalOutput.keptHand,
-        getSimulationRunGameStateCardMentions(run.chunks)
-      ),
-      getCommanderCardMentions(commanders),
+      getCommanderCardNames(commanders),
+      finalOutput.keptHand,
       getSimulationRunLibraryCardCount(run)
     )
   }
@@ -7685,7 +7654,6 @@ function getSimulationRunGameStateDisplay(
   }
 
   return {
-    cardMentions: getSimulationRunGameStateCardMentions(run.chunks),
     gameState,
     libraryCardCount: getSimulationRunLibraryCardCount(run),
   }
@@ -7701,8 +7669,8 @@ function getStartingHandGameStateDisplay(
   }
 
   return getOpeningHandGameStateDisplay(
-    getStartingHandCardMentions(startingHand),
-    getCommanderCardMentions(commanders),
+    getCommanderCardNames(commanders),
+    getStartingHandCardNames(startingHand),
     getPresetStartingHandLibraryCardCount({
       deckCards,
       startingHand,
@@ -7711,26 +7679,16 @@ function getStartingHandGameStateDisplay(
 }
 
 function getOpeningHandGameStateDisplay(
-  handMentions: SimulationResultCardMention[],
-  commandMentions: SimulationResultCardMention[],
+  commandCards: readonly string[],
+  handCards: readonly string[],
   libraryCardCount: number | null
 ): SimulationGameStateDisplay {
-  const gameStateHandMentions = getOpeningHandGameStateCardMentions({
-    mentions: handMentions,
-    zoneKey: "hand",
-  })
-  const gameStateCommandMentions = getOpeningHandGameStateCardMentions({
-    mentions: commandMentions,
-    zoneKey: "command",
-  })
-
   return {
-    cardMentions: [...gameStateHandMentions, ...gameStateCommandMentions],
     gameState: {
       zones: {
         battlefield: [],
-        hand: getOpeningHandGameStateCards(gameStateHandMentions),
-        command: getOpeningHandGameStateCards(gameStateCommandMentions),
+        hand: getOpeningHandGameStateCards(handCards),
+        command: getOpeningHandGameStateCards(commandCards),
         graveyard: [],
         exile: [],
       },
@@ -7739,65 +7697,28 @@ function getOpeningHandGameStateDisplay(
   }
 }
 
-function getOpeningHandGameStateCardMentions({
-  mentions,
-  zoneKey,
-}: {
-  mentions: readonly SimulationResultCardMention[]
-  zoneKey: "command" | "hand"
-}) {
-  return mentions.map((mention, index) => ({
-    ...mention,
-    position: index,
-    sourcePath: getOpeningHandGameStateCardSourcePath(zoneKey, index),
-  }))
-}
-
-function getOpeningHandGameStateCards(
-  mentions: readonly SimulationResultCardMention[]
-) {
-  return mentions.map((mention) => ({
-    name: getCardMentionDisplayName(mention),
+function getOpeningHandGameStateCards(cardNames: readonly string[]) {
+  return cardNames.map((cardName) => ({
+    name: cardName,
     notes: null,
     tapped: null,
   }))
 }
 
-function getOpeningHandGameStateCardSourcePath(
-  zoneKey: "command" | "hand",
-  index: number
-) {
-  return `payload.gameState.zones.${zoneKey}[${index}].name`
-}
-
-function getTurnActionCardMentions(
-  cardMentions: SimulationDebugLlmRunChunk["cardMentions"],
-  phaseChange: TurnPhaseChange,
-  actionIndex: number
-) {
-  const sourcePath = getTurnActionSourcePath(phaseChange, actionIndex)
-
-  return cardMentions
-    .filter((mention) => mention.sourcePath === sourcePath)
-    .sort((firstMention, secondMention) => {
-      return firstMention.position - secondMention.position
-    })
-}
-
-function getTurnActionSourcePath(
-  phaseChange: TurnPhaseChange,
-  actionIndex: number
-) {
-  return `payload.turnActions.${phaseChange}[${actionIndex}]`
-}
-
 function SimulationResultLoggedTurnActionEvent({
   actions,
+  cardLookup,
 }: {
   actions: LoggedTurnAction[]
+  cardLookup: SimulationCardLookup
 }) {
   if (actions.length === 1 && actions[0].phaseChange !== null) {
-    return <SimulationResultPhaseChangeEvent action={actions[0]} />
+    return (
+      <SimulationResultPhaseChangeEvent
+        action={actions[0]}
+        cardLookup={cardLookup}
+      />
+    )
   }
 
   return (
@@ -7807,7 +7728,7 @@ function SimulationResultLoggedTurnActionEvent({
           {actions.map((action, index) => (
             <li key={`${action.action}-${index}`}>
               <SimulationLoggedActionText
-                cardMentions={action.cardMentions ?? []}
+                cardLookup={cardLookup}
                 text={action.action}
               />
             </li>
@@ -7823,10 +7744,10 @@ function SimulationResultLoggedTurnActionEvent({
 }
 
 function SimulationLoggedActionText({
-  cardMentions,
+  cardLookup,
   text,
 }: {
-  cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
+  cardLookup: SimulationCardLookup
   text: string
 }) {
   return getSimulationLoggedActionTextTokens(text).map((token, index) => {
@@ -7846,18 +7767,20 @@ function SimulationLoggedActionText({
       )
     }
 
-    const mention = getCardMentionForActionToken(cardMentions, token)
+    const resolvedCard = resolveSimulationCard(cardLookup, token.cardName)
+    const href = resolvedCard?.scryfallUri.trim() || null
+    const imageUrl = href ? resolvedCard?.defaultImageUrl?.trim() || null : null
 
     return (
       <SimulationResultCardPill
         key={`${token.cardName}-${index}`}
-        href={mention?.scryfallUri?.trim() || null}
-        imageUrl={mention?.defaultImageUrl ?? null}
+        href={href}
+        imageUrl={imageUrl}
         label={token.cardName}
         title={
-          mention?.scryfallUri?.trim()
-            ? getCardMentionDisplayName(mention)
-            : `${token.cardName} was not resolved to a Scryfall card.`
+          resolvedCard
+            ? resolvedCard.name
+            : `${token.cardName} could not be resolved from this deck.`
         }
       />
     )
@@ -7866,33 +7789,31 @@ function SimulationLoggedActionText({
 
 type SimulationLoggedActionTextToken =
   | {
-    text: string
-    type: "text"
-  }
+      text: string
+      type: "text"
+    }
   | {
-    className: string
-    text: string
-    type: "mana"
-  }
+      className: string
+      text: string
+      type: "mana"
+    }
   | {
-    cardName: string
-    position: number
-    type: "card"
-  }
+      cardName: string
+      type: "card"
+    }
 
 function getSimulationLoggedActionTextTokens(
   text: string
 ): SimulationLoggedActionTextToken[] {
   const tokens: SimulationLoggedActionTextToken[] = []
   let index = 0
-  let cardPosition = 0
 
   while (index < text.length) {
     const manaToken = findNextManaSymbolToken(text, index)
-    const cardToken = findNextActionCardToken(text, index, cardPosition)
+    const cardToken = findNextActionCardToken(text, index)
     const nextToken =
       cardToken !== null &&
-        (manaToken === null || cardToken.startIndex < manaToken.startIndex)
+      (manaToken === null || cardToken.startIndex < manaToken.startIndex)
         ? cardToken
         : manaToken
 
@@ -7920,10 +7841,8 @@ function getSimulationLoggedActionTextTokens(
     } else {
       tokens.push({
         cardName: nextToken.cardName,
-        position: nextToken.position,
         type: "card",
       })
-      cardPosition += 1
     }
 
     index = nextToken.endIndex
@@ -7957,11 +7876,7 @@ function findNextManaSymbolToken(text: string, startIndex: number) {
   }
 }
 
-function findNextActionCardToken(
-  text: string,
-  startIndex: number,
-  position: number
-) {
+function findNextActionCardToken(text: string, startIndex: number) {
   let searchIndex = startIndex
 
   while (searchIndex < text.length) {
@@ -7983,7 +7898,6 @@ function findNextActionCardToken(
       return {
         cardName,
         endIndex: cardEndIndex + 1,
-        position,
         startIndex: cardStartIndex,
         type: "card" as const,
       }
@@ -8007,21 +7921,6 @@ function findNextSingleAsteriskIndex(text: string, startIndex: number) {
   }
 
   return -1
-}
-
-function getCardMentionForActionToken(
-  cardMentions: SimulationDebugLlmRunChunk["cardMentions"],
-  token: Extract<SimulationLoggedActionTextToken, { type: "card" }>
-) {
-  return (
-    cardMentions.find(
-      (mention) =>
-        mention.position === token.position &&
-        mention.requestedName === token.cardName
-    ) ??
-    cardMentions.find((mention) => mention.position === token.position) ??
-    null
-  )
 }
 
 function getManaSymbolClassName(text: string) {
@@ -8055,18 +7954,26 @@ function normalizeManaSymbolText(text: string) {
 
 function SimulationResultPhaseChangeEvent({
   action,
+  cardLookup,
 }: {
   action: LoggedTurnAction
+  cardLookup: SimulationCardLookup
 }) {
   const phaseChange = action.phaseChange
 
   if (phaseChange === null) {
-    return <SimulationResultLoggedTurnActionEvent actions={[action]} />
+    return (
+      <SimulationResultLoggedTurnActionEvent
+        actions={[action]}
+        cardLookup={cardLookup}
+      />
+    )
   }
 
   return (
     <SimulationResultTurnPhaseActionEvent
       actions={[]}
+      cardLookup={cardLookup}
       phaseChange={phaseChange}
     />
   )
@@ -8074,9 +7981,11 @@ function SimulationResultPhaseChangeEvent({
 
 function SimulationResultTurnPhaseActionEvent({
   actions,
+  cardLookup,
   phaseChange,
 }: {
   actions: LoggedTurnAction[]
+  cardLookup: SimulationCardLookup
   phaseChange: TurnPhaseChange
 }) {
   return (
@@ -8099,7 +8008,7 @@ function SimulationResultTurnPhaseActionEvent({
           {actions.map((action, index) => (
             <li key={`${action.action}-${index}`}>
               <SimulationLoggedActionText
-                cardMentions={action.cardMentions ?? []}
+                cardLookup={cardLookup}
                 text={action.action}
               />
             </li>
@@ -8149,8 +8058,10 @@ function getTurnPhaseChangeLabel(phaseChange: TurnPhaseChange) {
 }
 
 function SimulationResultEvent({
+  cardLookup,
   chunk,
 }: {
+  cardLookup: SimulationCardLookup
   chunk: SimulationDebugLlmRunChunk
 }) {
   if (chunk.kind === "mcp_call_start") {
@@ -8169,8 +8080,16 @@ function SimulationResultEvent({
   }
 
   if (chunk.kind === "mcp_call_complete") {
-    if (chunk.cardMentions.length > 0 && !isMcpCallFailure(chunk)) {
-      return <SimulationResultCompletedCardToolEvent chunk={chunk} />
+    const cardNames = getSimulationResultToolCardNames(chunk)
+
+    if (cardNames.length > 0 && !isMcpCallFailure(chunk)) {
+      return (
+        <SimulationResultCompletedCardToolEvent
+          cardLookup={cardLookup}
+          cardNames={cardNames}
+          chunk={chunk}
+        />
+      )
     }
 
     return (
@@ -8268,8 +8187,12 @@ function SimulationResultToolReasonText({ reason }: { reason: string | null }) {
 }
 
 function SimulationResultCompletedCardToolEvent({
+  cardLookup,
+  cardNames,
   chunk,
 }: {
+  cardLookup: SimulationCardLookup
+  cardNames: readonly string[]
   chunk: SimulationDebugLlmRunChunk
 }) {
   const [showCardImages, setShowCardImages] = useState(false)
@@ -8290,21 +8213,25 @@ function SimulationResultCompletedCardToolEvent({
               size="xs"
               type="button"
               variant="outline"
-              onClick={() =>
-                setShowCardImages((currentValue) => !currentValue)
-              }
+              onClick={() => setShowCardImages((currentValue) => !currentValue)}
             >
               {showCardImages ? <EyeOff /> : <Eye />}
               {showCardImages ? "Hide cards" : "Show cards"}
             </Button>
           ) : null}
           {!showCardImages ? (
-            <SimulationResultCardTextLinks mentions={chunk.cardMentions} />
+            <SimulationResultCardTextLinks
+              cardLookup={cardLookup}
+              cardNames={cardNames}
+            />
           ) : null}
         </div>
 
         {showCardImages ? (
-          <SimulationResultCardImageLinks mentions={chunk.cardMentions} />
+          <SimulationResultCardImageLinks
+            cardLookup={cardLookup}
+            cardNames={cardNames}
+          />
         ) : null}
       </div>
     </div>
@@ -8312,21 +8239,36 @@ function SimulationResultCompletedCardToolEvent({
 }
 
 function SimulationResultCardTextLinks({
-  mentions,
+  cardLookup,
+  cardNames,
 }: {
-  mentions: SimulationResultCardMention[]
+  cardLookup: SimulationCardLookup
+  cardNames: readonly string[]
 }) {
   return (
     <div className="flex w-max max-w-full min-w-0 shrink-0 flex-wrap items-center gap-2">
-      {mentions.map((mention, index) => (
-        <SimulationResultCardPill
-          key={`${mention.requestedName}-${index}`}
-          href={getCardMentionScryfallUrl(mention)}
-          imageUrl={mention.defaultImageUrl}
-          label={getCardMentionDisplayName(mention)}
-          title={getCardMentionDisplayName(mention)}
-        />
-      ))}
+      {cardNames.map((cardName, index) => {
+        const resolvedCard = resolveSimulationCard(cardLookup, cardName)
+        const href = resolvedCard?.scryfallUri.trim() || null
+        const imageUrl = href
+          ? resolvedCard?.defaultImageUrl?.trim() || null
+          : null
+        const label = resolvedCard?.name ?? cardName
+
+        return (
+          <SimulationResultCardPill
+            key={`${cardName}-${index}`}
+            href={href}
+            imageUrl={imageUrl}
+            label={label}
+            title={
+              resolvedCard
+                ? resolvedCard.name
+                : `${cardName} could not be resolved from this deck.`
+            }
+          />
+        )
+      })}
     </div>
   )
 }
@@ -8432,27 +8374,28 @@ function SimulationResultCardPill({
       </span>
       {isPreviewVisible && previewPosition
         ? createPortal(
-          <span
-            className={`pointer-events-none fixed z-50 rounded-[5.75%/4.4%] bg-black/80 p-1 shadow-2xl shadow-black/70 ${previewPosition.placement === "above"
-              ? "origin-bottom"
-              : "origin-top"
+            <span
+              className={`pointer-events-none fixed z-50 rounded-[5.75%/4.4%] bg-black/80 p-1 shadow-2xl shadow-black/70 ${
+                previewPosition.placement === "above"
+                  ? "origin-bottom"
+                  : "origin-top"
               }`}
-            style={{
-              left: previewPosition.left,
-              top: previewPosition.top,
-              width: previewPosition.width,
-            }}
-            aria-hidden="true"
-          >
-            <img
-              className="block aspect-[488/680] w-full rounded-[4.75%/3.4%] object-cover"
-              src={trimmedImageUrl}
-              alt=""
-              loading="lazy"
-            />
-          </span>,
-          document.body
-        )
+              style={{
+                left: previewPosition.left,
+                top: previewPosition.top,
+                width: previewPosition.width,
+              }}
+              aria-hidden="true"
+            >
+              <img
+                className="block aspect-[488/680] w-full rounded-[4.75%/3.4%] object-cover"
+                src={trimmedImageUrl}
+                alt=""
+                loading="lazy"
+              />
+            </span>,
+            document.body
+          )
         : null}
     </>
   )
@@ -8518,27 +8461,44 @@ function clampSimulationResultCardPreviewValue(
 }
 
 function SimulationResultCardImageLinks({
-  mentions,
+  cardLookup,
+  cardNames,
 }: {
-  mentions: SimulationResultCardMention[]
+  cardLookup: SimulationCardLookup
+  cardNames: readonly string[]
 }) {
-  const cardImageMentions = mentions.filter(hasCardMentionImage)
+  const cardImages = cardNames.flatMap((cardName, index) => {
+    const resolvedCard = resolveSimulationCard(cardLookup, cardName)
+    const imageUrl = resolvedCard?.defaultImageUrl?.trim() || null
+    const href = resolvedCard?.scryfallUri.trim() || null
+
+    return resolvedCard && imageUrl
+      ? [
+          {
+            href,
+            imageUrl,
+            index,
+            name: resolvedCard.name,
+          },
+        ]
+      : []
+  })
 
   return (
     <div className="grid grid-cols-7 gap-2 sm:gap-3">
-      {cardImageMentions.map((mention, index) => (
+      {cardImages.map((card) => (
         <a
-          key={`${mention.requestedName}-image-${index}`}
+          key={`${card.name}-image-${card.index}`}
           className="block min-w-0 overflow-hidden rounded-sm bg-black/40 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
-          href={getCardMentionScryfallUrl(mention)}
+          href={card.href ?? undefined}
           target="_blank"
           rel="noreferrer"
-          title={getCardMentionDisplayName(mention)}
+          title={card.name}
         >
           <img
             className="aspect-[488/680] w-full object-cover"
-            src={mention.defaultImageUrl}
-            alt={getCardMentionDisplayName(mention)}
+            src={card.imageUrl}
+            alt={card.name}
             loading="lazy"
           />
         </a>
@@ -8547,88 +8507,28 @@ function SimulationResultCardImageLinks({
   )
 }
 
-function hasCardMentionImage(
-  mention: SimulationResultCardMention
-): mention is SimulationResultCardMention & { defaultImageUrl: string } {
-  return typeof mention.defaultImageUrl === "string"
-}
-
-function getOpeningHandFinalOutputCardMentions(
-  keptHand: readonly string[],
-  cardMentions: SimulationDebugLlmRunChunk["cardMentions"]
-) {
-  const keptHandMentions = cardMentions
-    .filter((mention) => mention.sourcePath === "payload.keptHand")
-    .sort((firstMention, secondMention) => {
-      return firstMention.position - secondMention.position
-    })
-
-  return keptHand.map(
-    (cardName, index): SimulationResultCardMention =>
-      keptHandMentions.find((mention) => mention.position === index) ?? {
-        sourcePath: "payload.keptHand",
-        position: index,
-        requestedName: cardName,
-        resolutionStatus: "missing",
-        resolvedName: null,
-        scryfallUri: null,
-        defaultImageUrl: null,
-      }
-  )
-}
-
-function getStartingHandCardMentions(startingHand: StartingHand) {
-  const mentions: SimulationResultCardMention[] = []
+function getStartingHandCardNames(startingHand: StartingHand) {
+  const cardNames: string[] = []
 
   for (const card of startingHand.cards) {
     for (let copyIndex = 0; copyIndex < card.quantity; copyIndex += 1) {
-      mentions.push({
-        sourcePath: "startingHand.cards",
-        position: mentions.length,
-        requestedName: card.name,
-        resolutionStatus: "exact",
-        resolvedName: card.name,
-        scryfallUri: card.scryfallUri,
-        defaultImageUrl: card.defaultImageUrl,
-      })
+      cardNames.push(card.name)
     }
   }
 
-  return mentions
+  return cardNames
 }
 
-function getCommanderCardMentions(commanders: readonly DeckCard[]) {
-  const mentions: SimulationResultCardMention[] = []
+function getCommanderCardNames(commanders: readonly DeckCard[]) {
+  const cardNames: string[] = []
 
   for (const card of commanders) {
     for (let copyIndex = 0; copyIndex < card.quantity; copyIndex += 1) {
-      mentions.push({
-        sourcePath: "deck.commanders",
-        position: mentions.length,
-        requestedName: card.name,
-        resolutionStatus: "exact",
-        resolvedName: card.name,
-        scryfallUri: card.scryfallUri,
-        defaultImageUrl: card.defaultImageUrl,
-      })
+      cardNames.push(card.name)
     }
   }
 
-  return mentions
-}
-
-function getCardMentionDisplayName(mention: SimulationResultCardMention) {
-  return mention.requestedName
-}
-
-function getCardMentionScryfallUrl(mention: SimulationResultCardMention) {
-  if (mention.scryfallUri) {
-    return mention.scryfallUri
-  }
-
-  return `https://scryfall.com/search?q=${encodeURIComponent(
-    mention.resolvedName ?? mention.requestedName
-  )}`
+  return cardNames
 }
 
 function formatResultEventPayload(payload: unknown) {
@@ -8672,7 +8572,7 @@ function isMcpCallFailure(chunk: SimulationDebugLlmRunChunk) {
 
   return (
     getPayloadString(asPayloadRecord(chunk.payload).item, "status") ===
-    "failed" || getMcpCallErrorPayload(chunk) !== null
+      "failed" || getMcpCallErrorPayload(chunk) !== null
   )
 }
 
@@ -8863,7 +8763,7 @@ function SimulationDebugRunGroup({
             </div>
 
             {run.provider === "openrouter" &&
-              (run.openrouterGenerations?.length ?? 0) > 0 ? (
+            (run.openrouterGenerations?.length ?? 0) > 0 ? (
               <OpenRouterGenerationsTable
                 deckId={deckId}
                 generations={run.openrouterGenerations ?? []}
@@ -8924,19 +8824,19 @@ function SimulationDebugRunGroup({
 
 type OpenRouterGenerationLookupState =
   | {
-    status: "loading"
-  }
+      status: "loading"
+    }
   | {
-    status: "loaded"
-    providerName: string | null
-    providerEntry: unknown | null
-    providerSlug: string | null
-    result: unknown
-  }
+      status: "loaded"
+      providerName: string | null
+      providerEntry: unknown | null
+      providerSlug: string | null
+      result: unknown
+    }
   | {
-    status: "error"
-    error: string
-  }
+      status: "error"
+      error: string
+    }
 
 function OpenRouterGenerationsTable({
   deckId,
@@ -9659,12 +9559,13 @@ function CreateStartingHandModal({
                     return (
                       <li key={card.id}>
                         <label
-                          className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${isSelected
-                            ? "bg-accent text-accent-foreground"
-                            : isDisabled
-                              ? "text-muted-foreground/55"
-                              : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
-                            }`}
+                          className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
+                            isSelected
+                              ? "bg-accent text-accent-foreground"
+                              : isDisabled
+                                ? "text-muted-foreground/55"
+                                : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+                          }`}
                         >
                           <input
                             className="size-4 accent-sky-300"

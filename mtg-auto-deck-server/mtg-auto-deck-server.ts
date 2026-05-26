@@ -70,7 +70,7 @@ import { ensureStarterDeckCopiesSchema } from "./starter-decks-postgres.js"
 import { ensureFreshScryfallOracleCards } from "./scryfall-cache.js"
 import {
   appendLlmRunChunkAtNextSequence,
-  appendLlmRunChunkWithResolvedCardMentions,
+  appendLlmRunChunk,
   appendLlmRunChunks,
   cancelLlmRun,
   cancelReportLlmRun,
@@ -505,7 +505,6 @@ function createRuntimeStreamChunk(
     reasoningDelta: chunk.reasoningDelta,
     outputDelta: chunk.outputDelta,
     payload: chunk.payload ?? null,
-    cardMentions: [],
     receivedAt: new Date().toISOString(),
   }
 }
@@ -4833,7 +4832,7 @@ async function appendRuntimeChunk(
   if (shouldPersistRuntimeChunkBeforeStreaming(sequencedChunk)) {
     await forceFlushRuntimeChunks(runtime)
 
-    const persistedChunk = await appendLlmRunChunkWithResolvedCardMentions(
+    const persistedChunk = await appendLlmRunChunk(
       runtime.llmRunId,
       sequencedChunk
     )

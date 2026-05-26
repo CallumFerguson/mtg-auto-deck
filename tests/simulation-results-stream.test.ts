@@ -21,6 +21,11 @@ import {
   getKnownSimulationResultToolLabelForChunk,
   getSimulationResultToolReasonForChunk,
 } from "../src/lib/simulation-result-tool-labels.js"
+import {
+  createSimulationCardLookup,
+  getSimulationResultToolCardNames,
+  resolveSimulationCard,
+} from "../src/lib/simulation-card-resolution.js"
 import { applySimulationResultsStreamEvent } from "../src/lib/simulation-results-stream.js"
 import {
   buildSimulationResultsTimelineSteps,
@@ -29,6 +34,7 @@ import {
 } from "../src/lib/simulation-results-timeline.js"
 import { getSimulationRunStartTimeMs } from "../src/lib/simulation-run-timing.js"
 import type {
+  DeckCard,
   SimulationDebugLlmRun,
   SimulationDebugLlmRunChunk,
   SimulationResultsInfo,
@@ -75,6 +81,105 @@ test("keeps streamed chunks ordered by sequence", () => {
   assert.deepEqual(
     updatedResults?.openingHandLlmRuns[0].chunks.map((chunk) => chunk.sequence),
     [2, 3]
+  )
+})
+
+test("does not add card mention compatibility payloads to streamed chunks", () => {
+  const results = createResults({
+    openingHandLlmRuns: [
+      createRun({
+        llmRunId: "opening-run",
+        phase: "opening_hand",
+      }),
+    ],
+  })
+
+  const updatedResults = applySimulationResultsStreamEvent(results, {
+    type: "chunk",
+    llmRunId: "opening-run",
+    chunk: createChunk({ id: 20, sequence: 1, outputDelta: "A" }),
+  })
+
+  assert.equal(
+    Object.hasOwn(
+      updatedResults?.openingHandLlmRuns[0].chunks[0] ?? {},
+      "cardMentions"
+    ),
+    false
+  )
+})
+
+test("resolves simulation cards from loaded deck data by normalized name", () => {
+  const solRing = createDeckCard({
+    deckCardId: 1,
+    name: "Sol Ring",
+    scryfallUri: "https://scryfall.com/card/test/1/sol-ring",
+  })
+  const commander = createDeckCard({
+    deckCardId: 2,
+    name: "Aesi, Tyrant of Gyre Strait",
+    scryfallUri: "https://scryfall.com/card/test/2/aesi",
+  })
+  const cardLookup = createSimulationCardLookup({
+    cards: [solRing],
+    commanders: [commander],
+  })
+
+  assert.equal(resolveSimulationCard(cardLookup, " sol ring "), solRing)
+  assert.equal(
+    resolveSimulationCard(cardLookup, "AESI, TYRANT OF GYRE STRAIT"),
+    commander
+  )
+  assert.equal(resolveSimulationCard(cardLookup, "Fake Card"), null)
+})
+
+test("extracts known tool-output card names for client deck lookup", () => {
+  assert.deepEqual(
+    getSimulationResultToolCardNames(
+      createChunk({
+        id: 30,
+        kind: "mcp_call_complete",
+        mcpFunctionName: "draw_card_from_top",
+        mcpFunctionOutput: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              message: "Drew cards.",
+              data: {
+                cards: ["Sol Ring", "Sol Ring", "Fake Card"],
+              },
+            }),
+          },
+        ],
+        sequence: 1,
+      })
+    ),
+    ["Sol Ring", "Sol Ring", "Fake Card"]
+  )
+  assert.deepEqual(
+    getSimulationResultToolCardNames(
+      createChunk({
+        id: 31,
+        kind: "mcp_call_complete",
+        mcpFunctionName: "take_cards_from_library",
+        mcpFunctionOutput: {
+          data: {
+            matches: [
+              {
+                requestedCard: "Sool Ring",
+                foundCard: "Sol Ring",
+              },
+              {
+                requestedCard: "Fake Card",
+                foundCard: null,
+              },
+            ],
+          },
+        },
+        sequence: 2,
+      })
+    ),
+    ["Sol Ring", "Fake Card"]
   )
 })
 
@@ -131,147 +236,6 @@ test("keeps library snapshots from persisted run updates", () => {
     "Forest",
     "Island",
   ])
-})
-
-test("keeps card mentions from first streamed persisted chunks", () => {
-  const results = createResults({
-    openingHandLlmRuns: [
-      createRun({
-        llmRunId: "opening-run",
-        phase: "opening_hand",
-      }),
-    ],
-  })
-
-  const updatedResults = applySimulationResultsStreamEvent(results, {
-    type: "chunk",
-    llmRunId: "opening-run",
-    chunk: createChunk({
-      id: 20,
-      kind: "mcp_call_complete",
-      mcpFunctionName: "draw_starting_hand",
-      mcpFunctionOutput: {
-        data: {
-          cards: ["Sol Ring", "Mega Fake Lotus"],
-        },
-      },
-      sequence: 1,
-      cardMentions: [
-        {
-          sourcePath: "data.cards",
-          position: 0,
-          requestedName: "Sol Ring",
-          resolutionStatus: "exact",
-          resolvedName: "Sol Ring",
-          scryfallUri: "https://scryfall.com/card/test/1/sol-ring",
-          defaultImageUrl: "https://cards.example/sol-ring.jpg",
-        },
-        {
-          sourcePath: "data.cards",
-          position: 1,
-          requestedName: "Mega Fake Lotus",
-          resolutionStatus: "missing",
-          resolvedName: null,
-          scryfallUri: null,
-          defaultImageUrl: null,
-        },
-      ],
-    }),
-  })
-
-  assert.deepEqual(
-    updatedResults?.openingHandLlmRuns[0].chunks[0].cardMentions,
-    [
-      {
-        sourcePath: "data.cards",
-        position: 0,
-        requestedName: "Sol Ring",
-        resolutionStatus: "exact",
-        resolvedName: "Sol Ring",
-        scryfallUri: "https://scryfall.com/card/test/1/sol-ring",
-        defaultImageUrl: "https://cards.example/sol-ring.jpg",
-      },
-      {
-        sourcePath: "data.cards",
-        position: 1,
-        requestedName: "Mega Fake Lotus",
-        resolutionStatus: "missing",
-        resolvedName: null,
-        scryfallUri: null,
-        defaultImageUrl: null,
-      },
-    ]
-  )
-})
-
-test("keeps card mentions from final parsed output chunks", () => {
-  const results = createResults({
-    openingHandLlmRuns: [
-      createRun({
-        llmRunId: "opening-run",
-        phase: "opening_hand",
-      }),
-    ],
-  })
-
-  const updatedResults = applySimulationResultsStreamEvent(results, {
-    type: "chunk",
-    llmRunId: "opening-run",
-    chunk: createChunk({
-      id: 21,
-      kind: "final_parsed_output",
-      sequence: 1,
-      payload: {
-        keptHand: ["Sol Ring", "Mega Fake Lotus"],
-        summary: "Kept a hand.",
-        error: null,
-      },
-      cardMentions: [
-        {
-          sourcePath: "payload.keptHand",
-          position: 0,
-          requestedName: "Sol Ring",
-          resolutionStatus: "exact",
-          resolvedName: "Sol Ring",
-          scryfallUri: "https://scryfall.com/card/test/1/sol-ring",
-          defaultImageUrl: "https://cards.example/sol-ring.jpg",
-        },
-        {
-          sourcePath: "payload.keptHand",
-          position: 1,
-          requestedName: "Mega Fake Lotus",
-          resolutionStatus: "missing",
-          resolvedName: null,
-          scryfallUri: null,
-          defaultImageUrl: null,
-        },
-      ],
-    }),
-  })
-
-  assert.deepEqual(
-    updatedResults?.openingHandLlmRuns[0].chunks[0].cardMentions,
-    [
-      {
-        sourcePath: "payload.keptHand",
-        position: 0,
-        requestedName: "Sol Ring",
-        resolutionStatus: "exact",
-        resolvedName: "Sol Ring",
-        scryfallUri: "https://scryfall.com/card/test/1/sol-ring",
-        defaultImageUrl: "https://cards.example/sol-ring.jpg",
-      },
-      {
-        sourcePath: "payload.keptHand",
-        position: 1,
-        requestedName: "Mega Fake Lotus",
-        resolutionStatus: "missing",
-        resolvedName: null,
-        scryfallUri: null,
-        defaultImageUrl: null,
-      },
-    ]
-  )
 })
 
 test("merges OpenRouter generations from persisted run updates", () => {
@@ -2232,7 +2196,6 @@ function createRun(overrides: {
 }
 
 function createChunk(overrides: {
-  cardMentions?: SimulationDebugLlmRunChunk["cardMentions"]
   id: number | null
   kind?: string
   mcpFunctionName?: string | null
@@ -2253,8 +2216,26 @@ function createChunk(overrides: {
     reasoningDelta: overrides.reasoningDelta ?? null,
     outputDelta: overrides.outputDelta ?? null,
     payload: overrides.payload ?? {},
-    cardMentions: overrides.cardMentions ?? [],
     receivedAt: "2026-01-01T00:00:00.000Z",
+  }
+}
+
+function createDeckCard(overrides: {
+  deckCardId: number
+  defaultImageUrl?: string | null
+  name: string
+  quantity?: number
+  scryfallUri: string
+  typeLine?: string | null
+}): DeckCard {
+  return {
+    deckCardId: overrides.deckCardId,
+    oracleId: `oracle-${overrides.deckCardId}`,
+    name: overrides.name,
+    quantity: overrides.quantity ?? 1,
+    scryfallUri: overrides.scryfallUri,
+    defaultImageUrl: overrides.defaultImageUrl ?? null,
+    typeLine: overrides.typeLine ?? null,
   }
 }
 

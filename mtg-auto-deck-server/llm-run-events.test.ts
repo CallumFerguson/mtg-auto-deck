@@ -37,7 +37,6 @@ import {
   buildRecordLlmRunMcpFunctionCallQuery,
   canApplyLateLlmRunTerminalUpdate,
   compactLlmRunDeltaChunks,
-  extractLlmRunChunkCardMentionRequests,
   getInsertedLlmRunGeneratedDeltaCharCount,
   getInitialSimulationStatus,
   getLlmRunOwnerConcurrencyLimitSql,
@@ -690,278 +689,6 @@ test("normalizes OpenAI reasoning summary part lifecycle events", () => {
 
   assert.equal(summaryStartChunk.kind, "reasoning_start")
   assert.equal(summaryDoneChunk.kind, "reasoning_done")
-})
-
-test("extracts card mentions from draw tool output data", () => {
-  assert.deepEqual(
-    extractLlmRunChunkCardMentionRequests({
-      kind: "mcp_call_complete",
-      mcpFunctionName: "draw_starting_hand",
-      mcpFunctionOutput: {
-        data: {
-          cards: ["Sol Ring", "Mega Fake Lotus", "Sol Ring"],
-        },
-      },
-      payload: {},
-    }),
-    [
-      {
-        sourcePath: "data.cards",
-        position: 0,
-        requestedName: "Sol Ring",
-      },
-      {
-        sourcePath: "data.cards",
-        position: 1,
-        requestedName: "Mega Fake Lotus",
-      },
-      {
-        sourcePath: "data.cards",
-        position: 2,
-        requestedName: "Sol Ring",
-      },
-    ]
-  )
-})
-
-test("extracts one card mention per library search match", () => {
-  assert.deepEqual(
-    extractLlmRunChunkCardMentionRequests({
-      kind: "mcp_call_complete",
-      mcpFunctionName: "take_cards_from_library",
-      mcpFunctionOutput: {
-        data: {
-          foundCards: ["Sol Ring"],
-          matches: [
-            {
-              requestedCard: "Sool Ring",
-              foundCard: "Sol Ring",
-            },
-            {
-              requestedCard: "Imaginary Tutor",
-              foundCard: null,
-            },
-          ],
-        },
-      },
-      payload: {},
-    }),
-    [
-      {
-        sourcePath: "data.matches[*].foundCard",
-        position: 0,
-        requestedName: "Sol Ring",
-      },
-      {
-        sourcePath: "data.matches[*].requestedCard",
-        position: 1,
-        requestedName: "Imaginary Tutor",
-      },
-    ]
-  )
-})
-
-test("does not duplicate exact library search mentions across output fields", () => {
-  assert.deepEqual(
-    extractLlmRunChunkCardMentionRequests({
-      kind: "mcp_call_complete",
-      mcpFunctionName: "take_cards_from_library",
-      mcpFunctionOutput: {
-        data: {
-          foundCards: ["Forest"],
-          requestedCards: ["Forest"],
-          matches: [
-            {
-              requestedCard: "Forest",
-              foundCard: "Forest",
-            },
-          ],
-        },
-      },
-      payload: {},
-    }),
-    [
-      {
-        sourcePath: "data.matches[*].foundCard",
-        position: 0,
-        requestedName: "Forest",
-      },
-    ]
-  )
-})
-
-test("keeps repeated library search mentions when multiple copies are taken", () => {
-  assert.deepEqual(
-    extractLlmRunChunkCardMentionRequests({
-      kind: "mcp_call_complete",
-      mcpFunctionName: "take_cards_from_library",
-      mcpFunctionOutput: {
-        data: {
-          foundCards: ["Forest", "Forest"],
-          requestedCards: ["Forest", "Forest"],
-          matches: [
-            {
-              requestedCard: "Forest",
-              foundCard: "Forest",
-            },
-            {
-              requestedCard: "Forest",
-              foundCard: "Forest",
-            },
-          ],
-        },
-      },
-      payload: {},
-    }),
-    [
-      {
-        sourcePath: "data.matches[*].foundCard",
-        position: 0,
-        requestedName: "Forest",
-      },
-      {
-        sourcePath: "data.matches[*].foundCard",
-        position: 1,
-        requestedName: "Forest",
-      },
-    ]
-  )
-})
-
-test("extracts card mentions from opening-hand final parsed output", () => {
-  assert.deepEqual(
-    extractLlmRunChunkCardMentionRequests({
-      kind: "final_parsed_output",
-      mcpFunctionName: null,
-      mcpFunctionOutput: null,
-      payload: {
-        keptHand: ["Sol Ring", "Command Tower", "Mega Fake Lotus"],
-        summary: "Kept a hand.",
-        error: null,
-      },
-    }),
-    [
-      {
-        sourcePath: "payload.keptHand",
-        position: 0,
-        requestedName: "Sol Ring",
-      },
-      {
-        sourcePath: "payload.keptHand",
-        position: 1,
-        requestedName: "Command Tower",
-      },
-      {
-        sourcePath: "payload.keptHand",
-        position: 2,
-        requestedName: "Mega Fake Lotus",
-      },
-    ]
-  )
-})
-
-test("extracts card mentions from turn final parsed output actions", () => {
-  assert.deepEqual(
-    extractLlmRunChunkCardMentionRequests({
-      kind: "final_parsed_output",
-      mcpFunctionName: null,
-      mcpFunctionOutput: null,
-      payload: {
-        turnActions: createTurnActions({
-          draw: ["Draw *Forest*."],
-          precombat_main: [
-            "Tap *Command Tower* for {G}. Cast *Sol Ring*.",
-            "Ignore **bold text**, * *, and an unfinished *card reference.",
-          ],
-        }),
-        gameState: createTurnGameState({ battlefield: [], hand: [] }),
-        error: null,
-      },
-    }),
-    [
-      {
-        sourcePath: "payload.turnActions.draw[0]",
-        position: 0,
-        requestedName: "Forest",
-      },
-      {
-        sourcePath: "payload.turnActions.precombat_main[0]",
-        position: 0,
-        requestedName: "Command Tower",
-      },
-      {
-        sourcePath: "payload.turnActions.precombat_main[0]",
-        position: 1,
-        requestedName: "Sol Ring",
-      },
-    ]
-  )
-})
-
-test("extracts card mentions from turn final parsed output game state zones", () => {
-  assert.deepEqual(
-    extractLlmRunChunkCardMentionRequests({
-      kind: "final_parsed_output",
-      mcpFunctionName: null,
-      mcpFunctionOutput: null,
-      payload: {
-        turnActions: createTurnActions({
-          draw: [],
-          precombat_main: [],
-        }),
-        gameState: {
-          zones: {
-            hand: [
-              createGameStateCard("Forest"),
-              createGameStateCard("Forest"),
-            ],
-            command: [createGameStateCard("Aesi, Tyrant of Gyre Strait")],
-            battlefield: [
-              createGameStateCard("Sol Ring"),
-              { tapped: false, notes: null },
-              createGameStateCard("Command Tower"),
-            ],
-            graveyard: [],
-            exile: [],
-            stash: [createGameStateCard("Arcane Signet")],
-          },
-        },
-        error: null,
-      },
-    }),
-    [
-      {
-        sourcePath: "payload.gameState.zones.hand[0].name",
-        position: 0,
-        requestedName: "Forest",
-      },
-      {
-        sourcePath: "payload.gameState.zones.hand[1].name",
-        position: 1,
-        requestedName: "Forest",
-      },
-      {
-        sourcePath: "payload.gameState.zones.command[0].name",
-        position: 0,
-        requestedName: "Aesi, Tyrant of Gyre Strait",
-      },
-      {
-        sourcePath: "payload.gameState.zones.battlefield[0].name",
-        position: 0,
-        requestedName: "Sol Ring",
-      },
-      {
-        sourcePath: "payload.gameState.zones.battlefield[2].name",
-        position: 2,
-        requestedName: "Command Tower",
-      },
-      {
-        sourcePath: "payload.gameState.zones.stash[0].name",
-        position: 0,
-        requestedName: "Arcane Signet",
-      },
-    ]
-  )
 })
 
 test("estimates preset token cost in unrounded USD", () => {
@@ -2842,7 +2569,6 @@ test("builds opening-hand evaluation input like copy activity with prompt", () =
         reasoningDelta: "Reason about the opener.",
         outputDelta: null,
         payload: {},
-        cardMentions: [],
         receivedAt: "2026-01-01T00:00:00.000Z",
       },
       {
@@ -2857,7 +2583,6 @@ test("builds opening-hand evaluation input like copy activity with prompt", () =
         reasoningDelta: null,
         outputDelta: null,
         payload: {},
-        cardMentions: [],
         receivedAt: "2026-01-01T00:00:01.000Z",
       },
     ],
@@ -3030,7 +2755,6 @@ test("builds turn evaluation input like copy activity with prompt", () => {
         reasoningDelta: "Reason about the turn.",
         outputDelta: null,
         payload: {},
-        cardMentions: [],
         receivedAt: "2026-01-01T00:00:00.000Z",
       },
       {
@@ -3046,7 +2770,6 @@ test("builds turn evaluation input like copy activity with prompt", () => {
         reasoningDelta: null,
         outputDelta: null,
         payload: {},
-        cardMentions: [],
         receivedAt: "2026-01-01T00:00:01.000Z",
       },
     ],
