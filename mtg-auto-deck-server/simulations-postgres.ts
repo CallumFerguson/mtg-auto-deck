@@ -238,6 +238,18 @@ export type LlmRunMcpTokenContext = {
   simulationId: string
 }
 
+export type LlmRunMcpFunctionCallStatus = "completed" | "failed"
+
+export type RecordLlmRunMcpFunctionCallInput = {
+  llmRunId: string
+  mcpFunctionName: string
+  status: LlmRunMcpFunctionCallStatus
+  inputPayload: unknown
+  outputPayload: unknown
+  calledAt?: Date
+  completedAt?: Date
+}
+
 export type TurnEvaluationJson = {
   legalTurnPass: boolean
   reasoningPass: boolean
@@ -1053,6 +1065,24 @@ export async function ensureSimulationsSchema() {
     )
   `)
   await queryDatabase(`
+    CREATE TABLE IF NOT EXISTS llm_run_mcp_function_calls (
+      id bigserial PRIMARY KEY,
+
+      llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
+      mcp_function_name text NOT NULL,
+      status text NOT NULL,
+      input_payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+      output_payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+      called_at timestamptz NOT NULL DEFAULT now(),
+      completed_at timestamptz NOT NULL DEFAULT now(),
+
+      CONSTRAINT llm_run_mcp_function_calls_function_name_check
+        CHECK (btrim(mcp_function_name) <> ''),
+      CONSTRAINT llm_run_mcp_function_calls_status_check
+        CHECK (status IN ('completed', 'failed'))
+    )
+  `)
+  await queryDatabase(`
     CREATE TABLE IF NOT EXISTS llm_run_chunks (
       id bigserial PRIMARY KEY,
 
@@ -1339,6 +1369,14 @@ export async function ensureSimulationsSchema() {
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS llm_run_openrouter_generations_llm_run_id_turn_idx
       ON llm_run_openrouter_generations (llm_run_id, openrouter_turn_index)
+  `)
+  await queryDatabase(`
+    CREATE INDEX IF NOT EXISTS llm_run_mcp_function_calls_llm_run_id_called_at_idx
+      ON llm_run_mcp_function_calls (llm_run_id, called_at)
+  `)
+  await queryDatabase(`
+    CREATE INDEX IF NOT EXISTS llm_run_mcp_function_calls_function_name_called_at_idx
+      ON llm_run_mcp_function_calls (mcp_function_name, called_at)
   `)
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS llm_run_chunks_llm_run_id_sequence_idx
@@ -3059,6 +3097,45 @@ export async function revokeLlmRunMcpToken(llmRunId: string) {
   )
 }
 
+export async function recordLlmRunMcpFunctionCall(
+  input: RecordLlmRunMcpFunctionCallInput
+) {
+  const query = buildRecordLlmRunMcpFunctionCallQuery(input)
+
+  await queryDatabase(query.text, query.values)
+}
+
+export function buildRecordLlmRunMcpFunctionCallQuery(
+  input: RecordLlmRunMcpFunctionCallInput
+) {
+  const calledAt = input.calledAt ?? new Date()
+  const completedAt = input.completedAt ?? new Date()
+
+  return {
+    text: `
+      INSERT INTO llm_run_mcp_function_calls (
+        llm_run_id,
+        mcp_function_name,
+        status,
+        input_payload,
+        output_payload,
+        called_at,
+        completed_at
+      )
+      VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7)
+    `,
+    values: [
+      input.llmRunId,
+      input.mcpFunctionName,
+      input.status,
+      getRequiredJsonbQueryValue(input.inputPayload),
+      getRequiredJsonbQueryValue(input.outputPayload),
+      calledAt,
+      completedAt,
+    ],
+  }
+}
+
 export async function appendLlmRunChunks(
   llmRunId: string,
   chunks: readonly LlmRunChunkInput[]
@@ -3455,6 +3532,10 @@ function getDeltaChunkText(
 
 function getJsonbQueryValue(value: unknown | null | undefined) {
   return value === null || value === undefined ? null : JSON.stringify(value)
+}
+
+function getRequiredJsonbQueryValue(value: unknown | null | undefined) {
+  return value === null || value === undefined ? "{}" : JSON.stringify(value)
 }
 
 async function incrementRunningLlmRunCostFromInsertedChunks(

@@ -34,6 +34,7 @@ import {
   buildFailQueuedLlmRunUsageLimitQuery,
   buildIncrementRunningLlmRunCostQuery,
   buildPartialLlmRunCostSnapshotQuery,
+  buildRecordLlmRunMcpFunctionCallQuery,
   canApplyLateLlmRunTerminalUpdate,
   compactLlmRunDeltaChunks,
   extractLlmRunChunkCardMentionRequests,
@@ -44,7 +45,12 @@ import {
   getSimulationCreationDecision,
   getTurnCompletionDecision,
   isValidCompletedOpeningHand,
+  type RecordLlmRunMcpFunctionCallInput,
 } from "./simulations-postgres.js"
+import {
+  createMcpFunctionCallFailureOutput,
+  runAuditedMcpFunctionCall,
+} from "./mcp-function-call-audit.js"
 import {
   SimulationStopTimeoutError,
   waitForSimulationStopCompletions,
@@ -236,6 +242,189 @@ test("builds chunk inserts with extracted MCP function reason", () => {
 
   assert.match(query.text, /mcp_function_reason/)
   assert.equal(query.values[5], "Bottoming after mulligan")
+})
+
+test("builds MCP function call inserts with normalized success output", () => {
+  const calledAt = new Date("2026-05-26T18:00:00.000Z")
+  const completedAt = new Date("2026-05-26T18:00:01.000Z")
+  const inputPayload = {
+    llmRunId: "00000000-0000-0000-0000-000000000001",
+    reason: "Opening 7",
+  }
+  const outputPayload = {
+    message: "Drew the starting hand.",
+    data: {
+      cards: ["Sol Ring"],
+    },
+  }
+  const query = buildRecordLlmRunMcpFunctionCallQuery({
+    llmRunId: "00000000-0000-0000-0000-000000000001",
+    mcpFunctionName: "draw_starting_hand",
+    status: "completed",
+    inputPayload,
+    outputPayload,
+    calledAt,
+    completedAt,
+  })
+
+  assert.match(query.text, /INSERT INTO llm_run_mcp_function_calls/)
+  assert.deepEqual(query.values, [
+    "00000000-0000-0000-0000-000000000001",
+    "draw_starting_hand",
+    "completed",
+    JSON.stringify(inputPayload),
+    JSON.stringify(outputPayload),
+    calledAt,
+    completedAt,
+  ])
+})
+
+test("builds MCP function call inserts with normalized failure output", () => {
+  const error = new Error("Library is empty.")
+  error.name = "SimulationValidationError"
+  const outputPayload = createMcpFunctionCallFailureOutput(error)
+  const query = buildRecordLlmRunMcpFunctionCallQuery({
+    llmRunId: "00000000-0000-0000-0000-000000000001",
+    mcpFunctionName: "draw_card_from_top",
+    status: "failed",
+    inputPayload: {
+      llmRunId: "00000000-0000-0000-0000-000000000001",
+      count: 1,
+    },
+    outputPayload,
+    calledAt: new Date("2026-05-26T18:00:00.000Z"),
+    completedAt: new Date("2026-05-26T18:00:01.000Z"),
+  })
+
+  assert.equal(query.values[2], "failed")
+  assert.equal(
+    query.values[4],
+    JSON.stringify({
+      error: {
+        name: "SimulationValidationError",
+        message: "Library is empty.",
+      },
+    })
+  )
+})
+
+test("audits successful MCP tool calls against the trusted LLM run", async () => {
+  const records: RecordLlmRunMcpFunctionCallInput[] = []
+  const output = {
+    content: [
+      {
+        type: "text" as const,
+        text: "ok",
+      },
+    ],
+  }
+  const result = await runAuditedMcpFunctionCall({
+    authContext: {
+      llmRunId: "trusted-run",
+    },
+    getOutputPayload: () => ({
+      message: "Drew 1 card.",
+      data: {
+        cards: ["Sol Ring"],
+      },
+    }),
+    handler: async () => output,
+    inputPayload: {
+      llmRunId: "spoofed-run",
+      count: 1,
+    },
+    mcpFunctionName: "draw_card_from_top",
+    recordCall: async (record) => {
+      records.push(record)
+    },
+  })
+
+  assert.equal(result, output)
+  assert.equal(records.length, 1)
+  assert.equal(records[0]?.llmRunId, "trusted-run")
+  assert.equal(records[0]?.mcpFunctionName, "draw_card_from_top")
+  assert.equal(records[0]?.status, "completed")
+  assert.deepEqual(records[0]?.inputPayload, {
+    llmRunId: "spoofed-run",
+    count: 1,
+  })
+  assert.deepEqual(records[0]?.outputPayload, {
+    message: "Drew 1 card.",
+    data: {
+      cards: ["Sol Ring"],
+    },
+  })
+})
+
+test("audits failed MCP tool calls and rethrows the original error", async () => {
+  const records: RecordLlmRunMcpFunctionCallInput[] = []
+  const error = new Error("Library is empty.")
+  error.name = "SimulationValidationError"
+  let thrownError: unknown
+
+  try {
+    await runAuditedMcpFunctionCall({
+      authContext: {
+        llmRunId: "trusted-run",
+      },
+      getOutputPayload: () => null,
+      handler: async () => {
+        throw error
+      },
+      inputPayload: {
+        llmRunId: "trusted-run",
+        count: 1,
+      },
+      mcpFunctionName: "draw_card_from_top",
+      recordCall: async (record) => {
+        records.push(record)
+      },
+    })
+  } catch (caughtError) {
+    thrownError = caughtError
+  }
+
+  assert.equal(thrownError, error)
+  assert.equal(records.length, 1)
+  assert.equal(records[0]?.status, "failed")
+  assert.deepEqual(records[0]?.outputPayload, {
+    error: {
+      name: "SimulationValidationError",
+      message: "Library is empty.",
+    },
+  })
+})
+
+test("does not mask MCP success when audit recording fails", async () => {
+  const loggerCalls: unknown[][] = []
+  const output = {
+    content: [],
+  }
+  const result = await runAuditedMcpFunctionCall({
+    authContext: {
+      llmRunId: "trusted-run",
+    },
+    getOutputPayload: () => ({
+      message: "ok",
+      data: {},
+    }),
+    handler: async () => output,
+    inputPayload: {
+      llmRunId: "trusted-run",
+    },
+    logger: {
+      error: (...args) => {
+        loggerCalls.push(args)
+      },
+    },
+    mcpFunctionName: "shuffle_library",
+    recordCall: async () => {
+      throw new Error("insert failed")
+    },
+  })
+
+  assert.equal(result, output)
+  assert.equal(loggerCalls.length, 1)
 })
 
 test("builds delta chunk inserts with nullable payloads", () => {

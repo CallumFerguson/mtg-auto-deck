@@ -201,6 +201,7 @@ import {
   registerRuntimeAbortHandler,
   throwIfRuntimeAborted,
 } from "./llm-runtime-cancellation.js"
+import { runAuditedMcpFunctionCall } from "./mcp-function-call-audit.js"
 import {
   buildOpenRouterReasoningOptions,
   buildProviderReasoningOptions,
@@ -1208,6 +1209,14 @@ type McpTakeCardsInput = McpSimulationIdentifierInput & {
   cards: string[]
 }
 
+type McpToolResponse = {
+  content: ReturnType<typeof createToolResultContent>
+}
+
+type McpToolHandler<TInput extends McpSimulationIdentifierInput> = (
+  input: TInput
+) => Promise<McpToolResponse>
+
 type McpSimulationIdentifierConfig = {
   authContext?: LlmRunMcpTokenContext
   inputSchema: typeof llmRunIdentifierSchema
@@ -1217,6 +1226,21 @@ type McpSimulationIdentifierConfig = {
 const llmRunMcpIdentifier: McpSimulationIdentifierConfig = {
   inputSchema: llmRunIdentifierSchema,
   requireReason: true,
+}
+
+function createAuditedMcpToolHandler<TInput extends McpSimulationIdentifierInput>(
+  mcpFunctionName: string,
+  identifier: McpSimulationIdentifierConfig,
+  handler: McpToolHandler<TInput>
+) {
+  return async (input: TInput) =>
+    runAuditedMcpFunctionCall({
+      authContext: identifier.authContext,
+      getOutputPayload: getMcpToolAuditOutput,
+      handler: () => handler(input),
+      inputPayload: input,
+      mcpFunctionName,
+    })
 }
 
 async function resolveMcpSimulationId(
@@ -1346,21 +1370,25 @@ function registerDrawCardFromTopTool(
         count: z.number().int().positive().describe("How many cards to draw."),
       },
     },
-    async (input: McpDrawCardsInput) => {
-      const resolvedSimulationId = await resolveMcpSimulationId(
-        input,
-        identifier.authContext
-      )
-      const { count } = input
-      const response = await drawCardsFromTop(resolvedSimulationId, count)
+    createAuditedMcpToolHandler(
+      "draw_card_from_top",
+      identifier,
+      async (input: McpDrawCardsInput) => {
+        const resolvedSimulationId = await resolveMcpSimulationId(
+          input,
+          identifier.authContext
+        )
+        const { count } = input
+        const response = await drawCardsFromTop(resolvedSimulationId, count)
 
-      return {
-        content: createToolResultContent(
-          `Drew ${response.cards.length} card(s) from the top. ${response.cardsRemaining} card(s) remain.`,
-          addMcpReasonToToolResult(identifier, input, response)
-        ),
+        return {
+          content: createToolResultContent(
+            `Drew ${response.cards.length} card(s) from the top. ${response.cardsRemaining} card(s) remain.`,
+            addMcpReasonToToolResult(identifier, input, response)
+          ),
+        }
       }
-    }
+    )
   )
 }
 
@@ -1380,21 +1408,25 @@ function registerDrawCardFromBottomTool(
         count: z.number().int().positive().describe("How many cards to draw."),
       },
     },
-    async (input: McpDrawCardsInput) => {
-      const resolvedSimulationId = await resolveMcpSimulationId(
-        input,
-        identifier.authContext
-      )
-      const { count } = input
-      const response = await drawCardsFromBottom(resolvedSimulationId, count)
+    createAuditedMcpToolHandler(
+      "draw_card_from_bottom",
+      identifier,
+      async (input: McpDrawCardsInput) => {
+        const resolvedSimulationId = await resolveMcpSimulationId(
+          input,
+          identifier.authContext
+        )
+        const { count } = input
+        const response = await drawCardsFromBottom(resolvedSimulationId, count)
 
-      return {
-        content: createToolResultContent(
-          `Drew ${response.cards.length} card(s) from the bottom. ${response.cardsRemaining} card(s) remain.`,
-          addMcpReasonToToolResult(identifier, input, response)
-        ),
+        return {
+          content: createToolResultContent(
+            `Drew ${response.cards.length} card(s) from the bottom. ${response.cardsRemaining} card(s) remain.`,
+            addMcpReasonToToolResult(identifier, input, response)
+          ),
+        }
       }
-    }
+    )
   )
 }
 
@@ -1413,20 +1445,24 @@ function registerDrawStartingHandTool(
         ...(identifier.requireReason ? { reason: mcpShortReasonSchema } : {}),
       },
     },
-    async (input: McpSimulationIdentifierInput) => {
-      const resolvedSimulationId = await resolveMcpSimulationId(
-        input,
-        identifier.authContext
-      )
-      const response = await drawStartingHand(resolvedSimulationId)
+    createAuditedMcpToolHandler(
+      "draw_starting_hand",
+      identifier,
+      async (input: McpSimulationIdentifierInput) => {
+        const resolvedSimulationId = await resolveMcpSimulationId(
+          input,
+          identifier.authContext
+        )
+        const response = await drawStartingHand(resolvedSimulationId)
 
-      return {
-        content: createToolResultContent(
-          `Drew the starting hand. ${response.cardsRemaining} card(s) remain in the library.`,
-          addMcpReasonToToolResult(identifier, input, response)
-        ),
+        return {
+          content: createToolResultContent(
+            `Drew the starting hand. ${response.cardsRemaining} card(s) remain in the library.`,
+            addMcpReasonToToolResult(identifier, input, response)
+          ),
+        }
       }
-    }
+    )
   )
 }
 
@@ -1451,21 +1487,25 @@ function registerMulliganTool(
           ),
       },
     },
-    async (input: McpMulliganInput) => {
-      const resolvedSimulationId = await resolveMcpSimulationId(
-        input,
-        identifier.authContext
-      )
-      const { reason } = input
-      const response = await mulliganSimulation(resolvedSimulationId, reason)
+    createAuditedMcpToolHandler(
+      "mulligan",
+      identifier,
+      async (input: McpMulliganInput) => {
+        const resolvedSimulationId = await resolveMcpSimulationId(
+          input,
+          identifier.authContext
+        )
+        const { reason } = input
+        const response = await mulliganSimulation(resolvedSimulationId, reason)
 
-      return {
-        content: createToolResultContent(
-          `Mulligan ${response.mulliganCount}: drew a replacement seven-card hand. ${response.cardsRemaining} card(s) remain. ${response.reminder}`,
-          response
-        ),
+        return {
+          content: createToolResultContent(
+            `Mulligan ${response.mulliganCount}: drew a replacement seven-card hand. ${response.cardsRemaining} card(s) remain. ${response.reminder}`,
+            response
+          ),
+        }
       }
-    }
+    )
   )
 }
 
@@ -1501,26 +1541,30 @@ function registerReturnCardToLibraryTool(
           ),
       },
     },
-    async (input: McpReturnCardInput) => {
-      const resolvedSimulationId = await resolveMcpSimulationId(
-        input,
-        identifier.authContext
-      )
-      const { card, position, side } = input
-      const response = await returnCardToSimulationLibrary({
-        simulationId: resolvedSimulationId,
-        card,
-        side,
-        position,
-      })
+    createAuditedMcpToolHandler(
+      "return_card_to_library",
+      identifier,
+      async (input: McpReturnCardInput) => {
+        const resolvedSimulationId = await resolveMcpSimulationId(
+          input,
+          identifier.authContext
+        )
+        const { card, position, side } = input
+        const response = await returnCardToSimulationLibrary({
+          simulationId: resolvedSimulationId,
+          card,
+          side,
+          position,
+        })
 
-      return {
-        content: createToolResultContent(
-          `Returned ${JSON.stringify(response.card)} to the ${side} of the library. ${response.cardsRemaining} card(s) remain.`,
-          addMcpReasonToToolResult(identifier, input, response)
-        ),
+        return {
+          content: createToolResultContent(
+            `Returned ${JSON.stringify(response.card)} to the ${side} of the library. ${response.cardsRemaining} card(s) remain.`,
+            addMcpReasonToToolResult(identifier, input, response)
+          ),
+        }
       }
-    }
+    )
   )
 }
 
@@ -1553,26 +1597,30 @@ function registerReturnCardsToLibraryTool(
           ),
       },
     },
-    async (input: McpReturnCardsInput) => {
-      const resolvedSimulationId = await resolveMcpSimulationId(
-        input,
-        identifier.authContext
-      )
-      const { cards, randomizeOrder, side } = input
-      const response = await returnCardsToSimulationLibrary({
-        simulationId: resolvedSimulationId,
-        cards,
-        side,
-        randomizeOrder,
-      })
+    createAuditedMcpToolHandler(
+      "return_cards_to_library",
+      identifier,
+      async (input: McpReturnCardsInput) => {
+        const resolvedSimulationId = await resolveMcpSimulationId(
+          input,
+          identifier.authContext
+        )
+        const { cards, randomizeOrder, side } = input
+        const response = await returnCardsToSimulationLibrary({
+          simulationId: resolvedSimulationId,
+          cards,
+          side,
+          randomizeOrder,
+        })
 
-      return {
-        content: createToolResultContent(
-          `Returned ${response.cards.length} card(s) to the ${side} of the library. ${response.cardsRemaining} card(s) remain.`,
-          addMcpReasonToToolResult(identifier, input, response)
-        ),
+        return {
+          content: createToolResultContent(
+            `Returned ${response.cards.length} card(s) to the ${side} of the library. ${response.cardsRemaining} card(s) remain.`,
+            addMcpReasonToToolResult(identifier, input, response)
+          ),
+        }
       }
-    }
+    )
   )
 }
 
@@ -1597,24 +1645,28 @@ function registerTakeCardsFromLibraryTool(
           ),
       },
     },
-    async (input: McpTakeCardsInput) => {
-      const resolvedSimulationId = await resolveMcpSimulationId(
-        input,
-        identifier.authContext
-      )
-      const { cards } = input
-      const response = await takeCardsFromSimulationLibrary(
-        resolvedSimulationId,
-        cards
-      )
+    createAuditedMcpToolHandler(
+      "take_cards_from_library",
+      identifier,
+      async (input: McpTakeCardsInput) => {
+        const resolvedSimulationId = await resolveMcpSimulationId(
+          input,
+          identifier.authContext
+        )
+        const { cards } = input
+        const response = await takeCardsFromSimulationLibrary(
+          resolvedSimulationId,
+          cards
+        )
 
-      return {
-        content: createToolResultContent(
-          `Found and removed ${response.foundCards.length} requested card(s). ${response.cardsRemaining} card(s) remain.`,
-          addMcpReasonToToolResult(identifier, input, response)
-        ),
+        return {
+          content: createToolResultContent(
+            `Found and removed ${response.foundCards.length} requested card(s). ${response.cardsRemaining} card(s) remain.`,
+            addMcpReasonToToolResult(identifier, input, response)
+          ),
+        }
       }
-    }
+    )
   )
 }
 
@@ -1632,20 +1684,24 @@ function registerShuffleLibraryTool(
         ...(identifier.requireReason ? { reason: mcpShortReasonSchema } : {}),
       },
     },
-    async (input: McpSimulationIdentifierInput) => {
-      const resolvedSimulationId = await resolveMcpSimulationId(
-        input,
-        identifier.authContext
-      )
-      const response = await shuffleSimulationLibrary(resolvedSimulationId)
+    createAuditedMcpToolHandler(
+      "shuffle_library",
+      identifier,
+      async (input: McpSimulationIdentifierInput) => {
+        const resolvedSimulationId = await resolveMcpSimulationId(
+          input,
+          identifier.authContext
+        )
+        const response = await shuffleSimulationLibrary(resolvedSimulationId)
 
-      return {
-        content: createToolResultContent(
-          `Shuffled the library. ${response.cardsRemaining} card(s) remain.`,
-          addMcpReasonToToolResult(identifier, input, response)
-        ),
+        return {
+          content: createToolResultContent(
+            `Shuffled the library. ${response.cardsRemaining} card(s) remain.`,
+            addMcpReasonToToolResult(identifier, input, response)
+          ),
+        }
       }
-    }
+    )
   )
 }
 
@@ -1669,17 +1725,21 @@ function registerFlipCoinTool(
           ),
       },
     },
-    async (input: McpFlipCoinInput) => {
-      await resolveMcpSimulationId(input, identifier.authContext)
-      const response = flipCoins(input.count ?? 1)
+    createAuditedMcpToolHandler(
+      "flip_coin",
+      identifier,
+      async (input: McpFlipCoinInput) => {
+        await resolveMcpSimulationId(input, identifier.authContext)
+        const response = flipCoins(input.count ?? 1)
 
-      return {
-        content: createToolResultContent(
-          `Flipped ${response.results.length} coin(s): ${response.wins} win(s), ${response.losses} loss(es).`,
-          addMcpReasonToToolResult(identifier, input, response)
-        ),
+        return {
+          content: createToolResultContent(
+            `Flipped ${response.results.length} coin(s): ${response.wins} win(s), ${response.losses} loss(es).`,
+            addMcpReasonToToolResult(identifier, input, response)
+          ),
+        }
       }
-    }
+    )
   )
 }
 
@@ -1700,17 +1760,21 @@ function registerRollDiceTool(
         sides: diceSidesSchema,
       },
     },
-    async (input: McpRollDiceInput) => {
-      await resolveMcpSimulationId(input, identifier.authContext)
-      const response = rollDice(input.count, input.sides)
+    createAuditedMcpToolHandler(
+      "roll_dice",
+      identifier,
+      async (input: McpRollDiceInput) => {
+        await resolveMcpSimulationId(input, identifier.authContext)
+        const response = rollDice(input.count, input.sides)
 
-      return {
-        content: createToolResultContent(
-          `Rolled ${response.rolls.length} d${response.sides}: total ${response.total}.`,
-          addMcpReasonToToolResult(identifier, input, response)
-        ),
+        return {
+          content: createToolResultContent(
+            `Rolled ${response.rolls.length} d${response.sides}: total ${response.total}.`,
+            addMcpReasonToToolResult(identifier, input, response)
+          ),
+        }
       }
-    }
+    )
   )
 }
 
@@ -1968,6 +2032,14 @@ function formatMcpToolResultForProvider(result: unknown) {
   }
 
   return Object.hasOwn(resultRecord, "content") ? resultRecord.content : result
+}
+
+function getMcpToolAuditOutput(result: unknown) {
+  const textContent = getMcpToolResultTextContent(asRecord(result))
+
+  return textContent === null
+    ? result
+    : parseMcpToolResultTextContent(textContent)
 }
 
 function getMcpToolResultTextContent(resultRecord: Record<string, unknown>) {
