@@ -53,6 +53,7 @@ export type Simulation = {
   autoGenerateReport: boolean
   reasoningSummariesEnabled: boolean
   useFlexServiceTier: boolean
+  isPublic: boolean
   simulatedTurnCount: number
   completedLlmRunCount: number
   activeLlmRunCount: number
@@ -251,6 +252,13 @@ export type OpeningHandEvaluationResponse = {
 export type SimulationResultsInfo = SimulationDebugInfo
 
 export type SimulationResultsResponse = {
+  results: SimulationResultsInfo
+}
+
+export type PublicSimulationResponse = {
+  deck: DeckDetails
+  simulation: Simulation
+  startingHand: StartingHand | null
   results: SimulationResultsInfo
 }
 

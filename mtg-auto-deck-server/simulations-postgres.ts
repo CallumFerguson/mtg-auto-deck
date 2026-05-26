@@ -499,6 +499,7 @@ export type SimulationSummary = {
   autoGenerateReport: boolean
   reasoningSummariesEnabled: boolean
   useFlexServiceTier: boolean
+  isPublic: boolean
   simulatedTurnCount: number
   completedLlmRunCount: number
   activeLlmRunCount: number
@@ -845,6 +846,7 @@ export async function ensureSimulationsSchema() {
       auto_generate_report boolean NOT NULL DEFAULT false,
       reasoning_summaries_enabled boolean NOT NULL DEFAULT false,
       use_flex_service_tier boolean NOT NULL DEFAULT false,
+      is_public boolean NOT NULL DEFAULT false,
 
       status simulation_status NOT NULL DEFAULT 'pending',
       started_at timestamptz,
@@ -872,6 +874,10 @@ export async function ensureSimulationsSchema() {
   await queryDatabase(`
     ALTER TABLE simulations
     ADD COLUMN IF NOT EXISTS use_flex_service_tier boolean NOT NULL DEFAULT false
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulations
+    ADD COLUMN IF NOT EXISTS is_public boolean NOT NULL DEFAULT false
   `)
   await queryDatabase(`
     ALTER TABLE simulations
@@ -1300,6 +1306,11 @@ export async function ensureSimulationsSchema() {
       ON simulations (status)
   `)
   await queryDatabase(`
+    CREATE INDEX IF NOT EXISTS simulations_public_id_idx
+      ON simulations (id)
+      WHERE is_public = true
+  `)
+  await queryDatabase(`
     CREATE INDEX IF NOT EXISTS llm_runs_status_idx
       ON llm_runs (status)
   `)
@@ -1439,6 +1450,7 @@ type SimulationSummaryRow = {
   auto_generate_report: boolean
   reasoning_summaries_enabled: boolean
   use_flex_service_tier: boolean
+  is_public: boolean
   simulated_turn_count: number
   completed_llm_run_count: number
   active_llm_run_count: number
@@ -1551,6 +1563,7 @@ function mapSimulationSummaryRow(
     autoGenerateReport: simulation.auto_generate_report,
     reasoningSummariesEnabled: simulation.reasoning_summaries_enabled,
     useFlexServiceTier: simulation.use_flex_service_tier,
+    isPublic: simulation.is_public,
     simulatedTurnCount: simulation.simulated_turn_count,
     completedLlmRunCount: simulation.completed_llm_run_count,
     activeLlmRunCount: simulation.active_llm_run_count,
@@ -1577,6 +1590,7 @@ export async function listSimulationsForDeck(
         auto_generate_report,
         reasoning_summaries_enabled,
         use_flex_service_tier,
+        is_public,
         ${SIMULATION_SUMMARY_SIMULATED_TURN_COUNT_SQL} AS simulated_turn_count,
         ${SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL} AS completed_llm_run_count,
         ${SIMULATION_SUMMARY_ACTIVE_RUN_COUNT_SQL} AS active_llm_run_count,
@@ -1711,6 +1725,7 @@ export async function createSimulation(
         auto_generate_report,
         reasoning_summaries_enabled,
         use_flex_service_tier,
+        false AS is_public,
         0::integer AS simulated_turn_count,
         0::integer AS completed_llm_run_count,
         0::integer AS active_llm_run_count,
@@ -1756,6 +1771,7 @@ export async function getSimulationSummary(
         auto_generate_report,
         reasoning_summaries_enabled,
         use_flex_service_tier,
+        is_public,
         ${SIMULATION_SUMMARY_SIMULATED_TURN_COUNT_SQL} AS simulated_turn_count,
         ${SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL} AS completed_llm_run_count,
         ${SIMULATION_SUMMARY_ACTIVE_RUN_COUNT_SQL} AS active_llm_run_count,
@@ -1767,6 +1783,45 @@ export async function getSimulationSummary(
         AND deck_id = $2
     `,
     [simulationId, deckId]
+  )
+  const simulation = result.rows[0]
+
+  if (!simulation) {
+    return null
+  }
+
+  return mapSimulationSummaryRow(simulation)
+}
+
+export async function getPublicSimulationSummary(
+  simulationId: string
+): Promise<SimulationSummary | null> {
+  const result = await queryDatabase<SimulationSummaryRow>(
+    `
+      SELECT
+        id,
+        deck_id,
+        created_via,
+        llm_model_preset_id,
+        starting_hand_id,
+        seed,
+        library,
+        turns_to_simulate,
+        auto_generate_report,
+        reasoning_summaries_enabled,
+        use_flex_service_tier,
+        is_public,
+        ${SIMULATION_SUMMARY_SIMULATED_TURN_COUNT_SQL} AS simulated_turn_count,
+        ${SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL} AS completed_llm_run_count,
+        ${SIMULATION_SUMMARY_ACTIVE_RUN_COUNT_SQL} AS active_llm_run_count,
+        status,
+        created_at,
+        updated_at
+      FROM simulations
+      WHERE id = $1
+        AND is_public = true
+    `,
+    [simulationId]
   )
   const simulation = result.rows[0]
 
@@ -1882,6 +1937,7 @@ export async function updateSimulation(
         auto_generate_report,
         reasoning_summaries_enabled,
         use_flex_service_tier,
+        is_public,
         ${SIMULATION_SUMMARY_SIMULATED_TURN_COUNT_SQL} AS simulated_turn_count,
         ${SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL} AS completed_llm_run_count,
         ${SIMULATION_SUMMARY_ACTIVE_RUN_COUNT_SQL} AS active_llm_run_count,
@@ -1899,6 +1955,49 @@ export async function updateSimulation(
   )
 
   return mapSimulationSummaryRow(result.rows[0])
+}
+
+export async function setSimulationPublic(
+  deckId: string,
+  simulationId: string,
+  isPublic: boolean
+): Promise<SimulationSummary> {
+  const result = await queryDatabase<SimulationSummaryRow>(
+    `
+      UPDATE simulations
+      SET is_public = $3,
+          updated_at = now()
+      WHERE id = $1
+        AND deck_id = $2
+      RETURNING
+        id,
+        deck_id,
+        created_via,
+        llm_model_preset_id,
+        starting_hand_id,
+        seed,
+        library,
+        turns_to_simulate,
+        auto_generate_report,
+        reasoning_summaries_enabled,
+        use_flex_service_tier,
+        is_public,
+        ${SIMULATION_SUMMARY_SIMULATED_TURN_COUNT_SQL} AS simulated_turn_count,
+        ${SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL} AS completed_llm_run_count,
+        ${SIMULATION_SUMMARY_ACTIVE_RUN_COUNT_SQL} AS active_llm_run_count,
+        status,
+        created_at,
+        updated_at
+    `,
+    [simulationId, deckId, isPublic]
+  )
+  const simulation = result.rows[0]
+
+  if (!simulation) {
+    throw new SimulationValidationError("Simulation not found.")
+  }
+
+  return mapSimulationSummaryRow(simulation)
 }
 
 export async function updateSimulationLlmModelPreset(

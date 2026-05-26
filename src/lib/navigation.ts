@@ -42,3 +42,7 @@ export function getDeckSimulationPath(deckId: string, simulationId?: string) {
 
   return `/decks/${encodeURIComponent(deckId)}?${searchParams.toString()}`
 }
+
+export function getPublicSimulationPath(simulationId: string) {
+  return `/public/simulations/${encodeURIComponent(simulationId)}`
+}

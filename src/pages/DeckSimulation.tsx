@@ -27,8 +27,10 @@ import {
   Eye,
   EyeOff,
   Gauge,
+  Globe2,
   Hand,
   Hourglass,
+  Link2,
   LoaderCircle,
   MoreVertical,
   Moon,
@@ -63,6 +65,7 @@ import type {
   OpeningHandEvaluation,
   OpeningHandEvaluationResponse,
   OpenRouterGenerationDetailsResponse,
+  PublicSimulationResponse,
   SavedSeed,
   SavedSeedsResponse,
   Simulation,
@@ -84,7 +87,10 @@ import {
   type LlmModelPreset,
   type LlmModelPresetsResponse,
 } from "@/lib/llm-model-preset-types"
-import { getDeckSimulationPath } from "@/lib/navigation"
+import {
+  getDeckSimulationPath,
+  getPublicSimulationPath,
+} from "@/lib/navigation"
 import {
   getPresetStartingHandLibraryCardCount,
   getSimulationRunLibraryCardCount,
@@ -314,6 +320,10 @@ function getSimulationLabel(simulation: Simulation) {
       : `${simulation.simulatedTurnCount} turns`
 
   return `${simulation.id.slice(0, 8)} - ${turnLabel}`
+}
+
+function getPublicSimulationUrl(simulationId: string) {
+  return `${window.location.origin}${getPublicSimulationPath(simulationId)}`
 }
 
 function getSimulationRunCountFromResults(resultsInfo: SimulationResultsInfo) {
@@ -691,6 +701,125 @@ function UsageLimitReachedNotice({
         </Button>
       ) : null}
     </div>
+  )
+}
+
+export function PublicSimulationPage({
+  simulationId,
+}: {
+  simulationId: string
+}) {
+  const [publicSimulation, setPublicSimulation] =
+    useState<PublicSimulationResponse | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+
+  const loadPublicSimulation = useCallback(async () => {
+    setIsLoading(true)
+    setLoadError(null)
+
+    try {
+      const response = await apiFetch(
+        `${API_BASE_URL}/public/simulations/${encodeURIComponent(
+          simulationId
+        )}`
+      )
+
+      if (!response.ok) {
+        setLoadError(
+          response.status === 404
+            ? "Public simulation could not be found."
+            : await readApiError(
+              response,
+              "Public simulation could not be loaded."
+            )
+        )
+        return
+      }
+
+      const data = (await response.json()) as PublicSimulationResponse
+      setPublicSimulation(data)
+    } catch {
+      setLoadError("Public simulation could not be loaded.")
+    } finally {
+      setIsLoading(false)
+    }
+  }, [simulationId])
+
+  useEffect(() => {
+    void loadPublicSimulation()
+  }, [loadPublicSimulation])
+
+  return (
+    <main className="flex h-svh flex-col overflow-hidden bg-background text-foreground">
+      <header className="shrink-0 border-b border-border px-4 py-4 sm:px-6 lg:px-8">
+        <div className="mx-auto flex w-full max-w-7xl flex-col gap-2">
+          <p className="text-sm font-medium tracking-[0.18em] text-sky-300 uppercase">
+            Public simulation
+          </p>
+          <div className="flex flex-col gap-1">
+            <h1 className="text-2xl font-semibold text-foreground sm:text-3xl">
+              {publicSimulation?.deck.name ?? "Simulation"}
+            </h1>
+            <p className="text-sm break-all text-muted-foreground">
+              {simulationId}
+            </p>
+          </div>
+        </div>
+      </header>
+
+      <section className="min-h-0 flex-1 overflow-hidden">
+        {isLoading ? (
+          <div className="mx-4 mt-6 rounded-lg border border-border bg-card/70 px-4 py-8 text-sm text-muted-foreground sm:mx-6 lg:mx-8">
+            Loading public simulation...
+          </div>
+        ) : loadError ? (
+          <div className="mx-4 mt-6 flex flex-col gap-3 rounded-lg border border-border bg-card/70 px-4 py-8 sm:mx-6 sm:flex-row sm:items-center sm:justify-between lg:mx-8">
+            <p className="text-sm text-destructive">{loadError}</p>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void loadPublicSimulation()}
+            >
+              <RefreshCw data-icon="inline-start" />
+              Try again
+            </Button>
+          </div>
+        ) : publicSimulation ? (
+          <SimulationDetails
+            canUpgradeUsage={false}
+            cards={publicSimulation.deck.cards}
+            commanders={publicSimulation.deck.commanders}
+            defaultModelPresetId={null}
+            deckId={publicSimulation.deck.id}
+            initialResultsInfo={publicSimulation.results}
+            isAdmin={false}
+            isLoadingStartingHand={false}
+            modelPresets={[]}
+            onOpenDetails={() => {}}
+            onSimulationUpdated={(simulation) =>
+              setPublicSimulation((currentSimulation) =>
+                currentSimulation
+                  ? {
+                      ...currentSimulation,
+                      simulation,
+                    }
+                  : currentSimulation
+              )
+            }
+            onUpgradeUsage={() => {}}
+            readOnly={true}
+            resultsStreamUrl={`${API_BASE_URL}/public/simulations/${encodeURIComponent(
+              simulationId
+            )}/results/stream`}
+            resultsStreamWithCredentials={false}
+            simulation={publicSimulation.simulation}
+            startingHand={publicSimulation.startingHand}
+            startingHandLoadError={null}
+          />
+        ) : null}
+      </section>
+    </main>
   )
 }
 
@@ -2104,11 +2233,15 @@ function SimulationDetailsModal({
   const [debugInfoError, setDebugInfoError] = useState<string | null>(null)
   const [debugInfo, setDebugInfo] = useState<SimulationDebugInfo | null>(null)
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false)
+  const [isSavingPublicState, setIsSavingPublicState] = useState(false)
+  const [publicStateError, setPublicStateError] = useState<string | null>(null)
+  const [hasCopiedPublicLink, setHasCopiedPublicLink] = useState(false)
   const isLoadingDebugInfoRef = useRef(false)
   const shouldSimulateOpeningHand = simulation.startingHandId === null
   const selectedModelPreset =
     modelPresets.find((preset) => preset.id === simulation.llmModelPresetId) ??
     null
+  const publicSimulationUrl = getPublicSimulationUrl(simulation.id)
 
   const handleRefreshDebugInfo = useCallback(async () => {
     if (isLoadingDebugInfoRef.current) {
@@ -2149,7 +2282,13 @@ function SimulationDetailsModal({
     setDebugInfoError(null)
     setIsLoadingDebugInfo(false)
     isLoadingDebugInfoRef.current = false
+    setPublicStateError(null)
+    setHasCopiedPublicLink(false)
   }, [simulation.id])
+
+  useEffect(() => {
+    setHasCopiedPublicLink(false)
+  }, [simulation.isPublic])
 
   useEffect(() => {
     if (!isDebugModalOpen) {
@@ -2158,6 +2297,57 @@ function SimulationDetailsModal({
 
     void handleRefreshDebugInfo()
   }, [handleRefreshDebugInfo, isDebugModalOpen])
+
+  async function handlePublicStateChange(nextIsPublic: boolean) {
+    if (isSavingPublicState || nextIsPublic === simulation.isPublic) {
+      return
+    }
+
+    setIsSavingPublicState(true)
+    setPublicStateError(null)
+    setHasCopiedPublicLink(false)
+
+    try {
+      const response = await apiFetch(
+        `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/public`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            isPublic: nextIsPublic,
+          }),
+        }
+      )
+
+      if (!response.ok) {
+        setPublicStateError(
+          await readApiError(
+            response,
+            "Simulation public access could not be updated."
+          )
+        )
+        return
+      }
+
+      const data = (await response.json()) as UpdateSimulationResponse
+      onSimulationUpdated(data.simulation)
+    } catch {
+      setPublicStateError("Simulation public access could not be updated.")
+    } finally {
+      setIsSavingPublicState(false)
+    }
+  }
+
+  async function handleCopyPublicLink() {
+    try {
+      await writePlainTextToClipboard(publicSimulationUrl)
+      setHasCopiedPublicLink(true)
+    } catch {
+      setPublicStateError("Public link could not be copied.")
+    }
+  }
 
   return (
     <>
@@ -2185,6 +2375,11 @@ function SimulationDetailsModal({
                 <span className="shrink-0 rounded-md border border-border bg-background/45 px-3 py-1 text-sm text-muted-foreground">
                   {simulation.status}
                 </span>
+                {simulation.isPublic ? (
+                  <span className="shrink-0 rounded-md border border-sky-300/35 bg-sky-400/10 px-3 py-1 text-sm text-sky-100">
+                    public
+                  </span>
+                ) : null}
               </div>
               <p className="text-sm font-medium break-all text-foreground">
                 {simulation.id}
@@ -2301,7 +2496,65 @@ function SimulationDetailsModal({
           </div>
 
           {isAdmin ? (
-            <footer className="flex justify-end border-t border-border px-5 py-4">
+            <footer className="flex flex-col gap-3 border-t border-border px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="grid gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    className="w-fit"
+                    type="button"
+                    variant={simulation.isPublic ? "outline" : "default"}
+                    disabled={isSavingPublicState}
+                    onClick={() =>
+                      void handlePublicStateChange(!simulation.isPublic)
+                    }
+                  >
+                    {isSavingPublicState ? (
+                      <LoaderCircle
+                        className="animate-spin"
+                        data-icon="inline-start"
+                      />
+                    ) : (
+                      <Globe2 data-icon="inline-start" />
+                    )}
+                    {isSavingPublicState
+                      ? "Saving..."
+                      : simulation.isPublic
+                        ? "Make private"
+                        : "Make public"}
+                  </Button>
+                  {simulation.isPublic ? (
+                    <Button
+                      className={
+                        hasCopiedPublicLink
+                          ? "w-fit text-emerald-300 hover:text-emerald-200"
+                          : "w-fit"
+                      }
+                      type="button"
+                      variant="outline"
+                      onClick={() => void handleCopyPublicLink()}
+                    >
+                      {hasCopiedPublicLink ? (
+                        <ClipboardCheck data-icon="inline-start" />
+                      ) : (
+                        <Link2 data-icon="inline-start" />
+                      )}
+                      {hasCopiedPublicLink ? "Copied" : "Copy public link"}
+                    </Button>
+                  ) : null}
+                </div>
+                {publicStateError ? (
+                  <p
+                    className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                    role="alert"
+                  >
+                    {publicStateError}
+                  </p>
+                ) : simulation.isPublic ? (
+                  <p className="max-w-xl text-xs break-all text-muted-foreground">
+                    {publicSimulationUrl}
+                  </p>
+                ) : null}
+              </div>
               <Button
                 className="w-fit"
                 type="button"
@@ -2337,12 +2590,16 @@ function SimulationDetails({
   commanders,
   defaultModelPresetId,
   deckId,
+  initialResultsInfo = null,
   isAdmin,
   isLoadingStartingHand,
   modelPresets,
   onOpenDetails,
   onSimulationUpdated,
   onUpgradeUsage,
+  readOnly = false,
+  resultsStreamUrl,
+  resultsStreamWithCredentials = true,
   simulation,
   startingHand,
   startingHandLoadError,
@@ -2352,12 +2609,16 @@ function SimulationDetails({
   commanders: DeckCard[]
   defaultModelPresetId: string | null
   deckId: string
+  initialResultsInfo?: SimulationResultsInfo | null
   isAdmin: boolean
   isLoadingStartingHand: boolean
   modelPresets: LlmModelPreset[]
   onOpenDetails: () => void
   onSimulationUpdated: (simulation: Simulation) => void
   onUpgradeUsage: () => void
+  readOnly?: boolean
+  resultsStreamUrl?: string
+  resultsStreamWithCredentials?: boolean
   simulation: Simulation
   startingHand: StartingHand | null
   startingHandLoadError: string | null
@@ -2585,14 +2846,19 @@ function SimulationDetails({
 
     setIsLoadingResults(false)
     setResultsError(null)
-    setResultsInfo(null)
-    resultsInfoRef.current = null
+    setResultsInfo(initialResultsInfo)
+    resultsInfoRef.current = initialResultsInfo
     setResultsStreamRestartKey(0)
     setSelectedActivityRunId(null)
     setActivityPanelRunId(null)
     setIsActivityPanelOpen(false)
     clearOpenActivityPanelFrame()
-  }, [clearOpenActivityPanelFrame, scrollResultsToBottom, simulation.id])
+  }, [
+    clearOpenActivityPanelFrame,
+    initialResultsInfo,
+    scrollResultsToBottom,
+    simulation.id,
+  ])
 
   useLayoutEffect(() => {
     if (keepResultsScrolledDownRef.current) {
@@ -2641,6 +2907,7 @@ function SimulationDetails({
 
   async function handleStartOpeningHandRun() {
     if (
+      readOnly ||
       !shouldSimulateOpeningHand ||
       isStartingOpeningHandRun ||
       isStartingTurnRun ||
@@ -2688,6 +2955,7 @@ function SimulationDetails({
 
   async function handleStartTurnRun(turnNumber: number) {
     if (
+      readOnly ||
       isStartingTurnRun ||
       isStartingOpeningHandRun ||
       isStartingReportRun ||
@@ -2743,6 +3011,7 @@ function SimulationDetails({
 
   async function handleStartReportRun() {
     if (
+      readOnly ||
       isStartingReportRun ||
       isStartingTurnRun ||
       isStartingOpeningHandRun ||
@@ -2780,6 +3049,10 @@ function SimulationDetails({
   }
 
   async function stopSimulation() {
+    if (readOnly) {
+      return null
+    }
+
     setIsStoppingSimulation(true)
     setStopSimulationError(null)
 
@@ -2809,7 +3082,7 @@ function SimulationDetails({
   }
 
   async function handleStopSimulation() {
-    if (isStoppingSimulation) {
+    if (readOnly || isStoppingSimulation) {
       return
     }
 
@@ -2863,10 +3136,13 @@ function SimulationDetails({
   }
 
   useEffect(() => {
+    const streamUrl =
+      resultsStreamUrl ??
+      `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/results/stream`
     const eventSource = new EventSource(
-      `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/results/stream`,
+      streamUrl,
       {
-        withCredentials: true,
+        withCredentials: resultsStreamWithCredentials,
       }
     )
     let isStreamClosed = false
@@ -2916,6 +3192,7 @@ function SimulationDetails({
         if (streamEvent.type === "error") {
           setResultsError(streamEvent.message)
           markStreamLoaded()
+          closeStream()
           return
         }
 
@@ -2994,6 +3271,8 @@ function SimulationDetails({
     deckId,
     onSimulationUpdated,
     refreshUsageLimits,
+    resultsStreamUrl,
+    resultsStreamWithCredentials,
     resultsStreamRestartKey,
     simulation.id,
   ])
@@ -3039,6 +3318,7 @@ function SimulationDetails({
       onTurnEvaluationSaved={handleTurnEvaluationSaved}
       onUpgradeUsage={onUpgradeUsage}
       openingHandRunError={openingHandRunError}
+      readOnly={readOnly}
       reportRunError={reportRunError}
       resultsError={resultsError}
       resultsInfo={resultsInfo}
@@ -3544,6 +3824,7 @@ function SimulationResultsPanel({
   onTurnEvaluationSaved,
   onUpgradeUsage,
   openingHandRunError,
+  readOnly,
   reportRunError,
   resultsError,
   resultsInfo,
@@ -3582,6 +3863,7 @@ function SimulationResultsPanel({
   onTurnEvaluationSaved: (evaluation: TurnEvaluation) => void
   onUpgradeUsage: () => void
   openingHandRunError: string | null
+  readOnly: boolean
   reportRunError: string | null
   resultsError: string | null
   resultsInfo: SimulationResultsInfo
@@ -3597,7 +3879,7 @@ function SimulationResultsPanel({
   const canStartOpeningHandRun = simulation.startingHandId === null
   const hasPresetStartingHand = simulation.startingHandId !== null
   const shouldShowUsageUpgradeAction =
-    canUpgradeUsage && hasLoadedBillingTier && billingTier !== "pro"
+    !readOnly && canUpgradeUsage && hasLoadedBillingTier && billingTier !== "pro"
   const isOpeningHandRunning = resultsInfo.openingHandLlmRuns.some((run) =>
     isActiveLlmRunStatus(run.status)
   )
@@ -3621,6 +3903,7 @@ function SimulationResultsPanel({
     isStartingReportRun ||
     isStoppingSimulation
   const isSimulationActionBlocked =
+    readOnly ||
     isStartingSimulationRun ||
     isOpeningHandRunning ||
     isTurnRunning ||
@@ -3805,10 +4088,11 @@ function SimulationResultsPanel({
       ...run,
       canEvaluate:
         isAdmin &&
+        !readOnly &&
         run.status === "completed" &&
         run.openingHandIsValid === true &&
         !run.chunks.some((chunk) => chunk.kind === "error"),
-      canRerun: canStartOpeningHandRun && !isOpeningHandRunning,
+      canRerun: !readOnly && canStartOpeningHandRun && !isOpeningHandRunning,
       isActive: isActiveLlmRunStatus(run.status),
       resultKind: "opening_hand" as const,
       resultLabel: `Opening hand attempt ${run.attemptNumber}`,
@@ -3822,9 +4106,11 @@ function SimulationResultsPanel({
       ...run,
       canEvaluate:
         isAdmin &&
+        !readOnly &&
         run.status === "completed" &&
         !run.chunks.some((chunk) => chunk.kind === "error"),
       canRerun:
+        !readOnly &&
         typeof run.turnNumber === "number" &&
         !activeTurnNumbers.has(run.turnNumber),
       isActive: isActiveLlmRunStatus(run.status),
@@ -4042,7 +4328,7 @@ function SimulationResultsPanel({
         {run.isActive && !run.hasFinalParsedOutputChunk ? (
           <SimulationResultThinkingStatus
             activeToolCallName={run.activeToolCallName}
-            canStopSimulation={run.status !== "cancel_requested"}
+            canStopSimulation={!readOnly && run.status !== "cancel_requested"}
             finishedDurationText={null}
             isFinalizingTurn={isSimulationRunLatestChunkOutputDelta(
               run.chunks
