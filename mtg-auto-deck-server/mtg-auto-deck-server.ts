@@ -92,7 +92,6 @@ import {
   failLlmRun,
   failReportLlmRun,
   getActiveLlmRunMcpTokenContext,
-  getDeckCardReferenceData,
   getOpeningHandLlmRunEvaluationData,
   getOpenRouterGenerationForSimulation,
   getPublicSimulationSummary,
@@ -270,10 +269,8 @@ const DEFAULT_PORT = 3001
 const SERVER_NAME = "mtg-auto-deck-server"
 const OPENING_HAND_SERVER_NAME = "opening-hand-server"
 const TURN_SIMULATION_SERVER_NAME = "turn-simulation-server"
-const SIMULATION_SERVER_NAME = "simulation-server"
 const OPENING_HAND_MCP_PATH = "/mcp/opening-hand"
 const TURN_SIMULATION_MCP_PATH = "/mcp/turn-simulation"
-const SIMULATION_MCP_PATH = "/mcp/simulation"
 const AUTH_PATH_PREFIX = "/api/auth"
 const APP_SIGN_UP_PATH = "/api/app-auth/sign-up"
 const APP_EMAIL_VERIFICATION_CODE_PATH = "/api/app-auth/email-verification-code"
@@ -314,18 +311,6 @@ const llmRunIdSchema = z
   .describe("The LLM Run ID from the prompt.")
 const llmRunIdentifierSchema = {
   llmRunId: llmRunIdSchema,
-}
-const deckIdSchema = z.string().trim().min(1).describe("The deck ID.")
-const deckIdentifierSchema = {
-  deckId: deckIdSchema,
-}
-const simulationIdSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .describe("The Simulation ID returned by create_simulation.")
-const simulationIdentifierSchema = {
-  simulationId: simulationIdSchema,
 }
 const createDeckSchema = z.object({
   name: z.string().trim().min(1),
@@ -1192,15 +1177,8 @@ type LlmRunIdentifier = {
   llmRunId: string
 }
 
-type McpDeckIdentifierInput = {
-  deckId: string
-}
-type McpTestEchoInput = {
-  message: string
-}
 type McpSimulationIdentifierInput = {
   llmRunId?: string
-  simulationId?: string
   reason?: string
 }
 type McpDrawCardsInput = McpSimulationIdentifierInput & {
@@ -1232,17 +1210,13 @@ type McpTakeCardsInput = McpSimulationIdentifierInput & {
 
 type McpSimulationIdentifierConfig = {
   authContext?: LlmRunMcpTokenContext
-  inputSchema: typeof llmRunIdentifierSchema | typeof simulationIdentifierSchema
+  inputSchema: typeof llmRunIdentifierSchema
   requireReason: boolean
 }
 
 const llmRunMcpIdentifier: McpSimulationIdentifierConfig = {
   inputSchema: llmRunIdentifierSchema,
   requireReason: true,
-}
-const simulationMcpIdentifier: McpSimulationIdentifierConfig = {
-  inputSchema: simulationIdentifierSchema,
-  requireReason: false,
 }
 
 async function resolveMcpSimulationId(
@@ -1251,20 +1225,15 @@ async function resolveMcpSimulationId(
 ) {
   if (authContext) {
     const llmRunId = input.llmRunId?.trim()
-    const simulationId = input.simulationId?.trim()
 
     if (llmRunId && llmRunId !== authContext.llmRunId) {
       throw new Error("MCP run token does not match the requested LLM run.")
     }
 
-    if (simulationId && simulationId !== authContext.simulationId) {
-      throw new Error("MCP run token does not match the requested simulation.")
-    }
-
     return authContext.simulationId
   }
 
-  return resolveSimulationIdentifier(input)
+  throw new Error("MCP run authentication is required.")
 }
 
 const mcpShortReasonSchema = z
@@ -1359,154 +1328,6 @@ function createTurnSimulationServer(authContext?: LlmRunMcpTokenContext) {
     registerFlipCoinTool(server, identifier)
     registerRollDiceTool(server, identifier)
   })
-}
-
-function createSimulationServer() {
-  return createServer(SIMULATION_SERVER_NAME, (server) => {
-    registerTestEchoTool(server)
-    registerListDecksTool(server)
-    registerGetDeckCardReferenceTool(server)
-    registerCreateSimulationTool(server)
-    registerDrawStartingHandTool(server, simulationMcpIdentifier)
-    registerMulliganTool(server, simulationMcpIdentifier)
-    registerDrawCardFromTopTool(server, simulationMcpIdentifier)
-    registerDrawCardFromBottomTool(server, simulationMcpIdentifier)
-    registerTakeCardsFromLibraryTool(server, simulationMcpIdentifier)
-    registerReturnCardToLibraryTool(server, simulationMcpIdentifier)
-    registerReturnCardsToLibraryTool(server, simulationMcpIdentifier)
-    registerShuffleLibraryTool(server, simulationMcpIdentifier)
-    registerFlipCoinTool(server, simulationMcpIdentifier)
-    registerRollDiceTool(server, simulationMcpIdentifier)
-  })
-}
-
-function registerTestEchoTool(server: McpServer) {
-  server.registerTool(
-    "test_echo",
-    {
-      title: "Test Echo",
-      description:
-        "Echo a message for testing connectivity to the simulation MCP server. This tool does not require a simulation ID.",
-      inputSchema: {
-        message: z.string().describe("The message to echo."),
-      },
-    },
-    async ({ message }: McpTestEchoInput) => {
-      console.log(
-        `Simulation MCP test_echo called at ${new Date().toISOString()} messageLength=${message.length} message=${JSON.stringify(message)}`
-      )
-
-      return {
-        content: createToolResultContent("Echoed test message.", {
-          echo: message,
-        }),
-      }
-    }
-  )
-}
-
-function registerListDecksTool(server: McpServer) {
-  server.registerTool(
-    "list_decks",
-    {
-      title: "List Decks",
-      description:
-        "List all saved decks and their IDs. Use this before create_simulation when you do not know which deck ID to use.",
-      inputSchema: {},
-    },
-    async () => {
-      const decks = await listDecks()
-
-      return {
-        content: createToolResultContent(
-          `Found ${decks.length} saved deck(s).`,
-          {
-            decks,
-          }
-        ),
-      }
-    }
-  )
-}
-
-function registerGetDeckCardReferenceTool(server: McpServer) {
-  server.registerTool(
-    "get_deck_card_reference",
-    {
-      title: "Get Deck Card Reference",
-      description:
-        "Return the decklist and card oracle text reference for a saved deck.",
-      inputSchema: {
-        ...deckIdentifierSchema,
-      },
-    },
-    async ({ deckId }: McpDeckIdentifierInput) => {
-      const deck = await getDeckCardReferenceData(deckId)
-
-      if (!deck) {
-        throw new Error("Deck not found.")
-      }
-
-      const uniqueCards = dedupeCardsByNameAndText([
-        ...deck.commanders,
-        ...deck.library,
-      ])
-
-      return {
-        content: createToolResultContent(
-          `Loaded card reference for ${deck.name}.`,
-          {
-            deck: {
-              id: deck.deckId,
-              name: deck.name,
-              description: deck.description,
-              mulliganGuidelines: deck.mulliganGuidelines,
-              strategyGuidelines: deck.strategyGuidelines,
-              format: deck.format,
-              createdAt: deck.createdAt,
-              updatedAt: deck.updatedAt,
-            },
-            commanders: expandCardNames(deck.commanders),
-            cards: expandCardNames(deck.library),
-            cardReference: formatCardReference(uniqueCards),
-          }
-        ),
-      }
-    }
-  )
-}
-
-function registerCreateSimulationTool(server: McpServer) {
-  server.registerTool(
-    "create_simulation",
-    {
-      title: "Create Simulation",
-      description:
-        "Create a new simulation for a deck and return the simulation ID for future tool calls.",
-      inputSchema: {
-        deckId: deckIdSchema.describe(
-          "The deck ID to create a simulation for."
-        ),
-      },
-    },
-    async ({ deckId }) => {
-      const simulation = await createSimulation(deckId, {
-        seed: randomUUID(),
-        llmModelPresetId: null,
-        turnsToSimulate: 0,
-        autoGenerateReport: false,
-        startingHandId: null,
-        createdVia: "external_mcp",
-      })
-
-      return {
-        content: createToolResultContent(
-          `Created simulation ${simulation.id}. Use this simulationId for future tool calls.`,
-          simulation
-        ),
-      }
-    }
-  )
 }
 
 function registerDrawCardFromTopTool(
@@ -5075,7 +4896,6 @@ async function main() {
   const host = DEFAULT_HOST
   const port = DEFAULT_PORT
   const allowedOrigins = getAllowedCorsOrigins()
-  const simulationMcpServerEnabled = getSimulationMcpServerEnabled()
   const app = express()
 
   app.use(hostHeaderValidation(getAllowedHostnames()))
@@ -5094,7 +4914,7 @@ async function main() {
   app.all("/api/auth/*splat", toNodeHandler(auth))
 
   app.use((req: Request, res: Response, next) => {
-    if (isMcpPath(req.path, simulationMcpServerEnabled)) {
+    if (isMcpPath(req.path)) {
       next()
       return
     }
@@ -5427,7 +5247,7 @@ async function main() {
     if (
       req.path === "/health" ||
       isAuthPath(req.path) ||
-      isMcpPath(req.path, simulationMcpServerEnabled)
+      isMcpPath(req.path)
     ) {
       next()
       return
@@ -7215,10 +7035,6 @@ async function main() {
     phase: "turn",
   })
 
-  if (simulationMcpServerEnabled) {
-    registerMcpEndpoint(app, SIMULATION_MCP_PATH, createSimulationServer)
-  }
-
   app.listen(port, host, (error?: Error) => {
     if (error) {
       console.error("Failed to start server:", error)
@@ -7232,11 +7048,6 @@ async function main() {
     console.error(
       `Turn-simulation MCP endpoint available at http://${host}:${port}${TURN_SIMULATION_MCP_PATH}`
     )
-    if (simulationMcpServerEnabled) {
-      console.error(
-        `Simulation MCP test endpoint available at http://${host}:${port}${SIMULATION_MCP_PATH}`
-      )
-    }
     startLlmRunQueue(queueConfig)
   })
 }
@@ -7591,12 +7402,6 @@ function isAuthPath(path: string) {
   return path === AUTH_PATH_PREFIX || path.startsWith(`${AUTH_PATH_PREFIX}/`)
 }
 
-function getSimulationMcpServerEnabled() {
-  const value = process.env.SIMULATION_MCP_SERVER_ENABLED?.trim().toLowerCase()
-
-  return value === "true" || value === "1" || value === "yes"
-}
-
 function isAllowedOrigin(origin: string, allowedOrigins: readonly string[]) {
   return allowedOrigins.includes(origin) || isLoopbackOrigin(origin)
 }
@@ -7823,12 +7628,8 @@ function respondWithMethodNotAllowed(res: Response) {
   })
 }
 
-function isMcpPath(path: string, simulationMcpServerEnabled: boolean) {
-  return (
-    path === OPENING_HAND_MCP_PATH ||
-    path === TURN_SIMULATION_MCP_PATH ||
-    (simulationMcpServerEnabled && path === SIMULATION_MCP_PATH)
-  )
+function isMcpPath(path: string) {
+  return path === OPENING_HAND_MCP_PATH || path === TURN_SIMULATION_MCP_PATH
 }
 
 async function resolveSimulationPromptIdentifier(identifier: LlmRunIdentifier) {

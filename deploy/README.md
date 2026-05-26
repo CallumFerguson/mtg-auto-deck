@@ -140,7 +140,6 @@ Postgres                 -> same Droplet, localhost only
 
    OPENING_HAND_MCP_PUBLIC_URL=https://api.example.com/mcp/opening-hand
    TURN_SIMULATION_MCP_PUBLIC_URL=https://api.example.com/mcp/turn-simulation
-   SIMULATION_MCP_SERVER_ENABLED=false
    ```
 
    This snippet only shows the deployment-specific values. Fill in every other
