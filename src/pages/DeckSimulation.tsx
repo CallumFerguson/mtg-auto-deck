@@ -8,6 +8,7 @@ import {
   useState,
   type CSSProperties,
   type FormEvent,
+  type MouseEvent,
   type RefObject,
   type ReactNode,
   type UIEvent,
@@ -130,7 +131,9 @@ import { useUsageLimits } from "@/lib/usage-limits"
 type OpeningHandCardOption = {
   id: string
   deckCardId: number
+  defaultImageUrl: string | null
   name: string
+  scryfallUri: string
 }
 
 type SimulationResultsAction =
@@ -625,7 +628,9 @@ function getOpeningHandCardOptions(
       Array.from({ length: card.quantity }, (_, copyIndex) => ({
         id: `${card.deckCardId}-${copyIndex}`,
         deckCardId: card.deckCardId,
+        defaultImageUrl: card.defaultImageUrl,
         name: card.name,
+        scryfallUri: card.scryfallUri,
       }))
     )
     .sort((firstCard, secondCard) =>
@@ -4853,7 +4858,7 @@ type SimulationGameStateDisplay = {
   libraryCardCount: number | null
 }
 
-type SimulationResultCardPreviewPosition = {
+type CardPreviewPillPosition = {
   left: number
   placement: "above" | "below"
   top: number
@@ -4876,12 +4881,12 @@ const GAME_STATE_ZONE_LABELS: Record<string, string> = {
   hand: "Hand",
 }
 
-const SIMULATION_RESULT_CARD_PREVIEW_GAP_PX = 8
-const SIMULATION_RESULT_CARD_PREVIEW_MARGIN_PX = 12
-const SIMULATION_RESULT_CARD_PREVIEW_PADDING_PX = 8
-const SIMULATION_RESULT_CARD_PREVIEW_WIDTH_PX = 160
-const SIMULATION_RESULT_CARD_PREVIEW_WIDTH_SM_PX = 192
-const SIMULATION_RESULT_CARD_PREVIEW_IMAGE_HEIGHT_RATIO = 680 / 488
+const CARD_PREVIEW_PILL_GAP_PX = 8
+const CARD_PREVIEW_PILL_MARGIN_PX = 12
+const CARD_PREVIEW_PILL_PADDING_PX = 8
+const CARD_PREVIEW_PILL_WIDTH_PX = 160
+const CARD_PREVIEW_PILL_WIDTH_SM_PX = 192
+const CARD_PREVIEW_PILL_IMAGE_HEIGHT_RATIO = 680 / 488
 const SIMULATION_GAME_STATE_CARD_ENTER_ANIMATION_MS = 250
 const SIMULATION_GAME_STATE_CARD_EXIT_ANIMATION_MS = 250
 const SIMULATION_GAME_STATE_CARD_MOVE_ANIMATION_MS = 250
@@ -6188,7 +6193,7 @@ function SimulationLoggedActionText({
     const imageUrl = href ? resolvedCard?.defaultImageUrl?.trim() || null : null
 
     return (
-      <SimulationResultCardPill
+      <CardPreviewPill
         key={`${token.cardName}-${index}`}
         href={href}
         imageUrl={imageUrl}
@@ -6198,6 +6203,7 @@ function SimulationLoggedActionText({
             ? resolvedCard.name
             : `${token.cardName} could not be resolved from this deck.`
         }
+        variant={resolvedCard ? "default" : "unresolved"}
       />
     )
   })
@@ -6660,7 +6666,7 @@ function SimulationResultCardTextLinks({
         const label = resolvedCard?.name ?? cardName
 
         return (
-          <SimulationResultCardPill
+          <CardPreviewPill
             key={`${cardName}-${index}`}
             href={href}
             imageUrl={imageUrl}
@@ -6670,6 +6676,7 @@ function SimulationResultCardTextLinks({
                 ? resolvedCard.name
                 : `${cardName} could not be resolved from this deck.`
             }
+            variant={resolvedCard ? "default" : "unresolved"}
           />
         )
       })}
@@ -6677,25 +6684,37 @@ function SimulationResultCardTextLinks({
   )
 }
 
-function SimulationResultCardPill({
+function CardPreviewPill({
+  className = "",
   href,
   imageUrl,
+  isFocusable = true,
+  isLinkEnabled = true,
   label,
   title,
+  variant = "default",
 }: {
+  className?: string
   href: string | null
   imageUrl?: string | null
+  isFocusable?: boolean
+  isLinkEnabled?: boolean
   label: string
   title: string
+  variant?: "default" | "selected" | "disabled" | "unresolved"
 }) {
   const [isPreviewVisible, setIsPreviewVisible] = useState(false)
   const [previewPosition, setPreviewPosition] =
-    useState<SimulationResultCardPreviewPosition | null>(null)
+    useState<CardPreviewPillPosition | null>(null)
   const previewTriggerRef = useRef<HTMLSpanElement | null>(null)
   const content = <span className="block truncate">{label}</span>
+  const trimmedHref =
+    isLinkEnabled && variant !== "disabled" ? href?.trim() || null : null
   const trimmedImageUrl = imageUrl?.trim() || null
   const baseClassName =
     "inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-xs font-medium align-baseline"
+  const variantClassName = getCardPreviewPillVariantClassName(variant)
+  const pillClassName = `${baseClassName} ${variantClassName} ${className}`
 
   useLayoutEffect(() => {
     if (!isPreviewVisible || !trimmedImageUrl) {
@@ -6711,7 +6730,7 @@ function SimulationResultCardPill({
       }
 
       setPreviewPosition(
-        getSimulationResultCardPreviewPosition(
+        getCardPreviewPillPosition(
           triggerElement.getBoundingClientRect()
         )
       )
@@ -6732,22 +6751,10 @@ function SimulationResultCardPill({
     setPreviewPosition(null)
   }
 
-  if (!href) {
-    return (
-      <span
-        aria-disabled="true"
-        className={`${baseClassName} cursor-default border-sky-500/15 bg-sky-950/15 text-sky-100/55`}
-        title={title}
-      >
-        {content}
-      </span>
-    )
-  }
-
-  const link = (
+  const pill = trimmedHref ? (
     <a
-      className={`${baseClassName} border-sky-500/30 bg-sky-950/30 text-sky-100 transition-colors hover:border-sky-300/60 hover:bg-sky-900/40 hover:text-sky-50 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none`}
-      href={href}
+      className={pillClassName}
+      href={trimmedHref}
       target="_blank"
       rel="noreferrer"
       title={title}
@@ -6760,23 +6767,31 @@ function SimulationResultCardPill({
     >
       {content}
     </a>
+  ) : (
+    <span
+      aria-disabled={variant === "disabled" || variant === "unresolved"}
+      className={pillClassName}
+      tabIndex={isFocusable && trimmedImageUrl ? 0 : undefined}
+      title={title}
+      onBlur={hidePreview}
+      onFocus={() => setIsPreviewVisible(true)}
+    >
+      {content}
+    </span>
   )
-
-  if (!trimmedImageUrl) {
-    return link
-  }
 
   return (
     <>
       <span
         ref={previewTriggerRef}
+        data-card-preview-pill="true"
         className="inline-flex max-w-full align-baseline"
         onMouseEnter={() => setIsPreviewVisible(true)}
         onMouseLeave={hidePreview}
       >
-        {link}
+        {pill}
       </span>
-      {isPreviewVisible && previewPosition
+      {isPreviewVisible && previewPosition && trimmedImageUrl
         ? createPortal(
             <span
               className={`pointer-events-none fixed z-50 rounded-[5.75%/4.4%] bg-black/80 p-1 shadow-2xl shadow-black/70 ${
@@ -6805,58 +6820,67 @@ function SimulationResultCardPill({
   )
 }
 
-function getSimulationResultCardPreviewPosition(
+function getCardPreviewPillVariantClassName(
+  variant: "default" | "selected" | "disabled" | "unresolved"
+) {
+  switch (variant) {
+    case "selected":
+      return "border-sky-300/70 bg-sky-500/20 text-sky-50 shadow-sm shadow-sky-950/30 transition-colors hover:border-sky-200 hover:bg-sky-500/25 focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:outline-none"
+    case "disabled":
+      return "cursor-not-allowed border-sky-500/10 bg-sky-950/10 text-sky-100/45"
+    case "unresolved":
+      return "cursor-default border-sky-500/15 bg-sky-950/15 text-sky-100/55"
+    case "default":
+    default:
+      return "border-sky-500/30 bg-sky-950/30 text-sky-100 transition-colors hover:border-sky-300/60 hover:bg-sky-900/40 hover:text-sky-50 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
+  }
+}
+
+function getCardPreviewPillPosition(
   triggerRect: DOMRect
-): SimulationResultCardPreviewPosition {
+): CardPreviewPillPosition {
   const viewportWidth = window.innerWidth
   const viewportHeight = window.innerHeight
   const previewWidth = window.matchMedia("(min-width: 640px)").matches
-    ? SIMULATION_RESULT_CARD_PREVIEW_WIDTH_SM_PX
-    : SIMULATION_RESULT_CARD_PREVIEW_WIDTH_PX
+    ? CARD_PREVIEW_PILL_WIDTH_SM_PX
+    : CARD_PREVIEW_PILL_WIDTH_PX
   const previewContentWidth =
-    previewWidth - SIMULATION_RESULT_CARD_PREVIEW_PADDING_PX
+    previewWidth - CARD_PREVIEW_PILL_PADDING_PX
   const previewHeight =
-    previewContentWidth * SIMULATION_RESULT_CARD_PREVIEW_IMAGE_HEIGHT_RATIO +
-    SIMULATION_RESULT_CARD_PREVIEW_PADDING_PX
+    previewContentWidth * CARD_PREVIEW_PILL_IMAGE_HEIGHT_RATIO +
+    CARD_PREVIEW_PILL_PADDING_PX
   const spaceBelow =
-    viewportHeight -
-    triggerRect.bottom -
-    SIMULATION_RESULT_CARD_PREVIEW_MARGIN_PX
-  const spaceAbove = triggerRect.top - SIMULATION_RESULT_CARD_PREVIEW_MARGIN_PX
+    viewportHeight - triggerRect.bottom - CARD_PREVIEW_PILL_MARGIN_PX
+  const spaceAbove = triggerRect.top - CARD_PREVIEW_PILL_MARGIN_PX
   const placement =
     spaceBelow >= previewHeight || spaceBelow >= spaceAbove ? "below" : "above"
   const preferredTop =
     placement === "below"
-      ? triggerRect.bottom + SIMULATION_RESULT_CARD_PREVIEW_GAP_PX
-      : triggerRect.top - previewHeight - SIMULATION_RESULT_CARD_PREVIEW_GAP_PX
+      ? triggerRect.bottom + CARD_PREVIEW_PILL_GAP_PX
+      : triggerRect.top - previewHeight - CARD_PREVIEW_PILL_GAP_PX
   const maxTop =
-    viewportHeight - SIMULATION_RESULT_CARD_PREVIEW_MARGIN_PX - previewHeight
+    viewportHeight - CARD_PREVIEW_PILL_MARGIN_PX - previewHeight
   const preferredLeft =
     triggerRect.left + triggerRect.width / 2 - previewWidth / 2
-  const maxLeft =
-    viewportWidth - SIMULATION_RESULT_CARD_PREVIEW_MARGIN_PX - previewWidth
+  const maxLeft = viewportWidth - CARD_PREVIEW_PILL_MARGIN_PX - previewWidth
 
   return {
-    left: clampSimulationResultCardPreviewValue(
+    left: clampCardPreviewPillValue(
       preferredLeft,
-      SIMULATION_RESULT_CARD_PREVIEW_MARGIN_PX,
+      CARD_PREVIEW_PILL_MARGIN_PX,
       maxLeft
     ),
     placement,
-    top: clampSimulationResultCardPreviewValue(
+    top: clampCardPreviewPillValue(
       preferredTop,
-      SIMULATION_RESULT_CARD_PREVIEW_MARGIN_PX,
+      CARD_PREVIEW_PILL_MARGIN_PX,
       maxTop
     ),
     width: previewWidth,
   }
 }
 
-function clampSimulationResultCardPreviewValue(
-  value: number,
-  min: number,
-  max: number
-) {
+function clampCardPreviewPillValue(value: number, min: number, max: number) {
   if (max < min) {
     return min
   }
@@ -7370,6 +7394,68 @@ function getSelectedStartingHandCards(
   return Array.from(cardsByDeckCardId.values())
 }
 
+function getStartingHandCardCopies(startingHand: StartingHand) {
+  return startingHand.cards.flatMap((card) =>
+    Array.from({ length: card.quantity }, (_, copyIndex) => ({
+      ...card,
+      copyIndex,
+    }))
+  )
+}
+
+function StartingHandCardImageRow({ startingHand }: { startingHand: StartingHand }) {
+  return (
+    <ul className="grid w-full grid-cols-7 gap-1 sm:gap-2">
+      {getStartingHandCardCopies(startingHand).map((card) => (
+        <li key={`${card.deckCardId}-${card.copyIndex}`} className="min-w-0">
+          <StartingHandCardImage card={card} />
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function StartingHandCardImage({
+  card,
+}: {
+  card: ReturnType<typeof getStartingHandCardCopies>[number]
+}) {
+  const href = card.scryfallUri.trim() || null
+  const imageUrl = card.defaultImageUrl?.trim() || null
+  const content = imageUrl ? (
+    <img
+      className="block aspect-[488/680] w-full rounded-[5.75%/4.4%] bg-black/50 object-cover"
+      src={imageUrl}
+      alt={card.name}
+      loading="lazy"
+    />
+  ) : (
+    <span className="grid aspect-[488/680] w-full place-items-center rounded-[5.75%/4.4%] border border-border bg-black/50 px-1 text-center text-[0.5rem] leading-tight text-muted-foreground">
+      No image
+    </span>
+  )
+
+  if (!href) {
+    return (
+      <span className="block min-w-0" title={card.name}>
+        {content}
+      </span>
+    )
+  }
+
+  return (
+    <a
+      className="block min-w-0 rounded-[5.75%/4.4%] shadow-lg shadow-black/25 transition-transform hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      title={card.name}
+    >
+      {content}
+    </a>
+  )
+}
+
 function ChooseSavedSeedModal({
   deckId,
   isLoadingSavedSeeds,
@@ -7711,7 +7797,7 @@ function ChooseStartingHandModal({
       >
         <section
           aria-labelledby="choose-starting-hand-title"
-          className="flex max-h-[calc(100svh-3rem)] w-full max-w-2xl flex-col rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
+          className="flex max-h-[calc(100svh-3rem)] w-full max-w-4xl flex-col rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
           role="dialog"
           aria-modal="true"
           onMouseDown={(event) => event.stopPropagation()}
@@ -7814,22 +7900,8 @@ function ChooseStartingHandModal({
               {selectedHand ? (
                 <div className="grid gap-2">
                   <p className="text-sm text-sky-300">Cards</p>
-                  <div className="max-h-56 overflow-y-auto rounded-md border border-border bg-background/35 p-2">
-                    <ul className="grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
-                      {selectedHand.cards.map((card) => (
-                        <li
-                          key={card.deckCardId}
-                          className="rounded-md bg-muted/30 px-3 py-2"
-                        >
-                          {card.quantity > 1 ? (
-                            <span className="mr-2 text-sky-300">
-                              {card.quantity}x
-                            </span>
-                          ) : null}
-                          {card.name}
-                        </li>
-                      ))}
-                    </ul>
+                  <div className="rounded-md border border-border bg-background/35 p-2 sm:p-3">
+                    <StartingHandCardImageRow startingHand={selectedHand} />
                   </div>
                 </div>
               ) : !isLoadingStartingHands ? (
@@ -8079,6 +8151,25 @@ function CreateStartingHandModal({
     })
   }
 
+  function handleCardRowClick(
+    event: MouseEvent<HTMLDivElement>,
+    cardId: string,
+    isDisabled: boolean
+  ) {
+    const target = event.target
+
+    if (
+      isDisabled ||
+      !(target instanceof Element) ||
+      target.closest("input, [data-card-preview-pill]")
+    ) {
+      return
+    }
+
+    toggleCard(cardId)
+    setError(null)
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
@@ -8215,27 +8306,37 @@ function CreateStartingHandModal({
 
                     return (
                       <li key={card.id}>
-                        <label
-                          className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
+                        <div
+                          className={`flex min-w-0 items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
                             isSelected
                               ? "bg-accent text-accent-foreground"
                               : isDisabled
-                                ? "text-muted-foreground/55"
+                                ? "bg-muted/15 text-muted-foreground/55"
                                 : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
-                          }`}
+                          } ${isDisabled ? "cursor-not-allowed" : "cursor-pointer"}`}
+                          onClick={(event) =>
+                            handleCardRowClick(event, card.id, isDisabled)
+                          }
                         >
                           <input
-                            className="size-4 accent-sky-300"
+                            className="size-4 shrink-0 accent-sky-300"
                             type="checkbox"
                             checked={isSelected}
                             disabled={isDisabled}
+                            aria-label={`Select ${card.name}`}
                             onChange={() => {
                               toggleCard(card.id)
                               setError(null)
                             }}
                           />
-                          <span>{card.name}</span>
-                        </label>
+                          <CardPreviewPill
+                            href={card.scryfallUri}
+                            imageUrl={card.defaultImageUrl}
+                            label={card.name}
+                            title={card.name}
+                            variant={isSelected ? "selected" : "default"}
+                          />
+                        </div>
                       </li>
                     )
                   })}
