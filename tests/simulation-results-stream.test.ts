@@ -9,7 +9,7 @@ import type {
 import { getSimulationFinalParsedOutput } from "../src/lib/simulation-final-output.js"
 import { applySimulationResultsStreamEvent } from "../src/lib/simulation-results-stream.js"
 
-test("applies snapshot, run update, simulation update, and done events without chunks", () => {
+test("applies snapshot, run update, simulation update, and done events without incremental output events", () => {
   const snapshotResults = createResultsInfo({
     openingHandLlmRuns: [createRun({ llmRunId: "opening-1" })],
   })

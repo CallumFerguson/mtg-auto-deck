@@ -2,19 +2,8 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import {
   ModelReportedSimulationError,
-  ProviderTerminalEventError,
-  createCancellationChunk,
-  createFinalParsedOutputChunk,
-  createLlamaCppCompletedChunk,
-  createLlamaCppMessageDeltaChunk,
-  createLlamaCppReasoningDeltaChunk,
-  createLlamaCppToolCallCompleteChunk,
-  createLlamaCppToolCallStartChunk,
   getCompletedResponseOutputText,
-  getOpenRouterGenerationIdFromCompletedEvent,
   isAbortError,
-  normalizeOpenAiStreamEvent,
-  normalizeOpenRouterStreamEvent,
   parseOpeningHandCompletionFromResponseText,
   parseOpeningHandFromResponseText,
   parseTurnSimulationCompletionFromResponseText,
@@ -24,16 +13,11 @@ import {
   INVALID_OPENING_HAND_SIMULATION_FAILURE_MESSAGE,
   STALE_IN_FLIGHT_LLM_RUN_CANCELLATION_MESSAGE,
   STALE_RUNNING_SIMULATION_CANCELLATION_MESSAGE,
-  buildAppendToPersistedLlmRunDeltaChunkQuery,
-  buildAppendLlmRunChunksQuery,
-  buildClaimQueuedLlmRunStreamingQuery,
+  buildClaimQueuedLlmRunStartQuery,
   buildFailQueuedLlmRunUsageLimitQuery,
-  buildIncrementRunningLlmRunCostQuery,
   buildPartialLlmRunCostSnapshotQuery,
   buildRecordLlmRunMcpFunctionCallQuery,
   canApplyLateLlmRunTerminalUpdate,
-  compactLlmRunDeltaChunks,
-  getInsertedLlmRunGeneratedDeltaCharCount,
   getInitialSimulationStatus,
   getLlmRunOwnerConcurrencyLimitSql,
   getOpeningHandCompletionDecision,
@@ -62,7 +46,6 @@ import {
   estimatePartialLlmRunCostUsd,
   estimatePresetTokenCostUsd,
   estimateRunningLlmRunInitialCostUsd,
-  estimateRunningLlmRunOutputDeltaCostUsd,
   formatPreferredLlmRunCostAsCents,
   formatUsdCostAsCentLabel,
   formatUsdCostAsCents,
@@ -147,86 +130,6 @@ test("builds OpenRouter reasoning options with summaries when enabled", () => {
     effort: "high",
     summary: "auto",
   })
-})
-
-test("normalizes valid MCP output JSON", () => {
-  const chunk = normalizeOpenAiStreamEvent({
-    type: "response.output_item.done",
-    item: {
-      type: "mcp_call",
-      name: "draw_starting_hand",
-      output: '{"cards":["Sol Ring"]}',
-    },
-  })
-
-  assert.equal(chunk.kind, "mcp_call_complete")
-  assert.equal(chunk.mcpFunctionName, "draw_starting_hand")
-  assert.deepEqual(chunk.mcpFunctionOutput, {
-    cards: ["Sol Ring"],
-  })
-  assert.equal(chunk.mcpFunctionReason, null)
-})
-
-test("normalizes MCP output reason from nested tool result data", () => {
-  const chunk = normalizeOpenAiStreamEvent({
-    type: "response.output_item.done",
-    item: {
-      type: "mcp_call",
-      name: "draw_starting_hand",
-      output: JSON.stringify({
-        message: "Drew the starting hand.",
-        data: {
-          cards: ["Sol Ring"],
-          reason: " Opening 7 ",
-        },
-      }),
-    },
-  })
-
-  assert.equal(chunk.kind, "mcp_call_complete")
-  assert.equal(chunk.mcpFunctionReason, "Opening 7")
-})
-
-test("keeps malformed MCP output as raw text instead of throwing", () => {
-  const chunk = normalizeOpenAiStreamEvent({
-    type: "response.output_item.done",
-    item: {
-      type: "mcp_call",
-      name: "draw_starting_hand",
-      output: '{"cards":',
-    },
-  })
-
-  assert.equal(chunk.kind, "mcp_call_complete")
-  assert.equal(chunk.mcpFunctionOutput, '{"cards":')
-  assert.equal(chunk.mcpFunctionReason, null)
-})
-
-test("builds chunk inserts with extracted MCP function reason", () => {
-  const query = buildAppendLlmRunChunksQuery(
-    "00000000-0000-0000-0000-000000000001",
-    [
-      {
-        sequence: 1,
-        kind: "mcp_call_complete",
-        mcpFunctionName: "return_cards_to_library",
-        mcpFunctionOutput: {
-          message: "Returned cards.",
-          data: {
-            cards: ["Sol Ring"],
-            reason: " Bottoming after mulligan ",
-          },
-        },
-        mcpFunctionReason: null,
-        reasoningDelta: null,
-        outputDelta: null,
-        payload: {},
-      },
-    ]
-  )
-
-  assert.match(query.text, /mcp_function_reason/)
-  assert.equal(query.values[5], "Bottoming after mulligan")
 })
 
 test("builds MCP function call inserts with normalized success output", () => {
@@ -412,164 +315,6 @@ test("does not mask MCP success when audit recording fails", async () => {
   assert.equal(loggerCalls.length, 1)
 })
 
-test("builds delta chunk inserts with nullable payloads", () => {
-  const query = buildAppendLlmRunChunksQuery(
-    "00000000-0000-0000-0000-000000000001",
-    [
-      {
-        sequence: 1,
-        kind: "message_delta",
-        mcpFunctionName: null,
-        mcpFunctionOutput: null,
-        mcpFunctionReason: null,
-        reasoningDelta: null,
-        outputDelta: "Keep",
-      },
-    ]
-  )
-
-  assert.equal(query.values[8], null)
-})
-
-test("compacts adjacent delta chunks using the last sequence", () => {
-  const chunks = compactLlmRunDeltaChunks([
-    {
-      sequence: 1,
-      kind: "message_delta",
-      mcpFunctionName: "ignored",
-      mcpFunctionOutput: { ignored: true },
-      mcpFunctionReason: "ignored",
-      reasoningDelta: null,
-      outputDelta: "Keep",
-      payload: { type: "response.output_text.delta" },
-    },
-    {
-      sequence: 2,
-      kind: "message_delta",
-      mcpFunctionName: null,
-      mcpFunctionOutput: null,
-      mcpFunctionReason: null,
-      reasoningDelta: null,
-      outputDelta: " seven.",
-      payload: { type: "response.output_text.delta" },
-    },
-    {
-      sequence: 3,
-      kind: "reasoning_delta",
-      mcpFunctionName: null,
-      mcpFunctionOutput: null,
-      mcpFunctionReason: null,
-      reasoningDelta: "Hand",
-      outputDelta: null,
-      payload: { type: "response.reasoning_summary_text.delta" },
-    },
-    {
-      sequence: 4,
-      kind: "reasoning_delta",
-      mcpFunctionName: null,
-      mcpFunctionOutput: null,
-      mcpFunctionReason: null,
-      reasoningDelta: " has ramp.",
-      outputDelta: null,
-      payload: { type: "response.reasoning_summary_text.delta" },
-    },
-    {
-      sequence: 5,
-      kind: "output_start",
-      mcpFunctionName: null,
-      mcpFunctionOutput: null,
-      mcpFunctionReason: null,
-      reasoningDelta: null,
-      outputDelta: null,
-      payload: { type: "response.output_item.added" },
-    },
-    {
-      sequence: 6,
-      kind: "message_delta",
-      mcpFunctionName: null,
-      mcpFunctionOutput: null,
-      mcpFunctionReason: null,
-      reasoningDelta: null,
-      outputDelta: "Again.",
-      payload: { type: "response.output_text.delta" },
-    },
-  ])
-
-  assert.deepEqual(
-    chunks.map((chunk) => ({
-      kind: chunk.kind,
-      mcpFunctionName: chunk.mcpFunctionName,
-      mcpFunctionOutput: chunk.mcpFunctionOutput,
-      mcpFunctionReason: chunk.mcpFunctionReason,
-      outputDelta: chunk.outputDelta,
-      payload: chunk.payload,
-      reasoningDelta: chunk.reasoningDelta,
-      sequence: chunk.sequence,
-    })),
-    [
-      {
-        kind: "message_delta",
-        mcpFunctionName: null,
-        mcpFunctionOutput: null,
-        mcpFunctionReason: null,
-        outputDelta: "Keep seven.",
-        payload: null,
-        reasoningDelta: null,
-        sequence: 2,
-      },
-      {
-        kind: "reasoning_delta",
-        mcpFunctionName: null,
-        mcpFunctionOutput: null,
-        mcpFunctionReason: null,
-        outputDelta: null,
-        payload: null,
-        reasoningDelta: "Hand has ramp.",
-        sequence: 4,
-      },
-      {
-        kind: "output_start",
-        mcpFunctionName: null,
-        mcpFunctionOutput: null,
-        mcpFunctionReason: null,
-        outputDelta: null,
-        payload: { type: "response.output_item.added" },
-        reasoningDelta: null,
-        sequence: 5,
-      },
-      {
-        kind: "message_delta",
-        mcpFunctionName: null,
-        mcpFunctionOutput: null,
-        mcpFunctionReason: null,
-        outputDelta: "Again.",
-        payload: null,
-        reasoningDelta: null,
-        sequence: 6,
-      },
-    ]
-  )
-})
-
-test("builds persisted delta append updates with advanced sequence", () => {
-  const query = buildAppendToPersistedLlmRunDeltaChunkQuery({
-    chunkId: 10,
-    kind: "message_delta",
-    outputDelta: " seven.",
-    reasoningDelta: null,
-    sequence: 6,
-  })
-  const normalizedSql = query.text.replace(/\s+/g, " ")
-
-  assert.deepEqual(query.values, [10, 6, null, " seven.", "message_delta"])
-  assert.match(normalizedSql, /sequence = \$2/)
-  assert.match(normalizedSql, /output_delta =/)
-  assert.match(normalizedSql, /\$3::text/)
-  assert.match(normalizedSql, /\$4::text/)
-  assert.match(normalizedSql, /payload = NULL/)
-  assert.match(normalizedSql, /sequence < \$2/)
-})
-
 test("builds partial LLM run cost snapshot query", () => {
   const llmRunId = "00000000-0000-0000-0000-000000000001"
   const query = buildPartialLlmRunCostSnapshotQuery(llmRunId)
@@ -577,104 +322,30 @@ test("builds partial LLM run cost snapshot query", () => {
 
   assert.deepEqual(query.values, [llmRunId])
   assert.match(normalizedSql, /length\(llm_run\.full_prompt\)/)
-  assert.doesNotMatch(normalizedSql, /llm_run_chunks/)
-  assert.doesNotMatch(normalizedSql, /chunk\./)
   assert.match(normalizedSql, /llm_run\.service_tier/)
   assert.match(normalizedSql, /cached_input_token_cost_usd_per_million/)
-  assert.match(normalizedSql, /output_token_cost_usd_per_million/)
+  assert.doesNotMatch(normalizedSql, /output_token_cost_usd_per_million/)
   assert.doesNotMatch(normalizedSql, /openrouter_reported_cost_usd/)
 })
 
-test("normalizes OpenAI reasoning and output item lifecycle events", () => {
-  const reasoningStartChunk = normalizeOpenAiStreamEvent({
-    type: "response.output_item.added",
-    item: {
-      type: "reasoning",
-      id: "rs_1",
-      summary: [],
-      status: "in_progress",
-    },
-  })
-  const reasoningDoneChunk = normalizeOpenAiStreamEvent({
-    type: "response.output_item.done",
-    item: {
-      type: "reasoning",
-      id: "rs_1",
-      summary: [],
-      status: "completed",
-    },
-  })
-  const outputStartChunk = normalizeOpenAiStreamEvent({
-    type: "response.output_item.added",
-    item: {
-      type: "message",
-      id: "msg_1",
-      status: "in_progress",
-      role: "assistant",
-      content: [],
-    },
-  })
-  const outputDoneChunk = normalizeOpenAiStreamEvent({
-    type: "response.output_item.done",
-    item: {
-      type: "message",
-      id: "msg_1",
-      status: "completed",
-      role: "assistant",
-      content: [],
-    },
-  })
-
-  assert.equal(reasoningStartChunk.kind, "reasoning_start")
-  assert.equal(reasoningDoneChunk.kind, "reasoning_done")
-  assert.equal(outputStartChunk.kind, "output_start")
-  assert.equal(outputDoneChunk.kind, "output_done")
-})
-
-test("normalizes OpenAI text and reasoning deltas with null payloads", () => {
-  const textChunk = normalizeOpenAiStreamEvent({
-    type: "response.output_text.delta",
-    delta: "Keep the seven.",
-  })
-  const reasoningChunk = normalizeOpenAiStreamEvent({
-    type: "response.reasoning_summary_text.delta",
-    delta: "Hand has ramp.",
-  })
-
-  assert.equal(textChunk.kind, "message_delta")
-  assert.equal(textChunk.outputDelta, "Keep the seven.")
-  assert.equal(textChunk.payload, null)
-  assert.equal(reasoningChunk.kind, "reasoning_delta")
-  assert.equal(reasoningChunk.reasoningDelta, "Hand has ramp.")
-  assert.equal(reasoningChunk.payload, null)
-})
-
-test("normalizes OpenAI reasoning summary part lifecycle events", () => {
-  const summaryStartChunk = normalizeOpenAiStreamEvent({
-    type: "response.reasoning_summary_part.added",
-    item_id: "rs_1",
-    output_index: 0,
-    part: {
-      text: "",
-      type: "summary_text",
-    },
-    sequence_number: 1,
-    summary_index: 0,
-  })
-  const summaryDoneChunk = normalizeOpenAiStreamEvent({
-    type: "response.reasoning_summary_part.done",
-    item_id: "rs_1",
-    output_index: 0,
-    part: {
-      text: "Checking mana.",
-      type: "summary_text",
-    },
-    sequence_number: 2,
-    summary_index: 0,
-  })
-
-  assert.equal(summaryStartChunk.kind, "reasoning_start")
-  assert.equal(summaryDoneChunk.kind, "reasoning_done")
+test("extracts output text from completed response objects", () => {
+  assert.equal(
+    getCompletedResponseOutputText({
+      output: [
+        {
+          type: "message",
+          role: "assistant",
+          content: [
+            {
+              type: "output_text",
+              text: "Keep the opening hand.",
+            },
+          ],
+        },
+      ],
+    }),
+    "Keep the opening hand."
+  )
 })
 
 test("estimates preset token cost in unrounded USD", () => {
@@ -732,18 +403,15 @@ test("handles token usage aliases and clamps cached input tokens", () => {
   assert.equal(costUsd?.toFixed(4), "0.0003")
 })
 
-test("estimates partial LLM run cost from cached prompt and streamed output chars", () => {
+test("estimates partial LLM run cost from cached prompt chars only", () => {
   const costUsd = estimatePartialLlmRunCostUsd({
     fullPromptCharCount: 401,
-    reasoningDeltaCharCount: 121,
-    outputDeltaCharCount: 83,
     tokenCosts: {
       cachedInputDollarsPerMillion: 0.5,
-      outputDollarsPerMillion: 5,
     },
   })
 
-  assert.equal(costUsd?.toFixed(6), "0.000305")
+  assert.equal(costUsd?.toFixed(6), "0.000050")
 })
 
 test("estimates running LLM run initial cost from cached prompt chars", () => {
@@ -751,79 +419,30 @@ test("estimates running LLM run initial cost from cached prompt chars", () => {
     fullPromptCharCount: 401,
     tokenCosts: {
       cachedInputDollarsPerMillion: 0.5,
-      outputDollarsPerMillion: 5,
     },
   })
 
   assert.equal(costUsd?.toFixed(9), "0.000050125")
 })
 
-test("estimates running LLM run output delta cost from streamed chars", () => {
-  const costUsd = estimateRunningLlmRunOutputDeltaCostUsd({
-    reasoningDeltaCharCount: 121,
-    outputDeltaCharCount: 83,
-    tokenCosts: {
-      outputDollarsPerMillion: 5,
-    },
-  })
-
-  assert.equal(costUsd?.toFixed(6), "0.000255")
-})
-
-test("requires running LLM run initial cached input and output costs", () => {
+test("requires running LLM run initial cached input cost", () => {
   assert.equal(
     estimateRunningLlmRunInitialCostUsd({
       fullPromptCharCount: 400,
       tokenCosts: {
         cachedInputDollarsPerMillion: null,
-        outputDollarsPerMillion: 5,
-      },
-    }),
-    null
-  )
-  assert.equal(
-    estimateRunningLlmRunInitialCostUsd({
-      fullPromptCharCount: 400,
-      tokenCosts: {
-        cachedInputDollarsPerMillion: 0.5,
-        outputDollarsPerMillion: null,
-      },
-    }),
-    null
-  )
-  assert.equal(
-    estimateRunningLlmRunOutputDeltaCostUsd({
-      reasoningDeltaCharCount: 100,
-      outputDeltaCharCount: 100,
-      tokenCosts: {
-        outputDollarsPerMillion: null,
       },
     }),
     null
   )
 })
 
-test("requires partial LLM run cached input and output costs", () => {
+test("requires partial LLM run cached input cost", () => {
   assert.equal(
     estimatePartialLlmRunCostUsd({
       fullPromptCharCount: 400,
-      reasoningDeltaCharCount: 100,
-      outputDeltaCharCount: 100,
       tokenCosts: {
         cachedInputDollarsPerMillion: null,
-        outputDollarsPerMillion: 5,
-      },
-    }),
-    null
-  )
-  assert.equal(
-    estimatePartialLlmRunCostUsd({
-      fullPromptCharCount: 400,
-      reasoningDeltaCharCount: 100,
-      outputDeltaCharCount: 100,
-      tokenCosts: {
-        cachedInputDollarsPerMillion: 0.5,
-        outputDollarsPerMillion: null,
       },
     }),
     null
@@ -1273,7 +892,7 @@ test("checks usage limit gate before starting queued runs", () => {
 
 test("builds queued LLM run claim query with explicit claim timestamp", () => {
   const claimStartedAt = new Date("2026-05-15T12:00:00.123Z")
-  const query = buildClaimQueuedLlmRunStreamingQuery(
+  const query = buildClaimQueuedLlmRunStartQuery(
     "00000000-0000-0000-0000-000000000001",
     claimStartedAt
   )
@@ -1290,9 +909,8 @@ test("builds queued LLM run claim query with explicit claim timestamp", () => {
   assert.match(normalizedSql, /estimated_cost_usd =/)
   assert.match(normalizedSql, /length\(llm_run\.full_prompt\)::numeric \/ 4/)
   assert.match(normalizedSql, /cached_input_token_cost_usd_per_million/)
-  assert.match(normalizedSql, /output_token_cost_usd_per_million/)
   assert.match(normalizedSql, /cached_input_token_cost_usd_per_million >= 0/)
-  assert.match(normalizedSql, /output_token_cost_usd_per_million >= 0/)
+  assert.doesNotMatch(normalizedSql, /output_token_cost_usd_per_million >= 0/)
   assert.match(
     normalizedSql,
     /CASE WHEN llm_run\.service_tier = 'flex' THEN 0\.5 ELSE 1 END/
@@ -1305,56 +923,6 @@ test("builds queued LLM run claim query with explicit claim timestamp", () => {
   )
 })
 
-test("counts only inserted LLM run generated delta chars", () => {
-  assert.equal(
-    getInsertedLlmRunGeneratedDeltaCharCount([
-      {
-        reasoning_delta: "thinking",
-        output_delta: null,
-      },
-      {
-        reasoning_delta: null,
-        output_delta: "answer",
-      },
-      {
-        reasoning_delta: null,
-        output_delta: null,
-      },
-    ]),
-    14
-  )
-})
-
-test("builds incremental running LLM run cost query", () => {
-  const query = buildIncrementRunningLlmRunCostQuery({
-    llmRunId: "00000000-0000-0000-0000-000000000001",
-    generatedDeltaCharCount: 204,
-  })
-  const normalizedSql = query.text.replace(/\s+/g, " ")
-
-  assert.deepEqual(query.values, [
-    "00000000-0000-0000-0000-000000000001",
-    204,
-  ])
-  assert.match(normalizedSql, /llm_run\.estimated_cost_usd \+/)
-  assert.match(normalizedSql, /\$2::numeric \/ 4/)
-  assert.match(normalizedSql, /preset\.output_token_cost_usd_per_million/)
-  assert.match(
-    normalizedSql,
-    /CASE WHEN llm_run\.service_tier = 'flex' THEN 0\.5 ELSE 1 END/
-  )
-  assert.match(normalizedSql, /llm_run\.estimated_cost_usd IS NOT NULL/)
-  assert.match(
-    normalizedSql,
-    /llm_run\.status IN \('pending', 'streaming', 'cancel_requested'\)/
-  )
-  assert.match(
-    normalizedSql,
-    /preset\.output_token_cost_usd_per_million IS NOT NULL/
-  )
-  assert.match(normalizedSql, /preset\.output_token_cost_usd_per_million >= 0/)
-})
-
 test("uses the same claim timestamp for first usage window and queued run start", () => {
   const claimStartedAt = new Date("2026-05-15T12:00:00.123Z")
   const window = getStartedUsageLimitWindowBounds({
@@ -1362,7 +930,7 @@ test("uses the same claim timestamp for first usage window and queued run start"
     existingWindow: null,
     now: claimStartedAt,
   })
-  const claimRunQuery = buildClaimQueuedLlmRunStreamingQuery(
+  const claimRunQuery = buildClaimQueuedLlmRunStartQuery(
     "00000000-0000-0000-0000-000000000001",
     claimStartedAt
   )
@@ -1795,76 +1363,6 @@ function createLlamaCppPreset() {
   }
 }
 
-test("normalizes MCP tool errors from completed output items", () => {
-  const chunk = normalizeOpenAiStreamEvent({
-    type: "response.output_item.done",
-    item: {
-      type: "mcp_call",
-      name: "draw_card_from_top",
-      output: null,
-      status: "failed",
-      error: {
-        type: "mcp_tool_execution_error",
-        content: [
-          {
-            text: "Provided simulationId does not match the simulation associated with llmRunId.",
-            type: "text",
-          },
-        ],
-      },
-    },
-  })
-
-  assert.equal(chunk.kind, "mcp_call_complete")
-  assert.equal(chunk.mcpFunctionName, "draw_card_from_top")
-  assert.equal(
-    chunk.mcpFunctionOutput,
-    "Provided simulationId does not match the simulation associated with llmRunId."
-  )
-})
-
-test("creates a first-class cancellation chunk", () => {
-  const chunk = createCancellationChunk("Stopped by user.")
-
-  assert.equal(chunk.kind, "cancelled")
-  assert.deepEqual(chunk.payload, {
-    message: "Stopped by user.",
-  })
-})
-
-test("creates llama.cpp text, tool, and completion chunks", () => {
-  const startChunk = createLlamaCppToolCallStartChunk("draw_starting_hand", {
-    id: "call_1",
-  })
-  const completeChunk = createLlamaCppToolCallCompleteChunk(
-    "draw_starting_hand",
-    { cards: ["Sol Ring"] },
-    { id: "call_1" }
-  )
-  const textChunk = createLlamaCppMessageDeltaChunk(
-    '{"keptHand":["Sol Ring"]}',
-    { id: "chatcmpl_1" }
-  )
-  const reasoningChunk = createLlamaCppReasoningDeltaChunk("Thinking.", {
-    id: "chatcmpl_1",
-  })
-  const completedChunk = createLlamaCppCompletedChunk({ id: "chatcmpl_1" })
-
-  assert.equal(startChunk.kind, "mcp_call_start")
-  assert.equal(startChunk.mcpFunctionName, "draw_starting_hand")
-  assert.equal(completeChunk.kind, "mcp_call_complete")
-  assert.deepEqual(completeChunk.mcpFunctionOutput, {
-    cards: ["Sol Ring"],
-  })
-  assert.equal(textChunk.kind, "message_delta")
-  assert.equal(textChunk.outputDelta, '{"keptHand":["Sol Ring"]}')
-  assert.equal(textChunk.payload, null)
-  assert.equal(reasoningChunk.kind, "reasoning_delta")
-  assert.equal(reasoningChunk.reasoningDelta, "Thinking.")
-  assert.equal(reasoningChunk.payload, null)
-  assert.equal(completedChunk.kind, "completed")
-})
-
 test("runtime abort helper throws a recognized abort error", () => {
   const abortController = new AbortController()
   abortController.abort()
@@ -1930,193 +1428,6 @@ test("late LLM terminal updates do not apply after cancellation starts", () => {
   assert.equal(canApplyLateLlmRunTerminalUpdate("cancelled"), false)
   assert.equal(canApplyLateLlmRunTerminalUpdate("completed"), false)
   assert.equal(canApplyLateLlmRunTerminalUpdate("failed"), false)
-})
-
-test("recognizes provider terminal events as error chunks", () => {
-  const event = {
-    type: "response.failed",
-    response: {
-      error: {
-        message: "provider is unavailable",
-      },
-    },
-  }
-  const chunk = normalizeOpenAiStreamEvent(event)
-  const error = new ProviderTerminalEventError(event.type, event)
-
-  assert.equal(chunk.kind, "error")
-  assert.equal(chunk.payload, event)
-  assert.equal(
-    error.message,
-    "OpenAI stream ended with response.failed: provider is unavailable"
-  )
-})
-
-test("normalizes OpenRouter text and reasoning stream deltas", () => {
-  const textChunk = normalizeOpenRouterStreamEvent({
-    type: "response.output_text.delta",
-    delta: "Keep the seven.",
-  })
-  const summaryChunk = normalizeOpenRouterStreamEvent({
-    type: "response.reasoning_summary_text.delta",
-    delta: "Hand has ramp.",
-  })
-  const reasoningChunk = normalizeOpenRouterStreamEvent({
-    type: "response.reasoning_text.delta",
-    delta: "Evaluating mana.",
-  })
-
-  assert.equal(textChunk.kind, "message_delta")
-  assert.equal(textChunk.outputDelta, "Keep the seven.")
-  assert.equal(textChunk.payload, null)
-  assert.equal(summaryChunk.kind, "reasoning_delta")
-  assert.equal(summaryChunk.reasoningDelta, "Hand has ramp.")
-  assert.equal(summaryChunk.payload, null)
-  assert.equal(reasoningChunk.kind, "reasoning_delta")
-  assert.equal(reasoningChunk.reasoningDelta, "Evaluating mana.")
-  assert.equal(reasoningChunk.payload, null)
-})
-
-test("normalizes OpenRouter reasoning and output item lifecycle events", () => {
-  const reasoningStartChunk = normalizeOpenRouterStreamEvent({
-    type: "response.output_item.added",
-    item: {
-      type: "reasoning",
-      id: "rs_1",
-      summary: [],
-      status: "in_progress",
-    },
-  })
-  const reasoningDoneChunk = normalizeOpenRouterStreamEvent({
-    type: "response.output_item.done",
-    item: {
-      type: "reasoning",
-      id: "rs_1",
-      summary: [],
-      status: "completed",
-    },
-  })
-  const outputStartChunk = normalizeOpenRouterStreamEvent({
-    type: "response.output_item.added",
-    item: {
-      type: "message",
-      id: "msg_1",
-      status: "in_progress",
-      role: "assistant",
-      content: [],
-    },
-  })
-  const outputDoneChunk = normalizeOpenRouterStreamEvent({
-    type: "response.output_item.done",
-    item: {
-      type: "message",
-      id: "msg_1",
-      status: "completed",
-      role: "assistant",
-      content: [],
-    },
-  })
-
-  assert.equal(reasoningStartChunk.kind, "reasoning_start")
-  assert.equal(reasoningDoneChunk.kind, "reasoning_done")
-  assert.equal(outputStartChunk.kind, "output_start")
-  assert.equal(outputDoneChunk.kind, "output_done")
-})
-
-test("normalizes OpenRouter reasoning summary part lifecycle events", () => {
-  const summaryStartChunk = normalizeOpenRouterStreamEvent({
-    type: "response.reasoning_summary_part.added",
-    itemId: "rs_1",
-    outputIndex: 0,
-    part: {
-      text: "",
-      type: "summary_text",
-    },
-    sequenceNumber: 1,
-    summaryIndex: 0,
-  })
-  const summaryTextDoneChunk = normalizeOpenRouterStreamEvent({
-    type: "response.reasoning_summary_text.done",
-    itemId: "rs_1",
-    outputIndex: 0,
-    sequenceNumber: 2,
-    summaryIndex: 0,
-    text: "Checking mana.",
-  })
-
-  assert.equal(summaryStartChunk.kind, "reasoning_start")
-  assert.equal(summaryTextDoneChunk.kind, "reasoning_done")
-})
-
-test("normalizes OpenRouter function calls and tool results", () => {
-  const toolCallNamesById = new Map<string, string>()
-  const startChunk = normalizeOpenRouterStreamEvent(
-    {
-      type: "response.output_item.added",
-      item: {
-        type: "function_call",
-        id: "item_1",
-        callId: "call_1",
-        name: "draw_starting_hand",
-      },
-    },
-    toolCallNamesById
-  )
-  const resultChunk = normalizeOpenRouterStreamEvent(
-    {
-      type: "tool.result",
-      toolCallId: "call_1",
-      result: {
-        message: "Drew the starting hand.",
-      },
-    },
-    toolCallNamesById
-  )
-
-  assert.equal(startChunk.kind, "mcp_call_start")
-  assert.equal(startChunk.mcpFunctionName, "draw_starting_hand")
-  assert.equal(resultChunk.kind, "mcp_call_complete")
-  assert.equal(resultChunk.mcpFunctionName, "draw_starting_hand")
-  assert.deepEqual(resultChunk.mcpFunctionOutput, {
-    message: "Drew the starting hand.",
-  })
-})
-
-test("normalizes OpenRouter completed and failure events", () => {
-  const completedEvent = {
-    type: "response.completed",
-    response: {
-      id: "gen-openrouter-test",
-      outputText: '{"keptHand":["Sol Ring"]}',
-    },
-  }
-  const completedChunk = normalizeOpenRouterStreamEvent(completedEvent)
-  const failureEvent = {
-    type: "error",
-    message: "provider is unavailable",
-  }
-  const failureChunk = normalizeOpenRouterStreamEvent(failureEvent)
-  const error = new ProviderTerminalEventError(
-    failureEvent.type,
-    failureEvent,
-    "OpenRouter"
-  )
-
-  assert.equal(completedChunk.kind, "completed")
-  assert.equal(completedChunk.payload, completedEvent)
-  assert.equal(
-    getCompletedResponseOutputText(completedEvent.response),
-    '{"keptHand":["Sol Ring"]}'
-  )
-  assert.equal(
-    getOpenRouterGenerationIdFromCompletedEvent(completedEvent),
-    "gen-openrouter-test"
-  )
-  assert.equal(failureChunk.kind, "error")
-  assert.equal(
-    error.message,
-    "OpenRouter stream ended with error: provider is unavailable"
-  )
 })
 
 test("reports invalid completed JSON with an explicit message", () => {
@@ -2185,7 +1496,7 @@ test("parses opening-hand JSON after leading LLM text", () => {
   )
 })
 
-test("keeps parsed opening-hand JSON for final parsed output chunks", () => {
+test("keeps parsed opening-hand JSON for completed runs", () => {
   const parsedCompletion = parseOpeningHandCompletionFromResponseText(
     JSON.stringify({
       keptHand: ["Sol Ring", "Command Tower"],
@@ -2193,10 +1504,8 @@ test("keeps parsed opening-hand JSON for final parsed output chunks", () => {
       error: null,
     })
   )
-  const chunk = createFinalParsedOutputChunk(parsedCompletion.parsedOutput)
 
-  assert.equal(chunk.kind, "final_parsed_output")
-  assert.deepEqual(chunk.payload, {
+  assert.deepEqual(parsedCompletion.parsedOutput, {
     keptHand: ["Sol Ring", "Command Tower"],
     summary: "Kept a fast mana hand.",
     error: null,
@@ -2222,7 +1531,7 @@ test("parses completed turn JSON", () => {
   )
 })
 
-test("keeps parsed turn JSON for final parsed output chunks", () => {
+test("keeps parsed turn JSON for completed runs", () => {
   const gameState = createTurnGameState()
   const turnActions = createTurnActions()
   const parsedCompletion = parseTurnSimulationCompletionFromResponseText(
@@ -2232,10 +1541,8 @@ test("keeps parsed turn JSON for final parsed output chunks", () => {
       error: null,
     })
   )
-  const chunk = createFinalParsedOutputChunk(parsedCompletion.parsedOutput)
 
-  assert.equal(chunk.kind, "final_parsed_output")
-  assert.deepEqual(chunk.payload, {
+  assert.deepEqual(parsedCompletion.parsedOutput, {
     turnActions,
     gameState,
     error: null,
@@ -2449,15 +1756,10 @@ test("reports invalid completed turn JSON with an explicit message", () => {
 })
 
 test("startup stale-run cancellation message is explicit", () => {
-  const chunk = createCancellationChunk(
-    STALE_IN_FLIGHT_LLM_RUN_CANCELLATION_MESSAGE
+  assert.equal(
+    STALE_IN_FLIGHT_LLM_RUN_CANCELLATION_MESSAGE,
+    "LLM run was cancelled because the server restarted before the in-flight API request completed."
   )
-
-  assert.equal(chunk.kind, "cancelled")
-  assert.deepEqual(chunk.payload, {
-    message:
-      "LLM run was cancelled because the server restarted before the in-flight API stream completed.",
-  })
 })
 
 test("startup stale running simulation cancellation message is explicit", () => {

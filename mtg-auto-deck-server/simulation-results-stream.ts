@@ -43,7 +43,7 @@ export type SimulationResultsStreamEvent =
     }
 
 export type SimulationResultsStreamWriter = {
-  write: (chunk: string) => unknown
+  write: (data: string) => unknown
   end: () => unknown
 }
 

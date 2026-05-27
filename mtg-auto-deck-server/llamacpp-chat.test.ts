@@ -1,19 +1,18 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import type {
-  ChatCompletionChunk,
-  ChatCompletionCreateParamsStreaming,
+  ChatCompletion,
+  ChatCompletionCreateParamsNonStreaming,
 } from "openai/resources/chat/completions"
 import { z } from "zod/v4"
 import { isAbortError } from "./llm-run-events.js"
 import {
-  collectLlamaCppChatCompletion,
+  collectLlamaCppChatCompletionNonStreaming,
   createLlamaCppChatCompletionTools,
   getLlamaCppChatCompletionToolCalls,
   type LlamaCppChatCompletionRequestPayload,
   type LlamaCppToolDefinition,
 } from "./llamacpp-chat.js"
-import type { LlmRunChunkInput } from "./simulations-postgres.js"
 
 const openingHandToolDefinitions: LlamaCppToolDefinition[] = [
   {
@@ -36,50 +35,35 @@ const turnToolDefinitions: LlamaCppToolDefinition[] = [
   },
 ]
 
-test("collects a llama.cpp opening-hand tool loop", async () => {
-  const chatRequests: ChatCompletionCreateParamsStreaming[] = []
-  const chunks: Array<Omit<LlmRunChunkInput, "sequence">> = []
+test("collects a non-streaming llama.cpp opening-hand tool loop", async () => {
+  const chatRequests: ChatCompletionCreateParamsNonStreaming[] = []
   const toolCalls: Array<{ args: Record<string, unknown>; name: string }> = []
   const responses = [
-    createChatCompletionStream([
-      createChatCompletionChunk({
-        finishReason: "tool_calls",
-        toolCalls: [
-          {
-            index: 0,
-            id: "call_1",
-            type: "function",
-            function: {
-              name: "draw_starting_hand",
-              arguments: '{"llmRunId":"run_1"}',
-            },
+    createChatCompletion({
+      finishReason: "tool_calls",
+      toolCalls: [
+        {
+          id: "call_1",
+          type: "function",
+          function: {
+            name: "draw_starting_hand",
+            arguments: '{"llmRunId":"run_1"}',
           },
-        ],
-      }),
-    ]),
-    createChatCompletionStream([
-      createChatCompletionChunk({
-        content: '{"keptHand":',
-      }),
-      createChatCompletionChunk({
-        content: '["Sol Ring"]}',
-        finishReason: "stop",
-      }),
-      createChatCompletionChunk({
-        choices: [],
-        usage: {
-          prompt_tokens: 100,
-          completion_tokens: 25,
-          total_tokens: 125,
         },
-      }),
-    ]),
+      ],
+    }),
+    createChatCompletion({
+      content: '{"keptHand":["Sol Ring"]}',
+      finishReason: "stop",
+      usage: {
+        prompt_tokens: 100,
+        completion_tokens: 25,
+        total_tokens: 125,
+      },
+    }),
   ]
 
-  const result = await collectLlamaCppChatCompletion({
-    appendChunk: (chunk) => {
-      chunks.push(chunk)
-    },
+  const result = await collectLlamaCppChatCompletionNonStreaming({
     callTool: async (name, args) => {
       toolCalls.push({ name, args })
       return { cards: ["Sol Ring"] }
@@ -104,62 +88,50 @@ test("collects a llama.cpp opening-hand tool loop", async () => {
       },
     },
   ])
-  assert.deepEqual(
-    chunks.map((chunk) => chunk.kind),
-    [
-      "mcp_call_start",
-      "mcp_call_complete",
-      "output_start",
-      "message_delta",
-      "message_delta",
-      "output_done",
-      "completed",
-    ]
-  )
   assert.equal(result.outputText, '{"keptHand":["Sol Ring"]}')
   assert.deepEqual(result.usage, {
     prompt_tokens: 100,
     completion_tokens: 25,
     total_tokens: 125,
   })
-  assert.equal(chatRequests.length, 2)
   assert.deepEqual(
-    chatRequests.map((request) => request.max_tokens),
-    [2000, 2000]
+    chatRequests.map((request) => request.stream),
+    [false, false]
   )
+  assert.equal(chatRequests[0]?.max_tokens, 2000)
   assert.equal(chatRequests[1]?.messages.length, 3)
+  const rawResponse = result.rawResponse as { responses?: unknown[] }
+
+  assert.equal(Array.isArray(rawResponse.responses), true)
+  assert.equal(rawResponse.responses?.length, 2)
 })
 
-test("collects a llama.cpp turn tool loop with shorthand tool calls", async () => {
-  const chunks: Array<Omit<LlmRunChunkInput, "sequence">> = []
+test("collects a non-streaming llama.cpp turn tool loop with shorthand calls", async () => {
+  const toolCalls: Array<{ args: Record<string, unknown>; name: string }> = []
+  const finalOutput =
+    '{"gameState":{"zones":{"hand":[{"name":"Sol Ring","tapped":null,"notes":null}],"command":[],"battlefield":[],"graveyard":[],"exile":[]},"yourLife":40,"opponentA":{"life":40,"commanderDamage":{}},"opponentB":{"life":40,"commanderDamage":{}},"opponentC":{"life":40,"commanderDamage":{}},"other":""},"error":null}'
   const responses = [
-    createChatCompletionStream([
-      createChatCompletionChunk({
-        finishReason: "tool_calls",
-        toolCalls: [
-          {
-            index: 0,
-            id: "call_1",
-            name: "draw_card_from_top",
-            arguments: '{"llmRunId":"run_1","count":1}',
-          },
-        ],
-      }),
-    ]),
-    createChatCompletionStream([
-      createChatCompletionChunk({
-        content:
-          '{"gameState":{"zones":{"hand":[{"name":"Sol Ring","tapped":null,"notes":null}],"command":[],"battlefield":[],"graveyard":[],"exile":[]},"yourLife":40,"opponentA":{"life":40,"commanderDamage":{}},"opponentB":{"life":40,"commanderDamage":{}},"opponentC":{"life":40,"commanderDamage":{}},"other":""},"error":null}',
-        finishReason: "stop",
-      }),
-    ]),
+    createChatCompletion({
+      finishReason: "tool_calls",
+      toolCalls: [
+        {
+          id: "call_1",
+          name: "draw_card_from_top",
+          arguments: '{"llmRunId":"run_1","count":1}',
+        },
+      ],
+    }),
+    createChatCompletion({
+      content: finalOutput,
+      finishReason: "stop",
+    }),
   ]
 
-  const result = await collectLlamaCppChatCompletion({
-    appendChunk: (chunk) => {
-      chunks.push(chunk)
+  const result = await collectLlamaCppChatCompletionNonStreaming({
+    callTool: async (name, args) => {
+      toolCalls.push({ name, args })
+      return { cards: ["Sol Ring"] }
     },
-    callTool: async () => ({ cards: ["Sol Ring"] }),
     createChatCompletion: async () => {
       const response = responses.shift()
 
@@ -171,109 +143,38 @@ test("collects a llama.cpp turn tool loop with shorthand tool calls", async () =
     toolDefinitions: turnToolDefinitions,
   })
 
-  assert.equal(
-    result.outputText,
-    '{"gameState":{"zones":{"hand":[{"name":"Sol Ring","tapped":null,"notes":null}],"command":[],"battlefield":[],"graveyard":[],"exile":[]},"yourLife":40,"opponentA":{"life":40,"commanderDamage":{}},"opponentB":{"life":40,"commanderDamage":{}},"opponentC":{"life":40,"commanderDamage":{}},"other":""},"error":null}'
-  )
-  assert.deepEqual(
-    chunks.map((chunk) => chunk.mcpFunctionName).filter(Boolean),
-    ["draw_card_from_top", "draw_card_from_top"]
-  )
-})
-
-test("streams llama.cpp reasoning and output lifecycle chunks", async () => {
-  const chunks: Array<Omit<LlmRunChunkInput, "sequence">> = []
-  const result = await collectLlamaCppChatCompletion({
-    appendChunk: (chunk) => {
-      chunks.push(chunk)
+  assert.equal(result.outputText, finalOutput)
+  assert.deepEqual(toolCalls, [
+    {
+      name: "draw_card_from_top",
+      args: {
+        llmRunId: "run_1",
+        count: 1,
+      },
     },
-    callTool: async () => ({ cards: ["Sol Ring"] }),
-    createChatCompletion: async () =>
-      createChatCompletionStream([
-        createChatCompletionChunk({
-          reasoningContent: "Evaluating mana.",
-        }),
-        createChatCompletionChunk({
-          content: '{"keptHand":["Sol Ring"]}',
-          finishReason: "stop",
-        }),
-      ]),
-    requestPayload: createRequestPayload(openingHandToolDefinitions),
-    signal: new AbortController().signal,
-    toolDefinitions: openingHandToolDefinitions,
-  })
-
-  assert.equal(result.outputText, '{"keptHand":["Sol Ring"]}')
-  assert.deepEqual(
-    chunks.map((chunk) => ({
-      kind: chunk.kind,
-      outputDelta: chunk.outputDelta,
-      reasoningDelta: chunk.reasoningDelta,
-    })),
-    [
-      {
-        kind: "reasoning_start",
-        outputDelta: null,
-        reasoningDelta: null,
-      },
-      {
-        kind: "reasoning_delta",
-        outputDelta: null,
-        reasoningDelta: "Evaluating mana.",
-      },
-      {
-        kind: "reasoning_done",
-        outputDelta: null,
-        reasoningDelta: null,
-      },
-      {
-        kind: "output_start",
-        outputDelta: null,
-        reasoningDelta: null,
-      },
-      {
-        kind: "message_delta",
-        outputDelta: '{"keptHand":["Sol Ring"]}',
-        reasoningDelta: null,
-      },
-      {
-        kind: "output_done",
-        outputDelta: null,
-        reasoningDelta: null,
-      },
-      {
-        kind: "completed",
-        outputDelta: null,
-        reasoningDelta: null,
-      },
-    ]
-  )
+  ])
 })
 
 test("rejects malformed llama.cpp tool arguments", async () => {
   await assert.rejects(
-    collectLlamaCppChatCompletion({
-      appendChunk: () => {},
+    collectLlamaCppChatCompletionNonStreaming({
       callTool: async () => {
         throw new Error("Tool should not be called.")
       },
       createChatCompletion: async () =>
-        createChatCompletionStream([
-          createChatCompletionChunk({
-            finishReason: "tool_calls",
-            toolCalls: [
-              {
-                index: 0,
-                id: "call_1",
-                type: "function",
-                function: {
-                  name: "draw_starting_hand",
-                  arguments: '{"llmRunId":',
-                },
+        createChatCompletion({
+          finishReason: "tool_calls",
+          toolCalls: [
+            {
+              id: "call_1",
+              type: "function",
+              function: {
+                name: "draw_starting_hand",
+                arguments: '{"llmRunId":',
               },
-            ],
-          }),
-        ]),
+            },
+          ],
+        }),
       requestPayload: createRequestPayload(openingHandToolDefinitions),
       signal: new AbortController().signal,
       toolDefinitions: openingHandToolDefinitions,
@@ -284,26 +185,22 @@ test("rejects malformed llama.cpp tool arguments", async () => {
 
 test("stops runaway llama.cpp tool loops at the step limit", async () => {
   await assert.rejects(
-    collectLlamaCppChatCompletion({
-      appendChunk: () => {},
+    collectLlamaCppChatCompletionNonStreaming({
       callTool: async () => ({ cards: ["Sol Ring"] }),
       createChatCompletion: async () =>
-        createChatCompletionStream([
-          createChatCompletionChunk({
-            finishReason: "tool_calls",
-            toolCalls: [
-              {
-                index: 0,
-                id: "call_1",
-                type: "function",
-                function: {
-                  name: "draw_starting_hand",
-                  arguments: '{"llmRunId":"run_1"}',
-                },
+        createChatCompletion({
+          finishReason: "tool_calls",
+          toolCalls: [
+            {
+              id: "call_1",
+              type: "function",
+              function: {
+                name: "draw_starting_hand",
+                arguments: '{"llmRunId":"run_1"}',
               },
-            ],
-          }),
-        ]),
+            },
+          ],
+        }),
       requestPayload: {
         ...createRequestPayload(openingHandToolDefinitions),
         stopWhenStepCount: 1,
@@ -322,17 +219,14 @@ test("does not start llama.cpp requests after cancellation", async () => {
   abortController.abort()
 
   await assert.rejects(
-    collectLlamaCppChatCompletion({
-      appendChunk: () => {},
+    collectLlamaCppChatCompletionNonStreaming({
       callTool: async () => ({ cards: ["Sol Ring"] }),
       createChatCompletion: async () => {
         requestCount += 1
-        return createChatCompletionStream([
-          createChatCompletionChunk({
-            content: '{"keptHand":["Sol Ring"]}',
-            finishReason: "stop",
-          }),
-        ])
+        return createChatCompletion({
+          content: '{"keptHand":["Sol Ring"]}',
+          finishReason: "stop",
+        })
       },
       requestPayload: createRequestPayload(openingHandToolDefinitions),
       signal: abortController.signal,
@@ -346,8 +240,7 @@ test("does not start llama.cpp requests after cancellation", async () => {
 
 test("surfaces llama.cpp chat completion request failures", async () => {
   await assert.rejects(
-    collectLlamaCppChatCompletion({
-      appendChunk: () => {},
+    collectLlamaCppChatCompletionNonStreaming({
       callTool: async () => ({ cards: ["Sol Ring"] }),
       createChatCompletion: async () => {
         throw new Error("connect ECONNREFUSED 127.0.0.1:8080")
@@ -419,46 +312,35 @@ function createRequestPayload(
   }
 }
 
-async function* createChatCompletionStream(chunks: ChatCompletionChunk[]) {
-  for (const chunk of chunks) {
-    yield chunk
-  }
-}
-
-function createChatCompletionChunk({
-  choices,
+function createChatCompletion({
   content = null,
   finishReason = null,
-  reasoningContent = null,
   toolCalls,
   usage = null,
 }: {
-  choices?: ChatCompletionChunk["choices"]
   content?: string | null
-  finishReason?: ChatCompletionChunk["choices"][number]["finish_reason"]
-  reasoningContent?: string | null
+  finishReason?: ChatCompletion["choices"][number]["finish_reason"] | null
   toolCalls?: unknown[]
   usage?: unknown
-}): ChatCompletionChunk {
+}): ChatCompletion {
   return {
     id: "chatcmpl_1",
-    choices:
-      choices ??
-      [
-        {
-          finish_reason: finishReason,
-          index: 0,
-          logprobs: null,
-          delta: {
-            content,
-            reasoning_content: reasoningContent,
-            tool_calls: toolCalls,
-          },
+    choices: [
+      {
+        finish_reason: finishReason,
+        index: 0,
+        logprobs: null,
+        message: {
+          role: "assistant",
+          content,
+          refusal: null,
+          tool_calls: toolCalls,
         },
-      ],
+      },
+    ],
     created: 0,
     model: "local-model",
-    object: "chat.completion.chunk",
+    object: "chat.completion",
     usage,
-  } as ChatCompletionChunk
+  } as ChatCompletion
 }

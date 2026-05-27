@@ -62,40 +62,26 @@ export function estimatePresetTokenCostUsd({
 
 export function estimatePartialLlmRunCostUsd({
   fullPromptCharCount,
-  outputDeltaCharCount,
-  reasoningDeltaCharCount,
   tokenCosts,
 }: {
   fullPromptCharCount: number
-  outputDeltaCharCount: number
-  reasoningDeltaCharCount: number
-  tokenCosts: Pick<
-    TokenPrice,
-    "cachedInputDollarsPerMillion" | "outputDollarsPerMillion"
-  >
+  tokenCosts: Pick<TokenPrice, "cachedInputDollarsPerMillion">
 }) {
   const cachedInputRate = getCostValue(
     tokenCosts.cachedInputDollarsPerMillion
   )
-  const outputRate = getCostValue(tokenCosts.outputDollarsPerMillion)
 
-  if (cachedInputRate === null || outputRate === null) {
+  if (cachedInputRate === null) {
     return null
   }
 
   const cachedInputTokens = estimateTokensFromCharCount(fullPromptCharCount)
-  const outputTokens = estimateTokensFromCharCount(
-    reasoningDeltaCharCount + outputDeltaCharCount
-  )
 
-  if (cachedInputTokens === null || outputTokens === null) {
+  if (cachedInputTokens === null) {
     return null
   }
 
-  return (
-    (cachedInputTokens * cachedInputRate) / 1_000_000 +
-    (outputTokens * outputRate) / 1_000_000
-  )
+  return (cachedInputTokens * cachedInputRate) / 1_000_000
 }
 
 export function estimateRunningLlmRunInitialCostUsd({
@@ -103,17 +89,13 @@ export function estimateRunningLlmRunInitialCostUsd({
   tokenCosts,
 }: {
   fullPromptCharCount: number
-  tokenCosts: Pick<
-    TokenPrice,
-    "cachedInputDollarsPerMillion" | "outputDollarsPerMillion"
-  >
+  tokenCosts: Pick<TokenPrice, "cachedInputDollarsPerMillion">
 }) {
   const cachedInputRate = getCostValue(
     tokenCosts.cachedInputDollarsPerMillion
   )
-  const outputRate = getCostValue(tokenCosts.outputDollarsPerMillion)
 
-  if (cachedInputRate === null || outputRate === null) {
+  if (cachedInputRate === null) {
     return null
   }
 
@@ -125,32 +107,6 @@ export function estimateRunningLlmRunInitialCostUsd({
   }
 
   return (cachedInputTokens * cachedInputRate) / 1_000_000
-}
-
-export function estimateRunningLlmRunOutputDeltaCostUsd({
-  outputDeltaCharCount,
-  reasoningDeltaCharCount,
-  tokenCosts,
-}: {
-  outputDeltaCharCount: number
-  reasoningDeltaCharCount: number
-  tokenCosts: Pick<TokenPrice, "outputDollarsPerMillion">
-}) {
-  const outputRate = getCostValue(tokenCosts.outputDollarsPerMillion)
-
-  if (outputRate === null) {
-    return null
-  }
-
-  const outputTokens = estimateFractionalTokensFromCharCount(
-    reasoningDeltaCharCount + outputDeltaCharCount
-  )
-
-  if (outputTokens === null) {
-    return null
-  }
-
-  return (outputTokens * outputRate) / 1_000_000
 }
 
 export function getOpenRouterReportedCostUsd(usage: unknown) {

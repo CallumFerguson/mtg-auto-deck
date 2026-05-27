@@ -91,7 +91,7 @@ import {
   getSimulationSummary,
   getStartingHandSimulationPromptData,
   getTurnSimulationPromptData,
-  isLlmRunStreaming,
+  isLlmRunActive,
   listActiveSimulationLlmRuns,
   listSimulationsForDeck,
   markLlmRunQueued,
@@ -2746,7 +2746,7 @@ async function startClaimedQueuedLlmRun(run: ClaimedQueuedLlmRun) {
 
       assertClaimedRunMatchesConfig(run, config)
 
-      if (!(await isLlmRunStreaming(run.llmRunId))) {
+      if (!(await isLlmRunActive(run.llmRunId))) {
         return
       }
 
@@ -2774,7 +2774,7 @@ async function startClaimedQueuedLlmRun(run: ClaimedQueuedLlmRun) {
 
     assertClaimedRunMatchesConfig(run, config)
 
-    if (!(await isLlmRunStreaming(run.llmRunId))) {
+    if (!(await isLlmRunActive(run.llmRunId))) {
       return
     }
 
@@ -4308,17 +4308,17 @@ async function main() {
         }
         streamCleanup = cleanup
         const streamWriter = {
-          write(chunk: string) {
+          write(data: string) {
             if (!isStreamOpen) {
               return
             }
 
             if (hasSentSnapshot) {
-              res.write(chunk)
+              res.write(data)
               return
             }
 
-            queuedWrites.push(chunk)
+            queuedWrites.push(data)
           },
           end() {
             if (!isStreamOpen) {
@@ -5281,17 +5281,17 @@ async function main() {
         }
         streamCleanup = cleanup
         const streamWriter = {
-          write(chunk: string) {
+          write(data: string) {
             if (!isStreamOpen) {
               return
             }
 
             if (hasSentSnapshot) {
-              res.write(chunk)
+              res.write(data)
               return
             }
 
-            queuedWrites.push(chunk)
+            queuedWrites.push(data)
           },
           end() {
             if (!isStreamOpen) {

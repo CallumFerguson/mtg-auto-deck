@@ -1,4 +1,4 @@
-import type { DeckCard, SimulationDebugLlmRunChunk } from "./deck-types"
+import type { DeckCard, SimulationMcpFunctionCall } from "./deck-types"
 
 export type SimulationCardLookup = ReadonlyMap<string, DeckCard>
 
@@ -36,18 +36,11 @@ export function getSimulationCardLookupKey(cardName: string) {
 }
 
 export function getSimulationResultToolCardNames(
-  chunk: Pick<
-    SimulationDebugLlmRunChunk,
-    "kind" | "mcpFunctionName" | "mcpFunctionOutput"
-  >
+  call: Pick<SimulationMcpFunctionCall, "mcpFunctionName" | "outputPayload">
 ) {
-  if (chunk.kind !== "mcp_call_complete" || chunk.mcpFunctionName === null) {
-    return []
-  }
+  const outputData = getSimulationResultToolOutputData(call.outputPayload)
 
-  const outputData = getSimulationResultToolOutputData(chunk.mcpFunctionOutput)
-
-  switch (chunk.mcpFunctionName) {
+  switch (call.mcpFunctionName) {
     case "draw_starting_hand":
     case "mulligan":
     case "draw_card_from_top":

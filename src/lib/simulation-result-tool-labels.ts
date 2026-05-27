@@ -1,5 +1,3 @@
-import type { SimulationDebugLlmRunChunk } from "./deck-types"
-
 export type SimulationResultToolLabelState =
   | "active"
   | "started"
@@ -47,23 +45,6 @@ export function getKnownSimulationResultToolLabel({
   }
 }
 
-export function getKnownSimulationResultToolLabelForChunk({
-  chunk,
-  state,
-}: {
-  chunk: Pick<
-    SimulationDebugLlmRunChunk,
-    "mcpFunctionName" | "mcpFunctionOutput"
-  >
-  state: SimulationResultToolLabelState
-}) {
-  return getKnownSimulationResultToolLabel({
-    mcpFunctionName: chunk.mcpFunctionName,
-    mcpFunctionOutput: chunk.mcpFunctionOutput,
-    state,
-  })
-}
-
 export function getSimulationResultToolReason({
   mcpFunctionName,
   mcpFunctionOutput = null,
@@ -92,21 +73,6 @@ export function getSimulationResultToolReason({
   }
 
   return getTrimmedString(asRecord(outputRecord.data).reason)
-}
-
-export function getSimulationResultToolReasonForChunk({
-  chunk,
-}: {
-  chunk: Pick<
-    SimulationDebugLlmRunChunk,
-    "mcpFunctionName" | "mcpFunctionOutput" | "mcpFunctionReason"
-  >
-}) {
-  return getSimulationResultToolReason({
-    mcpFunctionName: chunk.mcpFunctionName,
-    mcpFunctionOutput: chunk.mcpFunctionOutput,
-    mcpFunctionReason: chunk.mcpFunctionReason,
-  })
 }
 
 function getDrawStartingHandLabel(state: SimulationResultToolLabelState) {

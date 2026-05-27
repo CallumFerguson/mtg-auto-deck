@@ -90,19 +90,6 @@ export type StopSimulationResponse = {
   cancelRequestedLlmRunIds: string[]
 }
 
-export type SimulationDebugLlmRunChunk = {
-  id: number | null
-  sequence: number
-  kind: string
-  mcpFunctionName: string | null
-  mcpFunctionOutput: unknown | null
-  mcpFunctionReason: string | null
-  reasoningDelta: string | null
-  outputDelta: string | null
-  payload: unknown | null
-  receivedAt: string
-}
-
 export type OpenRouterGeneration = {
   openrouterTurnIndex: number
   generationId: string

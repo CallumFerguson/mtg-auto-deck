@@ -63,7 +63,6 @@ import type {
   Simulation,
   SimulationDebugInfo,
   SimulationDebugLlmRun,
-  SimulationDebugLlmRunChunk,
   SimulationMcpFunctionCall,
   SimulationResultsInfo,
   SimulationResultsStreamEvent,
@@ -108,7 +107,7 @@ import {
   TURN_PHASE_CHANGES,
   type LoggedTurnAction,
   type TurnPhaseChange,
-} from "@/lib/simulation-result-chunks"
+} from "@/lib/simulation-turn-actions"
 import {
   EMPTY_SIMULATION_CARD_LOOKUP,
   createSimulationCardLookup,
@@ -117,8 +116,8 @@ import {
   type SimulationCardLookup,
 } from "@/lib/simulation-card-resolution"
 import {
-  getKnownSimulationResultToolLabelForChunk,
-  getSimulationResultToolReasonForChunk,
+  getKnownSimulationResultToolLabel,
+  getSimulationResultToolReason,
 } from "@/lib/simulation-result-tool-labels"
 import { useUsageLimits } from "@/lib/usage-limits"
 
@@ -1755,9 +1754,7 @@ export function DeckSimulation({
                   <div className="flex flex-col gap-6 rounded-lg border border-border bg-card/70 p-6 shadow-sm">
                     <div className="grid gap-6">
                       <fieldset className="grid gap-3">
-                        <legend className="sr-only">
-                          Simulation seed
-                        </legend>
+                        <legend className="sr-only">Simulation seed</legend>
                         <div className="grid gap-2 sm:grid-cols-2">
                           <SimulationSetupChoiceCard
                             checked={seedMode === "random"}
@@ -1795,9 +1792,7 @@ export function DeckSimulation({
                       </fieldset>
 
                       <fieldset className="grid gap-3">
-                        <legend className="sr-only">
-                          Opening hand
-                        </legend>
+                        <legend className="sr-only">Opening hand</legend>
                         <div className="grid gap-2 sm:grid-cols-2">
                           <SimulationSetupChoiceCard
                             checked={openingHandMode === "simulate"}
@@ -4063,7 +4058,7 @@ function SimulationResultsPanel({
         role={panelId ? "region" : undefined}
       >
         {run.resultEntries.length > 0 ? (
-          <SimulationResultChunkCards
+          <SimulationMcpFunctionCallCards
             cardLookup={cardLookup}
             entries={run.resultEntries}
           />
@@ -4643,12 +4638,8 @@ function getSimulationTimelineStepLabelClassName(isSelected: boolean) {
   return isSelected ? `${baseClassName} text-foreground` : baseClassName
 }
 
-const simulationResultChunkSurfaceClassName =
+const simulationResultSurfaceClassName =
   "rounded-md border border-border bg-black/20"
-const simulationResultChunkSummaryClassName =
-  "cursor-pointer px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
-const simulationResultChunkPreClassName =
-  "debug-scrollbar-neutral max-h-64 max-w-full overflow-y-auto border-t border-border p-3 text-xs leading-5 break-words whitespace-pre-wrap text-muted-foreground"
 const showSimulationResultCardImageToggle = false
 
 function getSimulationResultEntries(
@@ -4673,31 +4664,6 @@ function compareSimulationMcpFunctionCalls(
   return calledAtComparison || firstCall.id - secondCall.id
 }
 
-function createSimulationMcpFunctionCallChunk(
-  call: SimulationMcpFunctionCall
-): SimulationDebugLlmRunChunk {
-  return {
-    id: call.id,
-    sequence: call.id,
-    kind: "mcp_call_complete",
-    mcpFunctionName: call.mcpFunctionName,
-    mcpFunctionOutput: call.outputPayload,
-    mcpFunctionReason:
-      getMcpFunctionCallReason(call.inputPayload) ??
-      getMcpFunctionCallReason(call.outputPayload),
-    reasoningDelta: null,
-    outputDelta: null,
-    payload: {
-      input: call.inputPayload,
-      item: {
-        status: call.status,
-      },
-      output: call.outputPayload,
-    },
-    receivedAt: call.completedAt,
-  }
-}
-
 function getMcpFunctionCallReason(payload: unknown) {
   const payloadRecord = asPayloadRecord(payload)
   const argumentsRecord = asPayloadRecord(payloadRecord.arguments)
@@ -4708,7 +4674,7 @@ function getMcpFunctionCallReason(payload: unknown) {
   )
 }
 
-function SimulationResultChunkCards({
+function SimulationMcpFunctionCallCards({
   cardLookup,
   entries,
 }: {
@@ -4716,17 +4682,18 @@ function SimulationResultChunkCards({
   entries: SimulationResultEntry[]
 }) {
   function renderEntry(entry: SimulationResultEntry) {
-    const chunk = createSimulationMcpFunctionCallChunk(entry.call)
-
-    return <SimulationResultEvent cardLookup={cardLookup} chunk={chunk} />
+    return (
+      <SimulationMcpFunctionCallEvent
+        call={entry.call}
+        cardLookup={cardLookup}
+      />
+    )
   }
 
   return (
     <div className="grid gap-2">
       {entries.map((entry) => (
-        <Fragment key={entry.id}>
-          {renderEntry(entry)}
-        </Fragment>
+        <Fragment key={entry.id}>{renderEntry(entry)}</Fragment>
       ))}
     </div>
   )
@@ -4914,7 +4881,7 @@ function SimulationFinalOutputBlock({
   }
 
   return (
-    <div className={`grid gap-3 p-3 ${simulationResultChunkSurfaceClassName}`}>
+    <div className={`grid gap-3 p-3 ${simulationResultSurfaceClassName}`}>
       <SimulationResultSummaryMarkdown summary={finalOutput.summary} />
     </div>
   )
@@ -4946,7 +4913,7 @@ function SimulationPresetStartingHandBlock({
         : "Preset opening hand details are unavailable."
 
   return (
-    <div className={`grid gap-3 p-3 ${simulationResultChunkSurfaceClassName}`}>
+    <div className={`grid gap-3 p-3 ${simulationResultSurfaceClassName}`}>
       <p className="text-sm leading-6 text-muted-foreground">{statusText}</p>
 
       {!startingHand && startingHandLoadError ? (
@@ -5380,7 +5347,7 @@ function SimulationGameStateZonesBlock({
   return (
     <section
       ref={gameStateElementRef}
-      className={`grid gap-3 p-3 ${simulationResultChunkSurfaceClassName}`}
+      className={`grid gap-3 p-3 ${simulationResultSurfaceClassName}`}
     >
       {zonesBeforeLibraryCommandRow.map((zone) => (
         <SimulationGameStateZoneBlock
@@ -6142,7 +6109,7 @@ function SimulationResultLoggedTurnActionEvent({
   }
 
   return (
-    <div className={`grid gap-2 p-2 ${simulationResultChunkSurfaceClassName}`}>
+    <div className={`grid gap-2 p-2 ${simulationResultSurfaceClassName}`}>
       {actions.length > 0 ? (
         <ul className="list-disc space-y-1 pl-4 text-sm leading-6 text-foreground/90">
           {actions.map((action, index) => (
@@ -6411,7 +6378,7 @@ function SimulationResultTurnPhaseActionEvent({
 }) {
   return (
     <div
-      className={`grid gap-2 px-2 py-1.5 ${simulationResultChunkSurfaceClassName}`}
+      className={`grid gap-2 px-2 py-1.5 ${simulationResultSurfaceClassName}`}
     >
       <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-sky-100">
         <span
@@ -6478,82 +6445,31 @@ function getTurnPhaseChangeLabel(phaseChange: TurnPhaseChange) {
   }
 }
 
-function SimulationResultEvent({
+function SimulationMcpFunctionCallEvent({
+  call,
   cardLookup,
-  chunk,
 }: {
+  call: SimulationMcpFunctionCall
   cardLookup: SimulationCardLookup
-  chunk: SimulationDebugLlmRunChunk
 }) {
-  if (chunk.kind === "mcp_call_start") {
-    const title =
-      getKnownSimulationResultToolLabelForChunk({
-        chunk,
-        state: "started",
-      }) ?? `Tool started: ${chunk.mcpFunctionName ?? "unknown tool"}`
+  const cardNames = getSimulationResultToolCardNames(call)
 
+  if (cardNames.length > 0 && !isMcpFunctionCallFailure(call)) {
     return (
-      <SimulationResultToolLabelEvent
-        title={title}
-        reason={getSimulationResultToolReasonForChunk({ chunk })}
+      <SimulationResultCompletedCardToolEvent
+        call={call}
+        cardLookup={cardLookup}
+        cardNames={cardNames}
       />
-    )
-  }
-
-  if (chunk.kind === "mcp_call_complete") {
-    const cardNames = getSimulationResultToolCardNames(chunk)
-
-    if (cardNames.length > 0 && !isMcpCallFailure(chunk)) {
-      return (
-        <SimulationResultCompletedCardToolEvent
-          cardLookup={cardLookup}
-          cardNames={cardNames}
-          chunk={chunk}
-        />
-      )
-    }
-
-    return (
-      <SimulationResultToolLabelEvent
-        icon={getMcpCallCompleteIcon(chunk)}
-        title={getMcpCallCompleteTitle(chunk)}
-        reason={getSimulationResultToolReasonForChunk({ chunk })}
-      />
-    )
-  }
-
-  if (chunk.kind === "error") {
-    return (
-      <details className={simulationResultChunkSurfaceClassName}>
-        <summary className={simulationResultChunkSummaryClassName}>
-          Simulation event failed
-        </summary>
-        <pre className={simulationResultChunkPreClassName}>
-          {formatResultEventPayload(chunk.payload)}
-        </pre>
-      </details>
-    )
-  }
-
-  if (chunk.kind === "cancelled") {
-    return (
-      <div
-        className={`${simulationResultChunkSurfaceClassName} px-3 py-2 text-sm text-muted-foreground`}
-      >
-        Simulation cancelled: {getPayloadMessage(chunk.payload)}
-      </div>
     )
   }
 
   return (
-    <details className={simulationResultChunkSurfaceClassName}>
-      <summary className={simulationResultChunkSummaryClassName}>
-        {getDebugChunkEventLabel(chunk)}
-      </summary>
-      <pre className={simulationResultChunkPreClassName}>
-        {JSON.stringify(chunk, null, 2)}
-      </pre>
-    </details>
+    <SimulationResultToolLabelEvent
+      icon={getMcpFunctionCallCompleteIcon(call)}
+      title={getMcpFunctionCallCompleteTitle(call)}
+      reason={getMcpFunctionCallDisplayReason(call)}
+    />
   )
 }
 
@@ -6568,7 +6484,7 @@ function SimulationResultToolLabelEvent({
 }) {
   return (
     <div
-      className={`${simulationResultChunkSurfaceClassName} flex min-w-0 items-start gap-2 px-3 py-2 text-sm text-muted-foreground`}
+      className={`${simulationResultSurfaceClassName} flex min-w-0 items-start gap-2 px-3 py-2 text-sm text-muted-foreground`}
     >
       {icon ? (
         <span className="mt-0.5 shrink-0 text-sky-300" aria-hidden="true">
@@ -6596,22 +6512,22 @@ function SimulationResultToolReasonText({ reason }: { reason: string | null }) {
 }
 
 function SimulationResultCompletedCardToolEvent({
+  call,
   cardLookup,
   cardNames,
-  chunk,
 }: {
+  call: SimulationMcpFunctionCall
   cardLookup: SimulationCardLookup
   cardNames: readonly string[]
-  chunk: SimulationDebugLlmRunChunk
 }) {
   const [showCardImages, setShowCardImages] = useState(false)
 
   return (
-    <div className={simulationResultChunkSurfaceClassName}>
+    <div className={simulationResultSurfaceClassName}>
       <div className="grid gap-1 px-3 py-2 text-muted-foreground">
-        <p className="text-sm">{getMcpCallCompleteTitle(chunk)}</p>
+        <p className="text-sm">{getMcpFunctionCallCompleteTitle(call)}</p>
         <SimulationResultToolReasonText
-          reason={getSimulationResultToolReasonForChunk({ chunk })}
+          reason={getMcpFunctionCallDisplayReason(call)}
         />
       </div>
       <div className="grid gap-3 border-t border-border p-3">
@@ -6729,9 +6645,7 @@ function CardPreviewPill({
       }
 
       setPreviewPosition(
-        getCardPreviewPillPosition(
-          triggerElement.getBoundingClientRect()
-        )
+        getCardPreviewPillPosition(triggerElement.getBoundingClientRect())
       )
     }
 
@@ -6843,8 +6757,7 @@ function getCardPreviewPillPosition(
   const previewWidth = window.matchMedia("(min-width: 640px)").matches
     ? CARD_PREVIEW_PILL_WIDTH_SM_PX
     : CARD_PREVIEW_PILL_WIDTH_PX
-  const previewContentWidth =
-    previewWidth - CARD_PREVIEW_PILL_PADDING_PX
+  const previewContentWidth = previewWidth - CARD_PREVIEW_PILL_PADDING_PX
   const previewHeight =
     previewContentWidth * CARD_PREVIEW_PILL_IMAGE_HEIGHT_RATIO +
     CARD_PREVIEW_PILL_PADDING_PX
@@ -6857,8 +6770,7 @@ function getCardPreviewPillPosition(
     placement === "below"
       ? triggerRect.bottom + CARD_PREVIEW_PILL_GAP_PX
       : triggerRect.top - previewHeight - CARD_PREVIEW_PILL_GAP_PX
-  const maxTop =
-    viewportHeight - CARD_PREVIEW_PILL_MARGIN_PX - previewHeight
+  const maxTop = viewportHeight - CARD_PREVIEW_PILL_MARGIN_PX - previewHeight
   const preferredLeft =
     triggerRect.left + triggerRect.width / 2 - previewWidth / 2
   const maxLeft = viewportWidth - CARD_PREVIEW_PILL_MARGIN_PX - previewWidth
@@ -6958,54 +6870,53 @@ function getCommanderCardNames(commanders: readonly DeckCard[]) {
   return cardNames
 }
 
-function formatResultEventPayload(payload: unknown) {
-  if (typeof payload === "string") {
-    return payload
-  }
-
-  return JSON.stringify(payload, null, 2)
-}
-
-function getMcpCallCompleteTitle(chunk: SimulationDebugLlmRunChunk) {
-  const toolName = chunk.mcpFunctionName ?? "unknown tool"
-  const knownToolLabel = getKnownSimulationResultToolLabelForChunk({
-    chunk,
-    state: isMcpCallFailure(chunk) ? "failed" : "completed",
+function getMcpFunctionCallCompleteTitle(call: SimulationMcpFunctionCall) {
+  const toolName = call.mcpFunctionName
+  const knownToolLabel = getKnownSimulationResultToolLabel({
+    mcpFunctionName: call.mcpFunctionName,
+    mcpFunctionOutput: call.outputPayload,
+    state: isMcpFunctionCallFailure(call) ? "failed" : "completed",
   })
 
   if (knownToolLabel !== null) {
     return knownToolLabel
   }
 
-  if (isMcpCallFailure(chunk)) {
+  if (isMcpFunctionCallFailure(call)) {
     return `Tool failed: ${toolName}`
   }
 
   return `Tool completed: ${toolName}`
 }
 
-function getMcpCallCompleteIcon(chunk: SimulationDebugLlmRunChunk) {
-  if (chunk.mcpFunctionName === "shuffle_library" && !isMcpCallFailure(chunk)) {
+function getMcpFunctionCallCompleteIcon(call: SimulationMcpFunctionCall) {
+  if (
+    call.mcpFunctionName === "shuffle_library" &&
+    !isMcpFunctionCallFailure(call)
+  ) {
     return <Shuffle className="size-4" />
   }
 
   return null
 }
 
-function isMcpCallFailure(chunk: SimulationDebugLlmRunChunk) {
-  if (chunk.kind !== "mcp_call_complete") {
-    return false
-  }
+function getMcpFunctionCallDisplayReason(call: SimulationMcpFunctionCall) {
+  return getSimulationResultToolReason({
+    mcpFunctionName: call.mcpFunctionName,
+    mcpFunctionOutput: call.outputPayload,
+    mcpFunctionReason: getMcpFunctionCallReason(call.inputPayload),
+  })
+}
 
+function isMcpFunctionCallFailure(call: SimulationMcpFunctionCall) {
   return (
-    getPayloadString(asPayloadRecord(chunk.payload).item, "status") ===
-      "failed" || getMcpCallErrorPayload(chunk) !== null
+    call.status === "failed" || getMcpFunctionCallErrorPayload(call) !== null
   )
 }
 
-function getMcpCallErrorPayload(chunk: SimulationDebugLlmRunChunk) {
-  const itemRecord = asPayloadRecord(asPayloadRecord(chunk.payload).item)
-  const errorRecord = asPayloadRecord(itemRecord.error)
+function getMcpFunctionCallErrorPayload(call: SimulationMcpFunctionCall) {
+  const outputRecord = asPayloadRecord(call.outputPayload)
+  const errorRecord = asPayloadRecord(outputRecord.error)
   const content = errorRecord.content
 
   if (!Array.isArray(content)) {
@@ -7035,22 +6946,6 @@ function getPayloadString(value: unknown, property: string) {
   const propertyValue = asPayloadRecord(value)[property]
 
   return typeof propertyValue === "string" ? propertyValue : null
-}
-
-function getPayloadMessage(payload: unknown) {
-  if (typeof payload === "string" && payload.trim()) {
-    return payload
-  }
-
-  if (typeof payload === "object" && payload !== null && "message" in payload) {
-    const message = payload.message
-
-    if (typeof message === "string" && message.trim()) {
-      return message
-    }
-  }
-
-  return "The run was cancelled."
 }
 
 function SimulationDebugPanel({
@@ -7337,17 +7232,6 @@ function formatOpenRouterGenerationMetadata(
     .join("; ")
 }
 
-function getDebugChunkEventLabel(chunk: SimulationDebugLlmRunChunk) {
-  const eventType = getPayloadString(chunk.payload, "type")
-  const eventLabel = eventType ?? chunk.kind
-
-  if (chunk.mcpFunctionName) {
-    return `${eventLabel}: ${chunk.mcpFunctionName}`
-  }
-
-  return eventLabel
-}
-
 function EmptySimulationSelection() {
   return (
     <div className="grid flex-1 place-items-center px-5 py-10 text-center">
@@ -7402,7 +7286,11 @@ function getStartingHandCardCopies(startingHand: StartingHand) {
   )
 }
 
-function StartingHandCardImageRow({ startingHand }: { startingHand: StartingHand }) {
+function StartingHandCardImageRow({
+  startingHand,
+}: {
+  startingHand: StartingHand
+}) {
   return (
     <ul className="grid w-full grid-cols-7 gap-1 sm:gap-2">
       {getStartingHandCardCopies(startingHand).map((card) => (
@@ -7955,8 +7843,7 @@ function CreateSavedSeedModal({
   const [seedValue, setSeedValue] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
-  const canSaveSeed =
-    seedName.trim().length > 0 && seedValue.trim().length > 0
+  const canSaveSeed = seedName.trim().length > 0 && seedValue.trim().length > 0
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()

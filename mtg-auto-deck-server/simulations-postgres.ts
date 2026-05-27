@@ -52,27 +52,6 @@ export function isTerminalLlmRunStatus(status: LlmRunStatus) {
   )
 }
 
-export const LLM_CHUNK_KINDS = [
-  "raw_event",
-  "reasoning_start",
-  "reasoning_delta",
-  "reasoning_done",
-  "output_start",
-  "message_delta",
-  "output_done",
-  "completed",
-  "final_parsed_output",
-  "mcp_call_start",
-  "mcp_call_complete",
-  "error",
-  "cancelled",
-] as const
-
-export type LlmChunkKind = (typeof LLM_CHUNK_KINDS)[number]
-
-export const SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS: readonly LlmChunkKind[] =
-  ["raw_event", "completed"]
-
 export type CreateOpeningHandLlmRunInput = {
   simulationId: string
   llmModelPresetId: string
@@ -156,17 +135,6 @@ export type UpdateLlmRunRequestDataInput = {
   requestPayload: unknown
 }
 
-export type LlmRunChunkInput = {
-  sequence: number
-  kind: LlmChunkKind
-  mcpFunctionName: string | null
-  mcpFunctionOutput: unknown | null
-  mcpFunctionReason: string | null
-  reasoningDelta: string | null
-  outputDelta: string | null
-  payload?: unknown | null
-}
-
 export type RecordOpenRouterLlmRunGenerationInput = {
   llmRunId: string
   openrouterTurnIndex: number
@@ -192,19 +160,6 @@ export type ActiveSimulationLlmRun = {
   phase: LlmRunPhase
   runtimeStreamKey: string
   status: LlmRunStatus
-}
-
-export type SimulationDebugLlmRunChunk = {
-  id: number
-  sequence: number
-  kind: LlmChunkKind
-  mcpFunctionName: string | null
-  mcpFunctionOutput: unknown | null
-  mcpFunctionReason: string | null
-  reasoningDelta: string | null
-  outputDelta: string | null
-  payload: unknown | null
-  receivedAt: string
 }
 
 export type OpenRouterGeneration = {
@@ -308,7 +263,7 @@ export type StaleInFlightLlmRunCleanupResult = {
 }
 
 export const STALE_IN_FLIGHT_LLM_RUN_CANCELLATION_MESSAGE =
-  "LLM run was cancelled because the server restarted before the in-flight API stream completed."
+  "LLM run was cancelled because the server restarted before the in-flight API request completed."
 export const STALE_RUNNING_SIMULATION_CANCELLATION_MESSAGE =
   "Simulation was cancelled because the server restarted before it finished."
 export const INVALID_OPENING_HAND_SIMULATION_FAILURE_MESSAGE =
@@ -2700,543 +2655,8 @@ export function buildRecordLlmRunMcpFunctionCallQuery(
   }
 }
 
-export async function appendLlmRunChunks(
-  llmRunId: string,
-  chunks: readonly LlmRunChunkInput[]
-) {
-  if (chunks.length === 0) {
-    return
-  }
-
-  await withDatabaseTransaction(async (client) => {
-    await appendLlmRunChunksWithClient(client, llmRunId, chunks)
-  })
-}
-
-export async function appendLlmRunChunk(
-  llmRunId: string,
-  chunk: LlmRunChunkInput
-): Promise<SimulationDebugLlmRunChunk | null> {
-  return withDatabaseTransaction(async (client) => {
-    const insertedChunks = await appendLlmRunChunksWithClient(
-      client,
-      llmRunId,
-      [chunk]
-    )
-    const insertedChunk = insertedChunks[0]
-
-    if (!insertedChunk) {
-      return null
-    }
-
-    return mapInsertedLlmRunChunkRow(insertedChunk)
-  })
-}
-
-export async function appendLlmRunChunkAtNextSequence(
-  llmRunId: string,
-  chunk: Omit<LlmRunChunkInput, "sequence">
-) {
-  await withDatabaseTransaction(async (client) => {
-    const runResult = await client.query(
-      `
-        SELECT id
-        FROM llm_runs
-        WHERE id = $1
-        FOR UPDATE
-      `,
-      [llmRunId]
-    )
-
-    if (runResult.rowCount === 0) {
-      throw new SimulationValidationError("LLM run not found.")
-    }
-
-    const sequenceResult = await client.query<{ sequence: number }>(
-      `
-        SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence
-        FROM llm_run_chunks
-        WHERE llm_run_id = $1
-      `,
-      [llmRunId]
-    )
-    const sequence = Number(sequenceResult.rows[0].sequence)
-    await appendLlmRunChunksWithClient(client, llmRunId, [
-      {
-        ...chunk,
-        sequence,
-      },
-    ])
-  })
-}
-
-async function appendLlmRunChunksWithClient(
-  client: DatabaseTransactionClient,
-  llmRunId: string,
-  chunks: readonly LlmRunChunkInput[]
-) {
-  const compactedChunks = compactLlmRunDeltaChunks(chunks)
-
-  if (compactedChunks.length === 0) {
-    return []
-  }
-
-  const mergeResult = await mergeFirstDeltaChunkIntoLastPersistedChunk(
-    client,
-    llmRunId,
-    compactedChunks
-  )
-  const insertQuery =
-    mergeResult.chunks.length === 0
-      ? null
-      : buildAppendLlmRunChunksQuery(llmRunId, mergeResult.chunks)
-  const result = insertQuery
-    ? await client.query<InsertedLlmRunChunkRow>(
-        insertQuery.text,
-        insertQuery.values
-      )
-    : { rows: [] as InsertedLlmRunChunkRow[] }
-
-  await incrementRunningLlmRunCostFromInsertedChunks(
-    client,
-    llmRunId,
-    [...mergeResult.appendedDeltaChunks, ...result.rows]
-  )
-
-  return result.rows
-}
-
-export type LlmRunDeltaChunkKind = Extract<
-  LlmChunkKind,
-  "reasoning_delta" | "message_delta"
->
-
-type GeneratedDeltaChunkCost = {
-  reasoning_delta: string | null
-  output_delta: string | null
-}
-
-type LastPersistedLlmRunChunkRow = {
-  id: string | number
-  sequence: number
-  kind: LlmChunkKind
-}
-
-export function compactLlmRunDeltaChunks(
-  chunks: readonly LlmRunChunkInput[]
-) {
-  return chunks.reduce<LlmRunChunkInput[]>((compactedChunks, chunk) => {
-    const deltaKind = getDeltaChunkKind(chunk)
-
-    if (!deltaKind) {
-      compactedChunks.push(chunk)
-      return compactedChunks
-    }
-
-    const normalizedChunk = createNormalizedDeltaChunk(chunk, deltaKind)
-    const previousChunk = compactedChunks[compactedChunks.length - 1]
-
-    if (previousChunk && getDeltaChunkKind(previousChunk) === deltaKind) {
-      compactedChunks[compactedChunks.length - 1] = combineDeltaChunks(
-        previousChunk,
-        normalizedChunk,
-        deltaKind
-      )
-    } else {
-      compactedChunks.push(normalizedChunk)
-    }
-
-    return compactedChunks
-  }, [])
-}
-
-function createNormalizedDeltaChunk(
-  chunk: LlmRunChunkInput,
-  deltaKind: LlmRunDeltaChunkKind
-): LlmRunChunkInput {
-  return {
-    sequence: chunk.sequence,
-    kind: deltaKind,
-    mcpFunctionName: null,
-    mcpFunctionOutput: null,
-    mcpFunctionReason: null,
-    reasoningDelta:
-      deltaKind === "reasoning_delta" ? chunk.reasoningDelta : null,
-    outputDelta: deltaKind === "message_delta" ? chunk.outputDelta : null,
-    payload: null,
-  }
-}
-
-function combineDeltaChunks(
-  firstChunk: LlmRunChunkInput,
-  secondChunk: LlmRunChunkInput,
-  deltaKind: LlmRunDeltaChunkKind
-): LlmRunChunkInput {
-  const combinedDeltaText = combineOptionalText(
-    getDeltaChunkText(firstChunk, deltaKind),
-    getDeltaChunkText(secondChunk, deltaKind)
-  )
-
-  return {
-    sequence: secondChunk.sequence,
-    kind: deltaKind,
-    mcpFunctionName: null,
-    mcpFunctionOutput: null,
-    mcpFunctionReason: null,
-    reasoningDelta:
-      deltaKind === "reasoning_delta" ? combinedDeltaText : null,
-    outputDelta: deltaKind === "message_delta" ? combinedDeltaText : null,
-    payload: null,
-  }
-}
-
-function combineOptionalText(firstText: string | null, secondText: string | null) {
-  if (firstText === null && secondText === null) {
-    return null
-  }
-
-  return `${firstText ?? ""}${secondText ?? ""}`
-}
-
-async function mergeFirstDeltaChunkIntoLastPersistedChunk(
-  client: DatabaseTransactionClient,
-  llmRunId: string,
-  chunks: readonly LlmRunChunkInput[]
-) {
-  const firstChunk = chunks[0]
-  const firstDeltaKind = firstChunk ? getDeltaChunkKind(firstChunk) : null
-
-  if (!firstChunk || !firstDeltaKind) {
-    return {
-      chunks,
-      appendedDeltaChunks: [] as GeneratedDeltaChunkCost[],
-    }
-  }
-
-  const lastChunkResult = await client.query<LastPersistedLlmRunChunkRow>(
-    `
-      SELECT id, sequence, kind
-      FROM llm_run_chunks
-      WHERE llm_run_id = $1
-      ORDER BY sequence DESC
-      LIMIT 1
-      FOR UPDATE
-    `,
-    [llmRunId]
-  )
-  const lastChunk = lastChunkResult.rows[0]
-
-  if (
-    !lastChunk ||
-    lastChunk.kind !== firstDeltaKind ||
-    lastChunk.sequence >= firstChunk.sequence
-  ) {
-    return {
-      chunks,
-      appendedDeltaChunks: [] as GeneratedDeltaChunkCost[],
-    }
-  }
-
-  const updateQuery = buildAppendToPersistedLlmRunDeltaChunkQuery({
-    chunkId: lastChunk.id,
-    kind: firstDeltaKind,
-    sequence: firstChunk.sequence,
-    reasoningDelta: firstChunk.reasoningDelta,
-    outputDelta: firstChunk.outputDelta,
-  })
-  const updateResult = await client.query(updateQuery.text, updateQuery.values)
-
-  if (updateResult.rowCount === 0) {
-    return {
-      chunks,
-      appendedDeltaChunks: [] as GeneratedDeltaChunkCost[],
-    }
-  }
-
-  return {
-    chunks: chunks.slice(1),
-    appendedDeltaChunks: [createGeneratedDeltaCost(firstChunk)],
-  }
-}
-
-export function buildAppendToPersistedLlmRunDeltaChunkQuery({
-  chunkId,
-  kind,
-  outputDelta,
-  reasoningDelta,
-  sequence,
-}: {
-  chunkId: string | number
-  kind: LlmRunDeltaChunkKind
-  outputDelta: string | null
-  reasoningDelta: string | null
-  sequence: number
-}) {
-  return {
-    text: `
-      UPDATE llm_run_chunks
-      SET
-        sequence = $2,
-        reasoning_delta =
-          CASE
-            WHEN $5::llm_chunk_kind = 'reasoning_delta' THEN
-              CASE
-                WHEN reasoning_delta IS NULL AND $3::text IS NULL THEN NULL
-                ELSE COALESCE(reasoning_delta, '') || COALESCE($3::text, '')
-              END
-            ELSE reasoning_delta
-          END,
-        output_delta =
-          CASE
-            WHEN $5::llm_chunk_kind = 'message_delta' THEN
-              CASE
-                WHEN output_delta IS NULL AND $4::text IS NULL THEN NULL
-                ELSE COALESCE(output_delta, '') || COALESCE($4::text, '')
-              END
-            ELSE output_delta
-          END,
-        payload = NULL
-      WHERE id = $1
-        AND kind = $5::llm_chunk_kind
-        AND sequence < $2
-    `,
-    values: [chunkId, sequence, reasoningDelta, outputDelta, kind],
-  }
-}
-
-function createGeneratedDeltaCost(
-  chunk: LlmRunChunkInput
-): GeneratedDeltaChunkCost {
-  return {
-    reasoning_delta:
-      chunk.kind === "reasoning_delta" ? chunk.reasoningDelta : null,
-    output_delta: chunk.kind === "message_delta" ? chunk.outputDelta : null,
-  }
-}
-
-export function buildAppendLlmRunChunksQuery(
-  llmRunId: string,
-  chunks: readonly LlmRunChunkInput[]
-) {
-  const values: unknown[] = []
-  const valuePlaceholders = chunks.map((chunk, index) => {
-    const offset = index * 9
-
-    values.push(
-      llmRunId,
-      chunk.sequence,
-      chunk.kind,
-      chunk.mcpFunctionName,
-      chunk.mcpFunctionOutput === null
-        ? null
-        : JSON.stringify(chunk.mcpFunctionOutput),
-      chunk.mcpFunctionReason ?? extractMcpFunctionReasonFromChunk(chunk),
-      chunk.reasoningDelta,
-      chunk.outputDelta,
-      getJsonbQueryValue(chunk.payload)
-    )
-
-    return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}::jsonb, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}::jsonb)`
-  })
-
-  return {
-    text: `
-      INSERT INTO llm_run_chunks (
-        llm_run_id,
-        sequence,
-        kind,
-        mcp_function_name,
-        mcp_function_output,
-        mcp_function_reason,
-        reasoning_delta,
-        output_delta,
-        payload
-      )
-      VALUES ${valuePlaceholders.join(", ")}
-      ON CONFLICT (llm_run_id, sequence) DO NOTHING
-      RETURNING
-        id,
-        sequence,
-        kind,
-        mcp_function_name,
-        mcp_function_output,
-        mcp_function_reason,
-        reasoning_delta,
-        output_delta,
-        payload,
-        received_at
-    `,
-    values,
-  }
-}
-
-function getDeltaChunkKind(
-  chunk: Pick<LlmRunChunkInput, "kind">
-): LlmRunDeltaChunkKind | null {
-  if (chunk.kind === "reasoning_delta" || chunk.kind === "message_delta") {
-    return chunk.kind
-  }
-
-  return null
-}
-
-function getDeltaChunkText(
-  chunk: Pick<LlmRunChunkInput, "reasoningDelta" | "outputDelta">,
-  deltaKind: LlmRunDeltaChunkKind
-) {
-  return deltaKind === "reasoning_delta"
-    ? chunk.reasoningDelta
-    : chunk.outputDelta
-}
-
-function getJsonbQueryValue(value: unknown | null | undefined) {
-  return value === null || value === undefined ? null : JSON.stringify(value)
-}
-
 function getRequiredJsonbQueryValue(value: unknown | null | undefined) {
   return value === null || value === undefined ? "{}" : JSON.stringify(value)
-}
-
-async function incrementRunningLlmRunCostFromInsertedChunks(
-  client: DatabaseTransactionClient,
-  llmRunId: string,
-  chunks: readonly {
-    reasoning_delta: string | null
-    output_delta: string | null
-  }[]
-) {
-  const generatedDeltaCharCount =
-    getInsertedLlmRunGeneratedDeltaCharCount(chunks)
-
-  if (generatedDeltaCharCount === 0) {
-    return
-  }
-
-  const query = buildIncrementRunningLlmRunCostQuery({
-    generatedDeltaCharCount,
-    llmRunId,
-  })
-
-  await client.query(query.text, query.values)
-}
-
-export function getInsertedLlmRunGeneratedDeltaCharCount(
-  chunks: readonly {
-    reasoning_delta: string | null
-    output_delta: string | null
-  }[]
-) {
-  return chunks.reduce(
-    (total, chunk) =>
-      total +
-      (chunk.reasoning_delta?.length ?? 0) +
-      (chunk.output_delta?.length ?? 0),
-    0
-  )
-}
-
-export function buildIncrementRunningLlmRunCostQuery({
-  generatedDeltaCharCount,
-  llmRunId,
-}: {
-  generatedDeltaCharCount: number
-  llmRunId: string
-}) {
-  return {
-    text: `
-      UPDATE llm_runs llm_run
-      SET estimated_cost_usd =
-            llm_run.estimated_cost_usd +
-            (($2::numeric / 4) *
-              preset.output_token_cost_usd_per_million /
-              1000000 *
-              ${getLlmRunEstimatedCostServiceTierMultiplierSql()}),
-          updated_at = now()
-      FROM llm_model_presets preset
-      WHERE llm_run.id = $1
-        AND preset.id = llm_run.llm_model_preset_id
-        AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
-        AND llm_run.estimated_cost_usd IS NOT NULL
-        AND preset.output_token_cost_usd_per_million IS NOT NULL
-        AND preset.output_token_cost_usd_per_million >= 0
-    `,
-    values: [llmRunId, generatedDeltaCharCount],
-  }
-}
-
-export function extractMcpFunctionReasonFromChunk(
-  chunk: Pick<
-    LlmRunChunkInput,
-    "kind" | "mcpFunctionName" | "mcpFunctionOutput"
-  >
-) {
-  if (chunk.kind !== "mcp_call_complete") {
-    return null
-  }
-
-  const output = asUnknownRecord(chunk.mcpFunctionOutput)
-  const directReason = getTrimmedStringProperty(output, "reason")
-
-  if (directReason !== null) {
-    return directReason
-  }
-
-  const data = asUnknownRecord(output.data)
-
-  return getTrimmedStringProperty(data, "reason")
-}
-
-function getTrimmedStringProperty(
-  record: Record<string, unknown>,
-  property: string
-) {
-  const value = record[property]
-
-  if (typeof value !== "string") {
-    return null
-  }
-
-  const trimmedValue = value.trim()
-
-  return trimmedValue ? trimmedValue : null
-}
-
-type InsertedLlmRunChunkRow = {
-  id: string | number
-  sequence: number
-  kind: LlmChunkKind
-  mcp_function_name: string | null
-  mcp_function_output: unknown | null
-  mcp_function_reason: string | null
-  reasoning_delta: string | null
-  output_delta: string | null
-  payload: unknown | null
-  received_at: Date
-}
-
-function mapInsertedLlmRunChunkRow(
-  row: InsertedLlmRunChunkRow
-): SimulationDebugLlmRunChunk {
-  return {
-    id: Number(row.id),
-    sequence: row.sequence,
-    kind: row.kind,
-    mcpFunctionName: row.mcp_function_name,
-    mcpFunctionOutput: row.mcp_function_output,
-    mcpFunctionReason: row.mcp_function_reason,
-    reasoningDelta: row.reasoning_delta,
-    outputDelta: row.output_delta,
-    payload: row.payload,
-    receivedAt: row.received_at.toISOString(),
-  }
-}
-
-const EMPTY_RECORD: Record<string, unknown> = {}
-
-function asUnknownRecord(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null
-    ? (value as Record<string, unknown>)
-    : EMPTY_RECORD
 }
 
 const LLM_RUN_QUEUE_ADVISORY_LOCK_ID = 836_417_052
@@ -3453,7 +2873,7 @@ export async function claimNextQueuedLlmRun({
       }
     }
 
-    const claimRunQuery = buildClaimQueuedLlmRunStreamingQuery(
+    const claimRunQuery = buildClaimQueuedLlmRunStartQuery(
       run.llm_run_id,
       claimStartedAt
     )
@@ -3493,7 +2913,7 @@ export async function claimNextQueuedLlmRun({
   })
 }
 
-export function buildClaimQueuedLlmRunStreamingQuery(
+export function buildClaimQueuedLlmRunStartQuery(
   llmRunId: string,
   startedAt: Date
 ) {
@@ -3517,8 +2937,6 @@ function getRunningLlmRunInitialCostSql() {
             SELECT CASE
               WHEN preset.cached_input_token_cost_usd_per_million IS NOT NULL
                 AND preset.cached_input_token_cost_usd_per_million >= 0
-                AND preset.output_token_cost_usd_per_million IS NOT NULL
-                AND preset.output_token_cost_usd_per_million >= 0
               THEN
                 (length(llm_run.full_prompt)::numeric / 4) *
                 preset.cached_input_token_cost_usd_per_million /
@@ -3556,25 +2974,7 @@ export function buildFailQueuedLlmRunUsageLimitQuery(
   }
 }
 
-export async function markLlmRunStreaming(llmRunId: string) {
-  const result = await queryDatabase(
-    `
-      UPDATE llm_runs llm_run
-      SET status = 'streaming',
-          started_at = COALESCE(started_at, now()),
-          estimated_cost_usd = ${getRunningLlmRunInitialCostSql()},
-          updated_at = now()
-      WHERE llm_run.id = $1
-        AND llm_run.status = 'pending'
-      RETURNING id
-    `,
-    [llmRunId]
-  )
-
-  return (result.rowCount ?? 0) > 0
-}
-
-export async function isLlmRunStreaming(llmRunId: string) {
+export async function isLlmRunActive(llmRunId: string) {
   const result = await queryDatabase(
     `
       SELECT 1
@@ -3913,7 +3313,6 @@ type PartialLlmRunCostSnapshotRow = {
   full_prompt_character_count: string | number
   service_tier: string | null
   cached_input_token_cost_usd_per_million: string | number | null
-  output_token_cost_usd_per_million: string | number | null
 }
 
 export function buildPartialLlmRunCostSnapshotQuery(llmRunId: string) {
@@ -3922,8 +3321,7 @@ export function buildPartialLlmRunCostSnapshotQuery(llmRunId: string) {
       SELECT
         length(llm_run.full_prompt) AS full_prompt_character_count,
         llm_run.service_tier,
-        preset.cached_input_token_cost_usd_per_million,
-        preset.output_token_cost_usd_per_million
+        preset.cached_input_token_cost_usd_per_million
       FROM llm_runs llm_run
       LEFT JOIN llm_model_presets preset
         ON preset.id = llm_run.llm_model_preset_id
@@ -3931,8 +3329,7 @@ export function buildPartialLlmRunCostSnapshotQuery(llmRunId: string) {
       GROUP BY
         llm_run.id,
         llm_run.service_tier,
-        preset.cached_input_token_cost_usd_per_million,
-        preset.output_token_cost_usd_per_million
+        preset.cached_input_token_cost_usd_per_million
     `,
     values: [llmRunId],
   }
@@ -3956,14 +3353,9 @@ async function estimatePartialLlmRunCostUsdWithClient(
   const estimatedCostUsd = estimatePartialLlmRunCostUsd({
     fullPromptCharCount:
       toOptionalNumber(snapshot.full_prompt_character_count) ?? 0,
-    reasoningDeltaCharCount: 0,
-    outputDeltaCharCount: 0,
     tokenCosts: {
       cachedInputDollarsPerMillion: toOptionalNumber(
         snapshot.cached_input_token_cost_usd_per_million
-      ),
-      outputDollarsPerMillion: toOptionalNumber(
-        snapshot.output_token_cost_usd_per_million
       ),
     },
   })

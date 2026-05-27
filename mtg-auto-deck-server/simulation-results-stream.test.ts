@@ -96,8 +96,8 @@ function createWriter() {
   return {
     endCount: 0,
     writes: [] as string[],
-    write(chunk: string) {
-      this.writes.push(chunk)
+    write(data: string) {
+      this.writes.push(data)
     },
     end() {
       this.endCount += 1
