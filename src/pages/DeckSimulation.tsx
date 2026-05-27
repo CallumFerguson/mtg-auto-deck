@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type FormEvent,
   type RefObject,
   type ReactNode,
@@ -154,7 +155,14 @@ type SimulationResultsDisplayTimelineStep =
   | SimulationResultsTimelineStep
   | SimulationResultsNextTurnTimelineStep
 
+const MIN_TURNS_TO_SIMULATE = 0
+const MAX_TURNS_TO_SIMULATE = 8
+const TURNS_TO_SIMULATE_STEP = 1
 const DEFAULT_TURNS_TO_SIMULATE = "1"
+const TURNS_TO_SIMULATE_OPTIONS = Array.from(
+  { length: MAX_TURNS_TO_SIMULATE - MIN_TURNS_TO_SIMULATE + 1 },
+  (_, index) => MIN_TURNS_TO_SIMULATE + index
+)
 const USAGE_LIMIT_FAILURE_MESSAGE_PATTERN = /\bout of usage limits\b/i
 const CREATE_SIMULATION_USE_FLEX_STORAGE_KEY =
   "mtg-auto-deck:create-simulation-use-flex-service-tier"
@@ -563,10 +571,7 @@ function getStoredCreateSimulationSavedSeedId(deckId: string) {
   )
 }
 
-function storeCreateSimulationSavedSeedId(
-  deckId: string,
-  savedSeedId: string
-) {
+function storeCreateSimulationSavedSeedId(deckId: string, savedSeedId: string) {
   storeCreateSimulationDeckItemId(
     CREATE_SIMULATION_LAST_SAVED_SEED_STORAGE_KEY_PREFIX,
     deckId,
@@ -945,6 +950,17 @@ export function DeckSimulation({
       ) ?? null,
     [selectedSimulation?.startingHandId, startingHands]
   )
+  const turnsToSimulateNumber = Number(turnsToSimulate)
+  const displayTurnsToSimulate = Number.isFinite(turnsToSimulateNumber)
+    ? turnsToSimulateNumber
+    : Number(DEFAULT_TURNS_TO_SIMULATE)
+  const turnsToSimulateLabel = `${displayTurnsToSimulate} ${
+    displayTurnsToSimulate === 1 ? "turn" : "turns"
+  }`
+  const turnsToSimulateSliderProgress =
+    ((displayTurnsToSimulate - MIN_TURNS_TO_SIMULATE) /
+      (MAX_TURNS_TO_SIMULATE - MIN_TURNS_TO_SIMULATE)) *
+    100
   const canStartSimulation =
     (seedMode === "random" || Boolean(selectedSavedSeed)) &&
     Boolean(selectedModelPreset) &&
@@ -1862,26 +1878,79 @@ export function DeckSimulation({
                       </fieldset>
 
                       <div className="grid gap-3">
-                        <label
-                          className="text-sm font-medium text-foreground"
-                          htmlFor="turns-to-simulate"
-                        >
-                          Turns to simulate
-                        </label>
-                        <select
-                          id="turns-to-simulate"
-                          className="no-number-spinner h-9 w-full rounded-md border border-input bg-background/60 px-3 text-sm text-foreground transition-colors outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/30 sm:max-w-36"
-                          value={turnsToSimulate}
-                          onChange={(event) =>
-                            setTurnsToSimulate(event.target.value)
-                          }
-                        >
-                          {Array.from({ length: 11 }, (_, turnCount) => (
-                            <option key={turnCount} value={turnCount}>
-                              {turnCount}
-                            </option>
-                          ))}
-                        </select>
+                        <div className="flex items-center justify-between gap-3">
+                          <label
+                            className="text-sm font-medium text-foreground"
+                            htmlFor="turns-to-simulate"
+                          >
+                            Turns to simulate
+                          </label>
+                          <span className="rounded-md border border-input bg-background/60 px-2 py-1 text-xs font-medium text-sky-100">
+                            {turnsToSimulateLabel}
+                          </span>
+                        </div>
+                        <div className="grid gap-2 px-4 sm:px-7">
+                          <div
+                            className="turns-to-simulate-slider-control"
+                            style={
+                              {
+                                "--turns-to-simulate-slider-progress": `${turnsToSimulateSliderProgress}%`,
+                              } as CSSProperties
+                            }
+                          >
+                            <input
+                              id="turns-to-simulate"
+                              type="range"
+                              min={MIN_TURNS_TO_SIMULATE}
+                              max={MAX_TURNS_TO_SIMULATE}
+                              step={TURNS_TO_SIMULATE_STEP}
+                              className="turns-to-simulate-slider rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
+                              value={turnsToSimulate}
+                              aria-valuetext={turnsToSimulateLabel}
+                              onChange={(event) =>
+                                setTurnsToSimulate(event.target.value)
+                              }
+                            />
+                          </div>
+                          <div
+                            className="relative h-8 text-[0.68rem] font-medium text-muted-foreground"
+                            aria-hidden="true"
+                          >
+                            {TURNS_TO_SIMULATE_OPTIONS.map((turnCount) => (
+                              <span
+                                key={turnCount}
+                                className="absolute top-0 flex -translate-x-1/2 flex-col items-center gap-1"
+                                style={
+                                  {
+                                    left: `${
+                                      ((turnCount - MIN_TURNS_TO_SIMULATE) /
+                                        (MAX_TURNS_TO_SIMULATE -
+                                          MIN_TURNS_TO_SIMULATE)) *
+                                      100
+                                    }%`,
+                                  } as CSSProperties
+                                }
+                              >
+                                <span
+                                  className={`h-1.5 w-px rounded-full ${
+                                    turnCount <= displayTurnsToSimulate
+                                      ? "bg-sky-300/70"
+                                      : "bg-border"
+                                  }`}
+                                />
+                                <span
+                                  className={
+                                    turnCount === displayTurnsToSimulate
+                                      ? "text-sky-100"
+                                      : undefined
+                                  }
+                                >
+                                  {turnCount}
+                                </span>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
                       </div>
 
                       <div className="grid gap-3">
