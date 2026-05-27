@@ -965,14 +965,12 @@ test("builds completed LLM run query with exact final output text", () => {
     llmRunId: "00000000-0000-0000-0000-000000000001",
     openrouterReportedCostUsd: null,
     rawResponse: { raw: true },
-    responseMetadata: { metadata: true },
     usage: { inputTokens: 10, outputTokens: 20 },
   })
   const normalizedSql = query.text.replace(/\s+/g, " ")
 
   assert.deepEqual(query.values, [
     "00000000-0000-0000-0000-000000000001",
-    JSON.stringify({ metadata: true }),
     JSON.stringify({ inputTokens: 10, outputTokens: 20 }),
     0.01,
     null,
@@ -980,7 +978,7 @@ test("builds completed LLM run query with exact final output text", () => {
     finalOutputText,
   ])
   assert.match(normalizedSql, /status = 'completed'/)
-  assert.match(normalizedSql, /final_output_text = \$7/)
+  assert.match(normalizedSql, /final_output_text = \$6/)
 })
 
 test("builds failed LLM run query with parse-failure final output text", () => {

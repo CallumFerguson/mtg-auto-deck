@@ -41,14 +41,12 @@ export type LlamaCppChatCompletionToolCall = {
 export type LlamaCppChatCompletionResult = {
   outputText: string
   rawResponse?: unknown
-  responseMetadata: unknown
   usage: unknown
 }
 
 type LlamaCppChatCompletionStepResult = {
   finishReason: string | null
   outputText: string
-  responseMetadata: unknown
   toolCalls: LlamaCppChatCompletionToolCall[]
   usage: unknown
 }
@@ -120,7 +118,6 @@ export async function collectLlamaCppChatCompletionNonStreaming({
       return {
         outputText,
         rawResponse: { responses: rawResponses },
-        responseMetadata: stepResult.responseMetadata,
         usage: stepResult.usage,
       }
     }
@@ -175,7 +172,6 @@ function collectLlamaCppChatCompletionNonStreamingStep(
   return {
     finishReason: choice?.finish_reason ?? null,
     outputText: getLlamaCppChatCompletionMessageText(message),
-    responseMetadata: response,
     toolCalls: getLlamaCppChatCompletionToolCalls(message, stepNumber),
     usage: response.usage ?? {},
   }

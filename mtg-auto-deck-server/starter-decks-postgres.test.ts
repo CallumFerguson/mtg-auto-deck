@@ -101,7 +101,6 @@ type FakeLlmRun = {
   request_payload: unknown
   final_output_text: string | null
   raw_response: unknown
-  response_metadata: unknown
   usage: unknown
   estimated_cost_usd: number | null
   openrouter_reported_cost_usd: number | null
@@ -465,13 +464,13 @@ class FakeStarterDeckCopyClient {
 
   copyLlmRun<T>(values: unknown[]) {
     const copiedRun: FakeLlmRun = {
-      cancel_requested_at: getDateOrNull(values[18]),
-      cancelled_at: getDateOrNull(values[19]),
-      completed_at: getDateOrNull(values[16]),
-      created_at: getDate(values[21]),
+      cancel_requested_at: getDateOrNull(values[17]),
+      cancelled_at: getDateOrNull(values[18]),
+      completed_at: getDateOrNull(values[15]),
+      created_at: getDate(values[20]),
       estimated_cost_usd: null,
-      failed_at: getDateOrNull(values[17]),
-      failure_message: getStringOrNull(values[20]),
+      failed_at: getDateOrNull(values[16]),
+      failure_message: getStringOrNull(values[19]),
       final_output_text: getStringOrNull(values[11]),
       full_prompt: getString(values[9]),
       id: `copied-run-${this.llmRunIdSequence}`,
@@ -486,13 +485,12 @@ class FakeStarterDeckCopyClient {
       reasoning_effort: getStringOrNull(values[5]),
       request_payload: getJsonObject(values[10]),
       raw_response: getJsonObject(values[12]),
-      response_metadata: getJsonObject(values[13]),
       runtime_stream_key: null,
       service_tier: getStringOrNull(values[4]),
-      started_at: getDateOrNull(values[15]),
+      started_at: getDateOrNull(values[14]),
       status: getLlmRunStatus(values[8]),
-      updated_at: getDate(values[22]),
-      usage: getJsonObject(values[14]),
+      updated_at: getDate(values[21]),
+      usage: getJsonObject(values[13]),
     }
 
     this.llmRunIdSequence += 1
@@ -1020,7 +1018,6 @@ function createLlmRun({
     service_tier: "priority",
     request_payload: { request: true },
     raw_response: { raw: true },
-    response_metadata: { metadata: true },
     runtime_stream_key: `stream-${id}`,
     started_at: now,
     status,

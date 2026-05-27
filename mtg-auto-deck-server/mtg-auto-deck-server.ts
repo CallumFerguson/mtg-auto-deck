@@ -2887,7 +2887,6 @@ function isBenignAutoAdvanceAbortError(error: unknown) {
 type CompletedLlmResponseResult = {
   outputText: string
   rawResponse: unknown
-  responseMetadata: unknown
   usage: unknown
 }
 
@@ -3013,7 +3012,6 @@ async function collectOpenAiLlmResponse({
   return {
     outputText,
     rawResponse: response,
-    responseMetadata: response,
     usage,
   }
 }
@@ -3135,7 +3133,6 @@ async function collectOpenRouterLlmResponse({
           return {
             outputText,
             rawResponse: { responses },
-            responseMetadata: response,
             usage,
           }
         }
@@ -3507,7 +3504,7 @@ async function collectLlamaCppLlmResponse({
 
       return {
         ...result,
-        rawResponse: result.rawResponse ?? result.responseMetadata,
+        rawResponse: result.rawResponse ?? {},
       }
     } catch (error) {
       if (signal.aborted) {
@@ -3688,7 +3685,6 @@ async function runOpeningHandLlmRun({
       llmRunId,
       openingHand: parsedOpeningHand.keptHand,
       rawResponse: responseResult.rawResponse,
-      responseMetadata: responseResult.responseMetadata,
       summary: parsedOpeningHand.summary,
       usage: responseResult.usage,
     })
@@ -3921,7 +3917,6 @@ async function runTurnLlmRun({
       llmRunId,
       gameState: parsedTurn.gameState,
       rawResponse: responseResult.rawResponse,
-      responseMetadata: responseResult.responseMetadata,
       turnActions: parsedTurn.turnActions,
       usage: responseResult.usage,
     })

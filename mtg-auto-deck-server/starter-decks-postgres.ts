@@ -95,7 +95,6 @@ type LlmRunRow = {
   request_payload: unknown
   final_output_text: string | null
   raw_response: unknown
-  response_metadata: unknown
   usage: unknown
   started_at: Date | null
   completed_at: Date | null
@@ -837,7 +836,6 @@ async function listLinkedLlmRuns({
         llm_run.request_payload,
         llm_run.final_output_text,
         llm_run.raw_response,
-        llm_run.response_metadata,
         llm_run.usage,
         llm_run.started_at,
         llm_run.completed_at,
@@ -894,7 +892,6 @@ async function copyLlmRun({
         request_payload,
         final_output_text,
         raw_response,
-        response_metadata,
         usage,
         estimated_cost_usd,
         openrouter_reported_cost_usd,
@@ -924,17 +921,16 @@ async function copyLlmRun({
         $12,
         $13::jsonb,
         $14::jsonb,
-        $15::jsonb,
         NULL,
         NULL,
+        $15,
         $16,
         $17,
         $18,
         $19,
         $20,
         $21,
-        $22,
-        $23
+        $22
       )
       RETURNING id
     `,
@@ -952,7 +948,6 @@ async function copyLlmRun({
       toJsonParameter(sourceRun.request_payload),
       sourceRun.final_output_text,
       toJsonParameter(sourceRun.raw_response),
-      toJsonParameter(sourceRun.response_metadata),
       toJsonParameter(sourceRun.usage),
       sourceRun.started_at,
       sourceRun.completed_at,

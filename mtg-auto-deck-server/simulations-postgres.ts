@@ -672,7 +672,6 @@ export async function ensureSimulationsSchema() {
       full_prompt text NOT NULL DEFAULT '',
       request_payload jsonb NOT NULL DEFAULT '{}',
       final_output_text text,
-      response_metadata jsonb NOT NULL DEFAULT '{}',
       raw_response jsonb NOT NULL DEFAULT '{}',
       usage jsonb NOT NULL DEFAULT '{}',
       estimated_cost_usd numeric,
@@ -787,6 +786,10 @@ export async function ensureSimulationsSchema() {
   `)
   await queryDatabase(`
     ALTER TABLE llm_runs
+    DROP COLUMN IF EXISTS response_metadata
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_runs
     ALTER COLUMN reasoning_effort DROP NOT NULL
   `)
   await queryDatabase(`
@@ -808,7 +811,6 @@ export async function ensureSimulationsSchema() {
       llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
       openrouter_turn_index integer NOT NULL CHECK (openrouter_turn_index >= 0),
       generation_id text NOT NULL CHECK (btrim(generation_id) <> ''),
-      response_metadata jsonb NOT NULL DEFAULT '{}',
 
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now(),
@@ -816,6 +818,10 @@ export async function ensureSimulationsSchema() {
       UNIQUE (llm_run_id, openrouter_turn_index),
       UNIQUE (generation_id)
     )
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_run_openrouter_generations
+    DROP COLUMN IF EXISTS response_metadata
   `)
   await queryDatabase(`
     CREATE TABLE IF NOT EXISTS llm_run_mcp_function_calls (
@@ -2930,11 +2936,9 @@ export function buildCompleteLlmRunQuery({
   llmRunId,
   openrouterReportedCostUsd,
   rawResponse,
-  responseMetadata,
   usage,
 }: {
   llmRunId: string
-  responseMetadata: unknown
   usage: unknown
   estimatedCostUsd: number | null
   openrouterReportedCostUsd: number | null
@@ -2945,12 +2949,11 @@ export function buildCompleteLlmRunQuery({
     text: `
       UPDATE llm_runs
       SET status = 'completed',
-          response_metadata = $2::jsonb,
-          usage = $3::jsonb,
-          estimated_cost_usd = $4,
-          openrouter_reported_cost_usd = $5,
-          raw_response = $6::jsonb,
-          final_output_text = $7,
+          usage = $2::jsonb,
+          estimated_cost_usd = $3,
+          openrouter_reported_cost_usd = $4,
+          raw_response = $5::jsonb,
+          final_output_text = $6,
           completed_at = now(),
           updated_at = now()
       WHERE id = $1
@@ -2958,7 +2961,6 @@ export function buildCompleteLlmRunQuery({
     `,
     values: [
       llmRunId,
-      JSON.stringify(responseMetadata),
       JSON.stringify(usage),
       estimatedCostUsd,
       openrouterReportedCostUsd,
@@ -3042,7 +3044,6 @@ export async function completeOpeningHandLlmRun({
   llmRunId,
   openingHand,
   rawResponse,
-  responseMetadata,
   summary,
   usage,
 }: {
@@ -3050,7 +3051,6 @@ export async function completeOpeningHandLlmRun({
   llmRunId: string
   openingHand: readonly string[]
   rawResponse: unknown
-  responseMetadata: unknown
   summary: string
   usage: unknown
 }): Promise<SimulationLlmCompletionResult> {
@@ -3152,7 +3152,6 @@ export async function completeOpeningHandLlmRun({
       llmRunId,
       openrouterReportedCostUsd: costValues.openrouterReportedCostUsd,
       rawResponse,
-      responseMetadata,
       usage,
     })
     await client.query(completeRunQuery.text, completeRunQuery.values)
@@ -3182,7 +3181,6 @@ export async function completeTurnLlmRun({
   gameState,
   llmRunId,
   rawResponse,
-  responseMetadata,
   turnActions,
   usage,
 }: {
@@ -3190,7 +3188,6 @@ export async function completeTurnLlmRun({
   llmRunId: string
   gameState: unknown
   rawResponse: unknown
-  responseMetadata: unknown
   turnActions: unknown
   usage: unknown
 }): Promise<SimulationLlmCompletionResult> {
@@ -3275,7 +3272,6 @@ export async function completeTurnLlmRun({
       llmRunId,
       openrouterReportedCostUsd: costValues.openrouterReportedCostUsd,
       rawResponse,
-      responseMetadata,
       usage,
     })
     await client.query(completeRunQuery.text, completeRunQuery.values)
