@@ -1751,22 +1751,34 @@ export function DeckSimulation({
                         </div>
 
                         {seedMode === "set" ? (
-                          <div className="flex flex-col gap-3 rounded-md border border-border bg-background/35 p-3 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="min-w-0 space-y-1">
-                              <p className="text-sm font-medium text-foreground">
-                                {selectedSavedSeed
-                                  ? selectedSavedSeed.name
-                                  : "No saved seed selected"}
-                              </p>
-                              <p className="text-sm break-all text-muted-foreground">
-                                {selectedSavedSeed
-                                  ? selectedSavedSeed.seed
-                                  : savedSeedLoadError
-                                    ? "Saved seeds could not be loaded."
-                                    : isLoadingSavedSeeds
-                                      ? "Loading saved seeds..."
-                                      : "Choose a saved seed to continue."}
-                              </p>
+                          <div className="flex flex-col gap-2 rounded-md border border-border bg-background/35 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="min-w-0">
+                              {selectedSavedSeed ? (
+                                <p className="min-w-0 text-sm text-muted-foreground">
+                                  <span className="font-medium text-foreground">
+                                    {selectedSavedSeed.name}
+                                  </span>
+                                  <span className="mx-2 text-muted-foreground/60">
+                                    -
+                                  </span>
+                                  <span className="break-all">
+                                    {selectedSavedSeed.seed}
+                                  </span>
+                                </p>
+                              ) : (
+                                <div className="space-y-1">
+                                  <p className="text-sm font-medium text-foreground">
+                                    No saved seed selected
+                                  </p>
+                                  <p className="text-sm text-muted-foreground">
+                                    {savedSeedLoadError
+                                      ? "Saved seeds could not be loaded."
+                                      : isLoadingSavedSeeds
+                                        ? "Loading saved seeds..."
+                                        : "Choose a saved seed to continue."}
+                                  </p>
+                                </div>
+                              )}
                             </div>
                             <Button
                               type="button"
@@ -1815,27 +1827,27 @@ export function DeckSimulation({
                               checked={openingHandMode === "provide"}
                               onChange={handleProvideOpeningHandModeSelected}
                             />
-                            Provide opening hand
+                            Set opening hand
                           </label>
                         </div>
 
                         {openingHandMode === "provide" ? (
-                          <div className="flex flex-col gap-3 rounded-md border border-border bg-background/35 p-3 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="min-w-0 space-y-1">
+                          <div className="flex flex-col gap-2 rounded-md border border-border bg-background/35 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="min-w-0">
                               <p className="text-sm font-medium text-foreground">
                                 {selectedOpeningHand
                                   ? selectedOpeningHand.name
                                   : "No starting hand selected"}
                               </p>
-                              <p className="text-sm text-muted-foreground">
-                                {selectedOpeningHand
-                                  ? "Saved starting hand"
-                                  : startingHandLoadError
+                              {!selectedOpeningHand ? (
+                                <p className="mt-1 text-sm text-muted-foreground">
+                                  {startingHandLoadError
                                     ? "Starting hands could not be loaded."
                                     : isLoadingStartingHands
                                       ? "Loading starting hands..."
                                       : "Choose a saved starting hand to continue."}
-                              </p>
+                                </p>
+                              ) : null}
                             </div>
                             <Button
                               type="button"
@@ -7615,7 +7627,7 @@ function ChooseStartingHandModal({
                 id="choose-starting-hand-title"
                 className="text-xl font-semibold"
               >
-                Provide opening hand
+                Set opening hand
               </h2>
               <p className="text-sm text-muted-foreground">
                 Choose a saved starting hand for this simulation.
