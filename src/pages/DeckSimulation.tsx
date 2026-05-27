@@ -739,8 +739,6 @@ export function DeckSimulation({
   const [turnsToSimulate, setTurnsToSimulate] = useState(
     DEFAULT_TURNS_TO_SIMULATE
   )
-  const [reasoningSummariesEnabled, setReasoningSummariesEnabled] =
-    useState(false)
   const [useFlexServiceTier, setUseFlexServiceTier] = useState(
     getStoredCreateSimulationUseFlexServiceTier
   )
@@ -1067,7 +1065,6 @@ export function DeckSimulation({
     setSelectedSavedSeedId(savedSeeds[0]?.id ?? "")
     setSelectedModelPresetId(defaultModelPresetId ?? "")
     setTurnsToSimulate(DEFAULT_TURNS_TO_SIMULATE)
-    setReasoningSummariesEnabled(false)
     setOpeningHandMode("simulate")
     setSelectedOpeningHandId(startingHands[0]?.id ?? "")
   }
@@ -1114,7 +1111,6 @@ export function DeckSimulation({
                 : selectedSavedSeed?.seed,
             llmModelPresetId: selectedModelPreset.id,
             turnsToSimulate: parsedTurnsToSimulate,
-            reasoningSummariesEnabled,
             useFlexServiceTier:
               selectedModelPreset.supportsFlex && useFlexServiceTier,
             startingHandId:
@@ -1603,11 +1599,6 @@ export function DeckSimulation({
                         </select>
                       </div>
 
-                      <ReasoningSummariesSwitch
-                        checked={reasoningSummariesEnabled}
-                        onCheckedChange={setReasoningSummariesEnabled}
-                      />
-
                       <fieldset className="grid gap-3">
                         <legend className="text-sm font-medium text-foreground">
                           Opening hand
@@ -1948,47 +1939,6 @@ function DeleteSimulationModal({
   )
 }
 
-function ReasoningSummariesSwitch({
-  checked,
-  disabled = false,
-  onCheckedChange,
-}: {
-  checked: boolean
-  disabled?: boolean
-  onCheckedChange: (checked: boolean) => void
-}) {
-  return (
-    <div
-      className={`flex items-center gap-3 rounded-md border px-3 py-3 text-sm transition-colors ${
-        checked
-          ? "border-ring bg-accent text-accent-foreground"
-          : "border-border bg-background/35 text-muted-foreground"
-      } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
-    >
-      <button
-        className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus:ring-3 focus:ring-ring/25 focus:outline-none disabled:cursor-not-allowed ${
-          checked
-            ? "border-sky-300/70 bg-sky-500/70"
-            : "border-border bg-muted/55"
-        }`}
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        aria-label="Reasoning summaries"
-        disabled={disabled}
-        onClick={() => onCheckedChange(!checked)}
-      >
-        <span
-          className={`absolute top-1/2 left-1 size-4 -translate-y-1/2 rounded-full bg-foreground shadow-sm shadow-black/30 transition-transform ${
-            checked ? "translate-x-5" : "translate-x-0"
-          }`}
-        />
-      </button>
-      <span className="font-medium">Reasoning summaries</span>
-    </div>
-  )
-}
-
 function FlexServiceTierSwitch({
   checked,
   disabled = false,
@@ -2255,11 +2205,6 @@ function SimulationDetailsModal({
                 <div className="rounded-md border border-border bg-background/35 p-3 sm:col-span-2">
                   <dt className="text-muted-foreground">LLM options</dt>
                   <dd className="mt-2 grid gap-3">
-                    <SimulationReasoningSummariesSetting
-                      deckId={deckId}
-                      onSimulationUpdated={onSimulationUpdated}
-                      simulation={simulation}
-                    />
                     <SimulationFlexServiceTierSetting
                       deckId={deckId}
                       onSimulationUpdated={onSimulationUpdated}
@@ -2958,95 +2903,6 @@ function SimulationResultsShell({
           />
         </div>
       </div>
-    </div>
-  )
-}
-
-function SimulationReasoningSummariesSetting({
-  deckId,
-  onSimulationUpdated,
-  simulation,
-}: {
-  deckId: string
-  onSimulationUpdated: (simulation: Simulation) => void
-  simulation: Simulation
-}) {
-  const [selectedEnabled, setSelectedEnabled] = useState(
-    simulation.reasoningSummariesEnabled
-  )
-  const [isSaving, setIsSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    setSelectedEnabled(simulation.reasoningSummariesEnabled)
-    setError(null)
-  }, [simulation.id, simulation.reasoningSummariesEnabled])
-
-  async function handleReasoningSummariesChange(nextEnabled: boolean) {
-    if (isSaving || nextEnabled === simulation.reasoningSummariesEnabled) {
-      setSelectedEnabled(nextEnabled)
-      return
-    }
-
-    setSelectedEnabled(nextEnabled)
-    setError(null)
-    setIsSaving(true)
-
-    try {
-      const response = await apiFetch(
-        `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}`,
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            reasoningSummariesEnabled: nextEnabled,
-          }),
-        }
-      )
-
-      if (!response.ok) {
-        setSelectedEnabled(simulation.reasoningSummariesEnabled)
-        setError(
-          await readApiError(
-            response,
-            "Reasoning summaries could not be updated."
-          )
-        )
-        return
-      }
-
-      const data = (await response.json()) as UpdateSimulationResponse
-      onSimulationUpdated(data.simulation)
-    } catch {
-      setSelectedEnabled(simulation.reasoningSummariesEnabled)
-      setError("Reasoning summaries could not be updated.")
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  return (
-    <div className="grid gap-2">
-      <ReasoningSummariesSwitch
-        checked={selectedEnabled}
-        disabled={isSaving}
-        onCheckedChange={(nextEnabled) =>
-          void handleReasoningSummariesChange(nextEnabled)
-        }
-      />
-      {isSaving ? (
-        <p className="text-sm text-muted-foreground">Saving...</p>
-      ) : null}
-      {error ? (
-        <p
-          className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-          role="alert"
-        >
-          {error}
-        </p>
-      ) : null}
     </div>
   )
 }
