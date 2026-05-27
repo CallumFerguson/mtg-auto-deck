@@ -41,8 +41,8 @@ test("formats run library snapshots in stream events", () => {
       cancelledAt: null,
       turnNumber: 1,
       librarySnapshot: ["Forest", "Island"],
+      mcpFunctionCalls: [],
       openrouterGenerations: [],
-      chunks: [],
     },
   }
 

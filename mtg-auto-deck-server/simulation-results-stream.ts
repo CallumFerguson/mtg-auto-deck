@@ -1,23 +1,10 @@
 import type {
   SimulationDebugLlmRun,
-  SimulationDebugLlmRunChunk,
   SimulationResultsInfo,
   SimulationSummary,
 } from "./simulations-postgres.js"
 
-export type SimulationResultsStreamChunk = Omit<
-  SimulationDebugLlmRunChunk,
-  "id"
-> & {
-  id: number | null
-}
-
-export type SimulationResultsStreamRun = Omit<
-  SimulationDebugLlmRun,
-  "chunks"
-> & {
-  chunks: SimulationResultsStreamChunk[]
-}
+export type SimulationResultsStreamRun = SimulationDebugLlmRun
 
 export type SimulationResultsStreamInfo = Omit<
   SimulationResultsInfo,
@@ -36,11 +23,6 @@ export type SimulationResultsStreamEvent =
   | {
       type: "llm_run_started"
       run: SimulationResultsStreamRun
-    }
-  | {
-      type: "chunk"
-      llmRunId: string
-      chunk: SimulationResultsStreamChunk
     }
   | {
       type: "llm_run_updated"

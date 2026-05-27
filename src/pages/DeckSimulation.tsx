@@ -64,6 +64,7 @@ import type {
   SimulationDebugInfo,
   SimulationDebugLlmRun,
   SimulationDebugLlmRunChunk,
+  SimulationMcpFunctionCall,
   SimulationResultsInfo,
   SimulationResultsStreamEvent,
   SimulationsResponse,
@@ -87,7 +88,6 @@ import {
 } from "@/lib/simulation-game-state-library"
 import {
   getSimulationFinalParsedOutput,
-  getSimulationFinalParsedOutputFromPayload,
   hasTurnActions,
   type ParsedSimulationFinalOutput,
 } from "@/lib/simulation-final-output"
@@ -106,12 +106,7 @@ import {
 } from "@/lib/simulation-run-timing"
 import {
   TURN_PHASE_CHANGES,
-  getSimulationRunActiveToolCallName,
-  getSimulationResultEntries,
-  hasSimulationRunFinalParsedOutputChunk,
-  isSimulationRunLatestChunkOutputDelta,
   type LoggedTurnAction,
-  type SimulationResultEntry,
   type TurnPhaseChange,
 } from "@/lib/simulation-result-chunks"
 import {
@@ -122,7 +117,6 @@ import {
   type SimulationCardLookup,
 } from "@/lib/simulation-card-resolution"
 import {
-  getKnownSimulationResultToolLabel,
   getKnownSimulationResultToolLabelForChunk,
   getSimulationResultToolReasonForChunk,
 } from "@/lib/simulation-result-tool-labels"
@@ -134,6 +128,12 @@ type OpeningHandCardOption = {
   defaultImageUrl: string | null
   name: string
   scryfallUri: string
+}
+
+type SimulationResultEntry = {
+  id: string
+  type: "mcp_function_call"
+  call: SimulationMcpFunctionCall
 }
 
 type SimulationResultsAction =
@@ -3887,11 +3887,7 @@ function SimulationResultsPanel({
       isActive: isActiveLlmRunStatus(run.status),
       resultKind: "opening_hand" as const,
       resultLabel: `Opening hand attempt ${run.attemptNumber}`,
-      resultEntries: getSimulationResultEntries(run.chunks),
-      activeToolCallName: getSimulationRunActiveToolCallName(run.chunks),
-      hasFinalParsedOutputChunk: hasSimulationRunFinalParsedOutputChunk(
-        run.chunks
-      ),
+      resultEntries: getSimulationResultEntries(run.mcpFunctionCalls),
     })),
     ...resultsInfo.turnLlmRuns.map((run) => ({
       ...run,
@@ -3902,11 +3898,7 @@ function SimulationResultsPanel({
       isActive: isActiveLlmRunStatus(run.status),
       resultKind: "turn" as const,
       resultLabel: `Turn ${run.turnNumber ?? "?"} attempt ${run.attemptNumber}`,
-      resultEntries: getSimulationResultEntries(run.chunks),
-      activeToolCallName: getSimulationRunActiveToolCallName(run.chunks),
-      hasFinalParsedOutputChunk: hasSimulationRunFinalParsedOutputChunk(
-        run.chunks
-      ),
+      resultEntries: getSimulationResultEntries(run.mcpFunctionCalls),
     })),
   ]
   const timelineSteps = useMemo(
@@ -4023,10 +4015,8 @@ function SimulationResultsPanel({
       !run.isActive && getSimulationRunFinishedTimeMs(run) !== null
     const finishedThinkingStatus = shouldShowFinishedThinkingStatus ? (
       <SimulationResultThinkingStatus
-        activeToolCallName={null}
         canStopSimulation={false}
         finishedDurationText={finishedDurationText}
-        isFinalizingTurn={false}
         isPending={false}
         isFinishedSuccessfully={run.status === "completed"}
         isFinished={true}
@@ -4047,6 +4037,12 @@ function SimulationResultsPanel({
     const shouldShowRunActions = run.canRerun
     const emptyRunFailureMessage =
       run.status === "failed" ? run.failureMessage?.trim() || null : null
+    const emptyRunCancellationMessage =
+      run.status === "cancelled"
+        ? run.failureMessage?.trim() || "Run was cancelled."
+        : null
+    const emptyRunMessage =
+      emptyRunFailureMessage ?? emptyRunCancellationMessage
     const isUsageLimitFailure = isUsageLimitFailureMessage(
       emptyRunFailureMessage
     )
@@ -4066,28 +4062,31 @@ function SimulationResultsPanel({
         className="grid gap-3"
         role={panelId ? "region" : undefined}
       >
-        {directTurnActions ? (
+        {finishedThinkingStatus}
+
+        {finalParsedOutput ? (
+          <SimulationFinalOutputBlock
+            cardLookup={cardLookup}
+            finalOutput={finalParsedOutput}
+          />
+        ) : directTurnActions ? (
           <SimulationTurnActionsSurface
             cardLookup={cardLookup}
             turnActions={directTurnActions}
           />
         ) : null}
 
-        {run.resultEntries.length > 0 || finishedThinkingStatus ? (
+        {run.resultEntries.length > 0 ? (
           <SimulationResultChunkCards
             cardLookup={cardLookup}
-            run={run}
             entries={run.resultEntries}
-            finishedThinkingStatus={finishedThinkingStatus}
           />
         ) : null}
 
-        {run.isActive && !run.hasFinalParsedOutputChunk ? (
+        {run.isActive ? (
           <SimulationResultThinkingStatus
-            activeToolCallName={run.activeToolCallName}
             canStopSimulation={!readOnly && run.status !== "cancel_requested"}
             finishedDurationText={null}
-            isFinalizingTurn={isSimulationRunLatestChunkOutputDelta(run.chunks)}
             isPending={run.status === "pending"}
             isFinishedSuccessfully={false}
             isFinished={false}
@@ -4096,19 +4095,21 @@ function SimulationResultsPanel({
             runStartTimeMs={getSimulationRunStartTimeMs(run)}
             stopSimulationError={stopSimulationError}
           />
-        ) : run.resultEntries.length === 0 && directTurnActions === null ? (
+        ) : run.resultEntries.length === 0 &&
+          directTurnActions === null &&
+          finalParsedOutput === null ? (
           <div
             className={`rounded-md border px-3 py-2 text-sm ${
               isUsageLimitFailure
                 ? "border-amber-300/30 bg-amber-400/10 text-amber-100"
-                : emptyRunFailureMessage
+                : emptyRunMessage
                   ? "border-destructive/40 bg-destructive/10 text-destructive"
                   : "border-border bg-black/20 text-muted-foreground"
             }`}
             role={
               isUsageLimitFailure
                 ? "status"
-                : emptyRunFailureMessage
+                : emptyRunMessage
                   ? "alert"
                   : undefined
             }
@@ -4120,7 +4121,7 @@ function SimulationResultsPanel({
               />
             ) : (
               <p>
-                {emptyRunFailureMessage ??
+                {emptyRunMessage ??
                   "No user-facing events have been saved for this run yet."}
               </p>
             )}
@@ -4650,74 +4651,90 @@ const simulationResultChunkPreClassName =
   "debug-scrollbar-neutral max-h-64 max-w-full overflow-y-auto border-t border-border p-3 text-xs leading-5 break-words whitespace-pre-wrap text-muted-foreground"
 const showSimulationResultCardImageToggle = false
 
+function getSimulationResultEntries(
+  mcpFunctionCalls: readonly SimulationMcpFunctionCall[]
+): SimulationResultEntry[] {
+  return [...mcpFunctionCalls]
+    .sort(compareSimulationMcpFunctionCalls)
+    .map((call) => ({
+      id: `mcp-function-call-${call.id}`,
+      type: "mcp_function_call",
+      call,
+    }))
+}
+
+function compareSimulationMcpFunctionCalls(
+  firstCall: SimulationMcpFunctionCall,
+  secondCall: SimulationMcpFunctionCall
+) {
+  const calledAtComparison =
+    Date.parse(firstCall.calledAt) - Date.parse(secondCall.calledAt)
+
+  return calledAtComparison || firstCall.id - secondCall.id
+}
+
+function createSimulationMcpFunctionCallChunk(
+  call: SimulationMcpFunctionCall
+): SimulationDebugLlmRunChunk {
+  return {
+    id: call.id,
+    sequence: call.id,
+    kind: "mcp_call_complete",
+    mcpFunctionName: call.mcpFunctionName,
+    mcpFunctionOutput: call.outputPayload,
+    mcpFunctionReason:
+      getMcpFunctionCallReason(call.inputPayload) ??
+      getMcpFunctionCallReason(call.outputPayload),
+    reasoningDelta: null,
+    outputDelta: null,
+    payload: {
+      input: call.inputPayload,
+      item: {
+        status: call.status,
+      },
+      output: call.outputPayload,
+    },
+    receivedAt: call.completedAt,
+  }
+}
+
+function getMcpFunctionCallReason(payload: unknown) {
+  const payloadRecord = asPayloadRecord(payload)
+  const argumentsRecord = asPayloadRecord(payloadRecord.arguments)
+
+  return (
+    getPayloadString(payloadRecord, "reason") ??
+    getPayloadString(argumentsRecord, "reason")
+  )
+}
+
 function SimulationResultChunkCards({
   cardLookup,
   entries,
-  finishedThinkingStatus,
-  run,
 }: {
   cardLookup: SimulationCardLookup
   entries: SimulationResultEntry[]
-  finishedThinkingStatus: ReactNode | null
-  run: SimulationDebugLlmRun
 }) {
-  const finalParsedOutputEntryIndex = entries.findIndex(
-    (entry) =>
-      entry.type === "chunk" && entry.chunk.kind === "final_parsed_output"
-  )
-  const finishedThinkingStatusIndex =
-    finishedThinkingStatus === null
-      ? -1
-      : finalParsedOutputEntryIndex === -1
-        ? entries.length > 0
-          ? entries.length - 1
-          : -1
-        : finalParsedOutputEntryIndex
-  const shouldAppendFinishedThinkingStatus =
-    finishedThinkingStatus !== null && finishedThinkingStatusIndex === -1
-
   function renderEntry(entry: SimulationResultEntry) {
-    const { chunk } = entry
-
-    if (chunk.kind === "final_parsed_output") {
-      const finalOutput = getSimulationFinalParsedOutputFromPayload(
-        run.phase,
-        chunk.payload
-      )
-
-      if (finalOutput) {
-        return (
-          <SimulationFinalOutputBlock
-            cardLookup={cardLookup}
-            finalOutput={finalOutput}
-          />
-        )
-      }
-    }
+    const chunk = createSimulationMcpFunctionCallChunk(entry.call)
 
     return <SimulationResultEvent cardLookup={cardLookup} chunk={chunk} />
   }
 
   return (
     <div className="grid gap-2">
-      {entries.map((entry, index) => (
+      {entries.map((entry) => (
         <Fragment key={entry.id}>
-          {index === finishedThinkingStatusIndex
-            ? finishedThinkingStatus
-            : null}
           {renderEntry(entry)}
         </Fragment>
       ))}
-      {shouldAppendFinishedThinkingStatus ? finishedThinkingStatus : null}
     </div>
   )
 }
 
 function SimulationResultThinkingStatus({
-  activeToolCallName,
   canStopSimulation,
   finishedDurationText,
-  isFinalizingTurn,
   isPending,
   isFinished,
   isFinishedSuccessfully,
@@ -4726,10 +4743,8 @@ function SimulationResultThinkingStatus({
   runStartTimeMs,
   stopSimulationError,
 }: {
-  activeToolCallName: string | null
   canStopSimulation: boolean
   finishedDurationText: string | null
-  isFinalizingTurn: boolean
   isPending: boolean
   isFinished: boolean
   isFinishedSuccessfully: boolean
@@ -4754,13 +4769,6 @@ function SimulationResultThinkingStatus({
     }
   }, [isFinished, isPending])
 
-  const activeToolCallLabel =
-    activeToolCallName === null
-      ? null
-      : getKnownSimulationResultToolLabel({
-          mcpFunctionName: activeToolCallName,
-          state: "active",
-        })
   const activeElapsedText =
     runStartTimeMs === null || isFinished || isPending
       ? null
@@ -4771,11 +4779,7 @@ function SimulationResultThinkingStatus({
       : "Thought"
     : isPending
       ? "Pending"
-      : activeToolCallName
-        ? (activeToolCallLabel ?? `Calling tool: ${activeToolCallName}`)
-        : isFinalizingTurn
-          ? "Finalizing turn"
-          : "Thinking"
+      : "Thinking"
 
   return (
     <div className="grid gap-2 py-1 select-none">
@@ -6041,7 +6045,7 @@ function getSimulationGameStateZoneCardTitle(
 function getSimulationRunGameStateDisplay(
   run: Pick<
     SimulationDebugLlmRun,
-    "chunks" | "gameState" | "librarySnapshot" | "phase"
+    "gameState" | "librarySnapshot" | "openingHand" | "phase"
   > | null,
   commanders: readonly DeckCard[]
 ): SimulationGameStateDisplay | null {
@@ -6049,16 +6053,14 @@ function getSimulationRunGameStateDisplay(
     return null
   }
 
-  const finalOutput = getSimulationFinalParsedOutput(run)
-
   if (run.phase === "opening_hand") {
-    if (finalOutput?.type !== "opening_hand") {
+    if (!Array.isArray(run.openingHand)) {
       return null
     }
 
     return getOpeningHandGameStateDisplay(
       getCommanderCardNames(commanders),
-      finalOutput.keptHand,
+      run.openingHand,
       getSimulationRunLibraryCardCount(run)
     )
   }
@@ -6067,15 +6069,12 @@ function getSimulationRunGameStateDisplay(
     return null
   }
 
-  const gameState =
-    finalOutput?.type === "turn" ? finalOutput.gameState : run.gameState
-
-  if (!hasGameState(gameState)) {
+  if (!hasGameState(run.gameState)) {
     return null
   }
 
   return {
-    gameState,
+    gameState: run.gameState,
     libraryCardCount: getSimulationRunLibraryCardCount(run),
   }
 }

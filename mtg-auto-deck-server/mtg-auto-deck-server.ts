@@ -6,7 +6,6 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { hostHeaderValidation } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js"
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js"
-import { OpenRouter, stepCountIs, tool, type Tool } from "@openrouter/agent"
 import { createHash, randomBytes, randomInt, randomUUID } from "node:crypto"
 import OpenAI from "openai"
 import { z } from "zod/v4"
@@ -69,9 +68,6 @@ import {
 import { ensureStarterDeckCopiesSchema } from "./starter-decks-postgres.js"
 import { ensureFreshScryfallOracleCards } from "./scryfall-cache.js"
 import {
-  appendLlmRunChunkAtNextSequence,
-  appendLlmRunChunk,
-  appendLlmRunChunks,
   cancelLlmRun,
   cancelStaleInFlightLlmRuns,
   claimNextQueuedLlmRun,
@@ -104,7 +100,6 @@ import {
   markSimulationFailed,
   mulliganSimulation,
   requestCancelSimulationLlmRuns,
-  recordOpenRouterLlmRunGeneration,
   resetSimulationForOpeningHandLlmRun,
   returnCardToSimulationLibrary,
   returnCardsToSimulationLibrary,
@@ -114,22 +109,18 @@ import {
   shuffleSimulationLibrary,
   SIMULATION_AUTO_ADVANCE_DISABLED_MESSAGE,
   SIMULATION_AUTO_ADVANCE_NOT_RUNNING_MESSAGE,
-  SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
   SimulationValidationError,
   takeCardsFromSimulationLibrary,
   updateLlmRunRequestData,
   updateSimulation,
 } from "./simulations-postgres.js"
 import type {
-  LlmRunChunkInput,
   LlmRunMcpTokenContext,
   LlmRunMcpTokenPhase,
   LlmRunPhase,
   LlmRunStatus,
   ClaimedQueuedLlmRun,
   LlmRunQueueClaimResult,
-  OpenRouterGeneration,
-  SimulationDebugLlmRunChunk,
   SimulationDebugLlmRun,
   SimulationLlmCompletionResult,
   SimulationPromptCard,
@@ -158,25 +149,16 @@ import {
   SavedSeedValidationError,
 } from "./saved-seeds-postgres.js"
 import {
-  ProviderTerminalEventError,
   asRecord,
-  createCancellationChunk,
-  createFinalParsedOutputChunk,
-  createServerErrorChunk,
   getCompletedResponseOutputText,
   getErrorMessage,
-  getOpenRouterGenerationIdFromCompletedEvent,
   getStringProperty,
   isAbortError,
-  isProviderTerminalEvent,
-  normalizeOpenAiStreamEvent,
-  normalizeOpenRouterStreamEvent,
   parseOpeningHandCompletionFromResponseText,
   parseTurnSimulationCompletionFromResponseText,
-  type OpenRouterToolCallNameMap,
 } from "./llm-run-events.js"
 import {
-  collectLlamaCppChatCompletion,
+  collectLlamaCppChatCompletionNonStreaming,
   createLlamaCppChatCompletionTools,
   type LlamaCppChatCompletionRequestPayload,
   type LlamaCppToolDefinition,
@@ -184,7 +166,6 @@ import {
 import {
   callWithRuntimeAbortSignal,
   createRuntimeAbortError,
-  forEachRuntimeAbortableAsync,
   registerRuntimeAbortHandler,
   throwIfRuntimeAborted,
 } from "./llm-runtime-cancellation.js"
@@ -218,14 +199,13 @@ import {
   SimulationResultsBroadcaster,
   formatSseComment,
   formatSseEvent,
-  type SimulationResultsStreamChunk,
   type SimulationResultsStreamEvent,
   type SimulationResultsStreamInfo,
   type SimulationResultsStreamRun,
 } from "./simulation-results-stream.js"
 import {
-  aggregateOpenRouterUsage,
   applyLlmRunEstimatedCostServiceTierDiscount,
+  aggregateOpenRouterUsage,
   estimatePresetTokenCostUsd,
   formatUsdCostAsCentLabel,
   getOpenRouterReportedCostUsd,
@@ -251,8 +231,6 @@ const APP_PASSWORD_RESET_TOKEN_PATH =
   "/api/app-auth/password-reset-token/:token"
 const OPENING_HAND_MCP_SERVER_LABEL = "opening_hand"
 const TURN_SIMULATION_MCP_SERVER_LABEL = "turn_simulation"
-const STREAM_FLUSH_INTERVAL_MS = 1000
-const STREAM_RECENT_CHUNK_LIMIT = 500
 const SSE_KEEPALIVE_INTERVAL_MS = 15000
 const LLM_RUN_QUEUE_POLL_INTERVAL_MS = 1000
 const MCP_RUN_TOKEN_TTL_MS = 6 * 60 * 60 * 1000
@@ -386,23 +364,17 @@ const createTurnLlmRunSchema = z.object({
 type ActiveLlmRunRuntime = {
   abortController: AbortController
   attemptNumber: number
-  chunkBuffer: LlmRunChunkInput[]
   completionPromise: Promise<void>
   createdAt: string
   deckId: string
-  flushTimer: NodeJS.Timeout | null
-  flushPromise: Promise<void> | null
   llmRunId: string
   llmModelPresetId: string
   model: string
   fullPrompt: string
-  nextSequence: number
-  openrouterGenerations: OpenRouterGeneration[]
   phase: LlmRunPhase
   provider: string
   reasoningEffort: string | null
   serviceTier: string | null
-  recentChunks: SimulationResultsStreamChunk[]
   resolveCompletion: () => void
   runtimeStreamKey: string
   simulationId: string
@@ -455,65 +427,8 @@ function isTerminalSimulationStatus(status: SimulationSummary["status"]) {
   )
 }
 
-function shouldStreamSimulationResultsChunk(chunk: LlmRunChunkInput) {
-  return !SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS.includes(chunk.kind)
-}
-
-function createRuntimeStreamChunk(
-  chunk: LlmRunChunkInput
-): SimulationResultsStreamChunk {
-  return {
-    id: null,
-    sequence: chunk.sequence,
-    kind: chunk.kind,
-    mcpFunctionName: chunk.mcpFunctionName,
-    mcpFunctionOutput: chunk.mcpFunctionOutput,
-    mcpFunctionReason: chunk.mcpFunctionReason,
-    reasoningDelta: chunk.reasoningDelta,
-    outputDelta: chunk.outputDelta,
-    payload: chunk.payload ?? null,
-    receivedAt: new Date().toISOString(),
-  }
-}
-
-function rememberRuntimeStreamChunk(
-  runtime: ActiveLlmRunRuntime,
-  chunk: SimulationResultsStreamChunk
-) {
-  runtime.recentChunks.push(chunk)
-
-  if (runtime.recentChunks.length > STREAM_RECENT_CHUNK_LIMIT) {
-    runtime.recentChunks.splice(
-      0,
-      runtime.recentChunks.length - STREAM_RECENT_CHUNK_LIMIT
-    )
-  }
-}
-
-function rememberRuntimeOpenRouterGeneration(
-  runtime: ActiveLlmRunRuntime,
-  generation: OpenRouterGeneration
-) {
-  const existingGenerationIndex = runtime.openrouterGenerations.findIndex(
-    (existingGeneration) =>
-      existingGeneration.openrouterTurnIndex === generation.openrouterTurnIndex
-  )
-
-  if (existingGenerationIndex === -1) {
-    runtime.openrouterGenerations.push(generation)
-  } else {
-    runtime.openrouterGenerations[existingGenerationIndex] = generation
-  }
-
-  runtime.openrouterGenerations.sort(
-    (firstGeneration, secondGeneration) =>
-      firstGeneration.openrouterTurnIndex - secondGeneration.openrouterTurnIndex
-  )
-}
-
 function createStreamRunFromRuntime(
-  runtime: ActiveLlmRunRuntime,
-  chunks = runtime.recentChunks
+  runtime: ActiveLlmRunRuntime
 ): SimulationResultsStreamRun {
   return {
     llmRunId: runtime.llmRunId,
@@ -534,21 +449,15 @@ function createStreamRunFromRuntime(
     failedAt: null,
     cancelledAt: null,
     turnNumber: runtime.turnNumber,
-    openrouterGenerations: runtime.openrouterGenerations,
-    chunks,
+    openrouterGenerations: [],
+    mcpFunctionCalls: [],
   }
 }
 
 function createStreamRunFromPersistedRun(
   run: SimulationDebugLlmRun
 ): SimulationResultsStreamRun {
-  return {
-    ...run,
-    chunks: run.chunks.map((chunk) => ({
-      ...chunk,
-      id: chunk.id,
-    })),
-  }
+  return run
 }
 
 function createStreamResultsInfo(
@@ -563,7 +472,7 @@ function createStreamResultsInfo(
   }
 }
 
-function mergeActiveRuntimeChunksIntoResults(
+function mergeActiveRuntimesIntoResults(
   results: SimulationResultsStreamInfo,
   simulationId: string
 ): SimulationResultsStreamInfo {
@@ -631,7 +540,9 @@ function upsertStreamRunInList(
           [],
           incomingRun.openrouterGenerations ?? []
         ),
-        chunks: [...incomingRun.chunks].sort(compareStreamChunks),
+        mcpFunctionCalls: [...(incomingRun.mcpFunctionCalls ?? [])].sort(
+          compareMcpFunctionCalls
+        ),
       },
     ]
   }
@@ -644,7 +555,10 @@ function upsertStreamRunInList(
       existingRun.openrouterGenerations ?? [],
       incomingRun.openrouterGenerations ?? []
     ),
-    chunks: mergeStreamChunks(existingRun.chunks, incomingRun.chunks),
+    mcpFunctionCalls: mergeMcpFunctionCalls(
+      existingRun.mcpFunctionCalls ?? [],
+      incomingRun.mcpFunctionCalls ?? []
+    ),
   }
 
   return runs.map((run) =>
@@ -652,32 +566,14 @@ function upsertStreamRunInList(
   )
 }
 
-function mergeStreamChunks(
-  existingChunks: readonly SimulationResultsStreamChunk[],
-  incomingChunks: readonly SimulationResultsStreamChunk[]
-) {
-  const chunksBySequence = new Map<number, SimulationResultsStreamChunk>()
-
-  for (const chunk of existingChunks) {
-    chunksBySequence.set(chunk.sequence, chunk)
-  }
-
-  for (const chunk of incomingChunks) {
-    const existingChunk = chunksBySequence.get(chunk.sequence)
-
-    if (!existingChunk || existingChunk.id === null || chunk.id !== null) {
-      chunksBySequence.set(chunk.sequence, chunk)
-    }
-  }
-
-  return Array.from(chunksBySequence.values()).sort(compareStreamChunks)
-}
-
 function mergeOpenRouterGenerations(
-  existingGenerations: readonly OpenRouterGeneration[] = [],
-  incomingGenerations: readonly OpenRouterGeneration[] = []
+  existingGenerations: readonly SimulationResultsStreamRun["openrouterGenerations"][number][] = [],
+  incomingGenerations: readonly SimulationResultsStreamRun["openrouterGenerations"][number][] = []
 ) {
-  const generationsByTurn = new Map<number, OpenRouterGeneration>()
+  const generationsByTurn = new Map<
+    number,
+    SimulationResultsStreamRun["openrouterGenerations"][number]
+  >()
 
   for (const generation of existingGenerations) {
     generationsByTurn.set(generation.openrouterTurnIndex, generation)
@@ -693,11 +589,34 @@ function mergeOpenRouterGenerations(
   )
 }
 
-function compareStreamChunks(
-  firstChunk: SimulationResultsStreamChunk,
-  secondChunk: SimulationResultsStreamChunk
+function mergeMcpFunctionCalls(
+  existingCalls: readonly SimulationResultsStreamRun["mcpFunctionCalls"][number][] = [],
+  incomingCalls: readonly SimulationResultsStreamRun["mcpFunctionCalls"][number][] = []
 ) {
-  return firstChunk.sequence - secondChunk.sequence
+  const callsById = new Map<
+    number,
+    SimulationResultsStreamRun["mcpFunctionCalls"][number]
+  >()
+
+  for (const call of existingCalls) {
+    callsById.set(call.id, call)
+  }
+
+  for (const call of incomingCalls) {
+    callsById.set(call.id, call)
+  }
+
+  return Array.from(callsById.values()).sort(compareMcpFunctionCalls)
+}
+
+function compareMcpFunctionCalls(
+  firstCall: SimulationResultsStreamRun["mcpFunctionCalls"][number],
+  secondCall: SimulationResultsStreamRun["mcpFunctionCalls"][number]
+) {
+  const calledAtComparison =
+    Date.parse(firstCall.calledAt) - Date.parse(secondCall.calledAt)
+
+  return calledAtComparison || firstCall.id - secondCall.id
 }
 
 function compareOpeningHandStreamRuns(
@@ -735,7 +654,7 @@ async function getSimulationResultsStreamSnapshot(
     throw new SimulationValidationError("Simulation not found.")
   }
 
-  const results = mergeActiveRuntimeChunksIntoResults(
+  const results = mergeActiveRuntimesIntoResults(
     createStreamResultsInfo(
       await getSimulationResultsInfo(deckId, simulationId)
     ),
@@ -757,7 +676,7 @@ async function getPublicSimulationResultsStreamSnapshot(simulationId: string) {
 
   publicSimulationIds.add(simulationId)
 
-  const results = mergeActiveRuntimeChunksIntoResults(
+  const results = mergeActiveRuntimesIntoResults(
     createStreamResultsInfo(
       await getSimulationResultsInfo(simulation.deckId, simulationId)
     ),
@@ -768,36 +687,6 @@ async function getPublicSimulationResultsStreamSnapshot(simulationId: string) {
     simulation,
     results,
   }
-}
-
-function publishRuntimeChunk(
-  runtime: ActiveLlmRunRuntime,
-  chunk: LlmRunChunkInput
-) {
-  if (!shouldStreamSimulationResultsChunk(chunk)) {
-    return
-  }
-
-  const streamChunk = createRuntimeStreamChunk(chunk)
-
-  publishRuntimeStreamChunk(runtime, streamChunk)
-}
-
-function publishRuntimeStreamChunk(
-  runtime: ActiveLlmRunRuntime,
-  streamChunk: SimulationResultsStreamChunk
-) {
-  rememberRuntimeStreamChunk(runtime, streamChunk)
-  simulationResultsBroadcaster.publish(runtime.simulationId, {
-    type: "chunk",
-    llmRunId: runtime.llmRunId,
-    chunk: streamChunk,
-  })
-  publishPublicSimulationResultsEvent(runtime.simulationId, {
-    type: "chunk",
-    llmRunId: runtime.llmRunId,
-    chunk: streamChunk,
-  })
 }
 
 async function publishSimulationResultsState({
@@ -1894,43 +1783,31 @@ function getTurnSimulationLlmToolDefinitions(): readonly LlamaCppToolDefinition[
   return turnSimulationLibraryLlmToolDefinitions
 }
 
-function createOpeningHandOpenRouterTools(
-  mcpClient: Client,
-  signal: AbortSignal
-): Tool[] {
-  return createOpenRouterTools(openingHandLlmToolDefinitions, mcpClient, signal)
+type OpenRouterResponsesFunctionTool = {
+  type: "function"
+  name: string
+  description: string
+  parameters: Record<string, unknown>
 }
 
-function createTurnSimulationOpenRouterTools(
-  mcpClient: Client,
-  signal: AbortSignal
-): Tool[] {
-  return createOpenRouterTools(
-    getTurnSimulationLlmToolDefinitions(),
-    mcpClient,
-    signal
-  )
+function createOpenRouterResponsesTools(
+  toolDefinitions: readonly LlamaCppToolDefinition[]
+): OpenRouterResponsesFunctionTool[] {
+  return toolDefinitions.map((definition) => ({
+    type: "function",
+    name: definition.name,
+    description: definition.description,
+    parameters: createJsonSchemaParameters(definition.inputSchema),
+  }))
 }
 
-function createOpenRouterTools(
-  toolDefinitions: readonly LlamaCppToolDefinition[],
-  mcpClient: Client,
-  signal: AbortSignal
-): Tool[] {
-  return toolDefinitions.map((definition) =>
-    tool({
-      name: definition.name,
-      description: definition.description,
-      inputSchema: definition.inputSchema,
-      execute: async (input) =>
-        callMcpToolForProvider(
-          mcpClient,
-          definition.name,
-          input,
-          signal,
-          "OpenRouter"
-        ),
-    })
+function createJsonSchemaParameters(inputSchema: z.ZodObject) {
+  const schema = z.toJSONSchema(inputSchema, {
+    target: "draft-07",
+  }) as Record<string, unknown>
+
+  return Object.fromEntries(
+    Object.entries(schema).filter(([key]) => key !== "~standard")
   )
 }
 
@@ -2065,10 +1942,10 @@ function buildOpeningHandOpenAiRequestPayload(
   reasoningSummariesEnabled: boolean
 ) {
   return {
+    providerType: "openai" as const,
     model: config.model,
     input: fullPrompt,
     max_output_tokens: config.maxOutputTokens,
-    stream: true as const,
     ...(config.serviceTier ? { service_tier: config.serviceTier } : {}),
     metadata: {
       simulationId,
@@ -2103,10 +1980,10 @@ function buildTurnSimulationOpenAiRequestPayload(
   reasoningSummariesEnabled: boolean
 ) {
   return {
+    providerType: "openai" as const,
     model: config.model,
     input: fullPrompt,
     max_output_tokens: config.maxOutputTokens,
-    stream: true as const,
     ...(config.serviceTier ? { service_tier: config.serviceTier } : {}),
     metadata: {
       simulationId,
@@ -2280,7 +2157,7 @@ function getOpenRouterProviderPreferences(modelProvider: string | null) {
   }
 
   return {
-    allowFallbacks: false,
+    allow_fallbacks: false,
     only: [modelProvider],
   }
 }
@@ -3019,8 +2896,9 @@ function isBenignAutoAdvanceAbortError(error: unknown) {
   )
 }
 
-type CompletedLlmStreamResult = {
+type CompletedLlmResponseResult = {
   outputText: string
+  rawResponse: unknown
   responseMetadata: unknown
   usage: unknown
 }
@@ -3037,7 +2915,7 @@ function isOpenAiRequestPayload(
     | OpeningHandLlmRequestPayload
     | TurnSimulationLlmRequestPayload
 ): requestPayload is OpenAiRequestPayload {
-  return "stream" in requestPayload
+  return asRecord(requestPayload).providerType === "openai"
 }
 
 function isOpenRouterRequestPayload(
@@ -3092,7 +2970,7 @@ function requireLlamaCppRequestPayload(
   return requestPayload
 }
 
-async function collectOpenAiLlmStream({
+async function collectOpenAiLlmResponse({
   config,
   llmRunId,
   phase,
@@ -3104,16 +2982,15 @@ async function collectOpenAiLlmStream({
   phase: LlmRunPhase
   requestPayload: OpenAiRequestPayload
   runtime: ActiveLlmRunRuntime
-}): Promise<CompletedLlmStreamResult> {
-  let outputText = ""
-  let responseMetadata: unknown = {}
-  let usage: unknown = {}
-  let didReceiveCompletedResponse = false
-  let providerTerminalEventError: ProviderTerminalEventError | null = null
+}): Promise<CompletedLlmResponseResult> {
   const client = new OpenAI({
     apiKey: config.apiKey,
   })
   const signal = runtime.abortController.signal
+  const openAiRequestPayload: Record<string, unknown> = {
+    ...requestPayload,
+  }
+  delete openAiRequestPayload.providerType
 
   logLlmApiCallStarted({
     llmRunId,
@@ -3124,46 +3001,16 @@ async function collectOpenAiLlmStream({
 
   throwIfRuntimeAborted(signal)
 
-  const stream = (await client.responses.create(
-    requestPayload as unknown as Parameters<typeof client.responses.create>[0],
-    {
-      signal,
-    }
-  )) as AsyncIterable<unknown>
-
-  await forEachRuntimeAbortableAsync(stream, signal, async (event) => {
-    const eventRecord = asRecord(event)
-    const eventType = getStringProperty(eventRecord, "type")
-    const normalizedEvent = normalizeOpenAiStreamEvent(event)
-
-    if (eventType === "response.completed") {
-      const response = eventRecord.response
-      const responseRecord = asRecord(response)
-      didReceiveCompletedResponse = true
-      outputText = getCompletedResponseOutputText(response)
-      responseMetadata = response ?? {}
-      usage = responseRecord.usage ?? {}
-    }
-
-    await appendRuntimeChunk(runtime, normalizedEvent)
-
-    if (isProviderTerminalEvent(eventType)) {
-      providerTerminalEventError = new ProviderTerminalEventError(
-        eventType,
-        event
-      )
-    }
-  })
-
-  if (providerTerminalEventError) {
-    throw providerTerminalEventError
-  }
-
-  if (!didReceiveCompletedResponse) {
-    throw new Error(
-      `${formatLlmRunPhase(phase)} LLM stream ended without response.completed.`
-    )
-  }
+  const response = await client.responses.create(
+    openAiRequestPayload as unknown as Parameters<
+      typeof client.responses.create
+    >[0],
+    { signal }
+  )
+  assertCompletedProviderResponse(response, phase, "OpenAI")
+  const responseRecord = asRecord(response)
+  const outputText = getCompletedResponseOutputText(response)
+  const usage = responseRecord.usage ?? {}
 
   logLlmApiCallFinished({
     llmRunId,
@@ -3177,42 +3024,32 @@ async function collectOpenAiLlmStream({
 
   return {
     outputText,
-    responseMetadata,
+    rawResponse: response,
+    responseMetadata: response,
     usage,
   }
 }
 
-async function collectOpenRouterLlmStream({
+async function collectOpenRouterLlmResponse({
   config,
-  createTools,
   llmRunId,
   mcpPath,
   phase,
   requestPayload,
   runtime,
+  toolDefinitions,
 }: {
   config: OpenRouterRunConfig
-  createTools?: (mcpClient: Client, signal: AbortSignal) => Tool[]
   llmRunId: string
   mcpPath?: string
   phase: LlmRunPhase
   requestPayload: OpenRouterRequestPayload
   runtime: ActiveLlmRunRuntime
-}): Promise<CompletedLlmStreamResult> {
-  let outputText = ""
-  let responseMetadata: unknown = {}
-  let usage: unknown = {}
-  let didReceiveCompletedResponse = false
-  let providerTerminalEventError: ProviderTerminalEventError | null = null
-  let currentOpenRouterTurnIndex = 0
-  const completedResponseUsageValues: unknown[] = []
-  const toolCallNamesById: OpenRouterToolCallNameMap = new Map()
-  const openrouter = new OpenRouter({
-    apiKey: config.apiKey,
-  })
+  toolDefinitions: readonly LlamaCppToolDefinition[]
+}): Promise<CompletedLlmResponseResult> {
   const signal = runtime.abortController.signal
   const mcpClient =
-    createTools && mcpPath
+    mcpPath && toolDefinitions.length > 0
       ? await createProviderMcpClient({
         clientName: "openrouter-agent",
         path: mcpPath,
@@ -3220,6 +3057,13 @@ async function collectOpenRouterLlmStream({
       })
       : null
   let mcpClientClosePromise: Promise<void> | null = null
+  const responses: unknown[] = []
+  const usageValues: unknown[] = []
+  const tools = createOpenRouterResponsesTools(toolDefinitions)
+  const toolDefinitionsByName = new Map(
+    toolDefinitions.map((definition) => [definition.name, definition])
+  )
+  let input: unknown = requestPayload.input
 
   const closeMcpClient = () => {
     if (!mcpClient) {
@@ -3241,89 +3085,114 @@ async function collectOpenRouterLlmStream({
       provider: config.provider,
     })
 
-    const result = openrouter.callModel(
-      {
-        model: requestPayload.model,
-        input: requestPayload.input,
-        maxOutputTokens: requestPayload.maxOutputTokens,
-        metadata: requestPayload.metadata,
-        reasoning: requestPayload.reasoning,
-        parallelToolCalls: requestPayload.parallelToolCalls,
-        provider: requestPayload.provider,
-        ...(requestPayload.serviceTier
-          ? { serviceTier: requestPayload.serviceTier as never }
-          : {}),
-        stopWhen: stepCountIs(requestPayload.stopWhenStepCount),
-        tools: mcpClient && createTools ? createTools(mcpClient, signal) : [],
-      },
-      {
-        signal,
-      }
-    )
     const removeAbortHandler = registerRuntimeAbortHandler(signal, () => {
-      void result.cancel().catch(() => { })
       void closeMcpClient()
     })
 
     try {
-      // Drain the OpenRouter agent generator so its internal tool-execution
-      // promise is observed after result.cancel() closes the stream.
-      for await (const event of result.getFullResponsesStream()) {
-        const eventRecord = asRecord(event)
-        const eventType = getStringProperty(eventRecord, "type")
-        const normalizedEvent = normalizeOpenRouterStreamEvent(
-          event,
-          toolCallNamesById
+      for (
+        let stepNumber = 1;
+        stepNumber <= requestPayload.stopWhenStepCount;
+        stepNumber += 1
+      ) {
+        throwIfRuntimeAborted(signal)
+
+        const response = await createOpenRouterResponsesApiResponse(
+          config,
+          {
+            input,
+            max_output_tokens: requestPayload.maxOutputTokens,
+            metadata: requestPayload.metadata,
+            model: requestPayload.model,
+            parallel_tool_calls: requestPayload.parallelToolCalls,
+            provider: requestPayload.provider,
+            reasoning: requestPayload.reasoning,
+            ...(requestPayload.serviceTier
+              ? { service_tier: requestPayload.serviceTier }
+              : {}),
+            store: false,
+            stream: false,
+            tools,
+          },
+          signal
         )
-        const eventTurnNumber = getNumberProperty(eventRecord, "turnNumber")
+        const responseRecord = asRecord(response)
+        const functionCalls = getOpenRouterFunctionCalls(response)
 
-        if (
-          eventType === "turn.start" &&
-          eventTurnNumber !== null &&
-          Number.isInteger(eventTurnNumber) &&
-          eventTurnNumber >= 0
-        ) {
-          currentOpenRouterTurnIndex = eventTurnNumber
-        }
+        responses.push(response)
+        usageValues.push(responseRecord.usage ?? {})
 
-        if (eventType === "response.completed") {
-          const response = eventRecord.response
-          const responseRecord = asRecord(response)
-          const generationId =
-            getOpenRouterGenerationIdFromCompletedEvent(event)
-          didReceiveCompletedResponse = true
-          outputText = getCompletedResponseOutputText(response)
-          responseMetadata = response ?? {}
-          completedResponseUsageValues.push(responseRecord.usage ?? {})
-          usage = aggregateOpenRouterUsage(completedResponseUsageValues)
+        assertCompletedProviderResponse(response, phase, "OpenRouter")
 
-          if (generationId) {
-            const generation = await recordOpenRouterLlmRunGeneration({
-              llmRunId,
-              openrouterTurnIndex: currentOpenRouterTurnIndex,
-              generationId,
-              responseMetadata,
-            })
+        if (functionCalls.length === 0) {
+          const outputText = getCompletedResponseOutputText(response)
+          const usage = aggregateOpenRouterUsage(usageValues)
 
-            if (generation) {
-              rememberRuntimeOpenRouterGeneration(runtime, generation)
-            }
+          if (!outputText.trim()) {
+            throw new Error(
+              "OpenRouter response did not include final assistant content."
+            )
+          }
+
+          logLlmApiCallFinished({
+            llmRunId,
+            model: requestPayload.model,
+            phase,
+            provider: config.provider,
+            serviceTier: config.serviceTier,
+            tokenCosts: config.tokenCosts,
+            usage,
+          })
+
+          return {
+            outputText,
+            rawResponse: { responses },
+            responseMetadata: response,
+            usage,
           }
         }
 
-        await appendRuntimeChunk(runtime, normalizedEvent)
+        if (!mcpClient) {
+          throw new Error("OpenRouter requested a tool but no MCP tools are available.")
+        }
 
-        if (isProviderTerminalEvent(eventType)) {
-          providerTerminalEventError = new ProviderTerminalEventError(
-            eventType,
-            event,
+        const toolOutputItems: unknown[] = []
+
+        for (const toolCall of functionCalls) {
+          const toolDefinition = toolDefinitionsByName.get(toolCall.name)
+
+          if (!toolDefinition) {
+            throw new Error(`OpenRouter requested unknown tool: ${toolCall.name}.`)
+          }
+
+          const toolInput = parseAndValidateOpenRouterToolArguments(
+            toolCall,
+            toolDefinition
+          )
+          const toolOutput = await callMcpToolForProvider(
+            mcpClient,
+            toolCall.name,
+            toolInput,
+            signal,
             "OpenRouter"
           )
+
+          toolOutputItems.push({
+            type: "function_call_output",
+            call_id: toolCall.callId,
+            output: formatToolOutputForProviderMessage(toolOutput),
+            status: "completed",
+          })
         }
+
+        input = createOpenRouterFollowUpInput({
+          previousInput: input,
+          responseOutput: responseRecord.output,
+          toolOutputItems,
+        })
       }
     } catch (error) {
       if (signal.aborted) {
-        await result.cancel().catch(() => { })
         throw createRuntimeAbortError()
       }
 
@@ -3335,36 +3204,235 @@ async function collectOpenRouterLlmStream({
     await closeMcpClient()
   }
 
-  throwIfRuntimeAborted(signal)
+  throw new Error(
+    `OpenRouter LLM run reached stopWhenStepCount (${requestPayload.stopWhenStepCount}) before producing final output.`
+  )
+}
 
-  if (providerTerminalEventError) {
-    throw providerTerminalEventError
-  }
+type OpenRouterResponsesApiRequestBody = {
+  input: unknown
+  max_output_tokens: number
+  metadata: Record<string, string>
+  model: string
+  parallel_tool_calls: false
+  provider: unknown
+  reasoning: unknown
+  service_tier?: string
+  store: false
+  stream: false
+  tools: OpenRouterResponsesFunctionTool[]
+}
 
-  if (!didReceiveCompletedResponse) {
+type OpenRouterFunctionCall = {
+  argumentsText: string
+  callId: string
+  name: string
+  rawItem: unknown
+}
+
+async function createOpenRouterResponsesApiResponse(
+  config: OpenRouterRunConfig,
+  body: OpenRouterResponsesApiRequestBody,
+  signal: AbortSignal
+) {
+  const response = await callWithRuntimeAbortSignal(
+    signal,
+    (options) =>
+      fetch("https://openrouter.ai/api/v1/responses", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: options.signal,
+      }),
+    "OpenRouter Responses API request was cancelled."
+  )
+  const responseText = await response.text()
+
+  if (!response.ok) {
     throw new Error(
-      `${formatLlmRunPhase(phase)} LLM stream ended without response.completed.`
+      `OpenRouter Responses API request failed (${response.status}): ${formatProviderHttpErrorBody(responseText)}`
     )
   }
 
-  logLlmApiCallFinished({
-    llmRunId,
-    model: requestPayload.model,
-    phase,
-    provider: config.provider,
-    serviceTier: config.serviceTier,
-    tokenCosts: config.tokenCosts,
-    usage,
-  })
+  if (!responseText.trim()) {
+    return {}
+  }
 
-  return {
-    outputText,
-    responseMetadata,
-    usage,
+  try {
+    return JSON.parse(responseText) as unknown
+  } catch (error) {
+    throw new Error("OpenRouter Responses API returned non-JSON output.", {
+      cause: error,
+    })
   }
 }
 
-async function collectLlamaCppLlmStream({
+function getOpenRouterFunctionCalls(response: unknown): OpenRouterFunctionCall[] {
+  const output = asRecord(response).output
+
+  if (!Array.isArray(output)) {
+    return []
+  }
+
+  return output.flatMap((item) => {
+    const itemRecord = asRecord(item)
+
+    if (itemRecord.type !== "function_call") {
+      return []
+    }
+
+    const name = getStringProperty(itemRecord, "name")
+    const callId =
+      getStringProperty(itemRecord, "call_id") ??
+      getStringProperty(itemRecord, "callId") ??
+      getStringProperty(itemRecord, "id")
+
+    if (!name || !callId) {
+      throw new Error("OpenRouter returned a function call without a name or call id.")
+    }
+
+    return [
+      {
+        argumentsText: getStringProperty(itemRecord, "arguments") ?? "{}",
+        callId,
+        name,
+        rawItem: item,
+      },
+    ]
+  })
+}
+
+function parseAndValidateOpenRouterToolArguments(
+  toolCall: OpenRouterFunctionCall,
+  toolDefinition: LlamaCppToolDefinition
+) {
+  let parsedArguments: unknown
+
+  try {
+    parsedArguments = toolCall.argumentsText.trim()
+      ? JSON.parse(toolCall.argumentsText)
+      : {}
+  } catch (error) {
+    throw new Error(
+      `OpenRouter tool ${toolCall.name} arguments were not valid JSON.`,
+      {
+        cause: error,
+      }
+    )
+  }
+
+  if (
+    typeof parsedArguments !== "object" ||
+    parsedArguments === null ||
+    Array.isArray(parsedArguments)
+  ) {
+    throw new Error(
+      `OpenRouter tool ${toolCall.name} arguments must be a JSON object.`
+    )
+  }
+
+  const parsedInput = toolDefinition.inputSchema.safeParse(parsedArguments)
+
+  if (!parsedInput.success) {
+    throw new Error(
+      `OpenRouter tool ${toolCall.name} arguments did not match schema: ${parsedInput.error.message}`
+    )
+  }
+
+  return parsedInput.data as Record<string, unknown>
+}
+
+function createOpenRouterFollowUpInput({
+  previousInput,
+  responseOutput,
+  toolOutputItems,
+}: {
+  previousInput: unknown
+  responseOutput: unknown
+  toolOutputItems: readonly unknown[]
+}) {
+  return [
+    ...normalizeOpenRouterResponsesInput(previousInput),
+    ...(Array.isArray(responseOutput) ? responseOutput : []),
+    ...toolOutputItems,
+  ]
+}
+
+function normalizeOpenRouterResponsesInput(input: unknown) {
+  if (Array.isArray(input)) {
+    return input
+  }
+
+  return [
+    {
+      role: "user",
+      content: typeof input === "string" ? input : String(input ?? ""),
+    },
+  ]
+}
+
+function formatToolOutputForProviderMessage(value: unknown) {
+  if (typeof value === "string") {
+    return value
+  }
+
+  return JSON.stringify(value) ?? "null"
+}
+
+function assertCompletedProviderResponse(
+  response: unknown,
+  phase: LlmRunPhase,
+  providerName: string
+) {
+  const responseRecord = asRecord(response)
+  const status = getStringProperty(responseRecord, "status")
+
+  if (!status || status === "completed") {
+    return
+  }
+
+  throw new Error(
+    `${providerName} ${formatLlmRunPhase(phase)} response ended with status "${status}": ${getProviderResponseFailureDetail(response)}`
+  )
+}
+
+function getProviderResponseFailureDetail(response: unknown) {
+  const responseRecord = asRecord(response)
+  const errorRecord = asRecord(responseRecord.error)
+  const incompleteDetailsRecord = asRecord(responseRecord.incomplete_details)
+  const camelIncompleteDetailsRecord = asRecord(responseRecord.incompleteDetails)
+
+  return (
+    getStringProperty(errorRecord, "message") ??
+    getStringProperty(errorRecord, "code") ??
+    getStringProperty(incompleteDetailsRecord, "reason") ??
+    getStringProperty(camelIncompleteDetailsRecord, "reason") ??
+    JSON.stringify(response) ??
+    "unknown provider response failure"
+  )
+}
+
+function formatProviderHttpErrorBody(responseText: string) {
+  if (!responseText.trim()) {
+    return "empty response body"
+  }
+
+  try {
+    const parsed = JSON.parse(responseText) as unknown
+    const message = getProviderResponseFailureDetail(parsed)
+
+    return message === "unknown provider response failure"
+      ? JSON.stringify(parsed)
+      : message
+  } catch {
+    return responseText.slice(0, 1000)
+  }
+}
+
+async function collectLlamaCppLlmResponse({
   config,
   llmRunId,
   mcpPath,
@@ -3380,7 +3448,7 @@ async function collectLlamaCppLlmStream({
   requestPayload: LlamaCppRequestPayload
   runtime: ActiveLlmRunRuntime
   toolDefinitions: readonly LlamaCppToolDefinition[]
-}): Promise<CompletedLlmStreamResult> {
+}): Promise<CompletedLlmResponseResult> {
   const signal = runtime.abortController.signal
   const client = new OpenAI({
     apiKey: config.apiKey,
@@ -3421,8 +3489,7 @@ async function collectLlamaCppLlmStream({
     })
 
     try {
-      const result = await collectLlamaCppChatCompletion({
-        appendChunk: (chunk) => appendRuntimeChunk(runtime, chunk),
+      const result = await collectLlamaCppChatCompletionNonStreaming({
         callTool: (name, args, toolSignal) =>
           mcpClient
             ? callMcpToolForProvider(
@@ -3450,7 +3517,10 @@ async function collectLlamaCppLlmStream({
         usage: result.usage,
       })
 
-      return result
+      return {
+        ...result,
+        rawResponse: result.rawResponse ?? result.responseMetadata,
+      }
     } catch (error) {
       if (signal.aborted) {
         throw createRuntimeAbortError()
@@ -3529,23 +3599,17 @@ async function runOpeningHandLlmRun({
   const runtime: ActiveLlmRunRuntime = {
     abortController: new AbortController(),
     attemptNumber,
-    chunkBuffer: [],
     completionPromise: completion.completionPromise,
     createdAt,
     deckId,
-    flushTimer: null,
-    flushPromise: null,
     llmRunId,
     llmModelPresetId: config.modelPresetId,
     model: config.model,
     fullPrompt,
-    nextSequence: 1,
-    openrouterGenerations: [],
     phase: "opening_hand",
     provider: config.provider,
     reasoningEffort: config.reasoningEffort,
     serviceTier: getLlmRunServiceTier(config),
-    recentChunks: [],
     resolveCompletion: completion.resolveCompletion,
     runtimeStreamKey,
     simulationId,
@@ -3588,9 +3652,9 @@ async function runOpeningHandLlmRun({
     })
     throwIfRuntimeAborted(runtime.abortController.signal)
 
-    const streamResult =
+    const responseResult =
       config.provider === "openai"
-        ? await collectOpenAiLlmStream({
+        ? await collectOpenAiLlmResponse({
           config,
           llmRunId,
           phase: "opening_hand",
@@ -3598,9 +3662,8 @@ async function runOpeningHandLlmRun({
           runtime,
         })
         : config.provider === "openrouter"
-          ? await collectOpenRouterLlmStream({
+          ? await collectOpenRouterLlmResponse({
             config,
-            createTools: createOpeningHandOpenRouterTools,
             llmRunId,
             mcpPath: appendMcpRunTokenToPath(
               OPENING_HAND_MCP_PATH,
@@ -3609,8 +3672,9 @@ async function runOpeningHandLlmRun({
             phase: "opening_hand",
             requestPayload: requireOpenRouterRequestPayload(requestPayload),
             runtime,
+            toolDefinitions: openingHandLlmToolDefinitions,
           })
-          : await collectLlamaCppLlmStream({
+          : await collectLlamaCppLlmResponse({
             config,
             llmRunId,
             mcpPath: appendMcpRunTokenToPath(
@@ -3624,26 +3688,19 @@ async function runOpeningHandLlmRun({
           })
 
     throwIfRuntimeAborted(runtime.abortController.signal)
-    await forceFlushRuntimeChunks(runtime)
-    throwIfRuntimeAborted(runtime.abortController.signal)
-
     const parsedOpeningHand = parseOpeningHandCompletionFromResponseText(
-      streamResult.outputText
+      responseResult.outputText
     )
 
-    throwIfRuntimeAborted(runtime.abortController.signal)
-    await appendRuntimeChunk(
-      runtime,
-      createFinalParsedOutputChunk(parsedOpeningHand.parsedOutput)
-    )
-    await forceFlushRuntimeChunks(runtime)
     throwIfRuntimeAborted(runtime.abortController.signal)
 
     const completion = await completeOpeningHandLlmRun({
       llmRunId,
       openingHand: parsedOpeningHand.keptHand,
-      responseMetadata: streamResult.responseMetadata,
-      usage: streamResult.usage,
+      rawResponse: responseResult.rawResponse,
+      responseMetadata: responseResult.responseMetadata,
+      summary: parsedOpeningHand.summary,
+      usage: responseResult.usage,
     })
     runtime.status = "completed"
 
@@ -3660,8 +3717,6 @@ async function runOpeningHandLlmRun({
         phase: "opening_hand",
         provider: config.provider,
       })
-      await appendRuntimeChunk(runtime, createCancellationChunk())
-      await tryForceFlushRuntimeChunks(runtime, "cancelled opening-hand run")
       await cancelLlmRun(llmRunId, "Opening-hand LLM run was cancelled.")
       runtime.status = "cancelled"
       await publishSimulationResultsState({
@@ -3672,11 +3727,6 @@ async function runOpeningHandLlmRun({
       return
     }
 
-    if (!(error instanceof ProviderTerminalEventError)) {
-      await appendRuntimeChunk(runtime, createServerErrorChunk(error))
-    }
-
-    await tryForceFlushRuntimeChunks(runtime, "failed opening-hand run")
     logLlmApiCallStoppedWithError({
       error,
       llmRunId,
@@ -3695,7 +3745,6 @@ async function runOpeningHandLlmRun({
     await revokeLlmRunMcpToken(llmRunId).catch((error: unknown) => {
       console.error("Failed to revoke opening-hand MCP run token:", error)
     })
-    clearRuntimeFlushTimer(runtime)
     activeLlmRunRuntimes.delete(runtimeStreamKey)
     runtime.resolveCompletion()
     nudgeLlmRunQueue()
@@ -3771,23 +3820,17 @@ async function runTurnLlmRun({
   const runtime: ActiveLlmRunRuntime = {
     abortController: new AbortController(),
     attemptNumber,
-    chunkBuffer: [],
     completionPromise: completion.completionPromise,
     createdAt,
     deckId,
-    flushTimer: null,
-    flushPromise: null,
     llmRunId,
     llmModelPresetId: config.modelPresetId,
     model: config.model,
     fullPrompt,
-    nextSequence: 1,
-    openrouterGenerations: [],
     phase: "turn",
     provider: config.provider,
     reasoningEffort: config.reasoningEffort,
     serviceTier: getLlmRunServiceTier(config),
-    recentChunks: [],
     resolveCompletion: completion.resolveCompletion,
     runtimeStreamKey,
     simulationId,
@@ -3832,9 +3875,9 @@ async function runTurnLlmRun({
     })
     throwIfRuntimeAborted(runtime.abortController.signal)
 
-    const streamResult =
+    const responseResult =
       config.provider === "openai"
-        ? await collectOpenAiLlmStream({
+        ? await collectOpenAiLlmResponse({
           config,
           llmRunId,
           phase: "turn",
@@ -3842,9 +3885,8 @@ async function runTurnLlmRun({
           runtime,
         })
         : config.provider === "openrouter"
-          ? await collectOpenRouterLlmStream({
+          ? await collectOpenRouterLlmResponse({
             config,
-            createTools: createTurnSimulationOpenRouterTools,
             llmRunId,
             mcpPath: appendMcpRunTokenToPath(
               TURN_SIMULATION_MCP_PATH,
@@ -3853,8 +3895,9 @@ async function runTurnLlmRun({
             phase: "turn",
             requestPayload: requireOpenRouterRequestPayload(requestPayload),
             runtime,
+            toolDefinitions: getTurnSimulationLlmToolDefinitions(),
           })
-          : await collectLlamaCppLlmStream({
+          : await collectLlamaCppLlmResponse({
             config,
             llmRunId,
             mcpPath: appendMcpRunTokenToPath(
@@ -3868,27 +3911,19 @@ async function runTurnLlmRun({
           })
 
     throwIfRuntimeAborted(runtime.abortController.signal)
-    await forceFlushRuntimeChunks(runtime)
-    throwIfRuntimeAborted(runtime.abortController.signal)
-
     const parsedTurn = parseTurnSimulationCompletionFromResponseText(
-      streamResult.outputText
+      responseResult.outputText
     )
 
-    throwIfRuntimeAborted(runtime.abortController.signal)
-    await appendRuntimeChunk(
-      runtime,
-      createFinalParsedOutputChunk(parsedTurn.parsedOutput)
-    )
-    await forceFlushRuntimeChunks(runtime)
     throwIfRuntimeAborted(runtime.abortController.signal)
 
     const completion = await completeTurnLlmRun({
       llmRunId,
       gameState: parsedTurn.gameState,
-      responseMetadata: streamResult.responseMetadata,
+      rawResponse: responseResult.rawResponse,
+      responseMetadata: responseResult.responseMetadata,
       turnActions: parsedTurn.turnActions,
-      usage: streamResult.usage,
+      usage: responseResult.usage,
     })
     runtime.status = "completed"
 
@@ -3905,11 +3940,6 @@ async function runTurnLlmRun({
         phase: "turn",
         provider: config.provider,
       })
-      await appendRuntimeChunk(
-        runtime,
-        createCancellationChunk("Turn LLM run was cancelled.")
-      )
-      await tryForceFlushRuntimeChunks(runtime, "cancelled turn run")
       await cancelLlmRun(llmRunId, "Turn LLM run was cancelled.")
       runtime.status = "cancelled"
       await publishSimulationResultsState({
@@ -3920,11 +3950,6 @@ async function runTurnLlmRun({
       return
     }
 
-    if (!(error instanceof ProviderTerminalEventError)) {
-      await appendRuntimeChunk(runtime, createServerErrorChunk(error))
-    }
-
-    await tryForceFlushRuntimeChunks(runtime, "failed turn run")
     logLlmApiCallStoppedWithError({
       error,
       llmRunId,
@@ -3943,7 +3968,6 @@ async function runTurnLlmRun({
     await revokeLlmRunMcpToken(llmRunId).catch((error: unknown) => {
       console.error("Failed to revoke turn MCP run token:", error)
     })
-    clearRuntimeFlushTimer(runtime)
     activeLlmRunRuntimes.delete(runtimeStreamKey)
     runtime.resolveCompletion()
     nudgeLlmRunQueue()
@@ -3979,10 +4003,6 @@ async function stopActiveSimulationLlmRuns(
     } else {
       const cancellationMessage = `${formatLlmRunPhase(run.phase)} LLM run was cancelled before its active runtime could be found.`
 
-      await appendLlmRunChunkAtNextSequence(
-        run.llmRunId,
-        createCancellationChunk(cancellationMessage)
-      )
       await cancelLlmRun(run.llmRunId, cancellationMessage)
       cancelRequestedRunIds.push(run.llmRunId)
     }
@@ -4013,123 +4033,6 @@ async function stopActiveSimulationLlmRuns(
     stoppedLlmRunIds: stoppedRunIds,
     cancelRequestedLlmRunIds: cancelRequestedRunIds,
   }
-}
-
-async function appendRuntimeChunk(
-  runtime: ActiveLlmRunRuntime,
-  chunk: Omit<LlmRunChunkInput, "sequence">
-) {
-  const sequencedChunk = {
-    ...chunk,
-    sequence: runtime.nextSequence,
-  }
-
-  runtime.nextSequence += 1
-
-  if (shouldPersistRuntimeChunkBeforeStreaming(sequencedChunk)) {
-    await forceFlushRuntimeChunks(runtime)
-
-    const persistedChunk = await appendLlmRunChunk(
-      runtime.llmRunId,
-      sequencedChunk
-    )
-
-    if (persistedChunk) {
-      publishRuntimeStreamChunk(
-        runtime,
-        createStreamChunkFromPersistedChunk(persistedChunk)
-      )
-      return
-    }
-  }
-
-  runtime.chunkBuffer.push(sequencedChunk)
-  publishRuntimeChunk(runtime, sequencedChunk)
-  scheduleRuntimeFlush(runtime)
-}
-
-function shouldPersistRuntimeChunkBeforeStreaming(chunk: LlmRunChunkInput) {
-  return (
-    chunk.kind === "mcp_call_complete" || chunk.kind === "final_parsed_output"
-  )
-}
-
-function createStreamChunkFromPersistedChunk(
-  chunk: SimulationDebugLlmRunChunk
-): SimulationResultsStreamChunk {
-  return {
-    ...chunk,
-    id: chunk.id,
-  }
-}
-
-function scheduleRuntimeFlush(runtime: ActiveLlmRunRuntime) {
-  if (runtime.flushTimer || runtime.flushPromise) {
-    return
-  }
-
-  runtime.flushTimer = setTimeout(() => {
-    runtime.flushTimer = null
-    void flushRuntimeChunks(runtime).catch((error: unknown) => {
-      console.error("Failed to flush LLM run chunks:", error)
-    })
-  }, STREAM_FLUSH_INTERVAL_MS)
-}
-
-async function flushRuntimeChunks(runtime: ActiveLlmRunRuntime) {
-  if (runtime.flushPromise) {
-    await runtime.flushPromise
-    return
-  }
-
-  const chunks = runtime.chunkBuffer.slice()
-
-  if (chunks.length === 0) {
-    return
-  }
-
-  runtime.flushPromise = appendLlmRunChunks(runtime.llmRunId, chunks)
-    .then(() => {
-      runtime.chunkBuffer.splice(0, chunks.length)
-    })
-    .finally(() => {
-      runtime.flushPromise = null
-
-      if (runtime.chunkBuffer.length > 0) {
-        scheduleRuntimeFlush(runtime)
-      }
-    })
-  await runtime.flushPromise
-}
-
-async function forceFlushRuntimeChunks(runtime: ActiveLlmRunRuntime) {
-  clearRuntimeFlushTimer(runtime)
-
-  while (runtime.flushPromise || runtime.chunkBuffer.length > 0) {
-    await flushRuntimeChunks(runtime)
-  }
-}
-
-async function tryForceFlushRuntimeChunks(
-  runtime: ActiveLlmRunRuntime,
-  context: string
-) {
-  try {
-    await forceFlushRuntimeChunks(runtime)
-    return true
-  } catch (error) {
-    console.error(`Failed to flush chunks for ${context}:`, error)
-    return false
-  }
-}
-
-function clearRuntimeFlushTimer(runtime: ActiveLlmRunRuntime) {
-  if (!runtime.flushTimer) {
-    return
-  }
-
-  clearTimeout(runtime.flushTimer)
-  runtime.flushTimer = null
 }
 
 async function main() {

@@ -405,6 +405,7 @@ export function parseOpeningHandCompletionFromResponseText(
   return {
     keptHand,
     parsedOutput: responseRecord,
+    summary,
   }
 }
 

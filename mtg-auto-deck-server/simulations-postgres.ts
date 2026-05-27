@@ -46,6 +46,12 @@ export function canApplyLateLlmRunTerminalUpdate(status: LlmRunStatus) {
   return status === "pending" || status === "streaming"
 }
 
+export function isTerminalLlmRunStatus(status: LlmRunStatus) {
+  return (
+    status === "completed" || status === "failed" || status === "cancelled"
+  )
+}
+
 export const LLM_CHUNK_KINDS = [
   "raw_event",
   "reasoning_start",
@@ -168,6 +174,18 @@ export type RecordOpenRouterLlmRunGenerationInput = {
   responseMetadata: unknown
 }
 
+export type LlmRunMcpFunctionCallStatus = "completed" | "failed"
+
+export type LlmRunMcpFunctionCall = {
+  id: number
+  mcpFunctionName: string
+  status: LlmRunMcpFunctionCallStatus
+  inputPayload: unknown
+  outputPayload: unknown
+  calledAt: string
+  completedAt: string
+}
+
 export type ActiveSimulationLlmRun = {
   simulationId: string
   llmRunId: string
@@ -204,8 +222,6 @@ export type LlmRunMcpTokenContext = {
   simulationId: string
 }
 
-export type LlmRunMcpFunctionCallStatus = "completed" | "failed"
-
 export type RecordLlmRunMcpFunctionCallInput = {
   llmRunId: string
   mcpFunctionName: string
@@ -235,13 +251,15 @@ export type SimulationDebugLlmRun = {
   failedAt: string | null
   cancelledAt: string | null
   turnNumber?: number
+  openingHand?: string[]
+  summary?: string | null
   turnActions?: unknown
   gameState?: unknown
   librarySnapshot?: string[] | null
   outdated?: boolean
   openingHandIsValid?: boolean
   openrouterGenerations: OpenRouterGeneration[]
-  chunks: SimulationDebugLlmRunChunk[]
+  mcpFunctionCalls: LlmRunMcpFunctionCall[]
 }
 
 export type SimulationDebugLlmRunMetadata = {
@@ -627,7 +645,6 @@ export async function ensureSimulationsSchema() {
     "turn",
     "other",
   ])
-  await createEnumType("llm_chunk_kind", LLM_CHUNK_KINDS)
   await queryDatabase(`
     DROP TABLE IF EXISTS llm_run_chunk_card_mentions
   `)
@@ -720,6 +737,7 @@ export async function ensureSimulationsSchema() {
       full_prompt text NOT NULL DEFAULT '',
       request_payload jsonb NOT NULL DEFAULT '{}',
       response_metadata jsonb NOT NULL DEFAULT '{}',
+      raw_response jsonb NOT NULL DEFAULT '{}',
       usage jsonb NOT NULL DEFAULT '{}',
       estimated_cost_usd numeric,
       openrouter_reported_cost_usd numeric,
@@ -825,6 +843,10 @@ export async function ensureSimulationsSchema() {
   `)
   await queryDatabase(`
     ALTER TABLE llm_runs
+    ADD COLUMN IF NOT EXISTS raw_response jsonb NOT NULL DEFAULT '{}'
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_runs
     ALTER COLUMN reasoning_effort DROP NOT NULL
   `)
   await queryDatabase(`
@@ -874,54 +896,18 @@ export async function ensureSimulationsSchema() {
     )
   `)
   await queryDatabase(`
-    CREATE TABLE IF NOT EXISTS llm_run_chunks (
-      id bigserial PRIMARY KEY,
-
-      llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
-      sequence integer NOT NULL,
-      kind llm_chunk_kind NOT NULL,
-      mcp_function_name text,
-      mcp_function_output jsonb,
-      mcp_function_reason text,
-      reasoning_delta text,
-      output_delta text,
-      payload jsonb,
-      received_at timestamptz NOT NULL DEFAULT now(),
-
-      CONSTRAINT llm_run_chunks_kind_active_values_check
-        CHECK (
-          kind IN (${LLM_CHUNK_KINDS.map(quoteSqlLiteral).join(", ")})
-        ),
-      UNIQUE (llm_run_id, sequence)
-    )
+    DROP TABLE IF EXISTS llm_run_chunks
   `)
   await queryDatabase(`
-    ALTER TABLE llm_run_chunks
-    ADD COLUMN IF NOT EXISTS mcp_function_reason text
+    DROP TYPE IF EXISTS llm_chunk_kind
   `)
-  await queryDatabase(`
-    ALTER TABLE llm_run_chunks
-    ALTER COLUMN payload DROP NOT NULL
-  `)
-  await queryDatabase(`
-    ALTER TABLE llm_run_chunks
-    ALTER COLUMN payload DROP DEFAULT
-  `)
-  await queryDatabase(`
-    ALTER TABLE llm_run_chunks
-    DROP COLUMN IF EXISTS provider_event_type
-  `)
-  await queryDatabase(`
-    ALTER TABLE llm_run_chunks
-    DROP COLUMN IF EXISTS item_type
-  `)
-  await ensureLlmRunChunksKindConstraint()
   await queryDatabase(`
     CREATE TABLE IF NOT EXISTS simulation_opening_hand_llm_runs (
       simulation_id uuid NOT NULL REFERENCES simulations(id) ON DELETE CASCADE,
       llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
       attempt_number integer NOT NULL CHECK (attempt_number > 0),
       opening_hand jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(opening_hand) = 'array'),
+      summary text,
       library_snapshot jsonb CHECK (library_snapshot IS NULL OR jsonb_typeof(library_snapshot) = 'array'),
       opening_hand_is_valid boolean NOT NULL DEFAULT false,
       random_state_snapshot bigint,
@@ -934,6 +920,10 @@ export async function ensureSimulationsSchema() {
   await queryDatabase(`
     ALTER TABLE simulation_opening_hand_llm_runs
     ADD COLUMN IF NOT EXISTS opening_hand_is_valid boolean NOT NULL DEFAULT false
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulation_opening_hand_llm_runs
+    ADD COLUMN IF NOT EXISTS summary text
   `)
   await queryDatabase(`
     DROP TABLE IF EXISTS simulation_opening_hand_evaluations
@@ -1087,10 +1077,6 @@ export async function ensureSimulationsSchema() {
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS llm_run_mcp_function_calls_function_name_called_at_idx
       ON llm_run_mcp_function_calls (mcp_function_name, called_at)
-  `)
-  await queryDatabase(`
-    CREATE INDEX IF NOT EXISTS llm_run_chunks_llm_run_id_sequence_idx
-      ON llm_run_chunks (llm_run_id, sequence)
   `)
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS simulation_opening_hand_llm_runs_simulation_id_idx
@@ -3606,12 +3592,16 @@ export async function isLlmRunStreaming(llmRunId: string) {
 export async function completeOpeningHandLlmRun({
   llmRunId,
   openingHand,
+  rawResponse,
   responseMetadata,
+  summary,
   usage,
 }: {
   llmRunId: string
   openingHand: readonly string[]
+  rawResponse: unknown
   responseMetadata: unknown
+  summary: string
   usage: unknown
 }): Promise<SimulationLlmCompletionResult> {
   return withDatabaseTransaction(async (client) => {
@@ -3692,7 +3682,8 @@ export async function completeOpeningHandLlmRun({
         SET opening_hand = $2::jsonb,
             library_snapshot = $3::jsonb,
             random_state_snapshot = $4,
-            opening_hand_is_valid = $5
+            opening_hand_is_valid = $5,
+            summary = $6
         WHERE llm_run_id = $1
       `,
       [
@@ -3701,6 +3692,7 @@ export async function completeOpeningHandLlmRun({
         JSON.stringify(librarySnapshot),
         snapshot.random_state,
         openingHandIsValid,
+        summary,
       ]
     )
 
@@ -3712,6 +3704,7 @@ export async function completeOpeningHandLlmRun({
             usage = $3::jsonb,
             estimated_cost_usd = $4,
             openrouter_reported_cost_usd = $5,
+            raw_response = $6::jsonb,
             completed_at = now(),
             updated_at = now()
         WHERE id = $1
@@ -3723,6 +3716,7 @@ export async function completeOpeningHandLlmRun({
         JSON.stringify(usage),
         costValues.estimatedCostUsd,
         costValues.openrouterReportedCostUsd,
+        JSON.stringify(rawResponse ?? {}),
       ]
     )
 
@@ -3749,12 +3743,14 @@ export async function completeOpeningHandLlmRun({
 export async function completeTurnLlmRun({
   gameState,
   llmRunId,
+  rawResponse,
   responseMetadata,
   turnActions,
   usage,
 }: {
   llmRunId: string
   gameState: unknown
+  rawResponse: unknown
   responseMetadata: unknown
   turnActions: unknown
   usage: unknown
@@ -3842,6 +3838,7 @@ export async function completeTurnLlmRun({
             usage = $3::jsonb,
             estimated_cost_usd = $4,
             openrouter_reported_cost_usd = $5,
+            raw_response = $6::jsonb,
             completed_at = now(),
             updated_at = now()
         WHERE id = $1
@@ -3853,6 +3850,7 @@ export async function completeTurnLlmRun({
         JSON.stringify(usage),
         costValues.estimatedCostUsd,
         costValues.openrouterReportedCostUsd,
+        JSON.stringify(rawResponse ?? {}),
       ]
     )
 
@@ -3913,8 +3911,6 @@ function getCompletedLlmRunCostValues(
 
 type PartialLlmRunCostSnapshotRow = {
   full_prompt_character_count: string | number
-  reasoning_delta_character_count: string | number
-  output_delta_character_count: string | number
   service_tier: string | null
   cached_input_token_cost_usd_per_million: string | number | null
   output_token_cost_usd_per_million: string | number | null
@@ -3925,16 +3921,12 @@ export function buildPartialLlmRunCostSnapshotQuery(llmRunId: string) {
     text: `
       SELECT
         length(llm_run.full_prompt) AS full_prompt_character_count,
-        COALESCE(SUM(length(COALESCE(chunk.reasoning_delta, ''))), 0) AS reasoning_delta_character_count,
-        COALESCE(SUM(length(COALESCE(chunk.output_delta, ''))), 0) AS output_delta_character_count,
         llm_run.service_tier,
         preset.cached_input_token_cost_usd_per_million,
         preset.output_token_cost_usd_per_million
       FROM llm_runs llm_run
       LEFT JOIN llm_model_presets preset
         ON preset.id = llm_run.llm_model_preset_id
-      LEFT JOIN llm_run_chunks chunk
-        ON chunk.llm_run_id = llm_run.id
       WHERE llm_run.id = $1
       GROUP BY
         llm_run.id,
@@ -3964,10 +3956,8 @@ async function estimatePartialLlmRunCostUsdWithClient(
   const estimatedCostUsd = estimatePartialLlmRunCostUsd({
     fullPromptCharCount:
       toOptionalNumber(snapshot.full_prompt_character_count) ?? 0,
-    reasoningDeltaCharCount:
-      toOptionalNumber(snapshot.reasoning_delta_character_count) ?? 0,
-    outputDeltaCharCount:
-      toOptionalNumber(snapshot.output_delta_character_count) ?? 0,
+    reasoningDeltaCharCount: 0,
+    outputDeltaCharCount: 0,
     tokenCosts: {
       cachedInputDollarsPerMillion: toOptionalNumber(
         snapshot.cached_input_token_cost_usd_per_million
@@ -4187,32 +4177,6 @@ export async function cancelStaleInFlightLlmRuns(): Promise<StaleInFlightLlmRunC
     const cancelledSimulationIds = new Set<string>()
 
     for (const run of activeRunsResult.rows) {
-      const sequenceResult = await client.query<{ sequence: number }>(
-        `
-          SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence
-          FROM llm_run_chunks
-          WHERE llm_run_id = $1
-        `,
-        [run.id]
-      )
-      const sequence = Number(sequenceResult.rows[0].sequence)
-      const insertChunkQuery = buildAppendLlmRunChunksQuery(run.id, [
-        {
-          sequence,
-          kind: "cancelled",
-          mcpFunctionName: null,
-          mcpFunctionOutput: null,
-          mcpFunctionReason: null,
-          reasoningDelta: null,
-          outputDelta: null,
-          payload: {
-            message: STALE_IN_FLIGHT_LLM_RUN_CANCELLATION_MESSAGE,
-          },
-        },
-      ])
-
-      await client.query(insertChunkQuery.text, insertChunkQuery.values)
-
       const estimatedCostUsd = await estimatePartialLlmRunCostUsdWithClient(
         client,
         run.id
@@ -4559,9 +4523,8 @@ export async function getSimulationResultsInfo(
     simulationId,
     tableName: "simulation_opening_hand_llm_runs",
     selectColumns:
-      "run.attempt_number, NULL::integer AS turn_number, NULL::jsonb AS turn_actions, NULL::jsonb AS game_state, run.library_snapshot, NULL::boolean AS outdated, run.opening_hand_is_valid",
+      "run.attempt_number, NULL::integer AS turn_number, run.opening_hand, run.summary, NULL::jsonb AS turn_actions, NULL::jsonb AS game_state, run.library_snapshot, NULL::boolean AS outdated, run.opening_hand_is_valid",
     orderBy: "run.attempt_number ASC",
-    excludeChunkKinds: SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
     additionalWhereSql: `
       run.attempt_number = (
         SELECT MAX(latest_run.attempt_number)
@@ -4574,9 +4537,8 @@ export async function getSimulationResultsInfo(
     simulationId,
     tableName: "simulation_turn_llm_runs",
     selectColumns:
-      "run.attempt_number, run.turn_number, run.turn_actions, run.game_state, run.library_snapshot, run.outdated, NULL::boolean AS opening_hand_is_valid",
+      "run.attempt_number, run.turn_number, NULL::jsonb AS opening_hand, NULL::text AS summary, run.turn_actions, run.game_state, run.library_snapshot, run.outdated, NULL::boolean AS opening_hand_is_valid",
     orderBy: "run.turn_number ASC, run.attempt_number ASC",
-    excludeChunkKinds: SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
     additionalWhereSql: "run.outdated = false",
   })
 
@@ -4936,21 +4898,13 @@ type SimulationDebugLlmRunRow = {
   cancelled_at: Date | null
   attempt_number: number
   turn_number: number | null
+  opening_hand: unknown | null
+  summary: string | null
   turn_actions: unknown | null
   game_state: unknown | null
   library_snapshot: unknown | null
   outdated: boolean | null
   opening_hand_is_valid: boolean | null
-  chunk_id: string | null
-  sequence: number | null
-  kind: LlmChunkKind | null
-  mcp_function_name: string | null
-  mcp_function_output: unknown | null
-  mcp_function_reason: string | null
-  reasoning_delta: string | null
-  output_delta: string | null
-  payload: unknown | null
-  received_at: Date | null
 }
 
 type SimulationDebugSimulationRow = {
@@ -5001,6 +4955,17 @@ type OpenRouterGenerationRow = {
   openrouter_turn_index: number
   generation_id: string
   created_at: Date
+}
+
+type LlmRunMcpFunctionCallRow = {
+  id: string | number
+  llm_run_id: string
+  mcp_function_name: string
+  status: LlmRunMcpFunctionCallStatus
+  input_payload: unknown
+  output_payload: unknown
+  called_at: Date
+  completed_at: Date
 }
 
 async function getSimulationDebugLlmRunMetadata({
@@ -5109,7 +5074,6 @@ function mapSimulationDebugLlmRunMetadataRow(
 
 async function getSimulationDebugLlmRuns({
   additionalWhereSql,
-  excludeChunkKinds = [],
   orderBy,
   selectColumns,
   simulationId,
@@ -5121,7 +5085,6 @@ async function getSimulationDebugLlmRuns({
     | "simulation_turn_llm_runs"
   selectColumns: string
   orderBy: string
-  excludeChunkKinds?: readonly LlmChunkKind[]
   additionalWhereSql?: string
 }): Promise<SimulationDebugLlmRun[]> {
   const result = await queryDatabase<SimulationDebugLlmRunRow>(
@@ -5144,33 +5107,17 @@ async function getSimulationDebugLlmRuns({
         llm_run.completed_at,
         llm_run.failed_at,
         llm_run.cancelled_at,
-        ${selectColumns},
-        chunk.id AS chunk_id,
-        chunk.sequence,
-        chunk.kind,
-        chunk.mcp_function_name,
-        chunk.mcp_function_output,
-        chunk.mcp_function_reason,
-        chunk.reasoning_delta,
-        chunk.output_delta,
-        chunk.payload,
-        chunk.received_at
+        ${selectColumns}
       FROM ${tableName} run
       JOIN llm_runs llm_run
         ON llm_run.id = run.llm_run_id
       LEFT JOIN llm_model_presets preset
         ON preset.id = llm_run.llm_model_preset_id
-      LEFT JOIN llm_run_chunks chunk
-        ON chunk.llm_run_id = llm_run.id
-       AND (
-         COALESCE(array_length($2::llm_chunk_kind[], 1), 0) = 0
-         OR chunk.kind <> ALL($2::llm_chunk_kind[])
-        )
       WHERE run.simulation_id = $1
         ${additionalWhereSql ? `AND ${additionalWhereSql}` : ""}
-      ORDER BY ${orderBy}, chunk.sequence ASC NULLS LAST
+      ORDER BY ${orderBy}
     `,
-    [simulationId, excludeChunkKinds]
+    [simulationId]
   )
   const runsById = new Map<string, SimulationDebugLlmRun>()
 
@@ -5202,11 +5149,19 @@ async function getSimulationDebugLlmRuns({
         failedAt: row.failed_at?.toISOString() ?? null,
         cancelledAt: row.cancelled_at?.toISOString() ?? null,
         openrouterGenerations: [],
-        chunks: [],
+        mcpFunctionCalls: [],
       }
 
       if (row.turn_number !== null) {
         run.turnNumber = row.turn_number
+      }
+
+      if (row.opening_hand !== null) {
+        run.openingHand = parseStringArray(row.opening_hand)
+      }
+
+      if (row.summary !== null) {
+        run.summary = row.summary
       }
 
       if (row.turn_actions !== null) {
@@ -5231,21 +5186,6 @@ async function getSimulationDebugLlmRuns({
 
       runsById.set(row.llm_run_id, run)
     }
-
-    if (row.chunk_id !== null && row.sequence !== null && row.kind !== null) {
-      run.chunks.push({
-        id: Number(row.chunk_id),
-        sequence: row.sequence,
-        kind: row.kind,
-        mcpFunctionName: row.mcp_function_name,
-        mcpFunctionOutput: row.mcp_function_output,
-        mcpFunctionReason: row.mcp_function_reason,
-        reasoningDelta: row.reasoning_delta,
-        outputDelta: row.output_delta,
-        payload: row.payload,
-        receivedAt: row.received_at?.toISOString() ?? "",
-      })
-    }
   }
 
   const runs = Array.from(runsById.values())
@@ -5261,7 +5201,60 @@ async function getSimulationDebugLlmRuns({
       openRouterGenerationsByRunId.get(run.llmRunId) ?? []
   }
 
+  const mcpFunctionCallsByRunId = await getMcpFunctionCallsByLlmRunIds(
+    runs
+      .filter((run) => isTerminalLlmRunStatus(run.status))
+      .map((run) => run.llmRunId)
+  )
+
+  for (const run of runs) {
+    run.mcpFunctionCalls = mcpFunctionCallsByRunId.get(run.llmRunId) ?? []
+  }
+
   return runs
+}
+
+async function getMcpFunctionCallsByLlmRunIds(llmRunIds: readonly string[]) {
+  const callsByRunId = new Map<string, LlmRunMcpFunctionCall[]>()
+
+  if (llmRunIds.length === 0) {
+    return callsByRunId
+  }
+
+  const result = await queryDatabase<LlmRunMcpFunctionCallRow>(
+    `
+      SELECT
+        id,
+        llm_run_id,
+        mcp_function_name,
+        status,
+        input_payload,
+        output_payload,
+        called_at,
+        completed_at
+      FROM llm_run_mcp_function_calls
+      WHERE llm_run_id = ANY($1::uuid[])
+      ORDER BY llm_run_id ASC, called_at ASC, id ASC
+    `,
+    [llmRunIds]
+  )
+
+  for (const row of result.rows) {
+    const calls = callsByRunId.get(row.llm_run_id) ?? []
+
+    calls.push({
+      id: Number(row.id),
+      mcpFunctionName: row.mcp_function_name,
+      status: row.status,
+      inputPayload: row.input_payload,
+      outputPayload: row.output_payload,
+      calledAt: row.called_at.toISOString(),
+      completedAt: row.completed_at.toISOString(),
+    })
+    callsByRunId.set(row.llm_run_id, calls)
+  }
+
+  return callsByRunId
 }
 
 async function getOpenRouterGenerationsByLlmRunIds(
@@ -6367,19 +6360,6 @@ async function createEnumType(name: string, values: readonly string[]) {
   }
 }
 
-async function ensureLlmRunChunksKindConstraint() {
-  await queryDatabase(`
-    ALTER TABLE llm_run_chunks
-    DROP CONSTRAINT IF EXISTS llm_run_chunks_kind_active_values_check
-  `)
-  await queryDatabase(`
-    ALTER TABLE llm_run_chunks
-    ADD CONSTRAINT llm_run_chunks_kind_active_values_check
-      CHECK (
-        kind IN (${LLM_CHUNK_KINDS.map(quoteSqlLiteral).join(", ")})
-      )
-  `)
-}
 
 function getSafeSqlIdentifier(identifier: string) {
   if (!/^[a-z_][a-z0-9_]*$/u.test(identifier)) {

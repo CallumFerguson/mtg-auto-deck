@@ -1,1995 +1,230 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { getSimulationFinalParsedOutput } from "../src/lib/simulation-final-output.js"
-import {
-  getPresetStartingHandLibraryCardCount,
-  getSimulationRunLibraryCardCount,
-} from "../src/lib/simulation-game-state-library.js"
-import { formatDebugChunkBlocks } from "../src/lib/simulation-debug-chunks.js"
-import { formatSimulationRunTranscriptText } from "../mtg-auto-deck-server/simulation-run-text.js"
-import {
-  getSimulationRunActiveToolCallName,
-  getSimulationResultEntries,
-  getSimulationResultChunks,
-  getSimulationRunThinkingPreview,
-  hasSimulationRunFinalParsedOutputChunk,
-  isSimulationRunLatestChunkOutputDelta,
-} from "../src/lib/simulation-result-chunks.js"
-import {
-  getKnownSimulationResultToolLabel,
-  getKnownSimulationResultToolLabelForChunk,
-  getSimulationResultToolReasonForChunk,
-} from "../src/lib/simulation-result-tool-labels.js"
-import {
-  createSimulationCardLookup,
-  getSimulationResultToolCardNames,
-  resolveSimulationCard,
-} from "../src/lib/simulation-card-resolution.js"
-import { applySimulationResultsStreamEvent } from "../src/lib/simulation-results-stream.js"
-import {
-  buildSimulationResultsTimelineSteps,
-  getFallbackSimulationResultsTimelineStepId,
-  resolveSimulationResultsTimelineSelection,
-} from "../src/lib/simulation-results-timeline.js"
-import { getSimulationRunStartTimeMs } from "../src/lib/simulation-run-timing.js"
+
 import type {
-  DeckCard,
+  Simulation,
   SimulationDebugLlmRun,
-  SimulationDebugLlmRunChunk,
   SimulationResultsInfo,
 } from "../src/lib/deck-types.js"
+import { getSimulationFinalParsedOutput } from "../src/lib/simulation-final-output.js"
+import { applySimulationResultsStreamEvent } from "../src/lib/simulation-results-stream.js"
 
-test("appends streamed chunks without duplicating existing sequences", () => {
-  const results = createResults({
-    openingHandLlmRuns: [
-      createRun({
-        llmRunId: "opening-run",
-        phase: "opening_hand",
-        chunks: [createChunk({ id: 10, sequence: 1, outputDelta: "A" })],
-      }),
-    ],
+test("applies snapshot, run update, simulation update, and done events without chunks", () => {
+  const snapshotResults = createResultsInfo({
+    openingHandLlmRuns: [createRun({ llmRunId: "opening-1" })],
+  })
+  const snapshotSimulation = createSimulation({ status: "running" })
+  const updatedRun = createRun({
+    llmRunId: "opening-1",
+    openingHand: ["Island", "Sol Ring"],
+    status: "completed",
+    summary: "A keepable opener.",
   })
 
-  const updatedResults = applySimulationResultsStreamEvent(results, {
-    type: "chunk",
-    llmRunId: "opening-run",
-    chunk: createChunk({ id: null, sequence: 1, outputDelta: "A" }),
+  let results = applySimulationResultsStreamEvent(null, {
+    type: "snapshot",
+    simulation: snapshotSimulation,
+    results: snapshotResults,
   })
 
-  assert.equal(updatedResults?.openingHandLlmRuns[0].chunks.length, 1)
-  assert.equal(updatedResults?.openingHandLlmRuns[0].chunks[0].id, 10)
-})
+  assert.equal(results?.openingHandLlmRuns[0].status, "streaming")
 
-test("keeps streamed chunks ordered by sequence", () => {
-  const results = createResults({
-    openingHandLlmRuns: [
-      createRun({
-        llmRunId: "opening-run",
-        phase: "opening_hand",
-        chunks: [createChunk({ id: null, sequence: 3, outputDelta: "C" })],
-      }),
-    ],
+  results = applySimulationResultsStreamEvent(results, {
+    type: "simulation_updated",
+    simulation: createSimulation({ status: "completed" }),
   })
 
-  const updatedResults = applySimulationResultsStreamEvent(results, {
-    type: "chunk",
-    llmRunId: "opening-run",
-    chunk: createChunk({ id: null, sequence: 2, outputDelta: "B" }),
-  })
+  assert.equal(results?.openingHandLlmRuns[0].status, "streaming")
 
-  assert.deepEqual(
-    updatedResults?.openingHandLlmRuns[0].chunks.map((chunk) => chunk.sequence),
-    [2, 3]
-  )
-})
-
-test("does not add card mention compatibility payloads to streamed chunks", () => {
-  const results = createResults({
-    openingHandLlmRuns: [
-      createRun({
-        llmRunId: "opening-run",
-        phase: "opening_hand",
-      }),
-    ],
-  })
-
-  const updatedResults = applySimulationResultsStreamEvent(results, {
-    type: "chunk",
-    llmRunId: "opening-run",
-    chunk: createChunk({ id: 20, sequence: 1, outputDelta: "A" }),
-  })
-
-  assert.equal(
-    Object.hasOwn(
-      updatedResults?.openingHandLlmRuns[0].chunks[0] ?? {},
-      "cardMentions"
-    ),
-    false
-  )
-})
-
-test("resolves simulation cards from loaded deck data by normalized name", () => {
-  const solRing = createDeckCard({
-    deckCardId: 1,
-    name: "Sol Ring",
-    scryfallUri: "https://scryfall.com/card/test/1/sol-ring",
-  })
-  const commander = createDeckCard({
-    deckCardId: 2,
-    name: "Aesi, Tyrant of Gyre Strait",
-    scryfallUri: "https://scryfall.com/card/test/2/aesi",
-  })
-  const cardLookup = createSimulationCardLookup({
-    cards: [solRing],
-    commanders: [commander],
-  })
-
-  assert.equal(resolveSimulationCard(cardLookup, " sol ring "), solRing)
-  assert.equal(
-    resolveSimulationCard(cardLookup, "AESI, TYRANT OF GYRE STRAIT"),
-    commander
-  )
-  assert.equal(resolveSimulationCard(cardLookup, "Fake Card"), null)
-})
-
-test("extracts known tool-output card names for client deck lookup", () => {
-  assert.deepEqual(
-    getSimulationResultToolCardNames(
-      createChunk({
-        id: 30,
-        kind: "mcp_call_complete",
-        mcpFunctionName: "draw_card_from_top",
-        mcpFunctionOutput: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              message: "Drew cards.",
-              data: {
-                cards: ["Sol Ring", "Sol Ring", "Fake Card"],
-              },
-            }),
-          },
-        ],
-        sequence: 1,
-      })
-    ),
-    ["Sol Ring", "Sol Ring", "Fake Card"]
-  )
-  assert.deepEqual(
-    getSimulationResultToolCardNames(
-      createChunk({
-        id: 31,
-        kind: "mcp_call_complete",
-        mcpFunctionName: "take_cards_from_library",
-        mcpFunctionOutput: {
-          data: {
-            matches: [
-              {
-                requestedCard: "Sool Ring",
-                foundCard: "Sol Ring",
-              },
-              {
-                requestedCard: "Fake Card",
-                foundCard: null,
-              },
-            ],
-          },
-        },
-        sequence: 2,
-      })
-    ),
-    ["Sol Ring", "Fake Card"]
-  )
-})
-
-test("replaces synthetic chunks when a persisted run update arrives", () => {
-  const results = createResults({
-    turnLlmRuns: [
-      createRun({
-        llmRunId: "turn-run",
-        phase: "turn",
-        turnNumber: 1,
-        chunks: [createChunk({ id: null, sequence: 1, outputDelta: "A" })],
-      }),
-    ],
-  })
-
-  const updatedResults = applySimulationResultsStreamEvent(results, {
+  results = applySimulationResultsStreamEvent(results, {
     type: "llm_run_updated",
-    run: createRun({
-      llmRunId: "turn-run",
-      phase: "turn",
-      status: "completed",
-      turnNumber: 1,
-      chunks: [createChunk({ id: 20, sequence: 1, outputDelta: "A" })],
-    }),
+    run: updatedRun,
   })
 
-  assert.equal(updatedResults?.turnLlmRuns[0].chunks[0].id, 20)
-  assert.equal(updatedResults?.turnLlmRuns[0].status, "completed")
-})
-
-test("keeps library snapshots from persisted run updates", () => {
-  const results = createResults({
-    turnLlmRuns: [
-      createRun({
-        llmRunId: "turn-run",
-        phase: "turn",
-        turnNumber: 1,
-      }),
-    ],
-  })
-
-  const updatedResults = applySimulationResultsStreamEvent(results, {
-    type: "llm_run_updated",
-    run: createRun({
-      llmRunId: "turn-run",
-      phase: "turn",
-      librarySnapshot: ["Forest", "Island"],
-      status: "completed",
-      turnNumber: 1,
-    }),
-  })
-
-  assert.deepEqual(updatedResults?.turnLlmRuns[0].librarySnapshot, [
-    "Forest",
+  assert.equal(results?.openingHandLlmRuns[0].status, "completed")
+  assert.deepEqual(results?.openingHandLlmRuns[0].openingHand, [
     "Island",
+    "Sol Ring",
   ])
+
+  results = applySimulationResultsStreamEvent(results, {
+    type: "done",
+    simulation: createSimulation({ status: "completed" }),
+    results: createResultsInfo({
+      openingHandLlmRuns: [updatedRun],
+    }),
+  })
+
+  assert.equal(results?.openingHandLlmRuns[0].summary, "A keepable opener.")
 })
 
-test("merges OpenRouter generations from persisted run updates", () => {
-  const results = createResults({
+test("merges completed MCP function calls in called_at order", () => {
+  const currentResults = createResultsInfo({
     turnLlmRuns: [
       createRun({
-        llmRunId: "turn-run",
+        llmRunId: "turn-1",
         phase: "turn",
-        provider: "openrouter",
         turnNumber: 1,
-        openrouterGenerations: [
-          {
-            openrouterTurnIndex: 0,
-            generationId: "gen-initial",
-            createdAt: "2026-01-01T00:00:00.000Z",
-          },
+        mcpFunctionCalls: [
+          createMcpFunctionCall({
+            id: 20,
+            calledAt: "2026-01-01T00:00:20.000Z",
+            mcpFunctionName: "draw_card_from_top",
+          }),
         ],
       }),
     ],
   })
 
-  const updatedResults = applySimulationResultsStreamEvent(results, {
+  const updatedResults = applySimulationResultsStreamEvent(currentResults, {
     type: "llm_run_updated",
     run: createRun({
-      llmRunId: "turn-run",
-      phase: "turn",
-      provider: "openrouter",
-      status: "completed",
-      turnNumber: 1,
-      openrouterGenerations: [
-        {
-          openrouterTurnIndex: 1,
-          generationId: "gen-follow-up",
-          createdAt: "2026-01-01T00:01:00.000Z",
-        },
-      ],
-    }),
-  })
-
-  assert.deepEqual(
-    updatedResults?.turnLlmRuns[0].openrouterGenerations.map(
-      (generation) => generation.generationId
-    ),
-    ["gen-initial", "gen-follow-up"]
-  )
-})
-
-test("adds auto-advanced turn runs", () => {
-  const results = createResults()
-
-  const updatedResults = applySimulationResultsStreamEvent(results, {
-    type: "llm_run_started",
-    run: createRun({
-      llmRunId: "turn-run",
+      llmRunId: "turn-1",
       phase: "turn",
       turnNumber: 1,
-    }),
-  })
-
-  assert.equal(updatedResults?.turnLlmRunCount, 1)
-  assert.equal(updatedResults?.turnLlmRuns[0].llmRunId, "turn-run")
-})
-
-test("updates queued pending runs when they start streaming", () => {
-  let results: SimulationResultsInfo | null = createResults()
-
-  results = applySimulationResultsStreamEvent(results, {
-    type: "llm_run_updated",
-    run: createRun({
-      llmRunId: "turn-run",
-      phase: "turn",
-      startedAt: null,
-      status: "pending",
-      turnNumber: 1,
-    }),
-  })
-
-  assert.equal(results?.turnLlmRunCount, 1)
-  assert.equal(results?.turnLlmRuns[0].status, "pending")
-  assert.equal(results?.turnLlmRuns[0].startedAt, null)
-
-  results = applySimulationResultsStreamEvent(results, {
-    type: "llm_run_updated",
-    run: createRun({
-      llmRunId: "turn-run",
-      phase: "turn",
-      startedAt: "2026-01-01T00:00:05.000Z",
-      status: "streaming",
-      turnNumber: 1,
-    }),
-  })
-
-  assert.equal(results?.turnLlmRunCount, 1)
-  assert.equal(results?.turnLlmRuns[0].status, "streaming")
-  assert.equal(results?.turnLlmRuns[0].startedAt, "2026-01-01T00:00:05.000Z")
-})
-
-test("uses started time, not created time, for run elapsed timing", () => {
-  assert.equal(
-    getSimulationRunStartTimeMs(
-      createRun({
-        llmRunId: "pending-run",
-        phase: "turn",
-        createdAt: "2026-01-01T00:00:00.000Z",
-        startedAt: null,
-        status: "pending",
-        turnNumber: 1,
-      })
-    ),
-    null
-  )
-  assert.equal(
-    getSimulationRunStartTimeMs(
-      createRun({
-        llmRunId: "streaming-run",
-        phase: "turn",
-        createdAt: "2026-01-01T00:00:00.000Z",
-        startedAt: "2026-01-01T00:00:05.000Z",
-        status: "streaming",
-        turnNumber: 1,
-      })
-    ),
-    Date.parse("2026-01-01T00:00:05.000Z")
-  )
-})
-
-test("reads opening hand final output from final parsed output chunks", () => {
-  const parsedOutput = getSimulationFinalParsedOutput(
-    createRun({
-      llmRunId: "opening-run",
-      phase: "opening_hand",
-      chunks: [
-        createChunk({
-          id: 1,
-          sequence: 1,
-          kind: "final_parsed_output",
-          payload: {
-            keptHand: ["Forest", "Sol Ring"],
-            summary: "Kept a stable opener.",
-            error: null,
-          },
-        }),
-      ],
-    })
-  )
-
-  assert.deepEqual(parsedOutput, {
-    type: "opening_hand",
-    keptHand: ["Forest", "Sol Ring"],
-    summary: "Kept a stable opener.",
-  })
-})
-
-test("does not parse raw output deltas as final output", () => {
-  const parsedOutput = getSimulationFinalParsedOutput(
-    createRun({
-      llmRunId: "opening-run",
-      phase: "opening_hand",
-      status: "completed",
-      chunks: [
-        createChunk({
-          id: 1,
-          sequence: 1,
-          outputDelta: 'I would "keep this hand.\n',
-        }),
-        createChunk({
-          id: 2,
-          sequence: 2,
-          outputDelta:
-            '{"keptHand":["Forest","Sol Ring"],"summary":"Kept a stable opener."}',
-        }),
-      ],
-    })
-  )
-
-  assert.equal(parsedOutput, null)
-})
-
-test("reads turn final output from final parsed output chunks", () => {
-  const gameState = createTurnGameState()
-  const turnActions = createTurnActions()
-  const parsedOutput = getSimulationFinalParsedOutput(
-    createRun({
-      llmRunId: "turn-run",
-      phase: "turn",
-      turnNumber: 1,
-      chunks: [
-        createChunk({
-          id: 1,
-          sequence: 1,
-          kind: "final_parsed_output",
-          payload: {
-            turnActions,
-            gameState,
-            error: null,
-          },
-        }),
-      ],
-    })
-  )
-
-  assert.deepEqual(parsedOutput, {
-    type: "turn",
-    turnActions,
-    gameState,
-  })
-})
-
-test("ignores turn final output with string game state", () => {
-  const parsedOutput = getSimulationFinalParsedOutput(
-    createRun({
-      llmRunId: "turn-run",
-      phase: "turn",
-      turnNumber: 1,
-      chunks: [
-        createChunk({
-          id: 1,
-          sequence: 1,
-          kind: "final_parsed_output",
-          payload: {
-            turnActions: createTurnActions(),
-            gameState: "Hand: Forest\nBattlefield: Island",
-            error: null,
-          },
-        }),
-      ],
-    })
-  )
-
-  assert.equal(parsedOutput, null)
-})
-
-test("ignores turn final output without turn actions", () => {
-  const parsedOutput = getSimulationFinalParsedOutput(
-    createRun({
-      llmRunId: "turn-run",
-      phase: "turn",
-      turnNumber: 1,
-      chunks: [
-        createChunk({
-          id: 1,
-          sequence: 1,
-          kind: "final_parsed_output",
-          payload: {
-            gameState: createTurnGameState(),
-            error: null,
-          },
-        }),
-      ],
-    })
-  )
-
-  assert.equal(parsedOutput, null)
-})
-
-test("ignores turn final output with invalid turn actions", () => {
-  const parsedOutput = getSimulationFinalParsedOutput(
-    createRun({
-      llmRunId: "turn-run",
-      phase: "turn",
-      turnNumber: 1,
-      chunks: [
-        createChunk({
-          id: 1,
-          sequence: 1,
-          kind: "final_parsed_output",
-          payload: {
-            turnActions: {
-              ...createTurnActions(),
-              precombat_main: [1],
-            },
-            gameState: createTurnGameState(),
-            error: null,
-          },
-        }),
-      ],
-    })
-  )
-
-  assert.equal(parsedOutput, null)
-})
-
-test("ignores final parsed success payloads without explicit error null", () => {
-  const parsedOutput = getSimulationFinalParsedOutput(
-    createRun({
-      llmRunId: "turn-run",
-      phase: "turn",
-      chunks: [
-        createChunk({
-          id: 1,
-          sequence: 1,
-          kind: "final_parsed_output",
-          payload: {
-            turnActions: createTurnActions(),
-            gameState: createTurnGameState(),
-          },
-        }),
-      ],
-    })
-  )
-
-  assert.equal(parsedOutput, null)
-})
-
-test("ignores final parsed payloads with a model error", () => {
-  const parsedOutput = getSimulationFinalParsedOutput(
-    createRun({
-      llmRunId: "opening-run",
-      phase: "opening_hand",
-      chunks: [
-        createChunk({
-          id: 1,
-          sequence: 1,
-          kind: "final_parsed_output",
-          payload: {
-            keptHand: ["Forest", "Sol Ring"],
-            summary: "This should not be used.",
-            error: "Drew opening hand twice.",
-          },
-        }),
-      ],
-    })
-  )
-
-  assert.equal(parsedOutput, null)
-})
-
-test("ignores invalid final parsed output payloads", () => {
-  const parsedOutput = getSimulationFinalParsedOutput(
-    createRun({
-      llmRunId: "opening-run",
-      phase: "opening_hand",
-      chunks: [
-        createChunk({
-          id: null,
-          sequence: 1,
-          kind: "final_parsed_output",
-          payload: {
-            keptHand: ["Forest"],
-          },
-        }),
-      ],
-    })
-  )
-
-  assert.equal(parsedOutput, null)
-})
-
-test("formats transcript text from reasoning output lifecycle and tools", () => {
-  const text = formatSimulationRunTranscriptText(
-    createRun({
-      llmRunId: "opening-run",
-      phase: "opening_hand",
-      chunks: [
-        createChunk({
-          id: 1,
-          kind: "reasoning_start",
-          sequence: 1,
-        }),
-        createChunk({
-          id: 2,
-          kind: "reasoning_delta",
-          reasoningDelta: "Evaluate opener.",
-          sequence: 2,
-        }),
-        createChunk({
-          id: 3,
-          kind: "reasoning_done",
-          sequence: 3,
-        }),
-        createChunk({
-          id: 4,
-          kind: "output_start",
-          sequence: 4,
-        }),
-        createChunk({
-          id: 5,
-          outputDelta: "Keeping.",
-          sequence: 5,
-        }),
-        createChunk({
-          id: 6,
-          kind: "output_done",
-          sequence: 6,
-        }),
-        createChunk({
-          id: 7,
-          kind: "mcp_call_start",
-          mcpFunctionName: "draw_starting_hand",
-          payload: {
-            item: {
-              id: "call_1",
-            },
-          },
-          sequence: 7,
-        }),
-        createChunk({
-          id: 8,
-          kind: "mcp_call_complete",
-          mcpFunctionName: "draw_starting_hand",
-          mcpFunctionOutput: {
-            data: {
-              cards: ["Forest"],
-            },
-          },
-          payload: {
-            item: {
-              id: "call_1",
-            },
-          },
-          sequence: 8,
-        }),
-      ],
-    })
-  )
-
-  assert.equal(
-    text,
-    [
-      "Evaluate opener.",
-      "Keeping.",
-      "[called draw_starting_hand]",
-      `[result of draw_starting_hand]\n${JSON.stringify(
-        {
-          data: {
-            cards: ["Forest"],
-          },
-        },
-        null,
-        2
-      )}`,
-    ].join("\n\n")
-  )
-})
-
-test("prepends full prompt in transcript text without labels", () => {
-  const text = formatSimulationRunTranscriptText(
-    createRun({
-      llmRunId: "opening-run",
-      phase: "opening_hand",
-      chunks: [
-        createChunk({
-          id: 1,
-          outputDelta: "Run text",
-          sequence: 1,
-        }),
-      ],
-    }),
-    { fullPrompt: "Prompt text" }
-  )
-
-  assert.equal(text, "Prompt text\n\nRun text")
-})
-
-test("keeps transcript text chunks in sequence order", () => {
-  const text = formatSimulationRunTranscriptText(
-    createRun({
-      llmRunId: "opening-run",
-      phase: "opening_hand",
-      chunks: [
-        createChunk({
-          id: 2,
-          outputDelta: "second",
-          sequence: 2,
-        }),
-        createChunk({
-          id: 1,
-          outputDelta: "first ",
-          sequence: 1,
-        }),
-      ],
-    })
-  )
-
-  assert.equal(text, "first second")
-})
-
-test("adds tool name for unpaired completed tool transcript text", () => {
-  const text = formatSimulationRunTranscriptText(
-    createRun({
-      llmRunId: "turn-run",
-      phase: "turn",
-      chunks: [
-        createChunk({
-          id: 1,
-          kind: "mcp_call_complete",
+      mcpFunctionCalls: [
+        createMcpFunctionCall({
+          id: 21,
+          calledAt: "2026-01-01T00:00:10.000Z",
           mcpFunctionName: "shuffle_library",
-          mcpFunctionOutput: {
-            ok: true,
-          },
-          sequence: 1,
         }),
       ],
-    })
-  )
-
-  assert.equal(
-    text,
-    [
-      "[called shuffle_library]",
-      `[result of shuffle_library]\n${JSON.stringify({ ok: true }, null, 2)}`,
-    ].join("\n\n")
-  )
-})
-
-test("omits whitespace-only formatted reasoning and output blocks", () => {
-  const blocks = formatDebugChunkBlocks(
-    [
-      createChunk({
-        id: 1,
-        kind: "reasoning_delta",
-        reasoningDelta: " \n\t",
-        sequence: 1,
-      }),
-      createChunk({
-        id: 2,
-        outputDelta: "\n ",
-        sequence: 2,
-      }),
-      createChunk({
-        id: 3,
-        kind: "mcp_call_start",
-        sequence: 3,
-      }),
-      createChunk({
-        id: 4,
-        kind: "reasoning_delta",
-        reasoningDelta: "Keep a two-land hand.",
-        sequence: 4,
-      }),
-    ],
-    { omitWhitespaceOnlyDeltaBlocks: true }
-  )
+    }),
+  })
 
   assert.deepEqual(
-    blocks.map((block) => block.type),
-    ["event", "reasoning"]
-  )
-  assert.equal(
-    blocks[1]?.type === "reasoning" ? blocks[1].text : "",
-    "Keep a two-land hand."
+    updatedResults?.turnLlmRuns[0].mcpFunctionCalls.map(
+      (call) => call.mcpFunctionName
+    ),
+    ["shuffle_library", "draw_card_from_top"]
   )
 })
 
-test("keeps whitespace-only formatted blocks by default for debug views", () => {
-  const blocks = formatDebugChunkBlocks([
-    createChunk({
-      id: 1,
-      kind: "reasoning_delta",
-      reasoningDelta: " \n\t",
-      sequence: 1,
-    }),
-    createChunk({
-      id: 2,
-      outputDelta: "\n ",
-      sequence: 2,
-    }),
-  ])
-
-  assert.deepEqual(
-    blocks.map((block) => block.type),
-    ["reasoning", "output"]
-  )
-})
-
-test("hides completed tool starts across intervening chunks", () => {
-  const resultChunks = getSimulationResultChunks([
-    createChunk({
-      id: 1,
-      kind: "mcp_call_start",
-      mcpFunctionName: "draw_starting_hand",
-      payload: {
-        item: {
-          id: "call_1",
-        },
-      },
-      sequence: 1,
-    }),
-    createChunk({
-      id: 2,
-      kind: "reasoning_delta",
-      reasoningDelta: "Need to inspect the opener.",
-      sequence: 2,
-    }),
-    createChunk({
-      id: 3,
-      outputDelta: "Checking hand.",
-      sequence: 3,
-    }),
-    createChunk({
-      id: 4,
-      kind: "mcp_call_complete",
-      mcpFunctionName: "draw_starting_hand",
-      payload: {
-        item: {
-          id: "call_1",
-        },
-      },
-      sequence: 4,
-    }),
-  ])
-
-  assert.deepEqual(
-    resultChunks.map((chunk) => chunk.sequence),
-    [4]
-  )
-})
-
-test("hides the latest active tool start from result chunks", () => {
-  const resultChunks = getSimulationResultChunks([
-    createChunk({
-      id: 1,
-      kind: "mcp_call_complete",
-      mcpFunctionName: "draw_starting_hand",
-      sequence: 1,
-    }),
-    createChunk({
-      id: 2,
-      kind: "mcp_call_start",
-      mcpFunctionName: "mulligan",
-      sequence: 2,
-    }),
-  ])
-
-  assert.deepEqual(
-    resultChunks.map((chunk) => chunk.sequence),
-    [1]
-  )
-})
-
-test("reads active tool call name from the latest tool start chunk", () => {
-  const activeToolCallName = getSimulationRunActiveToolCallName([
-    createChunk({
-      id: 2,
-      kind: "mcp_call_start",
-      mcpFunctionName: "draw_starting_hand",
-      sequence: 2,
-    }),
-    createChunk({
-      id: 1,
-      kind: "reasoning_delta",
-      reasoningDelta: "Need a hand.",
-      sequence: 1,
-    }),
-  ])
-
-  assert.equal(activeToolCallName, "draw_starting_hand")
-})
-
-test("clears active tool call name once a newer chunk arrives", () => {
-  const activeToolCallName = getSimulationRunActiveToolCallName([
-    createChunk({
-      id: 1,
-      kind: "mcp_call_start",
-      mcpFunctionName: "draw_starting_hand",
-      sequence: 1,
-    }),
-    createChunk({
-      id: 2,
-      kind: "mcp_call_complete",
-      mcpFunctionName: "draw_starting_hand",
-      sequence: 2,
-    }),
-  ])
-
-  assert.equal(activeToolCallName, null)
-})
-
-test("detects when the latest run chunk is an output delta", () => {
-  assert.equal(
-    isSimulationRunLatestChunkOutputDelta([
-      createChunk({
-        id: 2,
-        outputDelta: "final",
-        sequence: 2,
-      }),
-      createChunk({
-        id: 1,
-        kind: "reasoning_delta",
-        reasoningDelta: "thinking",
-        sequence: 1,
-      }),
-    ]),
-    true
-  )
-
-  assert.equal(
-    isSimulationRunLatestChunkOutputDelta([
-      createChunk({
-        id: 1,
-        outputDelta: "final",
-        sequence: 1,
-      }),
-      createChunk({
-        id: 2,
-        kind: "output_done",
-        sequence: 2,
-      }),
-    ]),
-    false
-  )
-})
-
-test("keeps legacy turn action log chunks as regular result chunks", () => {
-  const resultEntries = getSimulationResultEntries([
-    createChunk({
-      id: 1,
-      kind: "mcp_call_start",
-      mcpFunctionName: "log_turn_action",
-      sequence: 1,
-    }),
-    createChunk({
-      id: 2,
-      kind: "mcp_call_complete",
-      mcpFunctionName: "log_turn_action",
-      mcpFunctionOutput: {
-        latestAction: {
-          action: "Tap Command Tower for one mana.",
-          phaseChange: null,
-        },
-        actions: ["Tap Command Tower for one mana."],
-      },
-      sequence: 2,
-    }),
-    createChunk({
-      id: 3,
-      kind: "mcp_call_complete",
-      mcpFunctionName: "draw_card_from_top",
-      sequence: 3,
-    }),
-    createChunk({
-      id: 4,
-      kind: "mcp_call_complete",
-      mcpFunctionName: "log_turn_action",
-      mcpFunctionOutput: {
-        latestAction: {
-          action: "Cast Sol Ring using one mana.",
-          phaseChange: null,
-        },
-        actions: [
-          "Tap Command Tower for one mana.",
-          "Cast Sol Ring using one mana.",
-        ],
-      },
-      sequence: 4,
-    }),
-  ])
-
-  assert.deepEqual(
-    resultEntries.map((entry) => entry.type),
-    ["chunk", "chunk", "chunk"]
-  )
-  assert.deepEqual(
-    resultEntries.map((entry) => entry.chunk.sequence),
-    [2, 3, 4]
-  )
-})
-
-test("omits reasoning and output lifecycle chunks and deltas from result chunks", () => {
-  const resultChunks = getSimulationResultChunks([
-    createChunk({
-      id: 1,
-      kind: "reasoning_start",
-      sequence: 1,
-    }),
-    createChunk({
-      id: 2,
-      kind: "reasoning_delta",
-      reasoningDelta: "Need to inspect the opener.",
-      sequence: 2,
-    }),
-    createChunk({
-      id: 3,
-      kind: "reasoning_done",
-      sequence: 3,
-    }),
-    createChunk({
-      id: 4,
-      kind: "output_start",
-      sequence: 4,
-    }),
-    createChunk({
-      id: 5,
-      outputDelta: "Checking hand.",
-      sequence: 5,
-    }),
-    createChunk({
-      id: 6,
-      kind: "output_done",
-      sequence: 6,
-    }),
-    createChunk({
-      id: 7,
-      kind: "final_parsed_output",
-      payload: {
-        keptHand: ["Sol Ring", "Forest"],
-        summary: "Kept a stable opener.",
-        error: null,
-      },
-      sequence: 7,
-    }),
-  ])
-
-  assert.deepEqual(
-    resultChunks.map((chunk) => chunk.sequence),
-    [7]
-  )
-})
-
-test("builds a one-line thinking preview from reasoning and output deltas", () => {
-  const preview = getSimulationRunThinkingPreview([
-    createChunk({
-      id: 1,
-      kind: "reasoning_start",
-      sequence: 1,
-    }),
-    createChunk({
-      id: 2,
-      kind: "reasoning_delta",
-      reasoningDelta: "Evaluating\nmana",
-      sequence: 2,
-    }),
-    createChunk({
-      id: 3,
-      kind: "reasoning_done",
-      sequence: 3,
-    }),
-    createChunk({
-      id: 4,
-      kind: "output_start",
-      sequence: 4,
-    }),
-    createChunk({
-      id: 5,
-      outputDelta: " and\r\nkeeping.",
-      sequence: 5,
-    }),
-    createChunk({
-      id: 6,
-      kind: "output_done",
-      sequence: 6,
-    }),
-    createChunk({
-      id: 7,
-      kind: "mcp_call_complete",
-      mcpFunctionName: "draw_starting_hand",
-      sequence: 7,
-    }),
-  ])
-
-  assert.equal(preview, "Evaluating mana and keeping.")
-})
-
-test("keeps thinking preview deltas in sequence order", () => {
-  const preview = getSimulationRunThinkingPreview([
-    createChunk({
-      id: 2,
-      outputDelta: "second",
-      sequence: 2,
-    }),
-    createChunk({
-      id: 1,
-      kind: "reasoning_delta",
-      reasoningDelta: "first ",
-      sequence: 1,
-    }),
-  ])
-
-  assert.equal(preview, "first second")
-})
-
-test("limits thinking preview to the latest 100 delta chunks", () => {
-  const chunks = Array.from({ length: 101 }, (_, index) =>
-    createChunk({
-      id: index + 1,
-      outputDelta: `${index + 1},`,
-      sequence: index + 1,
-    })
-  )
-
-  const preview = getSimulationRunThinkingPreview(chunks)
-
-  assert.ok(preview?.startsWith("2,"))
-  assert.ok(preview?.endsWith("101,"))
-})
-
-test("returns null for empty thinking previews", () => {
-  assert.equal(
-    getSimulationRunThinkingPreview([
-      createChunk({
-        id: 1,
-        kind: "reasoning_delta",
-        reasoningDelta: " \n\t",
-        sequence: 1,
-      }),
-      createChunk({
-        id: 2,
-        kind: "mcp_call_complete",
-        mcpFunctionName: "draw_starting_hand",
-        sequence: 2,
-      }),
-    ]),
-    null
-  )
-})
-
-test("separates transcript reasoning blocks by summary part index", () => {
-  const text = formatSimulationRunTranscriptText(
+test("reads opening-hand final output from run columns", () => {
+  const finalOutput = getSimulationFinalParsedOutput(
     createRun({
-      llmRunId: "turn-run",
-      phase: "turn",
-      chunks: [
-        createChunk({
-          id: 1,
-          kind: "reasoning_delta",
-          reasoningDelta: "I am checking mana for the signet.",
-          payload: createReasoningSummaryDeltaPayload(0),
-          sequence: 1,
-        }),
-        createChunk({
-          id: 2,
-          kind: "reasoning_delta",
-          reasoningDelta: "Calculating available mana",
-          payload: createReasoningSummaryDeltaPayload(1),
-          sequence: 2,
-        }),
-        createChunk({
-          id: 3,
-          kind: "reasoning_delta",
-          reasoningDelta: " after Sol Ring.",
-          payload: createReasoningSummaryDeltaPayload(1),
-          sequence: 3,
-        }),
-      ],
+      openingHand: ["Forest", "Llanowar Elves"],
+      status: "completed",
+      summary: "Fast mana and land make this a keep.",
     })
   )
 
-  assert.equal(
-    text,
-    [
-      "I am checking mana for the signet.",
-      "Calculating available mana after Sol Ring.",
-    ].join("\n\n")
-  )
-})
-
-test("detects final parsed output chunks for active-run thinking visibility", () => {
-  assert.equal(
-    hasSimulationRunFinalParsedOutputChunk([
-      createChunk({
-        id: 1,
-        kind: "reasoning_delta",
-        reasoningDelta: "Evaluating hand.",
-        sequence: 1,
-      }),
-      createChunk({
-        id: 2,
-        kind: "final_parsed_output",
-        payload: {
-          keptHand: ["Sol Ring", "Forest"],
-          summary: "Kept a stable opener.",
-          error: null,
-        },
-        sequence: 2,
-      }),
-    ]),
-    true
-  )
-
-  assert.equal(
-    hasSimulationRunFinalParsedOutputChunk([
-      createChunk({
-        id: 1,
-        kind: "reasoning_delta",
-        reasoningDelta: "Evaluating hand.",
-        sequence: 1,
-      }),
-    ]),
-    false
-  )
-})
-
-test("formats known active and started tool events as deck actions", () => {
-  assert.equal(
-    getKnownSimulationResultToolLabel({
-      mcpFunctionName: "draw_card_from_top",
-      state: "active",
-    }),
-    "Drawing card from top of deck"
-  )
-  assert.equal(
-    getKnownSimulationResultToolLabelForChunk({
-      chunk: createChunk({
-        id: 1,
-        kind: "mcp_call_start",
-        mcpFunctionName: "shuffle_library",
-        sequence: 1,
-      }),
-      state: "started",
-    }),
-    "Shuffling deck"
-  )
-  assert.equal(
-    getKnownSimulationResultToolLabel({
-      mcpFunctionName: "flip_coin",
-      state: "active",
-    }),
-    "Flipping coin"
-  )
-  assert.equal(
-    getKnownSimulationResultToolLabel({
-      mcpFunctionName: "roll_dice",
-      state: "active",
-    }),
-    "Rolling dice"
-  )
-})
-
-test("formats known completed draw and return events with result details", () => {
-  assert.equal(
-    getKnownSimulationResultToolLabelForChunk({
-      chunk: createChunk({
-        id: 1,
-        kind: "mcp_call_complete",
-        mcpFunctionName: "draw_card_from_bottom",
-        mcpFunctionOutput: {
-          data: {
-            cards: ["Forest", "Island"],
-          },
-        },
-        sequence: 1,
-      }),
-      state: "completed",
-    }),
-    "Drew 2 cards from bottom of deck"
-  )
-  assert.equal(
-    getKnownSimulationResultToolLabelForChunk({
-      chunk: createChunk({
-        id: 2,
-        kind: "mcp_call_complete",
-        mcpFunctionName: "return_cards_to_library",
-        mcpFunctionOutput: {
-          data: {
-            cards: ["Forest", "Island"],
-            randomizeOrder: false,
-            side: "bottom",
-          },
-        },
-        sequence: 2,
-      }),
-      state: "completed",
-    }),
-    "Returned 2 cards to bottom of deck"
-  )
-})
-
-test("formats known completed single return, search, mulligan, and shuffle events", () => {
-  assert.equal(
-    getKnownSimulationResultToolLabelForChunk({
-      chunk: createChunk({
-        id: 1,
-        kind: "mcp_call_complete",
-        mcpFunctionName: "return_card_to_library",
-        mcpFunctionOutput: {
-          data: {
-            card: "Sol Ring",
-            position: 2,
-            side: "top",
-          },
-        },
-        sequence: 1,
-      }),
-      state: "completed",
-    }),
-    "Returned Sol Ring to deck with 2 cards above it"
-  )
-  assert.equal(
-    getKnownSimulationResultToolLabelForChunk({
-      chunk: createChunk({
-        id: 2,
-        kind: "mcp_call_complete",
-        mcpFunctionName: "take_cards_from_library",
-        mcpFunctionOutput: {
-          data: {
-            foundCards: ["Sol Ring"],
-            requestedCards: ["Sol Ring", "Mana Crypt"],
-          },
-        },
-        sequence: 2,
-      }),
-      state: "completed",
-    }),
-    "Found 1 of 2 requested cards in deck"
-  )
-  assert.equal(
-    getKnownSimulationResultToolLabelForChunk({
-      chunk: createChunk({
-        id: 3,
-        kind: "mcp_call_complete",
-        mcpFunctionName: "mulligan",
-        mcpFunctionOutput: {
-          data: {
-            mulliganCount: 2,
-          },
-        },
-        sequence: 3,
-      }),
-      state: "completed",
-    }),
-    "Took mulligan 2 and drew a replacement hand"
-  )
-  assert.equal(
-    getKnownSimulationResultToolLabelForChunk({
-      chunk: createChunk({
-        id: 4,
-        kind: "mcp_call_complete",
-        mcpFunctionName: "shuffle_library",
-        sequence: 4,
-      }),
-      state: "completed",
-    }),
-    "Shuffled deck"
-  )
-})
-
-test("formats known completed randomizer events with result details", () => {
-  assert.equal(
-    getKnownSimulationResultToolLabelForChunk({
-      chunk: createChunk({
-        id: 1,
-        kind: "mcp_call_complete",
-        mcpFunctionName: "flip_coin",
-        mcpFunctionOutput: {
-          data: {
-            results: ["win", "lose", "win"],
-            wins: 2,
-            losses: 1,
-          },
-        },
-        sequence: 1,
-      }),
-      state: "completed",
-    }),
-    "Flipped 3 coins: 2 wins, 1 loss"
-  )
-  assert.equal(
-    getKnownSimulationResultToolLabelForChunk({
-      chunk: createChunk({
-        id: 2,
-        kind: "mcp_call_complete",
-        mcpFunctionName: "flip_coin",
-        mcpFunctionOutput: {
-          data: {
-            results: ["lose"],
-            wins: 0,
-            losses: 1,
-          },
-        },
-        sequence: 2,
-      }),
-      state: "completed",
-    }),
-    "Flipped coin: lose"
-  )
-  assert.equal(
-    getKnownSimulationResultToolLabelForChunk({
-      chunk: createChunk({
-        id: 3,
-        kind: "mcp_call_complete",
-        mcpFunctionName: "roll_dice",
-        mcpFunctionOutput: {
-          data: {
-            rolls: [8, 9],
-            total: 17,
-            sides: 20,
-          },
-        },
-        sequence: 3,
-      }),
-      state: "completed",
-    }),
-    "Rolled 2 d20: total 17"
-  )
-})
-
-test("treats legacy turn action logging as an unknown diagnostic tool", () => {
-  assert.equal(
-    getKnownSimulationResultToolLabelForChunk({
-      chunk: createChunk({
-        id: 1,
-        kind: "mcp_call_complete",
-        mcpFunctionName: "log_turn_action",
-        mcpFunctionOutput: {
-          loggedActions: [
-            {
-              action: "Draw a card.",
-              phaseChange: null,
-            },
-          ],
-          actions: ["Draw a card."],
-        },
-        sequence: 1,
-      }),
-      state: "completed",
-    }),
-    null
-  )
-})
-
-test("formats known failed tool events without raw tool names", () => {
-  assert.equal(
-    getKnownSimulationResultToolLabelForChunk({
-      chunk: createChunk({
-        id: 1,
-        kind: "mcp_call_complete",
-        mcpFunctionName: "draw_card_from_top",
-        sequence: 1,
-      }),
-      state: "failed",
-    }),
-    "Could not draw card from top of deck"
-  )
-  assert.equal(
-    getKnownSimulationResultToolLabelForChunk({
-      chunk: createChunk({
-        id: 2,
-        kind: "mcp_call_complete",
-        mcpFunctionName: "flip_coin",
-        sequence: 2,
-      }),
-      state: "failed",
-    }),
-    "Could not flip coin"
-  )
-  assert.equal(
-    getKnownSimulationResultToolLabelForChunk({
-      chunk: createChunk({
-        id: 3,
-        kind: "mcp_call_complete",
-        mcpFunctionName: "roll_dice",
-        sequence: 3,
-      }),
-      state: "failed",
-    }),
-    "Could not roll dice"
-  )
-})
-
-test("extracts MCP function reasons for simulation result tool events", () => {
-  assert.equal(
-    getSimulationResultToolReasonForChunk({
-      chunk: createChunk({
-        id: 1,
-        kind: "mcp_call_complete",
-        mcpFunctionName: "draw_card_from_top",
-        mcpFunctionReason: " Drawing for turn ",
-        sequence: 1,
-      }),
-    }),
-    "Drawing for turn"
-  )
-  assert.equal(
-    getSimulationResultToolReasonForChunk({
-      chunk: createChunk({
-        id: 2,
-        kind: "mcp_call_complete",
-        mcpFunctionName: "return_cards_to_library",
-        mcpFunctionOutput: {
-          data: {
-            reason: "Bottoming after a mulligan",
-          },
-        },
-        sequence: 2,
-      }),
-    }),
-    "Bottoming after a mulligan"
-  )
-  assert.equal(
-    getSimulationResultToolReasonForChunk({
-      chunk: createChunk({
-        id: 3,
-        kind: "mcp_call_complete",
-        mcpFunctionName: "log_turn_action",
-        mcpFunctionReason: "Legacy reason.",
-        sequence: 3,
-      }),
-    }),
-    "Legacy reason."
-  )
-})
-
-test("keeps unknown tool events available for diagnostic fallback", () => {
-  assert.equal(
-    getKnownSimulationResultToolLabel({
-      mcpFunctionName: "unknown_tool",
-      state: "completed",
-    }),
-    null
-  )
-})
-
-test("builds no timeline steps when a simulation has no preset or runs", () => {
-  const steps = buildSimulationResultsTimelineSteps({
-    hasPresetStartingHand: false,
-    resultsInfo: createResults(),
+  assert.deepEqual(finalOutput, {
+    type: "opening_hand",
+    keptHand: ["Forest", "Llanowar Elves"],
+    summary: "Fast mana and land make this a keep.",
   })
-
-  assert.deepEqual(steps, [])
-  assert.equal(getFallbackSimulationResultsTimelineStepId(steps), null)
 })
 
-test("builds a preset opening hand timeline step", () => {
-  const steps = buildSimulationResultsTimelineSteps({
-    hasPresetStartingHand: true,
-    resultsInfo: createResults(),
-  })
-
-  assert.deepEqual(
-    steps.map((step) => [step.id, step.kind, step.status]),
-    [["preset-opening-hand", "preset_opening_hand", "preset"]]
-  )
-  assert.equal(
-    getFallbackSimulationResultsTimelineStepId(steps),
-    "preset-opening-hand"
-  )
-})
-
-test("counts simulated run libraries from snapshots only", () => {
-  assert.equal(
-    getSimulationRunLibraryCardCount({
-      librarySnapshot: ["Forest", "Island", "Sol Ring"],
-    }),
-    3
-  )
-  assert.equal(getSimulationRunLibraryCardCount({ librarySnapshot: [] }), 0)
-  assert.equal(
-    getSimulationRunLibraryCardCount({ librarySnapshot: null }),
-    null
-  )
-  assert.equal(getSimulationRunLibraryCardCount({}), null)
-})
-
-test("counts preset opening hand libraries from deck library cards", () => {
-  assert.equal(
-    getPresetStartingHandLibraryCardCount({
-      deckCards: [{ quantity: 97 }, { quantity: 1 }],
-      startingHand: {
-        cards: [{ quantity: 2 }, { quantity: 5 }],
-      },
-    }),
-    91
-  )
-})
-
-test("does not infer preset library counts without a starting hand", () => {
-  assert.equal(
-    getPresetStartingHandLibraryCardCount({
-      deckCards: [{ quantity: 99 }],
-      startingHand: null,
-    }),
-    null
-  )
-})
-
-test("builds timeline steps in opening hand and turn order", () => {
-  const steps = buildSimulationResultsTimelineSteps({
-    hasPresetStartingHand: false,
-    resultsInfo: createResults({
-      openingHandLlmRuns: [
-        createRun({
-          llmRunId: "opening-run",
-          phase: "opening_hand",
-          status: "completed",
-        }),
-      ],
-      turnLlmRuns: [
-        createRun({
-          llmRunId: "turn-2",
-          phase: "turn",
-          status: "completed",
-          turnNumber: 2,
-        }),
-        createRun({
-          llmRunId: "turn-1",
-          phase: "turn",
-          status: "completed",
-          turnNumber: 1,
-        }),
-      ],
-    }),
-  })
-
-  assert.deepEqual(
-    steps.map((step) => step.id),
-    ["run:opening-run", "run:turn-1", "run:turn-2"]
-  )
-})
-
-test("prefers active timeline runs for fallback selection", () => {
-  const steps = buildSimulationResultsTimelineSteps({
-    hasPresetStartingHand: false,
-    resultsInfo: createResults({
-      openingHandLlmRuns: [
-        createRun({
-          llmRunId: "opening-run",
-          phase: "opening_hand",
-          status: "completed",
-        }),
-      ],
-      turnLlmRuns: [
-        createRun({
-          llmRunId: "turn-run",
-          phase: "turn",
-          status: "streaming",
-          turnNumber: 1,
-        }),
-      ],
-    }),
-  })
-
-  assert.equal(
-    getFallbackSimulationResultsTimelineStepId(steps),
-    "run:turn-run"
-  )
-})
-
-test("preserves the current opening hand selection when auto-advance starts a turn", () => {
-  const steps = buildSimulationResultsTimelineSteps({
-    hasPresetStartingHand: false,
-    resultsInfo: createResults({
-      openingHandLlmRuns: [
-        createRun({
-          llmRunId: "opening-run",
-          phase: "opening_hand",
-          status: "completed",
-        }),
-      ],
-      turnLlmRuns: [
-        createRun({
-          llmRunId: "turn-run",
-          phase: "turn",
-          status: "streaming",
-          turnNumber: 1,
-        }),
-      ],
-    }),
-  })
-
-  assert.equal(
-    resolveSimulationResultsTimelineSelection(steps, null, {
-      id: "run:opening-run",
-      kind: "opening_hand",
-      status: "streaming",
-    }),
-    "run:opening-run"
-  )
-})
-
-test("preserves the current turn selection when auto-advance starts the next turn", () => {
-  const steps = buildSimulationResultsTimelineSteps({
-    hasPresetStartingHand: false,
-    resultsInfo: createResults({
-      turnLlmRuns: [
-        createRun({
-          llmRunId: "turn-1",
-          phase: "turn",
-          status: "completed",
-          turnNumber: 1,
-        }),
-        createRun({
-          llmRunId: "turn-2",
-          phase: "turn",
-          status: "streaming",
-          turnNumber: 2,
-        }),
-      ],
-    }),
-  })
-
-  assert.equal(
-    resolveSimulationResultsTimelineSelection(steps, null, {
-      id: "run:turn-1",
-      kind: "turn",
-      status: "streaming",
-    }),
-    "run:turn-1"
-  )
-})
-
-test("prefers an active timeline run when the previous selection was already finished", () => {
-  const steps = buildSimulationResultsTimelineSteps({
-    hasPresetStartingHand: false,
-    resultsInfo: createResults({
-      openingHandLlmRuns: [
-        createRun({
-          llmRunId: "opening-run",
-          phase: "opening_hand",
-          status: "completed",
-        }),
-      ],
-      turnLlmRuns: [
-        createRun({
-          llmRunId: "turn-run",
-          phase: "turn",
-          status: "streaming",
-          turnNumber: 1,
-        }),
-      ],
-    }),
-  })
-
-  assert.equal(
-    resolveSimulationResultsTimelineSelection(steps, null, {
-      id: "run:opening-run",
-      kind: "opening_hand",
+test("reads turn final output from run columns", () => {
+  const turnActions = {
+    untap: [],
+    upkeep: [],
+    draw: ["Draw a card."],
+    precombat_main: ["Play a Forest."],
+    combat: [],
+    postcombat_main: [],
+    end_step_cleanup: [],
+  }
+  const gameState = {
+    battlefield: [{ name: "Forest" }],
+    hand: [],
+  }
+  const finalOutput = getSimulationFinalParsedOutput(
+    createRun({
+      phase: "turn",
+      turnNumber: 1,
       status: "completed",
-    }),
-    "run:turn-run"
+      gameState,
+      turnActions,
+    })
   )
-})
 
-test("falls back to the latest visible timeline stage", () => {
-  const steps = buildSimulationResultsTimelineSteps({
-    hasPresetStartingHand: false,
-    resultsInfo: createResults({
-      openingHandLlmRuns: [
-        createRun({
-          llmRunId: "opening-run",
-          phase: "opening_hand",
-          status: "completed",
-        }),
-      ],
-      turnLlmRuns: [
-        createRun({
-          llmRunId: "turn-run",
-          phase: "turn",
-          status: "completed",
-          turnNumber: 1,
-        }),
-      ],
-    }),
+  assert.deepEqual(finalOutput, {
+    type: "turn",
+    gameState,
+    turnActions,
   })
-
-  assert.equal(
-    getFallbackSimulationResultsTimelineStepId(steps),
-    "run:turn-run"
-  )
 })
 
-test("preserves a valid timeline selection across dynamic growth", () => {
-  const steps = buildSimulationResultsTimelineSteps({
-    hasPresetStartingHand: false,
-    resultsInfo: createResults({
-      openingHandLlmRuns: [
-        createRun({
-          llmRunId: "opening-run",
-          phase: "opening_hand",
-          status: "completed",
-        }),
-      ],
-      turnLlmRuns: [
-        createRun({
-          llmRunId: "turn-run",
-          phase: "turn",
-          status: "completed",
-          turnNumber: 1,
-        }),
-      ],
-    }),
-  })
+function createResultsInfo(
+  overrides: Partial<SimulationResultsInfo> = {}
+): SimulationResultsInfo {
+  const openingHandLlmRuns = overrides.openingHandLlmRuns ?? []
+  const turnLlmRuns = overrides.turnLlmRuns ?? []
 
-  assert.equal(
-    resolveSimulationResultsTimelineSelection(steps, "run:opening-run"),
-    "run:opening-run"
-  )
-})
-
-test("falls back when a selected timeline step is removed", () => {
-  const steps = buildSimulationResultsTimelineSteps({
-    hasPresetStartingHand: false,
-    resultsInfo: createResults({
-      openingHandLlmRuns: [
-        createRun({
-          llmRunId: "opening-run",
-          phase: "opening_hand",
-          status: "completed",
-        }),
-      ],
-      turnLlmRuns: [
-        createRun({
-          llmRunId: "turn-1",
-          phase: "turn",
-          status: "completed",
-          turnNumber: 1,
-        }),
-      ],
-    }),
-  })
-
-  assert.equal(
-    resolveSimulationResultsTimelineSelection(steps, "run:removed-turn"),
-    "run:turn-1"
-  )
-})
-
-function createResults({
-  openingHandLlmRuns = [],
-  turnLlmRuns = [],
-}: {
-  openingHandLlmRuns?: SimulationDebugLlmRun[]
-  turnLlmRuns?: SimulationDebugLlmRun[]
-} = {}): SimulationResultsInfo {
   return {
     simulationId: "simulation-id",
     openingHandLlmRunCount: openingHandLlmRuns.length,
     turnLlmRunCount: turnLlmRuns.length,
     openingHandLlmRuns,
     turnLlmRuns,
-  }
-}
-
-function createRun(overrides: {
-  llmRunId: string
-  phase: string
-  attemptNumber?: number
-  cancelledAt?: string | null
-  chunks?: ReturnType<typeof createChunk>[]
-  completedAt?: string | null
-  createdAt?: string
-  failedAt?: string | null
-  failureMessage?: string | null
-  librarySnapshot?: string[] | null
-  openrouterGenerations?: SimulationDebugLlmRun["openrouterGenerations"]
-  provider?: string
-  startedAt?: string | null
-  status?: string
-  turnNumber?: number
-}): SimulationDebugLlmRun {
-  return {
-    llmRunId: overrides.llmRunId,
-    llmModelPresetId: "preset-test",
-    phase: overrides.phase,
-    provider: overrides.provider ?? "openai",
-    model: "gpt-test",
-    estimatedPriceCents: null,
-    reasoningEffort: "low",
-    serviceTier: "priority",
-    status: overrides.status ?? "streaming",
-    runtimeStreamKey: null,
-    attemptNumber: overrides.attemptNumber ?? 1,
-    failureMessage: overrides.failureMessage ?? null,
-    createdAt: overrides.createdAt ?? "2026-01-01T00:00:00.000Z",
-    startedAt:
-      "startedAt" in overrides
-        ? (overrides.startedAt ?? null)
-        : "2026-01-01T00:00:01.000Z",
-    completedAt: overrides.completedAt ?? null,
-    failedAt: overrides.failedAt ?? null,
-    cancelledAt: overrides.cancelledAt ?? null,
-    librarySnapshot: overrides.librarySnapshot,
-    turnNumber: overrides.turnNumber,
-    openrouterGenerations: overrides.openrouterGenerations ?? [],
-    chunks: overrides.chunks ?? [],
-  }
-}
-
-function createChunk(overrides: {
-  id: number | null
-  kind?: string
-  mcpFunctionName?: string | null
-  mcpFunctionOutput?: unknown | null
-  mcpFunctionReason?: string | null
-  outputDelta?: string
-  payload?: unknown
-  reasoningDelta?: string
-  sequence: number
-}): SimulationDebugLlmRunChunk {
-  return {
-    id: overrides.id,
-    sequence: overrides.sequence,
-    kind: overrides.kind ?? "message_delta",
-    mcpFunctionName: overrides.mcpFunctionName ?? null,
-    mcpFunctionOutput: overrides.mcpFunctionOutput ?? null,
-    mcpFunctionReason: overrides.mcpFunctionReason ?? null,
-    reasoningDelta: overrides.reasoningDelta ?? null,
-    outputDelta: overrides.outputDelta ?? null,
-    payload: overrides.payload ?? {},
-    receivedAt: "2026-01-01T00:00:00.000Z",
-  }
-}
-
-function createDeckCard(overrides: {
-  deckCardId: number
-  defaultImageUrl?: string | null
-  name: string
-  quantity?: number
-  scryfallUri: string
-  typeLine?: string | null
-}): DeckCard {
-  return {
-    deckCardId: overrides.deckCardId,
-    oracleId: `oracle-${overrides.deckCardId}`,
-    name: overrides.name,
-    quantity: overrides.quantity ?? 1,
-    scryfallUri: overrides.scryfallUri,
-    defaultImageUrl: overrides.defaultImageUrl ?? null,
-    typeLine: overrides.typeLine ?? null,
-  }
-}
-
-function createTurnGameState() {
-  return {
-    zones: {
-      hand: [{ name: "Forest", tapped: null, notes: null }],
-      command: [],
-      battlefield: [{ name: "Island", tapped: false, notes: null }],
-      graveyard: [],
-      exile: [],
-    },
-    yourLife: 40,
-    opponentA: {
-      life: 40,
-      commanderDamage: {},
-    },
-    opponentB: {
-      life: 40,
-      commanderDamage: {},
-    },
-    opponentC: {
-      life: 40,
-      commanderDamage: {},
-    },
-    other: "",
-  }
-}
-
-function createTurnActions(overrides: Partial<Record<string, string[]>> = {}) {
-  return {
-    untap: [],
-    upkeep: [],
-    draw: ["Draw *Forest*."],
-    precombat_main: ["Play *Island*."],
-    combat: [],
-    postcombat_main: [],
-    end_step_cleanup: [],
     ...overrides,
   }
 }
 
-function createReasoningSummaryDeltaPayload(summaryIndex: number) {
+function createSimulation(overrides: Partial<Simulation> = {}): Simulation {
   return {
-    type: "response.reasoning_summary_text.delta",
-    item_id: "rs_1",
-    output_index: 0,
-    summary_index: summaryIndex,
+    id: "simulation-id",
+    deckId: "deck-id",
+    createdVia: "app",
+    llmModelPresetId: "preset-id",
+    startingHandId: null,
+    seed: "seed",
+    library: [],
+    turnsToSimulate: 1,
+    reasoningSummariesEnabled: false,
+    useFlexServiceTier: false,
+    isPublic: false,
+    simulatedTurnCount: 0,
+    completedLlmRunCount: 0,
+    activeLlmRunCount: 1,
+    status: "running",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  }
+}
+
+function createRun(
+  overrides: Partial<SimulationDebugLlmRun> = {}
+): SimulationDebugLlmRun {
+  return {
+    llmRunId: "run-id",
+    llmModelPresetId: "preset-id",
+    phase: "opening_hand",
+    provider: "openai",
+    model: "gpt-test",
+    estimatedPriceCents: null,
+    reasoningEffort: "low",
+    serviceTier: null,
+    status: "streaming",
+    runtimeStreamKey: "runtime-key",
+    attemptNumber: 1,
+    failureMessage: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    startedAt: "2026-01-01T00:00:01.000Z",
+    completedAt: null,
+    failedAt: null,
+    cancelledAt: null,
+    librarySnapshot: null,
+    mcpFunctionCalls: [],
+    openrouterGenerations: [],
+    ...overrides,
+  }
+}
+
+function createMcpFunctionCall(
+  overrides: Partial<SimulationDebugLlmRun["mcpFunctionCalls"][number]> = {}
+): SimulationDebugLlmRun["mcpFunctionCalls"][number] {
+  return {
+    id: 1,
+    mcpFunctionName: "draw_card_from_top",
+    status: "completed",
+    inputPayload: { reason: "Test call" },
+    outputPayload: { cards: ["Island"] },
+    calledAt: "2026-01-01T00:00:00.000Z",
+    completedAt: "2026-01-01T00:00:01.000Z",
+    ...overrides,
   }
 }

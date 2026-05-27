@@ -99,6 +99,7 @@ type FakeLlmRun = {
   queued_at: Date | null
   full_prompt: string
   request_payload: unknown
+  raw_response: unknown
   response_metadata: unknown
   usage: unknown
   estimated_cost_usd: number | null
@@ -118,6 +119,7 @@ type FakeOpeningHandRun = {
   llm_run_id: string
   attempt_number: number
   opening_hand: string[]
+  summary: string | null
   library_snapshot: string[] | null
   opening_hand_is_valid: boolean
   random_state_snapshot: number | null
@@ -137,18 +139,15 @@ type FakeTurnRun = {
   created_at: Date
 }
 
-type FakeChunk = {
+type FakeMcpFunctionCall = {
   id: number
   llm_run_id: string
-  sequence: number
-  kind: string
-  mcp_function_name: string | null
-  mcp_function_output: unknown | null
-  mcp_function_reason: string | null
-  reasoning_delta: string | null
-  output_delta: string | null
-  payload: unknown
-  received_at: Date
+  mcp_function_name: string
+  status: "completed" | "failed"
+  input_payload: unknown
+  output_payload: unknown
+  called_at: Date
+  completed_at: Date
 }
 
 class FakeStarterDeckCopyClient {
@@ -158,7 +157,7 @@ class FakeStarterDeckCopyClient {
   startingHandIdSequence = 1
   simulationIdSequence = 1
   llmRunIdSequence = 1
-  chunkIdSequence = 1000
+  mcpFunctionCallIdSequence = 1000
   starterDeckCopyIdSequence = 1
 
   decks: FakeDeck[] = []
@@ -170,7 +169,7 @@ class FakeStarterDeckCopyClient {
   llmRuns: FakeLlmRun[] = []
   openingHandRuns: FakeOpeningHandRun[] = []
   turnRuns: FakeTurnRun[] = []
-  chunks: FakeChunk[] = []
+  mcpFunctionCalls: FakeMcpFunctionCall[] = []
   starterDeckCopies: {
     copied_deck_id: string | null
     id: number
@@ -254,8 +253,8 @@ class FakeStarterDeckCopyClient {
       case "copy-turn-llm-run":
         return this.copyTurnRun<T>(values)
 
-      case "copy-llm-run-chunks":
-        return this.copyLlmRunChunks<T>(values) as QueryResult<T>
+      case "copy-llm-run-mcp-function-calls":
+        return this.copyLlmRunMcpFunctionCalls<T>(values) as QueryResult<T>
 
       default:
         throw new Error(`Unhandled fake query operation: ${operation}`)
@@ -465,13 +464,13 @@ class FakeStarterDeckCopyClient {
 
   copyLlmRun<T>(values: unknown[]) {
     const copiedRun: FakeLlmRun = {
-      cancel_requested_at: getDateOrNull(values[16]),
-      cancelled_at: getDateOrNull(values[17]),
-      completed_at: getDateOrNull(values[14]),
-      created_at: getDate(values[19]),
+      cancel_requested_at: getDateOrNull(values[17]),
+      cancelled_at: getDateOrNull(values[18]),
+      completed_at: getDateOrNull(values[15]),
+      created_at: getDate(values[20]),
       estimated_cost_usd: null,
-      failed_at: getDateOrNull(values[15]),
-      failure_message: getStringOrNull(values[18]),
+      failed_at: getDateOrNull(values[16]),
+      failure_message: getStringOrNull(values[19]),
       full_prompt: getString(values[9]),
       id: `copied-run-${this.llmRunIdSequence}`,
       llm_model_preset_id: getStringOrNull(values[6]),
@@ -484,13 +483,14 @@ class FakeStarterDeckCopyClient {
       queued_at: null,
       reasoning_effort: getStringOrNull(values[5]),
       request_payload: getJsonObject(values[10]),
-      response_metadata: getJsonObject(values[11]),
+      raw_response: getJsonObject(values[11]),
+      response_metadata: getJsonObject(values[12]),
       runtime_stream_key: null,
       service_tier: getStringOrNull(values[4]),
-      started_at: getDateOrNull(values[13]),
+      started_at: getDateOrNull(values[14]),
       status: getLlmRunStatus(values[8]),
-      updated_at: getDate(values[20]),
-      usage: getJsonObject(values[12]),
+      updated_at: getDate(values[21]),
+      usage: getJsonObject(values[13]),
     }
 
     this.llmRunIdSequence += 1
@@ -502,13 +502,14 @@ class FakeStarterDeckCopyClient {
   copyOpeningHandRun<T>(values: unknown[]) {
     this.openingHandRuns.push({
       attempt_number: getNumber(values[2]),
-      created_at: getDate(values[7]),
-      library_snapshot: getJsonStringArrayOrNull(values[4]),
+      created_at: getDate(values[8]),
+      library_snapshot: getJsonStringArrayOrNull(values[5]),
       llm_run_id: getString(values[1]),
       opening_hand: getJsonStringArray(values[3]),
-      opening_hand_is_valid: getBoolean(values[5]),
-      random_state_snapshot: getNumberOrNull(values[6]),
+      opening_hand_is_valid: getBoolean(values[6]),
+      random_state_snapshot: getNumberOrNull(values[7]),
       simulation_id: getString(values[0]),
+      summary: getStringOrNull(values[4]),
     })
 
     return this.result<T>([])
@@ -534,28 +535,25 @@ class FakeStarterDeckCopyClient {
     return this.result<T>([])
   }
 
-  copyLlmRunChunks<T>(values: unknown[]) {
+  copyLlmRunMcpFunctionCalls<T>(values: unknown[]) {
     const sourceLlmRunId = getString(values[0])
     const copiedLlmRunId = getString(values[1])
-    const rows = this.chunks
-      .filter((chunk) => chunk.llm_run_id === sourceLlmRunId)
-      .map((sourceChunk) => {
-        const copiedChunk = {
-          ...sourceChunk,
-          id: this.chunkIdSequence,
+    const copiedCalls = this.mcpFunctionCalls
+      .filter((call) => call.llm_run_id === sourceLlmRunId)
+      .map((sourceCall) => {
+        const copiedCall = {
+          ...sourceCall,
+          id: this.mcpFunctionCallIdSequence,
           llm_run_id: copiedLlmRunId,
         }
 
-        this.chunkIdSequence += 1
-        this.chunks.push(copiedChunk)
+        this.mcpFunctionCallIdSequence += 1
+        this.mcpFunctionCalls.push(copiedCall)
 
-        return {
-          copied_llm_run_chunk_id: copiedChunk.id,
-          source_llm_run_chunk_id: sourceChunk.id,
-        }
+        return copiedCall
       })
 
-    return this.result(rows as T[])
+    return this.result(copiedCalls as T[])
   }
 
   getDeck(deckId: string) {
@@ -667,6 +665,7 @@ test("starter deck copy clones deck data, presets, terminal history, and remaps 
   assert.ok(copiedOpeningRun)
   assert.ok(copiedTurnRun)
   assert.equal(copiedOpeningRun.llm_run_id.startsWith("copied-run-"), true)
+  assert.equal(copiedOpeningRun.summary, "Keep this opener.")
   assert.equal(copiedTurnRun.llm_run_id.startsWith("copied-run-"), true)
   assert.deepEqual(copiedTurnRun.turn_actions, {
     untap: [],
@@ -678,13 +677,13 @@ test("starter deck copy clones deck data, presets, terminal history, and remaps 
     end_step_cleanup: [],
   })
 
-  const copiedChunk = db.chunks.find(
-    (chunk) => chunk.llm_run_id === copiedOpeningRun.llm_run_id
+  const copiedFunctionCall = db.mcpFunctionCalls.find(
+    (call) => call.llm_run_id === copiedOpeningRun.llm_run_id
   )
 
-  assert.ok(copiedChunk)
-  assert.equal(copiedChunk.sequence, 1)
-  assert.equal(copiedChunk.mcp_function_name, "draw_starting_hand")
+  assert.ok(copiedFunctionCall)
+  assert.equal(copiedFunctionCall.mcp_function_name, "draw_starting_hand")
+  assert.deepEqual(copiedFunctionCall.output_payload, { cards: ["Sol Ring"] })
 
   assert.equal(
     db.openrouterGenerations.some((generation) =>
@@ -882,6 +881,7 @@ function createStarterDeckFixture() {
       opening_hand_is_valid: true,
       random_state_snapshot: 124,
       simulation_id: "sim-completed",
+      summary: "Keep this opener.",
     },
     {
       attempt_number: 1,
@@ -892,6 +892,7 @@ function createStarterDeckFixture() {
       opening_hand_is_valid: false,
       random_state_snapshot: null,
       simulation_id: "sim-completed-with-pending-run",
+      summary: null,
     },
     {
       attempt_number: 1,
@@ -902,6 +903,7 @@ function createStarterDeckFixture() {
       opening_hand_is_valid: true,
       random_state_snapshot: 124,
       simulation_id: "sim-running",
+      summary: "Keep this opener.",
     }
   )
   db.turnRuns.push({
@@ -928,18 +930,15 @@ function createStarterDeckFixture() {
     simulation_id: "sim-completed",
     turn_number: 1,
   })
-  db.chunks.push({
+  db.mcpFunctionCalls.push({
+    called_at: now,
+    completed_at: now,
     id: 10,
-    kind: "mcp_call_complete",
+    input_payload: { reason: "Opening hand" },
     llm_run_id: "run-opening",
     mcp_function_name: "draw_starting_hand",
-    mcp_function_output: { cards: ["Sol Ring"] },
-    mcp_function_reason: "Opening hand",
-    output_delta: null,
-    payload: { type: "tool" },
-    reasoning_delta: null,
-    received_at: now,
-    sequence: 1,
+    output_payload: { cards: ["Sol Ring"] },
+    status: "completed",
   })
   db.openrouterGenerations.push({ llm_run_id: "run-opening" })
   db.mcpTokens.push({ llm_run_id: "run-opening" })
@@ -1016,6 +1015,7 @@ function createLlmRun({
     reasoning_effort: "medium",
     service_tier: "priority",
     request_payload: { request: true },
+    raw_response: { raw: true },
     response_metadata: { metadata: true },
     runtime_stream_key: `stream-${id}`,
     started_at: now,

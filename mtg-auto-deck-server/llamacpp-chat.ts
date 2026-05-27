@@ -1,5 +1,7 @@
 import type {
+  ChatCompletion,
   ChatCompletionChunk,
+  ChatCompletionCreateParamsNonStreaming,
   ChatCompletionCreateParamsStreaming,
   ChatCompletionMessageParam,
   ChatCompletionMessageToolCall,
@@ -44,6 +46,11 @@ export type LlamaCppChatCompletionCreate = (
   options: { signal: AbortSignal }
 ) => Promise<AsyncIterable<ChatCompletionChunk>>
 
+export type LlamaCppChatCompletionCreateNonStreaming = (
+  body: ChatCompletionCreateParamsNonStreaming,
+  options: { signal: AbortSignal }
+) => Promise<ChatCompletion>
+
 export type LlamaCppChatCompletionToolCall = {
   argumentsText: string
   id: string
@@ -53,6 +60,7 @@ export type LlamaCppChatCompletionToolCall = {
 
 export type LlamaCppChatCompletionResult = {
   outputText: string
+  rawResponse?: unknown
   responseMetadata: unknown
   usage: unknown
 }
@@ -183,6 +191,86 @@ export async function collectLlamaCppChatCompletion({
   )
 }
 
+export async function collectLlamaCppChatCompletionNonStreaming({
+  callTool,
+  createChatCompletion,
+  requestPayload,
+  signal,
+  toolDefinitions,
+}: {
+  callTool: (
+    name: string,
+    args: Record<string, unknown>,
+    signal: AbortSignal
+  ) => Promise<unknown>
+  createChatCompletion: LlamaCppChatCompletionCreateNonStreaming
+  requestPayload: LlamaCppChatCompletionRequestPayload
+  signal: AbortSignal
+  toolDefinitions: readonly LlamaCppToolDefinition[]
+}): Promise<LlamaCppChatCompletionResult> {
+  const messages = requestPayload.messages.slice()
+  const rawResponses: unknown[] = []
+  const toolDefinitionsByName = new Map(
+    toolDefinitions.map((definition) => [definition.name, definition])
+  )
+
+  for (let stepNumber = 1; stepNumber <= requestPayload.stopWhenStepCount; stepNumber += 1) {
+    throwIfRuntimeAborted(signal)
+
+    const response = await createChatCompletion(
+      createNonStreamingChatCompletionApiPayload(requestPayload, messages),
+      { signal }
+    )
+    const stepResult = collectLlamaCppChatCompletionNonStreamingStep(
+      response,
+      stepNumber
+    )
+    const { toolCalls } = stepResult
+
+    rawResponses.push(response)
+
+    if (toolCalls.length === 0) {
+      const { outputText } = stepResult
+
+      if (!outputText.trim()) {
+        throw new Error(
+          "llama.cpp chat completion did not include final assistant content."
+        )
+      }
+
+      return {
+        outputText,
+        rawResponse: { responses: rawResponses },
+        responseMetadata: stepResult.responseMetadata,
+        usage: stepResult.usage,
+      }
+    }
+
+    messages.push(createAssistantToolCallMessage(stepResult.outputText, toolCalls))
+
+    for (const toolCall of toolCalls) {
+      const toolDefinition = toolDefinitionsByName.get(toolCall.name)
+
+      if (!toolDefinition) {
+        throw new Error(`llama.cpp requested unknown tool: ${toolCall.name}.`)
+      }
+
+      const toolInput = parseAndValidateToolArguments(toolCall, toolDefinition)
+      const toolOutput = await callTool(toolCall.name, toolInput, signal)
+
+      messages.push({
+        role: "tool",
+        tool_call_id: toolCall.id,
+        content: formatToolOutputForMessage(toolOutput),
+      })
+    }
+  }
+
+  throw new Error(
+    `llama.cpp LLM run reached LLAMACPP_STOP_WHEN_STEP_COUNT (${requestPayload.stopWhenStepCount}) before producing final output.`
+  )
+}
+
 export function getLlamaCppChatCompletionToolCalls(
   message: unknown,
   stepNumber: number
@@ -196,6 +284,22 @@ export function getLlamaCppChatCompletionToolCalls(
   return toolCalls.map((toolCall, index) =>
     normalizeLlamaCppToolCall(toolCall, stepNumber, index)
   )
+}
+
+function collectLlamaCppChatCompletionNonStreamingStep(
+  response: ChatCompletion,
+  stepNumber: number
+): LlamaCppChatCompletionStepResult {
+  const choice = response.choices[0]
+  const message = choice?.message ?? null
+
+  return {
+    finishReason: choice?.finish_reason ?? null,
+    outputText: getLlamaCppChatCompletionMessageText(message),
+    responseMetadata: response,
+    toolCalls: getLlamaCppChatCompletionToolCalls(message, stepNumber),
+    usage: response.usage ?? {},
+  }
 }
 
 async function collectLlamaCppChatCompletionStep({
@@ -339,6 +443,45 @@ function createChatCompletionApiPayload(
   }
 
   return payload
+}
+
+function createNonStreamingChatCompletionApiPayload(
+  requestPayload: LlamaCppChatCompletionRequestPayload,
+  messages: ChatCompletionMessageParam[]
+): ChatCompletionCreateParamsNonStreaming {
+  const payload: ChatCompletionCreateParamsNonStreaming = {
+    model: requestPayload.model,
+    max_tokens: requestPayload.max_tokens,
+    messages,
+    metadata: requestPayload.metadata,
+    parallel_tool_calls: requestPayload.parallel_tool_calls,
+    tools: requestPayload.tools,
+    stream: false,
+  }
+
+  return payload
+}
+
+function getLlamaCppChatCompletionMessageText(message: unknown) {
+  const content = asRecord(message).content
+
+  if (typeof content === "string") {
+    return content
+  }
+
+  if (!Array.isArray(content)) {
+    return ""
+  }
+
+  return content
+    .flatMap((part) => {
+      const partRecord = asRecord(part)
+
+      return partRecord.type === "text"
+        ? [getStringProperty(partRecord, "text") ?? ""]
+        : []
+    })
+    .join("")
 }
 
 function normalizeLlamaCppToolCall(

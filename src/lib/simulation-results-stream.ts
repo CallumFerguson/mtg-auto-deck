@@ -1,12 +1,13 @@
 import type {
   SimulationDebugLlmRun,
-  SimulationDebugLlmRunChunk,
   SimulationResultsInfo,
   SimulationResultsStreamEvent,
 } from "./deck-types"
 
 type SimulationOpenRouterGeneration =
   SimulationDebugLlmRun["openrouterGenerations"][number]
+type SimulationMcpFunctionCall =
+  SimulationDebugLlmRun["mcpFunctionCalls"][number]
 
 export function applySimulationResultsStreamEvent(
   currentResults: SimulationResultsInfo | null,
@@ -22,14 +23,6 @@ export function applySimulationResultsStreamEvent(
 
   if (streamEvent.type === "llm_run_updated") {
     return upsertSimulationResultsRun(currentResults, streamEvent.run)
-  }
-
-  if (streamEvent.type === "chunk") {
-    return appendSimulationResultsRunChunk(
-      currentResults,
-      streamEvent.llmRunId,
-      streamEvent.chunk
-    )
   }
 
   return currentResults
@@ -71,40 +64,6 @@ export function upsertSimulationResultsRun(
   return currentResults
 }
 
-export function appendSimulationResultsRunChunk(
-  currentResults: SimulationResultsInfo | null,
-  llmRunId: string,
-  chunk: SimulationDebugLlmRunChunk
-) {
-  if (!currentResults) {
-    return currentResults
-  }
-
-  const openingHandLlmRuns = appendChunkToRuns(
-    currentResults.openingHandLlmRuns,
-    llmRunId,
-    chunk
-  )
-  const turnLlmRuns = appendChunkToRuns(
-    currentResults.turnLlmRuns,
-    llmRunId,
-    chunk
-  )
-
-  if (
-    openingHandLlmRuns === currentResults.openingHandLlmRuns &&
-    turnLlmRuns === currentResults.turnLlmRuns
-  ) {
-    return currentResults
-  }
-
-  return {
-    ...currentResults,
-    openingHandLlmRuns,
-    turnLlmRuns,
-  }
-}
-
 function upsertRun(
   currentRuns: SimulationDebugLlmRun[],
   incomingRun: SimulationDebugLlmRun
@@ -114,7 +73,7 @@ function upsertRun(
   )
 
   if (!existingRun) {
-    return [...currentRuns, sortRunChunks(incomingRun)]
+    return [...currentRuns, normalizeRun(incomingRun)]
   }
 
   const mergedRun = {
@@ -124,54 +83,15 @@ function upsertRun(
       existingRun.openrouterGenerations ?? [],
       incomingRun.openrouterGenerations ?? []
     ),
-    chunks: mergeChunks(existingRun.chunks, incomingRun.chunks),
+    mcpFunctionCalls: mergeMcpFunctionCalls(
+      existingRun.mcpFunctionCalls ?? [],
+      incomingRun.mcpFunctionCalls ?? []
+    ),
   }
 
   return currentRuns.map((run) =>
     run.llmRunId === incomingRun.llmRunId ? mergedRun : run
   )
-}
-
-function appendChunkToRuns(
-  currentRuns: SimulationDebugLlmRun[],
-  llmRunId: string,
-  chunk: SimulationDebugLlmRunChunk
-) {
-  const runIndex = currentRuns.findIndex((run) => run.llmRunId === llmRunId)
-
-  if (runIndex === -1) {
-    return currentRuns
-  }
-
-  return currentRuns.map((run, index) =>
-    index === runIndex
-      ? {
-          ...run,
-          chunks: mergeChunks(run.chunks, [chunk]),
-        }
-      : run
-  )
-}
-
-function mergeChunks(
-  currentChunks: readonly SimulationDebugLlmRunChunk[],
-  incomingChunks: readonly SimulationDebugLlmRunChunk[]
-) {
-  const chunksBySequence = new Map<number, SimulationDebugLlmRunChunk>()
-
-  for (const chunk of currentChunks) {
-    chunksBySequence.set(chunk.sequence, chunk)
-  }
-
-  for (const chunk of incomingChunks) {
-    const existingChunk = chunksBySequence.get(chunk.sequence)
-
-    if (!existingChunk || shouldReplaceChunk(existingChunk, chunk)) {
-      chunksBySequence.set(chunk.sequence, chunk)
-    }
-  }
-
-  return Array.from(chunksBySequence.values()).sort(compareChunks)
 }
 
 function mergeOpenRouterGenerations(
@@ -194,29 +114,44 @@ function mergeOpenRouterGenerations(
   )
 }
 
-function shouldReplaceChunk(
-  existingChunk: SimulationDebugLlmRunChunk,
-  incomingChunk: SimulationDebugLlmRunChunk
+function mergeMcpFunctionCalls(
+  currentCalls: readonly SimulationMcpFunctionCall[] = [],
+  incomingCalls: readonly SimulationMcpFunctionCall[] = []
 ) {
-  return existingChunk.id === null || incomingChunk.id !== null
+  const callsById = new Map<number, SimulationMcpFunctionCall>()
+
+  for (const call of currentCalls) {
+    callsById.set(call.id, call)
+  }
+
+  for (const call of incomingCalls) {
+    callsById.set(call.id, call)
+  }
+
+  return Array.from(callsById.values()).sort(compareMcpFunctionCalls)
 }
 
-function sortRunChunks(run: SimulationDebugLlmRun) {
+function normalizeRun(run: SimulationDebugLlmRun) {
   return {
     ...run,
     openrouterGenerations: mergeOpenRouterGenerations(
       [],
       run.openrouterGenerations ?? []
     ),
-    chunks: [...run.chunks].sort(compareChunks),
+    mcpFunctionCalls: [...(run.mcpFunctionCalls ?? [])].sort(
+      compareMcpFunctionCalls
+    ),
   }
 }
 
-function compareChunks(
-  firstChunk: SimulationDebugLlmRunChunk,
-  secondChunk: SimulationDebugLlmRunChunk
+function compareMcpFunctionCalls(
+  firstCall: SimulationMcpFunctionCall,
+  secondCall: SimulationMcpFunctionCall
 ) {
-  return firstChunk.sequence - secondChunk.sequence
+  const calledAtComparison =
+    Date.parse(firstCall.calledAt) - Date.parse(secondCall.calledAt)
+
+  return calledAtComparison || firstCall.id - secondCall.id
 }
 
 function compareOpeningHandRuns(

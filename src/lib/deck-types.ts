@@ -109,6 +109,16 @@ export type OpenRouterGeneration = {
   createdAt: string
 }
 
+export type SimulationMcpFunctionCall = {
+  id: number
+  mcpFunctionName: string
+  status: "completed" | "failed"
+  inputPayload: unknown
+  outputPayload: unknown
+  calledAt: string
+  completedAt: string
+}
+
 export type SimulationDebugLlmRun = {
   llmRunId: string
   llmModelPresetId: string | null
@@ -128,13 +138,15 @@ export type SimulationDebugLlmRun = {
   failedAt: string | null
   cancelledAt: string | null
   turnNumber?: number
+  openingHand?: string[]
+  summary?: string | null
   turnActions?: unknown
   gameState?: unknown
   librarySnapshot?: string[] | null
   outdated?: boolean
   openingHandIsValid?: boolean
+  mcpFunctionCalls: SimulationMcpFunctionCall[]
   openrouterGenerations: OpenRouterGeneration[]
-  chunks: SimulationDebugLlmRunChunk[]
 }
 
 export type SimulationDebugLlmRunMetadata = {
@@ -216,11 +228,6 @@ export type SimulationResultsStreamEvent =
   | {
       type: "llm_run_started"
       run: SimulationDebugLlmRun
-    }
-  | {
-      type: "chunk"
-      llmRunId: string
-      chunk: SimulationDebugLlmRunChunk
     }
   | {
       type: "llm_run_updated"

@@ -22,8 +22,6 @@ import {
 } from "./llm-run-events.js"
 import {
   INVALID_OPENING_HAND_SIMULATION_FAILURE_MESSAGE,
-  LLM_CHUNK_KINDS,
-  SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
   STALE_IN_FLIGHT_LLM_RUN_CANCELLATION_MESSAGE,
   STALE_RUNNING_SIMULATION_CANCELLATION_MESSAGE,
   buildAppendToPersistedLlmRunDeltaChunkQuery,
@@ -579,8 +577,8 @@ test("builds partial LLM run cost snapshot query", () => {
 
   assert.deepEqual(query.values, [llmRunId])
   assert.match(normalizedSql, /length\(llm_run\.full_prompt\)/)
-  assert.match(normalizedSql, /chunk\.reasoning_delta/)
-  assert.match(normalizedSql, /chunk\.output_delta/)
+  assert.doesNotMatch(normalizedSql, /llm_run_chunks/)
+  assert.doesNotMatch(normalizedSql, /chunk\./)
   assert.match(normalizedSql, /llm_run\.service_tier/)
   assert.match(normalizedSql, /cached_input_token_cost_usd_per_million/)
   assert.match(normalizedSql, /output_token_cost_usd_per_million/)
@@ -2448,18 +2446,6 @@ test("reports invalid completed turn JSON with an explicit message", () => {
     () => parseTurnSimulationFromResponseText("{"),
     /Turn LLM completed response was not valid JSON\./
   )
-})
-
-test("normal results exclude only raw and completed chunks", () => {
-  assert.equal(LLM_CHUNK_KINDS.includes("reasoning_start"), true)
-  assert.equal(LLM_CHUNK_KINDS.includes("reasoning_done"), true)
-  assert.equal(LLM_CHUNK_KINDS.includes("output_start"), true)
-  assert.equal(LLM_CHUNK_KINDS.includes("output_done"), true)
-  assert.equal(LLM_CHUNK_KINDS.includes("final_parsed_output"), true)
-  assert.deepEqual(SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS, [
-    "raw_event",
-    "completed",
-  ])
 })
 
 test("startup stale-run cancellation message is explicit", () => {

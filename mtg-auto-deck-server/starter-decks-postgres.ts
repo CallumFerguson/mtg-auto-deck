@@ -93,6 +93,7 @@ type LlmRunRow = {
   status: LlmRunStatus
   full_prompt: string
   request_payload: unknown
+  raw_response: unknown
   response_metadata: unknown
   usage: unknown
   started_at: Date | null
@@ -110,6 +111,7 @@ type OpeningHandLlmRunRow = {
   llm_run_id: string
   attempt_number: number
   opening_hand: unknown
+  summary: string | null
   library_snapshot: unknown | null
   opening_hand_is_valid: boolean
   random_state_snapshot: string | number | null
@@ -127,11 +129,6 @@ type TurnLlmRunRow = {
   library_snapshot: unknown | null
   random_state_snapshot: string | number | null
   created_at: Date
-}
-
-type CopiedLlmRunChunkRow = {
-  source_llm_run_chunk_id: string | number
-  copied_llm_run_chunk_id: string | number
 }
 
 export async function ensureStarterDeckCopiesSchema() {
@@ -837,6 +834,7 @@ async function listLinkedLlmRuns({
         llm_run.status,
         llm_run.full_prompt,
         llm_run.request_payload,
+        llm_run.raw_response,
         llm_run.response_metadata,
         llm_run.usage,
         llm_run.started_at,
@@ -892,6 +890,7 @@ async function copyLlmRun({
         queued_at,
         full_prompt,
         request_payload,
+        raw_response,
         response_metadata,
         usage,
         estimated_cost_usd,
@@ -921,16 +920,17 @@ async function copyLlmRun({
         $11::jsonb,
         $12::jsonb,
         $13::jsonb,
+        $14::jsonb,
         NULL,
         NULL,
-        $14,
         $15,
         $16,
         $17,
         $18,
         $19,
         $20,
-        $21
+        $21,
+        $22
       )
       RETURNING id
     `,
@@ -946,6 +946,7 @@ async function copyLlmRun({
       sourceRun.status,
       sourceRun.full_prompt,
       toJsonParameter(sourceRun.request_payload),
+      toJsonParameter(sourceRun.raw_response),
       toJsonParameter(sourceRun.response_metadata),
       toJsonParameter(sourceRun.usage),
       sourceRun.started_at,
@@ -987,6 +988,7 @@ async function copyOpeningHandLlmRuns({
         llm_run_id,
         attempt_number,
         opening_hand,
+        summary,
         library_snapshot,
         opening_hand_is_valid,
         random_state_snapshot,
@@ -1007,18 +1009,20 @@ async function copyOpeningHandLlmRuns({
           llm_run_id,
           attempt_number,
           opening_hand,
+          summary,
           library_snapshot,
           opening_hand_is_valid,
           random_state_snapshot,
           created_at
         )
-        VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8)
+        VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7, $8, $9)
       `,
       [
         copiedSimulationId,
         getMappedId(llmRunIdMap, run.llm_run_id, "opening-hand LLM run"),
         run.attempt_number,
         toJsonParameter(run.opening_hand),
+        run.summary,
         toNullableJsonParameter(run.library_snapshot),
         run.opening_hand_is_valid,
         run.random_state_snapshot,
@@ -1102,7 +1106,7 @@ async function copyLlmRunChildren({
   llmRunIdMap: Map<string, string>
 }) {
   for (const [sourceLlmRunId, copiedLlmRunId] of llmRunIdMap.entries()) {
-    await copyLlmRunChunks({
+    await copyLlmRunMcpFunctionCalls({
       client,
       copiedLlmRunId,
       sourceLlmRunId,
@@ -1110,7 +1114,7 @@ async function copyLlmRunChildren({
   }
 }
 
-async function copyLlmRunChunks({
+async function copyLlmRunMcpFunctionCalls({
   client,
   copiedLlmRunId,
   sourceLlmRunId,
@@ -1119,68 +1123,31 @@ async function copyLlmRunChunks({
   copiedLlmRunId: string
   sourceLlmRunId: string
 }) {
-  const result = await client.query<CopiedLlmRunChunkRow>(
+  await client.query(
     `
-      /* starter-copy:copy-llm-run-chunks */
-      WITH source_chunks AS (
-        SELECT
-          id AS source_llm_run_chunk_id,
-          sequence,
-          kind,
-          mcp_function_name,
-          mcp_function_output,
-          mcp_function_reason,
-          reasoning_delta,
-          output_delta,
-          payload,
-          received_at
-        FROM llm_run_chunks
-        WHERE llm_run_id = $1
-      ),
-      inserted_chunks AS (
-        INSERT INTO llm_run_chunks (
-          llm_run_id,
-          sequence,
-          kind,
-          mcp_function_name,
-          mcp_function_output,
-          mcp_function_reason,
-          reasoning_delta,
-          output_delta,
-          payload,
-          received_at
-        )
-        SELECT
-          $2,
-          sequence,
-          kind,
-          mcp_function_name,
-          mcp_function_output,
-          mcp_function_reason,
-          reasoning_delta,
-          output_delta,
-          payload,
-          received_at
-        FROM source_chunks
-        ORDER BY sequence ASC
-        RETURNING id AS copied_llm_run_chunk_id, sequence
+      /* starter-copy:copy-llm-run-mcp-function-calls */
+      INSERT INTO llm_run_mcp_function_calls (
+        llm_run_id,
+        mcp_function_name,
+        status,
+        input_payload,
+        output_payload,
+        called_at,
+        completed_at
       )
       SELECT
-        source_chunks.source_llm_run_chunk_id,
-        inserted_chunks.copied_llm_run_chunk_id
-      FROM source_chunks
-      JOIN inserted_chunks
-        ON inserted_chunks.sequence = source_chunks.sequence
-      ORDER BY source_chunks.sequence ASC
+        $2,
+        mcp_function_name,
+        status,
+        input_payload,
+        output_payload,
+        called_at,
+        completed_at
+      FROM llm_run_mcp_function_calls
+      WHERE llm_run_id = $1
+      ORDER BY called_at ASC, id ASC
     `,
     [sourceLlmRunId, copiedLlmRunId]
-  )
-
-  return new Map(
-    result.rows.map((row) => [
-      String(row.source_llm_run_chunk_id),
-      String(row.copied_llm_run_chunk_id),
-    ])
   )
 }
 

@@ -13,20 +13,36 @@ export type ParsedSimulationFinalOutput =
     }
 
 export function getSimulationFinalParsedOutput(
-  run: Pick<SimulationDebugLlmRun, "phase" | "chunks">
+  run: Pick<
+    SimulationDebugLlmRun,
+    "gameState" | "openingHand" | "phase" | "summary" | "turnActions"
+  >
 ): ParsedSimulationFinalOutput | null {
-  const finalParsedOutputChunk = [...run.chunks]
-    .reverse()
-    .find((chunk) => chunk.kind === "final_parsed_output")
+  if (run.phase === "opening_hand") {
+    if (
+      !Array.isArray(run.openingHand) ||
+      !run.openingHand.every((cardName) => typeof cardName === "string") ||
+      typeof run.summary !== "string"
+    ) {
+      return null
+    }
 
-  if (!finalParsedOutputChunk) {
-    return null
+    return {
+      type: "opening_hand",
+      keptHand: run.openingHand,
+      summary: run.summary,
+    }
   }
 
-  return getSimulationFinalParsedOutputFromPayload(
-    run.phase,
-    finalParsedOutputChunk.payload
-  )
+  if (run.phase === "turn" && hasTurnActions(run.turnActions)) {
+    return {
+      type: "turn",
+      turnActions: run.turnActions,
+      gameState: run.gameState,
+    }
+  }
+
+  return null
 }
 
 export function getSimulationFinalParsedOutputFromPayload(
