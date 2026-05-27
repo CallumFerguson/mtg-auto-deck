@@ -4062,6 +4062,13 @@ function SimulationResultsPanel({
         className="grid gap-3"
         role={panelId ? "region" : undefined}
       >
+        {run.resultEntries.length > 0 ? (
+          <SimulationResultChunkCards
+            cardLookup={cardLookup}
+            entries={run.resultEntries}
+          />
+        ) : null}
+
         {finishedThinkingStatus}
 
         {finalParsedOutput ? (
@@ -4073,13 +4080,6 @@ function SimulationResultsPanel({
           <SimulationTurnActionsSurface
             cardLookup={cardLookup}
             turnActions={directTurnActions}
-          />
-        ) : null}
-
-        {run.resultEntries.length > 0 ? (
-          <SimulationResultChunkCards
-            cardLookup={cardLookup}
-            entries={run.resultEntries}
           />
         ) : null}
 
