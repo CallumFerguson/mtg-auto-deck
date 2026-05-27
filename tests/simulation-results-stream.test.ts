@@ -58,7 +58,7 @@ test("applies snapshot, run update, simulation update, and done events without i
   assert.equal(results?.openingHandLlmRuns[0].summary, "A keepable opener.")
 })
 
-test("merges completed MCP function calls in called_at order", () => {
+test("merges streaming MCP function calls in called_at order", () => {
   const currentResults = createResultsInfo({
     turnLlmRuns: [
       createRun({
@@ -97,6 +97,57 @@ test("merges completed MCP function calls in called_at order", () => {
       (call) => call.mcpFunctionName
     ),
     ["shuffle_library", "draw_card_from_top"]
+  )
+})
+
+test("uses done results as authoritative MCP function call resync", () => {
+  const currentResults = createResultsInfo({
+    turnLlmRuns: [
+      createRun({
+        llmRunId: "turn-1",
+        phase: "turn",
+        turnNumber: 1,
+        mcpFunctionCalls: [
+          createMcpFunctionCall({
+            id: 20,
+            mcpFunctionName: "draw_card_from_top",
+          }),
+        ],
+      }),
+    ],
+  })
+  const finalResults = createResultsInfo({
+    turnLlmRuns: [
+      createRun({
+        llmRunId: "turn-1",
+        phase: "turn",
+        turnNumber: 1,
+        status: "completed",
+        mcpFunctionCalls: [
+          createMcpFunctionCall({
+            id: 20,
+            mcpFunctionName: "draw_card_from_top",
+          }),
+          createMcpFunctionCall({
+            id: 21,
+            mcpFunctionName: "shuffle_library",
+          }),
+        ],
+      }),
+    ],
+  })
+
+  const updatedResults = applySimulationResultsStreamEvent(currentResults, {
+    type: "done",
+    simulation: createSimulation({ status: "completed" }),
+    results: finalResults,
+  })
+
+  assert.deepEqual(
+    updatedResults?.turnLlmRuns[0].mcpFunctionCalls.map(
+      (call) => call.mcpFunctionName
+    ),
+    ["draw_card_from_top", "shuffle_library"]
   )
 })
 

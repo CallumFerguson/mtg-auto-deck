@@ -13,6 +13,10 @@ type RecordMcpFunctionCall = (
   input: RecordLlmRunMcpFunctionCallInput
 ) => Promise<unknown>
 
+type OnMcpFunctionCallRecorded = (
+  input: RecordLlmRunMcpFunctionCallInput
+) => Promise<unknown> | unknown
+
 export async function runAuditedMcpFunctionCall<TOutput>({
   authContext,
   getOutputPayload,
@@ -20,6 +24,7 @@ export async function runAuditedMcpFunctionCall<TOutput>({
   inputPayload,
   logger = console,
   mcpFunctionName,
+  onRecorded,
   recordCall = recordLlmRunMcpFunctionCall,
 }: {
   authContext?: Pick<LlmRunMcpTokenContext, "llmRunId">
@@ -28,6 +33,7 @@ export async function runAuditedMcpFunctionCall<TOutput>({
   inputPayload: unknown
   logger?: ErrorLogger
   mcpFunctionName: string
+  onRecorded?: OnMcpFunctionCallRecorded
   recordCall?: RecordMcpFunctionCall
 }) {
   const calledAt = new Date()
@@ -49,6 +55,7 @@ export async function runAuditedMcpFunctionCall<TOutput>({
       inputPayload,
       logger,
       mcpFunctionName,
+      onRecorded,
       outputPayload,
       recordCall,
       status: "completed",
@@ -62,6 +69,7 @@ export async function runAuditedMcpFunctionCall<TOutput>({
       inputPayload,
       logger,
       mcpFunctionName,
+      onRecorded,
       outputPayload: createMcpFunctionCallFailureOutput(error),
       recordCall,
       status: "failed",
@@ -86,6 +94,7 @@ async function recordMcpFunctionCallSafely({
   inputPayload,
   logger,
   mcpFunctionName,
+  onRecorded,
   outputPayload,
   recordCall,
   status,
@@ -95,6 +104,7 @@ async function recordMcpFunctionCallSafely({
   inputPayload: unknown
   logger: ErrorLogger
   mcpFunctionName: string
+  onRecorded?: OnMcpFunctionCallRecorded
   outputPayload: unknown
   recordCall: RecordMcpFunctionCall
   status: LlmRunMcpFunctionCallStatus
@@ -104,7 +114,7 @@ async function recordMcpFunctionCallSafely({
   }
 
   try {
-    await recordCall({
+    const record = {
       llmRunId: authContext.llmRunId,
       mcpFunctionName,
       status,
@@ -112,7 +122,19 @@ async function recordMcpFunctionCallSafely({
       outputPayload,
       calledAt,
       completedAt: new Date(),
-    })
+    }
+
+    await recordCall(record)
+
+    if (!onRecorded) {
+      return
+    }
+
+    try {
+      await onRecorded(record)
+    } catch (error) {
+      logger.error("Failed to publish MCP function call stream update:", error)
+    }
   } catch (error) {
     logger.error("Failed to record MCP function call:", error)
   }

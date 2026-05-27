@@ -46,12 +46,6 @@ export function canApplyLateLlmRunTerminalUpdate(status: LlmRunStatus) {
   return status === "pending" || status === "streaming"
 }
 
-function isTerminalLlmRunStatus(status: LlmRunStatus) {
-  return (
-    status === "completed" || status === "failed" || status === "cancelled"
-  )
-}
-
 export type CreateOpeningHandLlmRunInput = {
   simulationId: string
   llmModelPresetId: string
@@ -4480,9 +4474,7 @@ async function getSimulationDebugLlmRuns({
   }
 
   const mcpFunctionCallsByRunId = await getMcpFunctionCallsByLlmRunIds(
-    runs
-      .filter((run) => isTerminalLlmRunStatus(run.status))
-      .map((run) => run.llmRunId)
+    runs.map((run) => run.llmRunId)
   )
 
   for (const run of runs) {

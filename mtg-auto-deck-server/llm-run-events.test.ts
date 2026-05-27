@@ -200,6 +200,7 @@ test("builds MCP function call inserts with normalized failure output", () => {
 
 test("audits successful MCP tool calls against the trusted LLM run", async () => {
   const records: RecordLlmRunMcpFunctionCallInput[] = []
+  const recordedCallbacks: RecordLlmRunMcpFunctionCallInput[] = []
   const output = {
     content: [
       {
@@ -224,6 +225,9 @@ test("audits successful MCP tool calls against the trusted LLM run", async () =>
       count: 1,
     },
     mcpFunctionName: "draw_card_from_top",
+    onRecorded: async (record) => {
+      recordedCallbacks.push(record)
+    },
     recordCall: async (record) => {
       records.push(record)
     },
@@ -234,6 +238,8 @@ test("audits successful MCP tool calls against the trusted LLM run", async () =>
   assert.equal(records[0]?.llmRunId, "trusted-run")
   assert.equal(records[0]?.mcpFunctionName, "draw_card_from_top")
   assert.equal(records[0]?.status, "completed")
+  assert.equal(recordedCallbacks.length, 1)
+  assert.equal(recordedCallbacks[0], records[0])
   assert.deepEqual(records[0]?.inputPayload, {
     llmRunId: "spoofed-run",
     count: 1,
@@ -248,6 +254,7 @@ test("audits successful MCP tool calls against the trusted LLM run", async () =>
 
 test("audits failed MCP tool calls and rethrows the original error", async () => {
   const records: RecordLlmRunMcpFunctionCallInput[] = []
+  const recordedCallbacks: RecordLlmRunMcpFunctionCallInput[] = []
   const error = new Error("Library is empty.")
   error.name = "SimulationValidationError"
   let thrownError: unknown
@@ -266,6 +273,9 @@ test("audits failed MCP tool calls and rethrows the original error", async () =>
         count: 1,
       },
       mcpFunctionName: "draw_card_from_top",
+      onRecorded: async (record) => {
+        recordedCallbacks.push(record)
+      },
       recordCall: async (record) => {
         records.push(record)
       },
@@ -277,6 +287,8 @@ test("audits failed MCP tool calls and rethrows the original error", async () =>
   assert.equal(thrownError, error)
   assert.equal(records.length, 1)
   assert.equal(records[0]?.status, "failed")
+  assert.equal(recordedCallbacks.length, 1)
+  assert.equal(recordedCallbacks[0], records[0])
   assert.deepEqual(records[0]?.outputPayload, {
     error: {
       name: "SimulationValidationError",
@@ -287,6 +299,7 @@ test("audits failed MCP tool calls and rethrows the original error", async () =>
 
 test("does not mask MCP success when audit recording fails", async () => {
   const loggerCalls: unknown[][] = []
+  let recordedCallbackCount = 0
   const output = {
     content: [],
   }
@@ -308,12 +321,94 @@ test("does not mask MCP success when audit recording fails", async () => {
       },
     },
     mcpFunctionName: "shuffle_library",
+    onRecorded: () => {
+      recordedCallbackCount += 1
+    },
     recordCall: async () => {
       throw new Error("insert failed")
     },
   })
 
   assert.equal(result, output)
+  assert.equal(loggerCalls.length, 1)
+  assert.equal(recordedCallbackCount, 0)
+})
+
+test("does not mask MCP success when stream publishing fails", async () => {
+  const loggerCalls: unknown[][] = []
+  const records: RecordLlmRunMcpFunctionCallInput[] = []
+  const output = {
+    content: [],
+  }
+  const result = await runAuditedMcpFunctionCall({
+    authContext: {
+      llmRunId: "trusted-run",
+    },
+    getOutputPayload: () => ({
+      message: "ok",
+      data: {},
+    }),
+    handler: async () => output,
+    inputPayload: {
+      llmRunId: "trusted-run",
+    },
+    logger: {
+      error: (...args) => {
+        loggerCalls.push(args)
+      },
+    },
+    mcpFunctionName: "shuffle_library",
+    onRecorded: () => {
+      throw new Error("publish failed")
+    },
+    recordCall: async (record) => {
+      records.push(record)
+    },
+  })
+
+  assert.equal(result, output)
+  assert.equal(records.length, 1)
+  assert.equal(loggerCalls.length, 1)
+})
+
+test("does not mask MCP failure when stream publishing fails", async () => {
+  const loggerCalls: unknown[][] = []
+  const records: RecordLlmRunMcpFunctionCallInput[] = []
+  const error = new Error("Library is empty.")
+  let thrownError: unknown
+
+  try {
+    await runAuditedMcpFunctionCall({
+      authContext: {
+        llmRunId: "trusted-run",
+      },
+      getOutputPayload: () => null,
+      handler: async () => {
+        throw error
+      },
+      inputPayload: {
+        llmRunId: "trusted-run",
+      },
+      logger: {
+        error: (...args) => {
+          loggerCalls.push(args)
+        },
+      },
+      mcpFunctionName: "draw_card_from_top",
+      onRecorded: () => {
+        throw new Error("publish failed")
+      },
+      recordCall: async (record) => {
+        records.push(record)
+      },
+    })
+  } catch (caughtError) {
+    thrownError = caughtError
+  }
+
+  assert.equal(thrownError, error)
+  assert.equal(records.length, 1)
+  assert.equal(records[0]?.status, "failed")
   assert.equal(loggerCalls.length, 1)
 })
 

@@ -1054,13 +1054,23 @@ function createAuditedMcpToolHandler<TInput extends McpSimulationIdentifierInput
   identifier: McpSimulationIdentifierConfig,
   handler: McpToolHandler<TInput>
 ) {
+  const authContext = identifier.authContext
+
   return async (input: TInput) =>
     runAuditedMcpFunctionCall({
-      authContext: identifier.authContext,
+      authContext,
       getOutputPayload: getMcpToolAuditOutput,
       handler: () => handler(input),
       inputPayload: input,
       mcpFunctionName,
+      onRecorded: authContext
+        ? () =>
+            publishSimulationResultsState({
+              deckId: authContext.deckId,
+              llmRunId: authContext.llmRunId,
+              simulationId: authContext.simulationId,
+            })
+        : undefined,
     })
 }
 
