@@ -16,7 +16,6 @@ import { createPortal } from "react-dom"
 import { useNavigate } from "react-router-dom"
 import tapIconUrl from "mana-font/svg/tap.svg"
 import {
-  BookCopy,
   Bug,
   Check,
   ClipboardCheck,
@@ -151,18 +150,9 @@ type SimulationResultsNextTurnTimelineStep = {
   turnNumber: number
 }
 
-type SimulationResultsReportTimelineStep = {
-  id: "action:report"
-  kind: "generate_report"
-  label: string
-  detailLabel: string
-  status: "report"
-}
-
 type SimulationResultsDisplayTimelineStep =
   | SimulationResultsTimelineStep
   | SimulationResultsNextTurnTimelineStep
-  | SimulationResultsReportTimelineStep
 
 const DEFAULT_TURNS_TO_SIMULATE = "1"
 const USAGE_LIMIT_FAILURE_MESSAGE_PATTERN = /\bout of usage limits\b/i
@@ -294,8 +284,7 @@ function getPublicSimulationUrl(simulationId: string) {
 function getSimulationRunCountFromResults(resultsInfo: SimulationResultsInfo) {
   return (
     getCurrentOpeningHandRunCount(resultsInfo) +
-    resultsInfo.turnLlmRuns.filter(isCountedTurnRun).length +
-    resultsInfo.reportLlmRuns.filter(isCountedReportRun).length
+    resultsInfo.turnLlmRuns.filter(isCountedTurnRun).length
   )
 }
 
@@ -313,7 +302,6 @@ function getActiveLlmRunCountFromResults(resultsInfo: SimulationResultsInfo) {
   return [
     ...resultsInfo.openingHandLlmRuns,
     ...resultsInfo.turnLlmRuns,
-    ...resultsInfo.reportLlmRuns,
   ].filter((run) => isActiveLlmRunStatus(run.status)).length
 }
 
@@ -351,7 +339,6 @@ function findSimulationResultsRun(
     [
       ...resultsInfo.openingHandLlmRuns,
       ...resultsInfo.turnLlmRuns,
-      ...resultsInfo.reportLlmRuns,
     ].find((run) => run.llmRunId === llmRunId) ?? null
   )
 }
@@ -477,87 +464,6 @@ function isSuccessfulTurnRun(
     hasGameState(run.gameState) &&
     hasTurnActions(run.turnActions)
   )
-}
-
-function canGenerateReportFromVisibleResults(
-  simulation: Simulation,
-  resultsInfo: SimulationResultsInfo
-) {
-  if (simulation.startingHandId === null) {
-    const latestOpeningHandRun = resultsInfo.openingHandLlmRuns.reduce<
-      SimulationResultsInfo["openingHandLlmRuns"][number] | null
-    >((latestRun, run) => {
-      if (!latestRun || run.attemptNumber > latestRun.attemptNumber) {
-        return run
-      }
-
-      return latestRun
-    }, null)
-
-    if (
-      !latestOpeningHandRun ||
-      latestOpeningHandRun.status !== "completed" ||
-      latestOpeningHandRun.openingHandIsValid !== true
-    ) {
-      return false
-    }
-
-    const openingHandFinalOutput =
-      getSimulationFinalParsedOutput(latestOpeningHandRun)
-
-    if (
-      openingHandFinalOutput?.type !== "opening_hand" ||
-      openingHandFinalOutput.keptHand.length === 0 ||
-      !openingHandFinalOutput.summary.trim()
-    ) {
-      return false
-    }
-  }
-
-  const sortedTurnRuns = [...resultsInfo.turnLlmRuns].sort(
-    (firstRun, secondRun) =>
-      (firstRun.turnNumber ?? 0) - (secondRun.turnNumber ?? 0) ||
-      firstRun.attemptNumber - secondRun.attemptNumber
-  )
-  const seenTurnNumbers = new Set<number>()
-
-  for (const run of sortedTurnRuns) {
-    if (
-      run.status !== "completed" ||
-      run.outdated === true ||
-      typeof run.turnNumber !== "number" ||
-      seenTurnNumbers.has(run.turnNumber)
-    ) {
-      return false
-    }
-
-    seenTurnNumbers.add(run.turnNumber)
-  }
-
-  for (
-    let turnNumber = 1;
-    turnNumber <= sortedTurnRuns.length;
-    turnNumber += 1
-  ) {
-    const run = sortedTurnRuns[turnNumber - 1]
-
-    if (run?.turnNumber !== turnNumber) {
-      return false
-    }
-
-    const turnFinalOutput = getSimulationFinalParsedOutput(run)
-
-    if (
-      turnFinalOutput?.type !== "turn" ||
-      !hasGameState(turnFinalOutput.gameState) ||
-      !hasGameState(run.gameState) ||
-      !hasTurnActions(run.turnActions)
-    ) {
-      return false
-    }
-  }
-
-  return true
 }
 
 function hasGameState(value: unknown): value is Record<string, unknown> {
@@ -833,7 +739,6 @@ export function DeckSimulation({
   const [turnsToSimulate, setTurnsToSimulate] = useState(
     DEFAULT_TURNS_TO_SIMULATE
   )
-  const [autoGenerateReport, setAutoGenerateReport] = useState(false)
   const [reasoningSummariesEnabled, setReasoningSummariesEnabled] =
     useState(false)
   const [useFlexServiceTier, setUseFlexServiceTier] = useState(
@@ -926,17 +831,6 @@ export function DeckSimulation({
     Boolean(selectedModelPreset) &&
     turnsToSimulate.length > 0 &&
     (openingHandMode !== "provide" || Boolean(selectedOpeningHand))
-  const parsedTurnsToSimulateForForm = Number(turnsToSimulate)
-  const canAutoGenerateReport =
-    Number.isInteger(parsedTurnsToSimulateForForm) &&
-    parsedTurnsToSimulateForForm > 0
-
-  useEffect(() => {
-    if (!canAutoGenerateReport) {
-      setAutoGenerateReport(false)
-    }
-  }, [canAutoGenerateReport])
-
   const loadSimulations = useCallback(
     async (options?: { silent?: boolean }) => {
       const isSilent = options?.silent ?? false
@@ -1173,7 +1067,6 @@ export function DeckSimulation({
     setSelectedSavedSeedId(savedSeeds[0]?.id ?? "")
     setSelectedModelPresetId(defaultModelPresetId ?? "")
     setTurnsToSimulate(DEFAULT_TURNS_TO_SIMULATE)
-    setAutoGenerateReport(false)
     setReasoningSummariesEnabled(false)
     setOpeningHandMode("simulate")
     setSelectedOpeningHandId(startingHands[0]?.id ?? "")
@@ -1221,7 +1114,6 @@ export function DeckSimulation({
                 : selectedSavedSeed?.seed,
             llmModelPresetId: selectedModelPreset.id,
             turnsToSimulate: parsedTurnsToSimulate,
-            autoGenerateReport: autoGenerateReport && canAutoGenerateReport,
             reasoningSummariesEnabled,
             useFlexServiceTier:
               selectedModelPreset.supportsFlex && useFlexServiceTier,
@@ -1709,49 +1601,6 @@ export function DeckSimulation({
                             </option>
                           ))}
                         </select>
-                      </div>
-
-                      <div
-                        className={`flex items-center gap-3 rounded-md border px-3 py-3 text-sm transition-colors ${
-                          canAutoGenerateReport && autoGenerateReport
-                            ? "border-ring bg-accent text-accent-foreground"
-                            : "border-border bg-background/35 text-muted-foreground"
-                        } ${
-                          canAutoGenerateReport
-                            ? ""
-                            : "cursor-not-allowed opacity-50"
-                        }`}
-                      >
-                        <button
-                          className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors focus:ring-3 focus:ring-ring/25 focus:outline-none disabled:cursor-not-allowed ${
-                            canAutoGenerateReport && autoGenerateReport
-                              ? "border-sky-300/70 bg-sky-500/70"
-                              : "border-border bg-muted/55"
-                          }`}
-                          type="button"
-                          role="switch"
-                          aria-checked={
-                            canAutoGenerateReport && autoGenerateReport
-                          }
-                          aria-label="Auto-generate report after final turn"
-                          disabled={!canAutoGenerateReport}
-                          onClick={() =>
-                            setAutoGenerateReport(
-                              (currentValue) => !currentValue
-                            )
-                          }
-                        >
-                          <span
-                            className={`absolute top-1/2 left-1 size-4 -translate-y-1/2 rounded-full bg-foreground shadow-sm shadow-black/30 transition-transform ${
-                              canAutoGenerateReport && autoGenerateReport
-                                ? "translate-x-5"
-                                : "translate-x-0"
-                            }`}
-                          />
-                        </button>
-                        <span className="font-medium">
-                          Auto-generate report after final turn
-                        </span>
                       </div>
 
                       <ReasoningSummariesSwitch
@@ -2403,14 +2252,6 @@ function SimulationDetailsModal({
                     {shouldSimulateOpeningHand ? "Yes" : "No"}
                   </dd>
                 </div>
-                <div className="rounded-md border border-border bg-background/35 p-3">
-                  <dt className="text-muted-foreground">
-                    Auto-generate report
-                  </dt>
-                  <dd className="mt-1 font-medium text-foreground">
-                    {simulation.autoGenerateReport ? "Yes" : "No"}
-                  </dd>
-                </div>
                 <div className="rounded-md border border-border bg-background/35 p-3 sm:col-span-2">
                   <dt className="text-muted-foreground">LLM options</dt>
                   <dd className="mt-2 grid gap-3">
@@ -2611,8 +2452,6 @@ function SimulationDetails({
   )
   const [isStartingTurnRun, setIsStartingTurnRun] = useState(false)
   const [turnRunError, setTurnRunError] = useState<string | null>(null)
-  const [isStartingReportRun, setIsStartingReportRun] = useState(false)
-  const [reportRunError, setReportRunError] = useState<string | null>(null)
   const [isStoppingSimulation, setIsStoppingSimulation] = useState(false)
   const [stopSimulationError, setStopSimulationError] = useState<string | null>(
     null
@@ -2680,8 +2519,6 @@ function SimulationDetails({
     setOpeningHandRunError(null)
     setIsStartingTurnRun(false)
     setTurnRunError(null)
-    setIsStartingReportRun(false)
-    setReportRunError(null)
     setIsStoppingSimulation(false)
     setStopSimulationError(null)
     resultsEventSourceRef.current?.close()
@@ -2750,7 +2587,6 @@ function SimulationDetails({
       !shouldSimulateOpeningHand ||
       isStartingOpeningHandRun ||
       isStartingTurnRun ||
-      isStartingReportRun ||
       isStoppingSimulation
     ) {
       return
@@ -2759,7 +2595,6 @@ function SimulationDetails({
     setIsStartingOpeningHandRun(true)
     setOpeningHandRunError(null)
     setTurnRunError(null)
-    setReportRunError(null)
 
     try {
       const stopResult = await stopSimulation()
@@ -2797,7 +2632,6 @@ function SimulationDetails({
       readOnly ||
       isStartingTurnRun ||
       isStartingOpeningHandRun ||
-      isStartingReportRun ||
       isStoppingSimulation
     ) {
       return
@@ -2811,7 +2645,6 @@ function SimulationDetails({
     setIsStartingTurnRun(true)
     setTurnRunError(null)
     setOpeningHandRunError(null)
-    setReportRunError(null)
 
     try {
       const stopResult = await stopSimulation()
@@ -2845,45 +2678,6 @@ function SimulationDetails({
       setTurnRunError("Turn run could not be sent to the server.")
     } finally {
       setIsStartingTurnRun(false)
-    }
-  }
-
-  async function handleStartReportRun() {
-    if (
-      readOnly ||
-      isStartingReportRun ||
-      isStartingTurnRun ||
-      isStartingOpeningHandRun ||
-      isStoppingSimulation
-    ) {
-      return
-    }
-
-    setIsStartingReportRun(true)
-    setReportRunError(null)
-    setTurnRunError(null)
-    setOpeningHandRunError(null)
-
-    try {
-      const response = await apiFetch(
-        `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/report-llm-runs`,
-        {
-          method: "POST",
-        }
-      )
-
-      if (!response.ok) {
-        setReportRunError(
-          await readApiError(response, "Report run could not be started.")
-        )
-        return
-      }
-
-      setResultsStreamRestartKey((currentKey) => currentKey + 1)
-    } catch {
-      setReportRunError("Report run could not be sent to the server.")
-    } finally {
-      setIsStartingReportRun(false)
     }
   }
 
@@ -3082,12 +2876,10 @@ function SimulationDetails({
       commanders={commanders}
       hasUsableModelPreset={selectedModelPreset !== null}
       isStartingOpeningHandRun={isStartingOpeningHandRun}
-      isStartingReportRun={isStartingReportRun}
       isStartingTurnRun={isStartingTurnRun}
       isLoadingStartingHand={isLoadingStartingHand}
       isStoppingSimulation={isStoppingSimulation}
       onStartOpeningHandRun={() => void handleStartOpeningHandRun()}
-      onStartReportRun={() => void handleStartReportRun()}
       onKeepResultsScrolledToBottom={keepResultsScrolledToBottom}
       onModelPresetRequired={onOpenDetails}
       onResultsScroll={handleResultsScroll}
@@ -3097,7 +2889,6 @@ function SimulationDetails({
       onUpgradeUsage={onUpgradeUsage}
       openingHandRunError={openingHandRunError}
       readOnly={readOnly}
-      reportRunError={reportRunError}
       resultsError={resultsError}
       resultsInfo={resultsInfo}
       resultsPanelRef={resultsPanelRef}
@@ -3583,7 +3374,6 @@ function SimulationResultsPanel({
   commanders,
   hasUsableModelPreset,
   isStartingOpeningHandRun,
-  isStartingReportRun,
   isStartingTurnRun,
   isLoadingStartingHand,
   isStoppingSimulation,
@@ -3593,12 +3383,10 @@ function SimulationResultsPanel({
   onResultsScroll,
   onScrollResultsToBottomIfKept,
   onStartTurnRun,
-  onStartReportRun,
   onStopSimulation,
   onUpgradeUsage,
   openingHandRunError,
   readOnly,
-  reportRunError,
   resultsError,
   resultsInfo,
   resultsPanelRef,
@@ -3613,7 +3401,6 @@ function SimulationResultsPanel({
   commanders: DeckCard[]
   hasUsableModelPreset: boolean
   isStartingOpeningHandRun: boolean
-  isStartingReportRun: boolean
   isStartingTurnRun: boolean
   isLoadingStartingHand: boolean
   isStoppingSimulation: boolean
@@ -3623,12 +3410,10 @@ function SimulationResultsPanel({
   onResultsScroll: (event: UIEvent<HTMLElement>) => void
   onScrollResultsToBottomIfKept: () => void
   onStartTurnRun: (turnNumber: number) => void
-  onStartReportRun: () => void
   onStopSimulation: () => void
   onUpgradeUsage: () => void
   openingHandRunError: string | null
   readOnly: boolean
-  reportRunError: string | null
   resultsError: string | null
   resultsInfo: SimulationResultsInfo
   resultsPanelRef: RefObject<HTMLElement | null>
@@ -3656,9 +3441,6 @@ function SimulationResultsPanel({
   const isTurnRunning = resultsInfo.turnLlmRuns.some((run) =>
     isActiveLlmRunStatus(run.status)
   )
-  const isReportRunning = resultsInfo.reportLlmRuns.some((run) =>
-    isActiveLlmRunStatus(run.status)
-  )
   const activeTurnNumbers = new Set(
     resultsInfo.turnLlmRuns
       .filter(
@@ -3670,19 +3452,13 @@ function SimulationResultsPanel({
   const isStartingSimulationRun =
     isStartingOpeningHandRun ||
     isStartingTurnRun ||
-    isStartingReportRun ||
     isStoppingSimulation
   const isSimulationActionBlocked =
     readOnly ||
     isStartingSimulationRun ||
     isOpeningHandRunning ||
     isTurnRunning ||
-    isReportRunning ||
     simulation.activeLlmRunCount > 0
-  const canStartReportRun =
-    !isSimulationActionBlocked &&
-    resultsInfo.reportLlmRuns.length === 0 &&
-    canGenerateReportFromVisibleResults(simulation, resultsInfo)
   const latestOpeningHandRun = resultsInfo.openingHandLlmRuns.reduce<
     SimulationResultsInfo["openingHandLlmRuns"][number] | null
   >((latestRun, run) => {
@@ -3803,7 +3579,7 @@ function SimulationResultsPanel({
     }
   }, [onScrollResultsToBottomIfKept, renderedSimulationAction])
 
-  const actionError = openingHandRunError ?? turnRunError ?? reportRunError
+  const actionError = openingHandRunError ?? turnRunError
   function canContinueWithModelPreset() {
     if (hasUsableModelPreset) {
       return true
@@ -3841,18 +3617,6 @@ function SimulationResultsPanel({
         run.chunks
       ),
     })),
-    ...resultsInfo.reportLlmRuns.map((run) => ({
-      ...run,
-      canRerun: false,
-      isActive: isActiveLlmRunStatus(run.status),
-      resultKind: "report" as const,
-      resultLabel: `Report attempt ${run.attemptNumber}`,
-      resultEntries: getSimulationResultEntries(run.chunks),
-      activeToolCallName: getSimulationRunActiveToolCallName(run.chunks),
-      hasFinalParsedOutputChunk: hasSimulationRunFinalParsedOutputChunk(
-        run.chunks
-      ),
-    })),
   ]
   const timelineSteps = useMemo(
     () =>
@@ -3875,19 +3639,8 @@ function SimulationResultsPanel({
       }
     }
 
-    const reportTimelineStep = getReportTimelineStep(canStartReportRun)
-
-    if (reportTimelineStep) {
-      steps.push(reportTimelineStep)
-    }
-
     return steps
-  }, [
-    canStartReportRun,
-    isStartingTurnRun,
-    renderedSimulationAction,
-    timelineSteps,
-  ])
+  }, [isStartingTurnRun, renderedSimulationAction, timelineSteps])
   const [
     selectedTimelineStepIdPreference,
     setSelectedTimelineStepIdPreference,
@@ -4001,10 +3754,6 @@ function SimulationResultsPanel({
     ].filter(Boolean)
     const shouldShowRunMetadata = !run.isActive && runMetadata.length > 0
     const shouldShowRunActions = run.canRerun
-    const hasLiveReport =
-      run.resultKind === "report" &&
-      !run.hasFinalParsedOutputChunk &&
-      getReportTextFromChunks(run.chunks) !== null
     const emptyRunFailureMessage =
       run.status === "failed" ? run.failureMessage?.trim() || null : null
     const isUsageLimitFailure = isUsageLimitFailureMessage(
@@ -4033,9 +3782,7 @@ function SimulationResultsPanel({
           />
         ) : null}
 
-        {run.resultEntries.length > 0 ||
-        finishedThinkingStatus ||
-        hasLiveReport ? (
+        {run.resultEntries.length > 0 || finishedThinkingStatus ? (
           <SimulationResultChunkCards
             cardLookup={cardLookup}
             run={run}
@@ -4110,16 +3857,12 @@ function SimulationResultsPanel({
                   aria-label={
                     run.resultKind === "opening_hand"
                       ? "Rerun opening hand"
-                      : run.resultKind === "report"
-                        ? "Rerun report"
-                        : `Rerun turn ${run.turnNumber}`
+                      : `Rerun turn ${run.turnNumber}`
                   }
                   title={
                     run.resultKind === "opening_hand"
                       ? "Rerun opening hand"
-                      : run.resultKind === "report"
-                        ? "Rerun report"
-                        : `Rerun turn ${run.turnNumber}`
+                      : `Rerun turn ${run.turnNumber}`
                   }
                   onClick={() => {
                     if (!canContinueWithModelPreset()) {
@@ -4131,11 +3874,6 @@ function SimulationResultsPanel({
 
                     if (run.resultKind === "opening_hand") {
                       onStartOpeningHandRun()
-                      return
-                    }
-
-                    if (run.resultKind === "report") {
-                      onStartReportRun()
                       return
                     }
 
@@ -4388,24 +4126,13 @@ function hasSimulationTimelineTurnStep(
   )
 }
 
-function getReportTimelineStep(
-  canStartReportRun: boolean
-): SimulationResultsReportTimelineStep | null {
-  if (canStartReportRun) {
-    return null
-  }
-
-  return null
-}
-
 function isSimulationTimelineResultStep(
   step: SimulationResultsDisplayTimelineStep
 ): step is SimulationResultsTimelineStep {
   return (
     step.kind === "preset_opening_hand" ||
     step.kind === "opening_hand" ||
-    step.kind === "turn" ||
-    step.kind === "report"
+    step.kind === "turn"
   )
 }
 
@@ -4430,10 +4157,6 @@ function getSimulationTimelineStepStatusLabel(
 
   if (step.status === "starting_turn") {
     return "Starting"
-  }
-
-  if (step.status === "report") {
-    return "Report"
   }
 
   if (step.status === "preset") {
@@ -4470,7 +4193,7 @@ function getSimulationTimelineStepStatusLabel(
 function getSimulationTimelineStepDescription(
   step: SimulationResultsDisplayTimelineStep
 ) {
-  if (step.kind === "simulate_turn" || step.kind === "generate_report") {
+  if (step.kind === "simulate_turn") {
     return step.detailLabel
   }
 
@@ -4528,7 +4251,7 @@ function getSimulationTimelineStepNodeClassName(
     return `${baseClassName} border-primary text-primary`
   }
 
-  if (step.kind === "simulate_turn" || step.kind === "generate_report") {
+  if (step.kind === "simulate_turn") {
     return `${baseClassName} border-border text-muted-foreground group-hover:border-primary/60 group-hover:text-primary`
   }
 
@@ -4564,7 +4287,7 @@ function getSimulationTimelineStepNodeContent({
     return <LoaderCircle className="size-4 animate-spin" />
   }
 
-  if (step.kind === "simulate_turn" || step.kind === "generate_report") {
+  if (step.kind === "simulate_turn") {
     return <Plus className="size-4" />
   }
 
@@ -4603,10 +4326,6 @@ function getSimulationTimelineSelectedActiveStepNodeContent(
 
   if (step.kind === "turn") {
     return <Swords className="size-4" />
-  }
-
-  if (step.kind === "report") {
-    return <BookCopy className="size-4" />
   }
 
   return <Hourglass className="size-4" />
@@ -4665,10 +4384,6 @@ function SimulationResultChunkCards({
         : finalParsedOutputEntryIndex
   const shouldAppendFinishedThinkingStatus =
     finishedThinkingStatus !== null && finishedThinkingStatusIndex === -1
-  const liveReport =
-    run.phase === "report" && finalParsedOutputEntryIndex === -1
-      ? getReportTextFromChunks(run.chunks)
-      : null
 
   function renderEntry(entry: SimulationResultEntry) {
     const { chunk } = entry
@@ -4694,13 +4409,6 @@ function SimulationResultChunkCards({
 
   return (
     <div className="grid gap-2">
-      {liveReport ? (
-        <div
-          className={`grid gap-3 p-3 ${simulationResultChunkSurfaceClassName}`}
-        >
-          <SimulationReportMarkdown report={liveReport} />
-        </div>
-      ) : null}
       {entries.map((entry, index) => (
         <Fragment key={entry.id}>
           {index === finishedThinkingStatusIndex
@@ -4712,22 +4420,6 @@ function SimulationResultChunkCards({
       {shouldAppendFinishedThinkingStatus ? finishedThinkingStatus : null}
     </div>
   )
-}
-
-function getReportTextFromChunks(
-  chunks: readonly SimulationDebugLlmRunChunk[]
-) {
-  const report = [...chunks]
-    .sort(
-      (firstChunk, secondChunk) => firstChunk.sequence - secondChunk.sequence
-    )
-    .map((chunk) =>
-      chunk.kind === "message_delta" ? (chunk.outputDelta ?? "") : ""
-    )
-    .join("")
-    .trim()
-
-  return report.length > 0 ? report : null
 }
 
 function SimulationResultThinkingStatus({
@@ -4845,8 +4537,6 @@ function SimulationResultThinkingStatus({
   )
 }
 
-const simulationReportMarkdownClassName =
-  "min-w-0 space-y-2 text-sm leading-6 break-words text-foreground/95 [&_a]:text-sky-300 [&_a]:underline [&_code]:rounded-sm [&_code]:bg-muted/45 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-sky-100 [&_ol]:list-decimal [&_ol]:pl-5 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-black/30 [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_strong]:text-foreground [&_ul]:list-disc [&_ul]:pl-5"
 const simulationResultSummaryMarkdownClassName =
   "min-w-0 space-y-2 text-sm leading-6 break-words text-muted-foreground [&_a]:text-sky-300 [&_a]:underline [&_code]:rounded-sm [&_code]:bg-muted/45 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-sky-100 [&_ol]:list-decimal [&_ol]:pl-5 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-black/30 [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_strong]:text-foreground/90 [&_ul]:list-disc [&_ul]:pl-5"
 
@@ -4930,11 +4620,7 @@ function SimulationFinalOutputBlock({
 
   return (
     <div className={`grid gap-3 p-3 ${simulationResultChunkSurfaceClassName}`}>
-      {finalOutput.type === "opening_hand" ? (
-        <SimulationResultSummaryMarkdown summary={finalOutput.summary} />
-      ) : (
-        <SimulationReportMarkdown report={finalOutput.report} />
-      )}
+      <SimulationResultSummaryMarkdown summary={finalOutput.summary} />
     </div>
   )
 }
@@ -4943,14 +4629,6 @@ function SimulationResultSummaryMarkdown({ summary }: { summary: string }) {
   return (
     <div className={simulationResultSummaryMarkdownClassName}>
       <ReactMarkdown>{summary}</ReactMarkdown>
-    </div>
-  )
-}
-
-function SimulationReportMarkdown({ report }: { report: string }) {
-  return (
-    <div className={simulationReportMarkdownClassName}>
-      <ReactMarkdown>{report}</ReactMarkdown>
     </div>
   )
 }
@@ -6588,18 +6266,6 @@ function SimulationResultEvent({
   )
 }
 
-function isCountedReportRun(
-  run: SimulationResultsInfo["reportLlmRuns"][number]
-) {
-  return (
-    run.outdated !== true &&
-    (isActiveLlmRunStatus(run.status) ||
-      run.status === "failed" ||
-      run.status === "cancelled" ||
-      (run.status === "completed" && Boolean(run.report?.trim())))
-  )
-}
-
 function SimulationResultToolLabelEvent({
   icon,
   reason,
@@ -7120,10 +6786,6 @@ function SimulationDebugPanel({
             }
           />
           <DebugMetadataItem
-            label="Auto-generate report"
-            value={formatDebugBoolean(debugInfo.autoGenerateReport)}
-          />
-          <DebugMetadataItem
             label="Reasoning summaries"
             value={formatDebugBoolean(debugInfo.reasoningSummariesEnabled)}
           />
@@ -7169,10 +6831,6 @@ function SimulationDebugPanel({
             label="Turn LLM runs"
             value={debugInfo.turnLlmRunCount}
           />
-          <DebugMetadataItem
-            label="Report LLM runs"
-            value={debugInfo.reportLlmRunCount}
-          />
         </DebugMetadataGrid>
       </section>
 
@@ -7185,11 +6843,6 @@ function SimulationDebugPanel({
         heading="Turn runs"
         modelPresets={modelPresets}
         runs={debugInfo.turnLlmRuns}
-      />
-      <SimulationDebugRunGroup
-        heading="Report runs"
-        modelPresets={modelPresets}
-        runs={debugInfo.reportLlmRuns}
       />
     </div>
   )

@@ -68,19 +68,6 @@ export function upsertSimulationResultsRun(
     }
   }
 
-  if (incomingRun.phase === "report") {
-    const reportLlmRuns = upsertRun(
-      currentResults.reportLlmRuns,
-      incomingRun
-    ).sort(compareReportRuns)
-
-    return {
-      ...currentResults,
-      reportLlmRunCount: reportLlmRuns.length,
-      reportLlmRuns,
-    }
-  }
-
   return currentResults
 }
 
@@ -103,16 +90,10 @@ export function appendSimulationResultsRunChunk(
     llmRunId,
     chunk
   )
-  const reportLlmRuns = appendChunkToRuns(
-    currentResults.reportLlmRuns,
-    llmRunId,
-    chunk
-  )
 
   if (
     openingHandLlmRuns === currentResults.openingHandLlmRuns &&
-    turnLlmRuns === currentResults.turnLlmRuns &&
-    reportLlmRuns === currentResults.reportLlmRuns
+    turnLlmRuns === currentResults.turnLlmRuns
   ) {
     return currentResults
   }
@@ -121,7 +102,6 @@ export function appendSimulationResultsRunChunk(
     ...currentResults,
     openingHandLlmRuns,
     turnLlmRuns,
-    reportLlmRuns,
   }
 }
 
@@ -254,11 +234,4 @@ function compareTurnRuns(
     (firstRun.turnNumber ?? 0) - (secondRun.turnNumber ?? 0) ||
     firstRun.attemptNumber - secondRun.attemptNumber
   )
-}
-
-function compareReportRuns(
-  firstRun: SimulationDebugLlmRun,
-  secondRun: SimulationDebugLlmRun
-) {
-  return firstRun.attemptNumber - secondRun.attemptNumber
 }

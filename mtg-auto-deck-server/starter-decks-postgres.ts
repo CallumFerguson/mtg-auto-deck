@@ -71,7 +71,6 @@ type SimulationRow = {
   mulligan_count: number
   has_drawn_starting_hand: boolean
   auto_simulate_next_step: boolean
-  auto_generate_report: boolean
   status: SimulationStatus
   started_at: Date | null
   completed_at: Date | null
@@ -127,15 +126,6 @@ type TurnLlmRunRow = {
   outdated: boolean
   library_snapshot: unknown | null
   random_state_snapshot: string | number | null
-  created_at: Date
-}
-
-type ReportLlmRunRow = {
-  simulation_id: string
-  llm_run_id: string
-  attempt_number: number
-  report: string | null
-  outdated: boolean
   created_at: Date
 }
 
@@ -627,12 +617,6 @@ async function copySimulations({
       llmRunIdMap,
       sourceSimulationId: sourceSimulation.id,
     })
-    await copyReportLlmRuns({
-      client,
-      copiedSimulationId,
-      llmRunIdMap,
-      sourceSimulationId: sourceSimulation.id,
-    })
     await copyLlmRunChildren({
       client,
       llmRunIdMap,
@@ -662,7 +646,6 @@ async function listCopyableSimulations({
         simulation.mulligan_count,
         simulation.has_drawn_starting_hand,
         simulation.auto_simulate_next_step,
-        simulation.auto_generate_report,
         simulation.status,
         simulation.started_at,
         simulation.completed_at,
@@ -683,10 +666,6 @@ async function listCopyableSimulations({
             UNION ALL
             SELECT llm_run_id
             FROM simulation_turn_llm_runs
-            WHERE simulation_id = simulation.id
-            UNION ALL
-            SELECT llm_run_id
-            FROM simulation_report_llm_runs
             WHERE simulation_id = simulation.id
           ) linked_run
           JOIN llm_runs llm_run
@@ -731,7 +710,6 @@ async function copySimulationShell({
         mulligan_count,
         has_drawn_starting_hand,
         auto_simulate_next_step,
-        auto_generate_report,
         status,
         started_at,
         completed_at,
@@ -760,8 +738,7 @@ async function copySimulationShell({
         $16,
         $17,
         $18,
-        $19,
-        $20
+        $19
       )
       RETURNING id
     `,
@@ -777,7 +754,6 @@ async function copySimulationShell({
       sourceSimulation.mulligan_count,
       sourceSimulation.has_drawn_starting_hand,
       sourceSimulation.auto_simulate_next_step,
-      sourceSimulation.auto_generate_report,
       sourceSimulation.status,
       sourceSimulation.started_at,
       sourceSimulation.completed_at,
@@ -865,10 +841,6 @@ async function listLinkedLlmRuns({
         UNION
         SELECT llm_run_id
         FROM simulation_turn_llm_runs
-        WHERE simulation_id = $1
-        UNION
-        SELECT llm_run_id
-        FROM simulation_report_llm_runs
         WHERE simulation_id = $1
       ) linked_run
       JOIN llm_runs llm_run
@@ -1103,60 +1075,6 @@ async function copyTurnLlmRuns({
         run.outdated,
         toNullableJsonParameter(run.library_snapshot),
         run.random_state_snapshot,
-        run.created_at,
-      ]
-    )
-  }
-}
-
-async function copyReportLlmRuns({
-  client,
-  copiedSimulationId,
-  llmRunIdMap,
-  sourceSimulationId,
-}: {
-  client: Queryable
-  copiedSimulationId: string
-  llmRunIdMap: Map<string, string>
-  sourceSimulationId: string
-}) {
-  const result = await client.query<ReportLlmRunRow>(
-    `
-      /* starter-copy:list-report-llm-runs */
-      SELECT
-        simulation_id,
-        llm_run_id,
-        attempt_number,
-        report,
-        outdated,
-        created_at
-      FROM simulation_report_llm_runs
-      WHERE simulation_id = $1
-      ORDER BY attempt_number ASC
-    `,
-    [sourceSimulationId]
-  )
-
-  for (const run of result.rows) {
-    await client.query(
-      `
-        /* starter-copy:copy-report-llm-run */
-        INSERT INTO simulation_report_llm_runs (
-          simulation_id,
-          llm_run_id,
-          attempt_number,
-          report,
-          outdated,
-          created_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6)
-      `,
-      [
-        copiedSimulationId,
-        getMappedId(llmRunIdMap, run.llm_run_id, "report LLM run"),
-        run.attempt_number,
-        run.report,
-        run.outdated,
         run.created_at,
       ]
     )

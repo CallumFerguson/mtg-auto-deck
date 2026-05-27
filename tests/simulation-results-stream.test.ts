@@ -361,56 +361,6 @@ test("uses started time, not created time, for run elapsed timing", () => {
   )
 })
 
-test("streams report runs and keeps report attempts sorted", () => {
-  let results: SimulationResultsInfo | null = createResults()
-
-  results = applySimulationResultsStreamEvent(results, {
-    type: "llm_run_started",
-    run: createRun({
-      llmRunId: "report-run-2",
-      phase: "report",
-      attemptNumber: 2,
-    }),
-  })
-
-  results = applySimulationResultsStreamEvent(results, {
-    type: "llm_run_started",
-    run: createRun({
-      llmRunId: "report-run-1",
-      phase: "report",
-      attemptNumber: 1,
-    }),
-  })
-
-  assert.equal(results?.reportLlmRunCount, 2)
-  assert.deepEqual(
-    results?.reportLlmRuns.map((run) => run.attemptNumber),
-    [1, 2]
-  )
-
-  results = applySimulationResultsStreamEvent(results, {
-    type: "chunk",
-    llmRunId: "report-run-2",
-    chunk: createChunk({ id: null, sequence: 1, outputDelta: "# Report" }),
-  })
-
-  assert.equal(results?.reportLlmRuns[1].chunks[0].outputDelta, "# Report")
-
-  results = applySimulationResultsStreamEvent(results, {
-    type: "llm_run_updated",
-    run: createRun({
-      llmRunId: "report-run-2",
-      phase: "report",
-      attemptNumber: 2,
-      report: "# Report\n\nLooks good.",
-      status: "completed",
-    }),
-  })
-
-  assert.equal(results?.reportLlmRuns[1].status, "completed")
-  assert.equal(results?.reportLlmRuns[1].report, "# Report\n\nLooks good.")
-})
-
 test("reads opening hand final output from final parsed output chunks", () => {
   const parsedOutput = getSimulationFinalParsedOutput(
     createRun({
@@ -610,30 +560,6 @@ test("ignores final parsed payloads with a model error", () => {
   )
 
   assert.equal(parsedOutput, null)
-})
-
-test("reads report final output from final parsed output chunks", () => {
-  const parsedOutput = getSimulationFinalParsedOutput(
-    createRun({
-      llmRunId: "report-run",
-      phase: "report",
-      chunks: [
-        createChunk({
-          id: 1,
-          sequence: 1,
-          kind: "final_parsed_output",
-          payload: {
-            report: "# Simulation report\n\nThe opener converted cleanly.",
-          },
-        }),
-      ],
-    })
-  )
-
-  assert.deepEqual(parsedOutput, {
-    type: "report",
-    report: "# Simulation report\n\nThe opener converted cleanly.",
-  })
 })
 
 test("ignores invalid final parsed output payloads", () => {
@@ -1674,7 +1600,7 @@ test("does not infer preset library counts without a starting hand", () => {
   )
 })
 
-test("builds timeline steps in opening hand, turn, report order", () => {
+test("builds timeline steps in opening hand and turn order", () => {
   const steps = buildSimulationResultsTimelineSteps({
     hasPresetStartingHand: false,
     resultsInfo: createResults({
@@ -1699,19 +1625,12 @@ test("builds timeline steps in opening hand, turn, report order", () => {
           turnNumber: 1,
         }),
       ],
-      reportLlmRuns: [
-        createRun({
-          llmRunId: "report-run",
-          phase: "report",
-          status: "completed",
-        }),
-      ],
     }),
   })
 
   assert.deepEqual(
     steps.map((step) => step.id),
-    ["run:opening-run", "run:turn-1", "run:turn-2", "run:report-run"]
+    ["run:opening-run", "run:turn-1", "run:turn-2"]
   )
 })
 
@@ -1857,19 +1776,12 @@ test("falls back to the latest visible timeline stage", () => {
           turnNumber: 1,
         }),
       ],
-      reportLlmRuns: [
-        createRun({
-          llmRunId: "report-run",
-          phase: "report",
-          status: "completed",
-        }),
-      ],
     }),
   })
 
   assert.equal(
     getFallbackSimulationResultsTimelineStepId(steps),
-    "run:report-run"
+    "run:turn-run"
   )
 })
 
@@ -1931,20 +1843,16 @@ test("falls back when a selected timeline step is removed", () => {
 
 function createResults({
   openingHandLlmRuns = [],
-  reportLlmRuns = [],
   turnLlmRuns = [],
 }: {
   openingHandLlmRuns?: SimulationDebugLlmRun[]
-  reportLlmRuns?: SimulationDebugLlmRun[]
   turnLlmRuns?: SimulationDebugLlmRun[]
 } = {}): SimulationResultsInfo {
   return {
     simulationId: "simulation-id",
     openingHandLlmRunCount: openingHandLlmRuns.length,
-    reportLlmRunCount: reportLlmRuns.length,
     turnLlmRunCount: turnLlmRuns.length,
     openingHandLlmRuns,
-    reportLlmRuns,
     turnLlmRuns,
   }
 }
@@ -1962,7 +1870,6 @@ function createRun(overrides: {
   librarySnapshot?: string[] | null
   openrouterGenerations?: SimulationDebugLlmRun["openrouterGenerations"]
   provider?: string
-  report?: string
   startedAt?: string | null
   status?: string
   turnNumber?: number
@@ -1990,7 +1897,6 @@ function createRun(overrides: {
     cancelledAt: overrides.cancelledAt ?? null,
     librarySnapshot: overrides.librarySnapshot,
     turnNumber: overrides.turnNumber,
-    report: overrides.report,
     openrouterGenerations: overrides.openrouterGenerations ?? [],
     chunks: overrides.chunks ?? [],
   }

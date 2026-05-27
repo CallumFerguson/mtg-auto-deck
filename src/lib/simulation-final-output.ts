@@ -11,10 +11,6 @@ export type ParsedSimulationFinalOutput =
       turnActions: Record<string, string[]>
       gameState: unknown
     }
-  | {
-      type: "report"
-      report: string
-    }
 
 export function getSimulationFinalParsedOutput(
   run: Pick<SimulationDebugLlmRun, "phase" | "chunks">
@@ -43,10 +39,6 @@ export function getSimulationFinalParsedOutputFromPayload(
 
   if (phase === "turn") {
     return getTurnFinalParsedOutput(payload)
-  }
-
-  if (phase === "report") {
-    return getReportFinalParsedOutput(payload)
   }
 
   return null
@@ -100,25 +92,6 @@ function getTurnFinalParsedOutput(
     type: "turn",
     turnActions,
     gameState,
-  }
-}
-
-function getReportFinalParsedOutput(
-  value: unknown
-): ParsedSimulationFinalOutput | null {
-  if (!isRecord(value)) {
-    return null
-  }
-
-  const report = value.report
-
-  if (typeof report !== "string" || !report.trim()) {
-    return null
-  }
-
-  return {
-    type: "report",
-    report,
   }
 }
 

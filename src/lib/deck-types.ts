@@ -48,7 +48,6 @@ export type Simulation = {
   seed: string
   library: string[]
   turnsToSimulate: number
-  autoGenerateReport: boolean
   reasoningSummariesEnabled: boolean
   useFlexServiceTier: boolean
   isPublic: boolean
@@ -84,8 +83,6 @@ export type CreateOpeningHandLlmRunResponse = {
 export type CreateTurnLlmRunResponse = CreateOpeningHandLlmRunResponse & {
   turnNumber: number
 }
-
-export type CreateReportLlmRunResponse = CreateOpeningHandLlmRunResponse
 
 export type StopSimulationResponse = {
   simulationId: string
@@ -134,7 +131,6 @@ export type SimulationDebugLlmRun = {
   turnActions?: unknown
   gameState?: unknown
   librarySnapshot?: string[] | null
-  report?: string
   outdated?: boolean
   openingHandIsValid?: boolean
   openrouterGenerations: OpenRouterGeneration[]
@@ -173,7 +169,6 @@ export type SimulationDebugInfo = {
   startingHandId: string | null
   seed: string
   turnsToSimulate: number
-  autoGenerateReport: boolean
   reasoningSummariesEnabled: boolean
   useFlexServiceTier: boolean
   isPublic: boolean
@@ -185,10 +180,8 @@ export type SimulationDebugInfo = {
   updatedAt: string
   openingHandLlmRunCount: number
   turnLlmRunCount: number
-  reportLlmRunCount: number
   openingHandLlmRuns: SimulationDebugLlmRunMetadata[]
   turnLlmRuns: SimulationDebugLlmRunMetadata[]
-  reportLlmRuns: SimulationDebugLlmRunMetadata[]
 }
 
 export type SimulationDebugResponse = {
@@ -199,10 +192,8 @@ export type SimulationResultsInfo = {
   simulationId: string
   openingHandLlmRunCount: number
   turnLlmRunCount: number
-  reportLlmRunCount: number
   openingHandLlmRuns: SimulationDebugLlmRun[]
   turnLlmRuns: SimulationDebugLlmRun[]
-  reportLlmRuns: SimulationDebugLlmRun[]
 }
 
 export type SimulationResultsResponse = {

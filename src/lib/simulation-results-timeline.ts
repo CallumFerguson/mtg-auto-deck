@@ -4,7 +4,6 @@ export type SimulationResultsTimelineStepKind =
   | "preset_opening_hand"
   | "opening_hand"
   | "turn"
-  | "report"
 
 export type SimulationResultsTimelineStepStatus =
   | "preset"
@@ -70,10 +69,6 @@ export function buildSimulationResultsTimelineSteps({
     steps.push(createRunStep(run, "turn"))
   }
 
-  for (const run of [...resultsInfo.reportLlmRuns].sort(compareReportRuns)) {
-    steps.push(createRunStep(run, "report"))
-  }
-
   return steps
 }
 
@@ -135,7 +130,6 @@ function getPreferredSimulationResultsTimelineStep(
   }
 
   return (
-    findLastStepByKind(steps, "report") ??
     findLastStepByKind(steps, "turn") ??
     findLastStepByKind(steps, "opening_hand") ??
     findLastStepByKind(steps, "preset_opening_hand") ??
@@ -211,11 +205,7 @@ function getRunStepLabel(
     return "Opening hand"
   }
 
-  if (kind === "turn") {
-    return `Turn ${run.turnNumber ?? "?"}`
-  }
-
-  return "Report"
+  return `Turn ${run.turnNumber ?? "?"}`
 }
 
 function getRunStepStatus(status: string): SimulationResultsTimelineStepStatus {
@@ -248,11 +238,4 @@ function compareTurnRuns(
     (firstRun.turnNumber ?? 0) - (secondRun.turnNumber ?? 0) ||
     firstRun.attemptNumber - secondRun.attemptNumber
   )
-}
-
-function compareReportRuns(
-  firstRun: SimulationDebugLlmRun,
-  secondRun: SimulationDebugLlmRun
-) {
-  return firstRun.attemptNumber - secondRun.attemptNumber
 }

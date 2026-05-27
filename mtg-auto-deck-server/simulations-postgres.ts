@@ -40,7 +40,7 @@ export type LlmRunStatus =
   | "cancel_requested"
   | "cancelled"
 
-export type LlmRunPhase = "opening_hand" | "turn" | "report" | "other"
+export type LlmRunPhase = "opening_hand" | "turn" | "other"
 
 export function canApplyLateLlmRunTerminalUpdate(status: LlmRunStatus) {
   return status === "pending" || status === "streaming"
@@ -93,20 +93,6 @@ export type CreateTurnLlmRunInput = {
   requireAutoSimulateNextStep?: boolean
 }
 
-export type CreateReportLlmRunInput = {
-  simulationId: string
-  llmModelPresetId: string
-  provider: string
-  model: string
-  openrouterModelProvider: string | null
-  serviceTier: string | null
-  reasoningEffort: string | null
-  runtimeStreamKey: string
-  fullPrompt: string
-  requestPayload: unknown
-  requireAutoSimulateNextStep?: boolean
-}
-
 export type OpeningHandLlmRun = {
   simulationId: string
   llmRunId: string
@@ -121,8 +107,6 @@ export type TurnLlmRun = OpeningHandLlmRun & {
   turnNumber: number
 }
 
-export type ReportLlmRun = OpeningHandLlmRun
-
 export type PreparedTurnLlmRun = TurnLlmRun & {
   previousGameState: unknown | null
 }
@@ -132,7 +116,7 @@ export type ClaimedQueuedLlmRun = {
   deckId: string
   llmRunId: string
   llmModelPresetId: string | null
-  phase: Extract<LlmRunPhase, "opening_hand" | "turn" | "report">
+  phase: Extract<LlmRunPhase, "opening_hand" | "turn">
   provider: string
   model: string
   openrouterModelProvider: string | null
@@ -152,7 +136,7 @@ export type UsageLimitedQueuedLlmRun = {
   simulationId: string
   deckId: string
   llmRunId: string
-  phase: Extract<LlmRunPhase, "opening_hand" | "turn" | "report">
+  phase: Extract<LlmRunPhase, "opening_hand" | "turn">
   failureMessage: string
 }
 
@@ -254,7 +238,6 @@ export type SimulationDebugLlmRun = {
   turnActions?: unknown
   gameState?: unknown
   librarySnapshot?: string[] | null
-  report?: string
   outdated?: boolean
   openingHandIsValid?: boolean
   openrouterGenerations: OpenRouterGeneration[]
@@ -289,20 +272,16 @@ export type SimulationDebugInfo = Omit<SimulationSummary, "id" | "library"> & {
   simulationId: string
   openingHandLlmRunCount: number
   turnLlmRunCount: number
-  reportLlmRunCount: number
   openingHandLlmRuns: SimulationDebugLlmRunMetadata[]
   turnLlmRuns: SimulationDebugLlmRunMetadata[]
-  reportLlmRuns: SimulationDebugLlmRunMetadata[]
 }
 
 export type SimulationResultsInfo = {
   simulationId: string
   openingHandLlmRunCount: number
   turnLlmRunCount: number
-  reportLlmRunCount: number
   openingHandLlmRuns: SimulationDebugLlmRun[]
   turnLlmRuns: SimulationDebugLlmRun[]
-  reportLlmRuns: SimulationDebugLlmRun[]
 }
 
 export type StaleInFlightLlmRunCleanupResult = {
@@ -328,9 +307,6 @@ export type SimulationNextStep =
   | {
       type: "turn"
       turnNumber: number
-    }
-  | {
-      type: "report"
     }
 
 export type SimulationCreationDecision = {
@@ -359,7 +335,6 @@ export type SimulationSummary = {
   seed: string
   library: string[]
   turnsToSimulate: number
-  autoGenerateReport: boolean
   reasoningSummariesEnabled: boolean
   useFlexServiceTier: boolean
   isPublic: boolean
@@ -436,7 +411,6 @@ export type CreateSimulationInput = {
   seed: string
   llmModelPresetId: string | null
   turnsToSimulate: number
-  autoGenerateReport: boolean
   reasoningSummariesEnabled?: boolean
   useFlexServiceTier?: boolean
   startingHandId: string | null
@@ -523,28 +497,15 @@ export function getOpeningHandCompletionDecision({
 }
 
 export function getTurnCompletionDecision({
-  autoGenerateReport,
   autoSimulateNextStep,
   turnNumber,
   turnsToSimulate,
 }: {
-  autoGenerateReport: boolean
   autoSimulateNextStep: boolean
   turnNumber: number
   turnsToSimulate: number
 }): SimulationCompletionDecision {
   if (turnNumber >= turnsToSimulate) {
-    if (autoGenerateReport && autoSimulateNextStep) {
-      return {
-        simulationStatus: "completed",
-        nextStep: {
-          type: "report",
-        },
-        disableAutoSimulateNextStep: false,
-        failureMessage: null,
-      }
-    }
-
     return {
       simulationStatus: "completed",
       nextStep: null,
@@ -635,22 +596,6 @@ export type TurnSimulationPromptData = {
   startingHand: string[]
 }
 
-export type SimulationReportTurnPromptData = {
-  turnNumber: number
-  gameState: unknown
-  turnActions: Record<TurnPhaseChange, string[]>
-}
-
-export type SimulationReportPromptData = {
-  simulationId: string
-  deckId: string
-  seed: string
-  turnsToSimulate: number
-  startingHand: string[]
-  openingHandSummary: string | null
-  turns: SimulationReportTurnPromptData[]
-}
-
 export class SimulationValidationError extends Error {
   constructor(message: string) {
     super(message)
@@ -680,7 +625,6 @@ export async function ensureSimulationsSchema() {
   await createEnumType("llm_run_phase", [
     "opening_hand",
     "turn",
-    "report",
     "other",
   ])
   await createEnumType("llm_chunk_kind", LLM_CHUNK_KINDS)
@@ -707,7 +651,6 @@ export async function ensureSimulationsSchema() {
       mulligan_count integer NOT NULL DEFAULT 0 CHECK (mulligan_count >= 0),
       has_drawn_starting_hand boolean NOT NULL DEFAULT false,
       auto_simulate_next_step boolean NOT NULL DEFAULT true,
-      auto_generate_report boolean NOT NULL DEFAULT false,
       reasoning_summaries_enabled boolean NOT NULL DEFAULT false,
       use_flex_service_tier boolean NOT NULL DEFAULT false,
       is_public boolean NOT NULL DEFAULT false,
@@ -726,10 +669,6 @@ export async function ensureSimulationsSchema() {
   await queryDatabase(`
     ALTER TABLE simulations
     ADD COLUMN IF NOT EXISTS auto_simulate_next_step boolean NOT NULL DEFAULT true
-  `)
-  await queryDatabase(`
-    ALTER TABLE simulations
-    ADD COLUMN IF NOT EXISTS auto_generate_report boolean NOT NULL DEFAULT false
   `)
   await queryDatabase(`
     ALTER TABLE simulations
@@ -1054,19 +993,6 @@ export async function ensureSimulationsSchema() {
     DROP TABLE IF EXISTS simulation_turn_evaluations
   `)
   await queryDatabase(`
-    CREATE TABLE IF NOT EXISTS simulation_report_llm_runs (
-      simulation_id uuid NOT NULL REFERENCES simulations(id) ON DELETE CASCADE,
-      llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
-      attempt_number integer NOT NULL CHECK (attempt_number > 0),
-      report text,
-      outdated boolean NOT NULL DEFAULT false,
-      created_at timestamptz NOT NULL DEFAULT now(),
-
-      UNIQUE (simulation_id, attempt_number),
-      UNIQUE (llm_run_id)
-    )
-  `)
-  await queryDatabase(`
     UPDATE llm_runs llm_run
     SET owner_user_id = deck.owner_user_id,
         updated_at = now()
@@ -1076,9 +1002,6 @@ export async function ensureSimulationsSchema() {
       UNION
       SELECT simulation_id, llm_run_id
       FROM simulation_turn_llm_runs
-      UNION
-      SELECT simulation_id, llm_run_id
-      FROM simulation_report_llm_runs
     ) linked_run
     JOIN simulations simulation
       ON simulation.id = linked_run.simulation_id
@@ -1177,9 +1100,60 @@ export async function ensureSimulationsSchema() {
     CREATE INDEX IF NOT EXISTS simulation_turn_llm_runs_simulation_id_turn_number_idx
       ON simulation_turn_llm_runs (simulation_id, turn_number)
   `)
+  await dropSimulationReportStorage()
+}
+
+async function dropSimulationReportStorage() {
   await queryDatabase(`
-    CREATE INDEX IF NOT EXISTS simulation_report_llm_runs_simulation_id_idx
-      ON simulation_report_llm_runs (simulation_id)
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM pg_type type
+        JOIN pg_enum enum_value
+          ON enum_value.enumtypid = type.oid
+        WHERE type.typname = 'llm_run_phase'
+          AND enum_value.enumlabel = 'report'
+      ) THEN
+        EXECUTE 'DELETE FROM llm_runs WHERE phase = ''report''';
+      END IF;
+    END $$;
+  `)
+  await queryDatabase(`
+    DROP TABLE IF EXISTS simulation_report_llm_runs
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulations
+    DROP COLUMN IF EXISTS auto_generate_report
+  `)
+  await queryDatabase(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM pg_type type
+        JOIN pg_enum enum_value
+          ON enum_value.enumtypid = type.oid
+        WHERE type.typname = 'llm_run_phase'
+          AND enum_value.enumlabel = 'report'
+      ) THEN
+        ALTER TABLE llm_runs
+          ALTER COLUMN phase TYPE text USING phase::text;
+        ALTER TABLE llm_run_mcp_tokens
+          DROP CONSTRAINT IF EXISTS llm_run_mcp_tokens_phase_check;
+        ALTER TABLE llm_run_mcp_tokens
+          ALTER COLUMN phase TYPE text USING phase::text;
+        DROP TYPE llm_run_phase;
+        CREATE TYPE llm_run_phase AS ENUM ('opening_hand', 'turn', 'other');
+        ALTER TABLE llm_runs
+          ALTER COLUMN phase TYPE llm_run_phase USING phase::llm_run_phase;
+        ALTER TABLE llm_run_mcp_tokens
+          ALTER COLUMN phase TYPE llm_run_phase USING phase::llm_run_phase;
+        ALTER TABLE llm_run_mcp_tokens
+          ADD CONSTRAINT llm_run_mcp_tokens_phase_check
+          CHECK (phase IN ('opening_hand', 'turn'));
+      END IF;
+    END $$;
   `)
 }
 
@@ -1256,7 +1230,6 @@ type SimulationSummaryRow = {
   seed: string
   library: unknown
   turns_to_simulate: number
-  auto_generate_report: boolean
   reasoning_summaries_enabled: boolean
   use_flex_service_tier: boolean
   is_public: boolean
@@ -1302,21 +1275,6 @@ const SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL = `
           AND turn_run.turn_actions IS NOT NULL
         )
       )
-  ) + (
-    SELECT COUNT(*)::integer
-    FROM simulation_report_llm_runs report_run
-    JOIN llm_runs llm_run
-      ON llm_run.id = report_run.llm_run_id
-    WHERE report_run.simulation_id = simulations.id
-      AND report_run.outdated = false
-      AND (
-        llm_run.status IN ('pending', 'streaming', 'cancel_requested', 'failed', 'cancelled')
-        OR (
-          llm_run.status = 'completed'
-          AND report_run.report IS NOT NULL
-          AND btrim(report_run.report) <> ''
-        )
-      )
   )
 `
 
@@ -1336,13 +1294,6 @@ const SIMULATION_SUMMARY_ACTIVE_RUN_COUNT_SQL = `
       JOIN llm_runs llm_run
         ON llm_run.id = turn_run.llm_run_id
       WHERE turn_run.simulation_id = simulations.id
-        AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
-      UNION ALL
-      SELECT report_run.llm_run_id
-      FROM simulation_report_llm_runs report_run
-      JOIN llm_runs llm_run
-        ON llm_run.id = report_run.llm_run_id
-      WHERE report_run.simulation_id = simulations.id
         AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
     ) active_run
   )
@@ -1369,7 +1320,6 @@ function mapSimulationSummaryRow(
     seed: simulation.seed,
     library: parseStringArray(simulation.library),
     turnsToSimulate: simulation.turns_to_simulate,
-    autoGenerateReport: simulation.auto_generate_report,
     reasoningSummariesEnabled: simulation.reasoning_summaries_enabled,
     useFlexServiceTier: simulation.use_flex_service_tier,
     isPublic: simulation.is_public,
@@ -1396,7 +1346,6 @@ export async function listSimulationsForDeck(
         seed,
         library,
         turns_to_simulate,
-        auto_generate_report,
         reasoning_summaries_enabled,
         use_flex_service_tier,
         is_public,
@@ -1513,7 +1462,6 @@ export async function createSimulation(
         seed,
         random_state,
         turns_to_simulate,
-        auto_generate_report,
         reasoning_summaries_enabled,
         use_flex_service_tier,
         starting_hand_id,
@@ -1521,7 +1469,7 @@ export async function createSimulation(
         has_drawn_starting_hand,
         status
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12)
       RETURNING
         id,
         deck_id,
@@ -1531,7 +1479,6 @@ export async function createSimulation(
         seed,
         library,
         turns_to_simulate,
-        auto_generate_report,
         reasoning_summaries_enabled,
         use_flex_service_tier,
         false AS is_public,
@@ -1549,7 +1496,6 @@ export async function createSimulation(
       seed,
       shuffledLibrary.randomState,
       input.turnsToSimulate,
-      input.autoGenerateReport,
       input.reasoningSummariesEnabled ?? false,
       input.useFlexServiceTier ?? false,
       input.startingHandId,
@@ -1577,7 +1523,6 @@ export async function getSimulationSummary(
         seed,
         library,
         turns_to_simulate,
-        auto_generate_report,
         reasoning_summaries_enabled,
         use_flex_service_tier,
         is_public,
@@ -1616,7 +1561,6 @@ export async function getPublicSimulationSummary(
         seed,
         library,
         turns_to_simulate,
-        auto_generate_report,
         reasoning_summaries_enabled,
         use_flex_service_tier,
         is_public,
@@ -1743,7 +1687,6 @@ export async function updateSimulation(
         seed,
         library,
         turns_to_simulate,
-        auto_generate_report,
         reasoning_summaries_enabled,
         use_flex_service_tier,
         is_public,
@@ -1787,7 +1730,6 @@ export async function setSimulationPublic(
         seed,
         library,
         turns_to_simulate,
-        auto_generate_report,
         reasoning_summaries_enabled,
         use_flex_service_tier,
         is_public,
@@ -2438,8 +2380,6 @@ export async function resetSimulationForOpeningHandLlmRun(
       `,
       [simulationId]
     )
-
-    await markSimulationReportRunsOutdatedWithClient(client, simulationId)
   })
 }
 
@@ -2518,8 +2458,6 @@ export async function createTurnLlmRun(
       `,
       [input.simulationId, input.turnNumber]
     )
-
-    await markSimulationReportRunsOutdatedWithClient(client, input.simulationId)
 
     const attemptResult = await client.query<{ attempt_number: number }>(
       `
@@ -2604,138 +2542,6 @@ export async function createTurnLlmRun(
       status: llmRun.status,
       createdAt: llmRun.created_at.toISOString(),
       previousGameState,
-    }
-  })
-}
-
-export async function createReportLlmRun(
-  deckId: string,
-  input: CreateReportLlmRunInput
-): Promise<ReportLlmRun> {
-  return withDatabaseTransaction(async (client) => {
-    const simulationResult = await client.query<{
-      id: string
-      auto_simulate_next_step: boolean
-      reasoning_summaries_enabled: boolean
-      owner_user_id: string | null
-    }>(
-      `
-        SELECT
-          simulation.id,
-          simulation.auto_simulate_next_step,
-          simulation.reasoning_summaries_enabled,
-          deck.owner_user_id
-        FROM simulations simulation
-        JOIN decks deck
-          ON deck.id = simulation.deck_id
-        WHERE simulation.id = $1
-          AND simulation.deck_id = $2
-        FOR UPDATE
-      `,
-      [input.simulationId, deckId]
-    )
-
-    if (simulationResult.rowCount === 0) {
-      throw new SimulationValidationError("Simulation not found.")
-    }
-
-    const simulation = simulationResult.rows[0]
-
-    if (
-      input.requireAutoSimulateNextStep &&
-      !simulation.auto_simulate_next_step
-    ) {
-      throw new SimulationValidationError(
-        SIMULATION_AUTO_ADVANCE_DISABLED_MESSAGE
-      )
-    }
-
-    await assertNoActiveSimulationLlmRuns(client, input.simulationId)
-    await markSimulationReportRunsOutdatedWithClient(client, input.simulationId)
-
-    const attemptResult = await client.query<{ attempt_number: number }>(
-      `
-        SELECT COALESCE(MAX(attempt_number), 0) + 1 AS attempt_number
-        FROM simulation_report_llm_runs
-        WHERE simulation_id = $1
-      `,
-      [input.simulationId]
-    )
-    const attemptNumber = Number(attemptResult.rows[0].attempt_number)
-    const openrouterModelProvider = getPersistableOpenRouterModelProvider(input)
-    const llmRunResult = await client.query<{
-      id: string
-      status: LlmRunStatus
-      runtime_stream_key: string
-      created_at: Date
-    }>(
-      `
-        INSERT INTO llm_runs (
-          phase,
-          llm_model_preset_id,
-          provider,
-          model,
-          openrouter_model_provider,
-          service_tier,
-          reasoning_effort,
-          reasoning_summaries_enabled,
-          owner_user_id,
-          runtime_stream_key,
-          full_prompt,
-          request_payload
-        )
-        VALUES (
-          'report',
-          $1,
-          $2,
-          $3,
-          $4,
-          $5,
-          $6,
-          $7,
-          $8,
-          $9,
-          $10,
-          $11::jsonb
-        )
-        RETURNING id, status, runtime_stream_key, created_at
-      `,
-      [
-        input.llmModelPresetId,
-        input.provider,
-        input.model,
-        openrouterModelProvider,
-        input.serviceTier,
-        input.reasoningEffort,
-        simulation.reasoning_summaries_enabled,
-        simulation.owner_user_id,
-        input.runtimeStreamKey,
-        input.fullPrompt,
-        JSON.stringify(input.requestPayload),
-      ]
-    )
-    const llmRun = llmRunResult.rows[0]
-
-    await client.query(
-      `
-        INSERT INTO simulation_report_llm_runs (
-          simulation_id,
-          llm_run_id,
-          attempt_number
-        )
-        VALUES ($1, $2, $3)
-      `,
-      [input.simulationId, llmRun.id, attemptNumber]
-    )
-
-    return {
-      simulationId: input.simulationId,
-      llmRunId: llmRun.id,
-      attemptNumber,
-      reasoningSummariesEnabled: simulation.reasoning_summaries_enabled,
-      runtimeStreamKey: llmRun.runtime_stream_key,
-      status: llmRun.status,
-      createdAt: llmRun.created_at.toISOString(),
     }
   })
 }
@@ -3512,7 +3318,7 @@ export async function claimNextQueuedLlmRun({
       deck_id: string
       llm_run_id: string
       llm_model_preset_id: string | null
-      phase: Extract<LlmRunPhase, "opening_hand" | "turn" | "report">
+      phase: Extract<LlmRunPhase, "opening_hand" | "turn">
       provider: string
       model: string
       openrouter_model_provider: string | null
@@ -3547,16 +3353,6 @@ export async function claimNextQueuedLlmRun({
           FROM simulation_turn_llm_runs turn_run
           JOIN simulations simulation
             ON simulation.id = turn_run.simulation_id
-          UNION ALL
-          SELECT
-            report_run.simulation_id,
-            simulation.deck_id,
-            report_run.llm_run_id,
-            report_run.attempt_number,
-            NULL::integer AS turn_number
-          FROM simulation_report_llm_runs report_run
-          JOIN simulations simulation
-            ON simulation.id = report_run.simulation_id
         ),
         candidate AS (
           SELECT
@@ -3645,21 +3441,19 @@ export async function claimNextQueuedLlmRun({
         )
         await client.query(failRunQuery.text, failRunQuery.values)
 
-        if (run.phase !== "report") {
-          await client.query(
-            `
-              UPDATE simulations
-              SET status = 'failed',
-                  auto_simulate_next_step = false,
-                  failed_at = now(),
-                  failure_message = $2,
-                  updated_at = now()
-              WHERE id = $1
-                AND status NOT IN ('completed', 'cancelled')
-            `,
-            [run.simulation_id, USAGE_LIMIT_OUT_OF_USAGE_MESSAGE]
-          )
-        }
+        await client.query(
+          `
+            UPDATE simulations
+            SET status = 'failed',
+                auto_simulate_next_step = false,
+                failed_at = now(),
+                failure_message = $2,
+                updated_at = now()
+            WHERE id = $1
+              AND status NOT IN ('completed', 'cancelled')
+          `,
+          [run.simulation_id, USAGE_LIMIT_OUT_OF_USAGE_MESSAGE]
+        )
 
         return {
           usageLimitExceeded: true,
@@ -3979,7 +3773,6 @@ export async function completeTurnLlmRun({
       random_state: string
       turns_to_simulate: number
       auto_simulate_next_step: boolean
-      auto_generate_report: boolean
     }>(
       `
         SELECT
@@ -3995,8 +3788,7 @@ export async function completeTurnLlmRun({
           simulation.library,
           simulation.random_state,
           simulation.turns_to_simulate,
-          simulation.auto_simulate_next_step,
-          simulation.auto_generate_report
+          simulation.auto_simulate_next_step
         FROM simulation_turn_llm_runs turn_run
         JOIN llm_runs llm_run
           ON llm_run.id = turn_run.llm_run_id
@@ -4064,7 +3856,6 @@ export async function completeTurnLlmRun({
     )
 
     const decision = getTurnCompletionDecision({
-      autoGenerateReport: snapshot.auto_generate_report,
       autoSimulateNextStep: snapshot.auto_simulate_next_step,
       turnNumber: snapshot.turn_number,
       turnsToSimulate: snapshot.turns_to_simulate,
@@ -4081,99 +3872,6 @@ export async function completeTurnLlmRun({
       deckId: snapshot.deck_id,
       ...decision,
     }
-  })
-}
-
-export async function completeReportLlmRun({
-  llmRunId,
-  report,
-  responseMetadata,
-  usage,
-}: {
-  llmRunId: string
-  report: string
-  responseMetadata: unknown
-  usage: unknown
-}) {
-  const trimmedReport = report.trim()
-
-  if (!trimmedReport) {
-    throw new SimulationValidationError("Report LLM response was empty.")
-  }
-
-  await withDatabaseTransaction(async (client) => {
-    const snapshotResult = await client.query<{
-      llm_run_status: LlmRunStatus
-      provider: string
-      service_tier: string | null
-      input_token_cost_usd_per_million: string | number | null
-      cached_input_token_cost_usd_per_million: string | number | null
-      output_token_cost_usd_per_million: string | number | null
-    }>(
-      `
-        SELECT
-          llm_run.status AS llm_run_status,
-          llm_run.provider,
-          llm_run.service_tier,
-          preset.input_token_cost_usd_per_million,
-          preset.cached_input_token_cost_usd_per_million,
-          preset.output_token_cost_usd_per_million
-        FROM simulation_report_llm_runs report_run
-        JOIN llm_runs llm_run
-          ON llm_run.id = report_run.llm_run_id
-        LEFT JOIN llm_model_presets preset
-          ON preset.id = llm_run.llm_model_preset_id
-        WHERE report_run.llm_run_id = $1
-        FOR UPDATE OF llm_run
-      `,
-      [llmRunId]
-    )
-
-    if (snapshotResult.rowCount === 0) {
-      throw new SimulationValidationError("Report LLM run not found.")
-    }
-
-    if (
-      !canApplyLateLlmRunTerminalUpdate(snapshotResult.rows[0].llm_run_status)
-    ) {
-      throw new SimulationValidationError("LLM run is no longer active.")
-    }
-
-    const costValues = getCompletedLlmRunCostValues(
-      snapshotResult.rows[0],
-      usage
-    )
-
-    await client.query(
-      `
-        UPDATE simulation_report_llm_runs
-        SET report = $2
-        WHERE llm_run_id = $1
-      `,
-      [llmRunId, trimmedReport]
-    )
-
-    await client.query(
-      `
-        UPDATE llm_runs
-        SET status = 'completed',
-            response_metadata = $2::jsonb,
-            usage = $3::jsonb,
-            estimated_cost_usd = $4,
-            openrouter_reported_cost_usd = $5,
-            completed_at = now(),
-            updated_at = now()
-        WHERE id = $1
-          AND status IN ('pending', 'streaming')
-      `,
-      [
-        llmRunId,
-        JSON.stringify(responseMetadata),
-        JSON.stringify(usage),
-        costValues.estimatedCostUsd,
-        costValues.openrouterReportedCostUsd,
-      ]
-    )
   })
 }
 
@@ -4403,33 +4101,6 @@ export async function failLlmRun(llmRunId: string, failureMessage: string) {
   })
 }
 
-export async function failReportLlmRun(
-  llmRunId: string,
-  failureMessage: string
-) {
-  await withDatabaseTransaction(async (client) => {
-    const estimatedCostUsd = await estimatePartialLlmRunCostUsdWithClient(
-      client,
-      llmRunId
-    )
-
-    await client.query(
-      `
-        UPDATE llm_runs
-        SET status = 'failed',
-            estimated_cost_usd = $3,
-            failed_at = now(),
-            failure_message = $2,
-            updated_at = now()
-        WHERE id = $1
-          AND status IN ('pending', 'streaming')
-          AND phase = 'report'
-      `,
-      [llmRunId, failureMessage, estimatedCostUsd]
-    )
-  })
-}
-
 export async function cancelLlmRun(llmRunId: string, failureMessage?: string) {
   await withDatabaseTransaction(async (client) => {
     const estimatedCostUsd = await estimatePartialLlmRunCostUsdWithClient(
@@ -4480,33 +4151,6 @@ export async function cancelLlmRun(llmRunId: string, failureMessage?: string) {
   })
 }
 
-export async function cancelReportLlmRun(
-  llmRunId: string,
-  failureMessage?: string
-) {
-  await withDatabaseTransaction(async (client) => {
-    const estimatedCostUsd = await estimatePartialLlmRunCostUsdWithClient(
-      client,
-      llmRunId
-    )
-
-    await client.query(
-      `
-        UPDATE llm_runs
-        SET status = 'cancelled',
-            estimated_cost_usd = $3,
-            cancelled_at = now(),
-            failure_message = COALESCE($2, failure_message),
-            updated_at = now()
-        WHERE id = $1
-          AND status IN ('pending', 'streaming', 'cancel_requested')
-          AND phase = 'report'
-      `,
-      [llmRunId, failureMessage ?? null, estimatedCostUsd]
-    )
-  })
-}
-
 export async function cancelStaleInFlightLlmRuns(): Promise<StaleInFlightLlmRunCleanupResult> {
   return withDatabaseTransaction(async (client) => {
     const activeRunsResult = await client.query<{
@@ -4520,16 +4164,13 @@ export async function cancelStaleInFlightLlmRuns(): Promise<StaleInFlightLlmRunC
           llm_run.phase,
           COALESCE(
             opening_run.simulation_id,
-            turn_run.simulation_id,
-            report_run.simulation_id
+            turn_run.simulation_id
           ) AS simulation_id
         FROM llm_runs llm_run
         LEFT JOIN simulation_opening_hand_llm_runs opening_run
           ON opening_run.llm_run_id = llm_run.id
         LEFT JOIN simulation_turn_llm_runs turn_run
           ON turn_run.llm_run_id = llm_run.id
-        LEFT JOIN simulation_report_llm_runs report_run
-          ON report_run.llm_run_id = llm_run.id
         WHERE (
           llm_run.status IN ('streaming', 'cancel_requested')
           OR (
@@ -4603,9 +4244,7 @@ export async function cancelStaleInFlightLlmRuns(): Promise<StaleInFlightLlmRunC
     const activeSimulationIds = Array.from(
       new Set(
         activeRunsResult.rows.flatMap((run) =>
-          run.simulation_id === null || run.phase === "report"
-            ? []
-            : [run.simulation_id]
+          run.simulation_id === null ? [] : [run.simulation_id]
         )
       )
     )
@@ -4652,10 +4291,6 @@ export async function cancelStaleInFlightLlmRuns(): Promise<StaleInFlightLlmRunC
               SELECT turn_run.llm_run_id
               FROM simulation_turn_llm_runs turn_run
               WHERE turn_run.simulation_id = simulations.id
-              UNION ALL
-              SELECT report_run.llm_run_id
-              FROM simulation_report_llm_runs report_run
-              WHERE report_run.simulation_id = simulations.id
             ) linked_run
             JOIN llm_runs llm_run
               ON llm_run.id = linked_run.llm_run_id
@@ -4738,18 +4373,6 @@ export async function requestCancelSimulationLlmRuns(
           ON llm_run.id = turn_run.llm_run_id
         WHERE turn_run.simulation_id = $1
           AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
-        UNION ALL
-        SELECT
-          report_run.simulation_id,
-          llm_run.id AS llm_run_id,
-          llm_run.phase,
-          llm_run.runtime_stream_key,
-          llm_run.status
-        FROM simulation_report_llm_runs report_run
-        JOIN llm_runs llm_run
-          ON llm_run.id = report_run.llm_run_id
-        WHERE report_run.simulation_id = $1
-          AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
       `,
       [simulationId]
     )
@@ -4827,18 +4450,6 @@ export async function listActiveSimulationLlmRuns(
         ON llm_run.id = turn_run.llm_run_id
       WHERE turn_run.simulation_id = $1
         AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
-      UNION ALL
-      SELECT
-        report_run.simulation_id,
-        llm_run.id AS llm_run_id,
-        llm_run.phase,
-        llm_run.runtime_stream_key,
-        llm_run.status
-      FROM simulation_report_llm_runs report_run
-      JOIN llm_runs llm_run
-        ON llm_run.id = report_run.llm_run_id
-      WHERE report_run.simulation_id = $1
-        AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
     `,
     [simulationId]
   )
@@ -4866,7 +4477,6 @@ export async function getSimulationDebugInfo(
         starting_hand_id,
         seed,
         turns_to_simulate,
-        auto_generate_report,
         reasoning_summaries_enabled,
         use_flex_service_tier,
         is_public,
@@ -4902,14 +4512,6 @@ export async function getSimulationDebugInfo(
       "run.attempt_number, run.turn_number, run.outdated, NULL::boolean AS opening_hand_is_valid",
     orderBy: "run.turn_number ASC, run.attempt_number ASC",
   })
-  const reportRuns = await getSimulationDebugLlmRunMetadata({
-    simulationId,
-    tableName: "simulation_report_llm_runs",
-    selectColumns:
-      "run.attempt_number, NULL::integer AS turn_number, run.outdated, NULL::boolean AS opening_hand_is_valid",
-    orderBy: "run.attempt_number ASC",
-  })
-
   return {
     simulationId,
     deckId: simulation.deck_id,
@@ -4918,7 +4520,6 @@ export async function getSimulationDebugInfo(
     startingHandId: simulation.starting_hand_id,
     seed: simulation.seed,
     turnsToSimulate: simulation.turns_to_simulate,
-    autoGenerateReport: simulation.auto_generate_report,
     reasoningSummariesEnabled: simulation.reasoning_summaries_enabled,
     useFlexServiceTier: simulation.use_flex_service_tier,
     isPublic: simulation.is_public,
@@ -4930,10 +4531,8 @@ export async function getSimulationDebugInfo(
     updatedAt: simulation.updated_at.toISOString(),
     openingHandLlmRunCount: openingHandRuns.length,
     turnLlmRunCount: turnRuns.length,
-    reportLlmRunCount: reportRuns.length,
     openingHandLlmRuns: openingHandRuns,
     turnLlmRuns: turnRuns,
-    reportLlmRuns: reportRuns,
   }
 }
 
@@ -4959,7 +4558,7 @@ export async function getSimulationResultsInfo(
     simulationId,
     tableName: "simulation_opening_hand_llm_runs",
     selectColumns:
-      "run.attempt_number, NULL::integer AS turn_number, NULL::jsonb AS turn_actions, NULL::jsonb AS game_state, run.library_snapshot, NULL::text AS report, NULL::boolean AS outdated, run.opening_hand_is_valid",
+      "run.attempt_number, NULL::integer AS turn_number, NULL::jsonb AS turn_actions, NULL::jsonb AS game_state, run.library_snapshot, NULL::boolean AS outdated, run.opening_hand_is_valid",
     orderBy: "run.attempt_number ASC",
     excludeChunkKinds: SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
     additionalWhereSql: `
@@ -4974,17 +4573,8 @@ export async function getSimulationResultsInfo(
     simulationId,
     tableName: "simulation_turn_llm_runs",
     selectColumns:
-      "run.attempt_number, run.turn_number, run.turn_actions, run.game_state, run.library_snapshot, NULL::text AS report, run.outdated, NULL::boolean AS opening_hand_is_valid",
+      "run.attempt_number, run.turn_number, run.turn_actions, run.game_state, run.library_snapshot, run.outdated, NULL::boolean AS opening_hand_is_valid",
     orderBy: "run.turn_number ASC, run.attempt_number ASC",
-    excludeChunkKinds: SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
-    additionalWhereSql: "run.outdated = false",
-  })
-  const reportRuns = await getSimulationDebugLlmRuns({
-    simulationId,
-    tableName: "simulation_report_llm_runs",
-    selectColumns:
-      "run.attempt_number, NULL::integer AS turn_number, NULL::jsonb AS turn_actions, NULL::jsonb AS game_state, NULL::jsonb AS library_snapshot, run.report, run.outdated, NULL::boolean AS opening_hand_is_valid",
-    orderBy: "run.attempt_number ASC",
     excludeChunkKinds: SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
     additionalWhereSql: "run.outdated = false",
   })
@@ -4993,10 +4583,8 @@ export async function getSimulationResultsInfo(
     simulationId,
     openingHandLlmRunCount: openingHandRuns.length,
     turnLlmRunCount: turnRuns.length,
-    reportLlmRunCount: reportRuns.length,
     openingHandLlmRuns: openingHandRuns,
     turnLlmRuns: turnRuns,
-    reportLlmRuns: reportRuns,
   }
 }
 
@@ -5013,10 +4601,6 @@ export async function deleteSimulation(
         UNION
         SELECT llm_run_id
         FROM simulation_turn_llm_runs
-        WHERE simulation_id = $1
-        UNION
-        SELECT llm_run_id
-        FROM simulation_report_llm_runs
         WHERE simulation_id = $1
       `,
       [simulationId]
@@ -5074,15 +4658,6 @@ export async function resolveSimulationIdForActiveLlmRun(llmRunId: string) {
       FROM llm_runs llm_run
       JOIN simulation_turn_llm_runs turn_run
         ON turn_run.llm_run_id = llm_run.id
-      WHERE llm_run.id = $1
-      UNION ALL
-      SELECT
-        report_run.simulation_id,
-        llm_run.status,
-        report_run.outdated
-      FROM llm_runs llm_run
-      JOIN simulation_report_llm_runs report_run
-        ON report_run.llm_run_id = llm_run.id
       WHERE llm_run.id = $1
       LIMIT 1
     `,
@@ -5340,213 +4915,6 @@ export async function getTurnSimulationPromptData(
   }
 }
 
-export async function getSimulationReportPromptData(
-  deckId: string,
-  simulationId: string
-): Promise<SimulationReportPromptData> {
-  const simulation = await getSimulationSummary(deckId, simulationId)
-
-  if (!simulation) {
-    throw new SimulationValidationError("Simulation not found.")
-  }
-
-  const resultsInfo = await getSimulationResultsInfo(deckId, simulationId)
-  const openingHand = await getReportOpeningHandPromptData(
-    simulation,
-    resultsInfo
-  )
-  const turns = await getReportTurnPromptData(resultsInfo.turnLlmRuns)
-
-  return {
-    simulationId,
-    deckId,
-    seed: simulation.seed,
-    turnsToSimulate: simulation.turnsToSimulate,
-    startingHand: openingHand.startingHand,
-    openingHandSummary: openingHand.summary,
-    turns,
-  }
-}
-
-async function getReportOpeningHandPromptData(
-  simulation: SimulationSummary,
-  resultsInfo: SimulationResultsInfo
-) {
-  if (simulation.startingHandId !== null) {
-    return {
-      startingHand: await getTurnSimulationStartingHand({
-        simulationId: simulation.id,
-        startingHandId: simulation.startingHandId,
-      }),
-      summary: null,
-    }
-  }
-
-  const latestOpeningHandRun =
-    resultsInfo.openingHandLlmRuns.reduce<SimulationDebugLlmRun | null>(
-      (latestRun, run) => {
-        if (!latestRun || run.attemptNumber > latestRun.attemptNumber) {
-          return run
-        }
-
-        return latestRun
-      },
-      null
-    )
-
-  if (!latestOpeningHandRun) {
-    throw new SimulationValidationError(
-      "No opening-hand LLM run exists for this simulation."
-    )
-  }
-
-  if (latestOpeningHandRun.status !== "completed") {
-    throw new SimulationValidationError(
-      "The most recent opening-hand LLM run is not complete."
-    )
-  }
-
-  if (latestOpeningHandRun.openingHandIsValid !== true) {
-    throw new SimulationValidationError(
-      "The most recent opening-hand LLM run does not have a valid starting hand."
-    )
-  }
-
-  const finalOutput = getOpeningHandFinalOutput(latestOpeningHandRun)
-
-  if (!finalOutput) {
-    throw new SimulationValidationError(
-      "The most recent opening-hand LLM run is missing its final kept hand and summary."
-    )
-  }
-
-  return {
-    startingHand: finalOutput.keptHand,
-    summary: finalOutput.summary,
-  }
-}
-
-async function getReportTurnPromptData(
-  turnRuns: readonly SimulationDebugLlmRun[]
-): Promise<SimulationReportTurnPromptData[]> {
-  const sortedTurnRuns = [...turnRuns].sort(
-    (firstRun, secondRun) =>
-      (firstRun.turnNumber ?? 0) - (secondRun.turnNumber ?? 0) ||
-      firstRun.attemptNumber - secondRun.attemptNumber
-  )
-  const seenTurnNumbers = new Set<number>()
-
-  for (const run of sortedTurnRuns) {
-    if (run.status !== "completed") {
-      throw new SimulationValidationError(
-        `The current turn ${run.turnNumber ?? "?"} LLM run is not complete.`
-      )
-    }
-
-    if (run.outdated) {
-      throw new SimulationValidationError(
-        `The current turn ${run.turnNumber ?? "?"} LLM run is outdated.`
-      )
-    }
-
-    if (typeof run.turnNumber !== "number") {
-      throw new SimulationValidationError(
-        "A current turn LLM run is missing its turn number."
-      )
-    }
-
-    if (seenTurnNumbers.has(run.turnNumber)) {
-      throw new SimulationValidationError(
-        `Multiple current turn ${run.turnNumber} LLM runs exist.`
-      )
-    }
-
-    seenTurnNumbers.add(run.turnNumber)
-  }
-
-  for (
-    let turnNumber = 1;
-    turnNumber <= sortedTurnRuns.length;
-    turnNumber += 1
-  ) {
-    const run = sortedTurnRuns[turnNumber - 1]
-
-    if (run && run.turnNumber !== turnNumber) {
-      throw new SimulationValidationError(
-        `Turn ${turnNumber} has not been simulated.`
-      )
-    }
-  }
-
-  return sortedTurnRuns.map((run) => {
-    const finalOutput = getTurnFinalOutput(run)
-
-    if (!finalOutput) {
-      throw new SimulationValidationError(
-        `The current turn ${run.turnNumber} LLM run is missing its final turn output.`
-      )
-    }
-
-    if (
-      !isJsonObject(run.gameState) ||
-      !isJsonObject(finalOutput.gameState) ||
-      !isTurnActionsObject(run.turnActions)
-    ) {
-      throw new SimulationValidationError(
-        `The current turn ${run.turnNumber} LLM run is missing valid turn output.`
-      )
-    }
-
-    return {
-      turnNumber: run.turnNumber as number,
-      gameState: finalOutput.gameState,
-      turnActions: run.turnActions,
-    }
-  })
-}
-
-function getOpeningHandFinalOutput(run: SimulationDebugLlmRun) {
-  const payload = getFinalParsedOutputPayload(run)
-  const keptHand = asStringArray(payload.keptHand)
-  const summary = getRequiredString(payload.summary)
-
-  if (payload.error !== null || !keptHand || !summary) {
-    return null
-  }
-
-  return {
-    keptHand,
-    summary,
-  }
-}
-
-function getTurnFinalOutput(run: SimulationDebugLlmRun) {
-  const payload = getFinalParsedOutputPayload(run)
-  const gameState = payload.gameState
-  const turnActions = payload.turnActions
-
-  if (
-    payload.error !== null ||
-    !isJsonObject(gameState) ||
-    !isTurnActionsObject(turnActions)
-  ) {
-    return null
-  }
-
-  return {
-    gameState,
-    turnActions,
-  }
-}
-
-function getFinalParsedOutputPayload(run: SimulationDebugLlmRun) {
-  const finalParsedOutputChunk = [...run.chunks]
-    .reverse()
-    .find((chunk) => chunk.kind === "final_parsed_output")
-
-  return asRecord(finalParsedOutputChunk?.payload)
-}
-
 type SimulationDebugLlmRunRow = {
   llm_run_id: string
   llm_model_preset_id: string | null
@@ -5570,7 +4938,6 @@ type SimulationDebugLlmRunRow = {
   turn_actions: unknown | null
   game_state: unknown | null
   library_snapshot: unknown | null
-  report: string | null
   outdated: boolean | null
   opening_hand_is_valid: boolean | null
   chunk_id: string | null
@@ -5593,7 +4960,6 @@ type SimulationDebugSimulationRow = {
   starting_hand_id: string | null
   seed: string
   turns_to_simulate: number
-  auto_generate_report: boolean
   reasoning_summaries_enabled: boolean
   use_flex_service_tier: boolean
   is_public: boolean
@@ -5646,7 +5012,6 @@ async function getSimulationDebugLlmRunMetadata({
   tableName:
     | "simulation_opening_hand_llm_runs"
     | "simulation_turn_llm_runs"
-    | "simulation_report_llm_runs"
   selectColumns: string
   orderBy: string
 }): Promise<SimulationDebugLlmRunMetadata[]> {
@@ -5753,7 +5118,6 @@ async function getSimulationDebugLlmRuns({
   tableName:
     | "simulation_opening_hand_llm_runs"
     | "simulation_turn_llm_runs"
-    | "simulation_report_llm_runs"
   selectColumns: string
   orderBy: string
   excludeChunkKinds?: readonly LlmChunkKind[]
@@ -5854,10 +5218,6 @@ async function getSimulationDebugLlmRuns({
 
       if (row.phase === "opening_hand" || row.phase === "turn") {
         run.librarySnapshot = asStringArray(row.library_snapshot)
-      }
-
-      if (row.report !== null) {
-        run.report = row.report
       }
 
       if (row.outdated !== null) {
@@ -6004,21 +5364,6 @@ async function markSimulationRunningWithClient(
   )
 }
 
-async function markSimulationReportRunsOutdatedWithClient(
-  client: DatabaseTransactionClient,
-  simulationId: string
-) {
-  await client.query(
-    `
-      UPDATE simulation_report_llm_runs
-      SET outdated = true
-      WHERE simulation_id = $1
-        AND outdated = false
-    `,
-    [simulationId]
-  )
-}
-
 async function markSimulationCompletedWithClient(
   client: DatabaseTransactionClient,
   simulationId: string
@@ -6128,13 +5473,6 @@ async function assertNoActiveSimulationLlmRuns(
         JOIN llm_runs llm_run
           ON llm_run.id = turn_run.llm_run_id
         WHERE turn_run.simulation_id = $1
-          AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
-        UNION ALL
-        SELECT llm_run.id
-        FROM simulation_report_llm_runs report_run
-        JOIN llm_runs llm_run
-          ON llm_run.id = report_run.llm_run_id
-        WHERE report_run.simulation_id = $1
           AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
       ) active_run
       LIMIT 1
@@ -6536,16 +5874,6 @@ function parseSimulationPromptCardFaces(
 
 function getOptionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value : null
-}
-
-function getRequiredString(value: unknown) {
-  return typeof value === "string" && value.trim() ? value.trim() : null
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {}
 }
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {

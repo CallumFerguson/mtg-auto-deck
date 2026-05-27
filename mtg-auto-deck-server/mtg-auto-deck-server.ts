@@ -73,15 +73,12 @@ import {
   appendLlmRunChunk,
   appendLlmRunChunks,
   cancelLlmRun,
-  cancelReportLlmRun,
   cancelStaleInFlightLlmRuns,
   claimNextQueuedLlmRun,
   completeOpeningHandLlmRun,
-  completeReportLlmRun,
   completeTurnLlmRun,
   createLlmRunMcpToken,
   createOpeningHandLlmRun,
-  createReportLlmRun,
   createSimulation,
   createTurnLlmRun,
   deleteSimulation,
@@ -90,13 +87,11 @@ import {
   drawStartingHand,
   ensureSimulationsSchema,
   failLlmRun,
-  failReportLlmRun,
   getActiveLlmRunMcpTokenContext,
   getPublicSimulationSummary,
   getSimulationCreationDecision,
   getSimulationDebugInfo,
   getSimulationResultsInfo,
-  getSimulationReportPromptData,
   getSimulationSummary,
   getStartingHandSimulationPromptData,
   getTurnSimulationPromptData,
@@ -122,7 +117,6 @@ import {
   SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
   SimulationValidationError,
   takeCardsFromSimulationLibrary,
-  TURN_PHASE_CHANGES,
   updateLlmRunRequestData,
   updateSimulation,
 } from "./simulations-postgres.js"
@@ -143,8 +137,6 @@ import type {
   SimulationSummary,
   StartingHandSimulationPromptData,
   TurnSimulationPromptData,
-  SimulationReportPromptData,
-  SimulationReportTurnPromptData,
 } from "./simulations-postgres.js"
 import {
   ensureUsageLimitsSchema,
@@ -334,7 +326,6 @@ const createSimulationSchema = z.object({
   seed: z.string().trim().min(1),
   llmModelPresetId: z.uuid(),
   turnsToSimulate: z.number().int().nonnegative(),
-  autoGenerateReport: z.boolean().default(false),
   reasoningSummariesEnabled: z.boolean().default(false),
   useFlexServiceTier: z.boolean().default(false),
   startingHandId: z.uuid().nullable(),
@@ -566,7 +557,6 @@ function createStreamResultsInfo(
       createStreamRunFromPersistedRun
     ),
     turnLlmRuns: results.turnLlmRuns.map(createStreamRunFromPersistedRun),
-    reportLlmRuns: results.reportLlmRuns.map(createStreamRunFromPersistedRun),
   }
 }
 
@@ -617,19 +607,6 @@ function upsertStreamRun(
       ...results,
       turnLlmRunCount: turnLlmRuns.length,
       turnLlmRuns,
-    }
-  }
-
-  if (incomingRun.phase === "report") {
-    const reportLlmRuns = upsertStreamRunInList(
-      results.reportLlmRuns,
-      incomingRun
-    ).sort(compareReportStreamRuns)
-
-    return {
-      ...results,
-      reportLlmRunCount: reportLlmRuns.length,
-      reportLlmRuns,
     }
   }
 
@@ -737,18 +714,10 @@ function compareTurnStreamRuns(
   )
 }
 
-function compareReportStreamRuns(
-  firstRun: SimulationResultsStreamRun,
-  secondRun: SimulationResultsStreamRun
-) {
-  return firstRun.attemptNumber - secondRun.attemptNumber
-}
-
 function findStreamRun(results: SimulationResultsStreamInfo, llmRunId: string) {
   return (
     results.openingHandLlmRuns.find((run) => run.llmRunId === llmRunId) ??
     results.turnLlmRuns.find((run) => run.llmRunId === llmRunId) ??
-    results.reportLlmRuns.find((run) => run.llmRunId === llmRunId) ??
     null
   )
 }
@@ -2164,29 +2133,6 @@ function getTurnSimulationMcpServerDescription() {
   return "Tools for resolving one Magic: The Gathering goldfish turn, including library operations and random coin/dice results."
 }
 
-function buildReportOpenAiRequestPayload(
-  config: OpenAiRunConfig,
-  fullPrompt: string,
-  simulationId: string,
-  reasoningSummariesEnabled: boolean
-) {
-  return {
-    model: config.model,
-    input: fullPrompt,
-    max_output_tokens: config.maxOutputTokens,
-    stream: true as const,
-    ...(config.serviceTier ? { service_tier: config.serviceTier } : {}),
-    metadata: {
-      simulationId,
-      phase: "report",
-    },
-    reasoning: buildProviderReasoningOptions(
-      config.reasoningEffort,
-      reasoningSummariesEnabled
-    ),
-  }
-}
-
 function generateMcpRunToken(): GeneratedMcpRunToken {
   const token = randomBytes(32).toString("base64url")
 
@@ -2243,32 +2189,6 @@ function buildOpeningHandOpenRouterRequestPayload(
   }
 }
 
-function buildReportOpenRouterRequestPayload(
-  config: OpenRouterRunConfig,
-  fullPrompt: string,
-  simulationId: string,
-  reasoningSummariesEnabled: boolean
-) {
-  return {
-    providerType: "openrouter" as const,
-    model: config.model,
-    input: fullPrompt,
-    maxOutputTokens: config.maxOutputTokens,
-    ...(config.serviceTier ? { serviceTier: config.serviceTier } : {}),
-    metadata: {
-      simulationId,
-      phase: "report",
-    },
-    reasoning: buildOpenRouterReasoningOptions(
-      config.reasoningEffort,
-      reasoningSummariesEnabled
-    ),
-    parallelToolCalls: false as const,
-    provider: getOpenRouterProviderPreferences(config.modelProvider),
-    stopWhenStepCount: config.stopWhenStepCount,
-  }
-}
-
 function buildOpeningHandLlamaCppRequestPayload(
   config: ResolvedLlamaCppRunConfig,
   fullPrompt: string,
@@ -2290,31 +2210,6 @@ function buildOpeningHandLlamaCppRequestPayload(
     },
     parallel_tool_calls: false,
     tools: createLlamaCppChatCompletionTools(openingHandLlmToolDefinitions),
-    stopWhenStepCount: config.stopWhenStepCount,
-  }
-}
-
-function buildReportLlamaCppRequestPayload(
-  config: ResolvedLlamaCppRunConfig,
-  fullPrompt: string,
-  simulationId: string
-): LlamaCppChatCompletionRequestPayload {
-  return {
-    providerType: "llamacpp",
-    model: config.model,
-    max_tokens: config.maxOutputTokens,
-    messages: [
-      {
-        role: "user",
-        content: fullPrompt,
-      },
-    ],
-    metadata: {
-      simulationId,
-      phase: "report",
-    },
-    parallel_tool_calls: false,
-    tools: [],
     stopWhenStepCount: config.stopWhenStepCount,
   }
 }
@@ -2484,53 +2379,21 @@ function buildTurnSimulationLlmRequestPayload(
   )
 }
 
-function buildReportLlmRequestPayload(
-  config: ResolvedTurnSimulationLlmRunConfig,
-  fullPrompt: string,
-  simulationId: string,
-  reasoningSummariesEnabled: boolean
-) {
-  if (config.provider === "openai") {
-    return buildReportOpenAiRequestPayload(
-      config,
-      fullPrompt,
-      simulationId,
-      reasoningSummariesEnabled
-    )
-  }
-
-  if (config.provider === "llamacpp") {
-    return buildReportLlamaCppRequestPayload(config, fullPrompt, simulationId)
-  }
-
-  return buildReportOpenRouterRequestPayload(
-    config,
-    fullPrompt,
-    simulationId,
-    reasoningSummariesEnabled
-  )
-}
-
 type OpeningHandLlmRequestPayload = ReturnType<
   typeof buildOpeningHandLlmRequestPayload
 >
 type TurnSimulationLlmRequestPayload = ReturnType<
   typeof buildTurnSimulationLlmRequestPayload
 >
-type ReportLlmRequestPayload = ReturnType<typeof buildReportLlmRequestPayload>
 type OpeningHandOpenRouterRequestPayload = ReturnType<
   typeof buildOpeningHandOpenRouterRequestPayload
 >
 type TurnSimulationOpenRouterRequestPayload = ReturnType<
   typeof buildTurnSimulationOpenRouterRequestPayload
 >
-type ReportOpenRouterRequestPayload = ReturnType<
-  typeof buildReportOpenRouterRequestPayload
->
 type LlamaCppRequestPayload =
   | ReturnType<typeof buildOpeningHandLlamaCppRequestPayload>
   | ReturnType<typeof buildTurnSimulationLlamaCppRequestPayload>
-  | ReturnType<typeof buildReportLlamaCppRequestPayload>
 
 function getPersistableLlmRequestPayload<
   TRequestPayload extends Record<string, unknown>,
@@ -2593,10 +2456,6 @@ function formatLlmRunPhase(phase: LlmRunPhase) {
 
   if (phase === "turn") {
     return "Turn"
-  }
-
-  if (phase === "report") {
-    return "Report"
   }
 
   return "Simulation"
@@ -2848,85 +2707,6 @@ async function prepareAndStartTurnLlmRun({
   }
 }
 
-async function prepareAndStartReportLlmRun({
-  deckId,
-  requireAutoSimulateNextStep = false,
-  simulationId,
-}: {
-  deckId: string
-  simulationId: string
-  requireAutoSimulateNextStep?: boolean
-}) {
-  let createdLlmRunId: string | null = null
-
-  try {
-    const modelPresetSelection =
-      await getRequiredEnabledSimulationLlmModelPreset(deckId, simulationId)
-    const llmConfig = await resolveLlmRunConfigModel(
-      getTurnSimulationLlmRunConfig(
-        getLlmModelPresetRunConfig(modelPresetSelection.preset),
-        process.env,
-        {
-          useFlexServiceTier: modelPresetSelection.useFlexServiceTier,
-        }
-      )
-    )
-    const fullPrompt = await buildSimulationReportPrompt({
-      deckId,
-      simulationId,
-    })
-    const reportRun = await createReportLlmRun(deckId, {
-      simulationId,
-      llmModelPresetId: llmConfig.modelPresetId,
-      provider: llmConfig.provider,
-      model: llmConfig.model,
-      openrouterModelProvider: getLlmRunOpenRouterModelProvider(llmConfig),
-      serviceTier: getLlmRunServiceTier(llmConfig),
-      reasoningEffort: llmConfig.reasoningEffort,
-      runtimeStreamKey: randomUUID(),
-      fullPrompt,
-      requestPayload: {},
-      requireAutoSimulateNextStep,
-    })
-    createdLlmRunId = reportRun.llmRunId
-
-    const requestPayload = buildReportLlmRequestPayload(
-      llmConfig,
-      fullPrompt,
-      simulationId,
-      reportRun.reasoningSummariesEnabled
-    )
-
-    await updateLlmRunRequestData({
-      llmRunId: reportRun.llmRunId,
-      fullPrompt,
-      requestPayload: getPersistableLlmRequestPayload(requestPayload),
-    })
-
-    if (!(await markLlmRunQueued(reportRun.llmRunId))) {
-      throw new Error("Report LLM run could not be queued.")
-    }
-    await publishSimulationResultsState({
-      deckId,
-      llmRunId: reportRun.llmRunId,
-      simulationId,
-    })
-    nudgeLlmRunQueue()
-
-    return reportRun
-  } catch (error) {
-    if (createdLlmRunId !== null) {
-      await failReportLlmRun(createdLlmRunId, getErrorMessage(error)).catch(
-        (failError: unknown) => {
-          console.error("Failed to mark report LLM run failed:", failError)
-        }
-      )
-    }
-
-    throw error
-  }
-}
-
 async function startCreatedSimulationInitialStep(
   deckId: string,
   simulation: {
@@ -2981,27 +2761,11 @@ async function handleSimulationCompletionNextStep(
       return
     }
 
-    if (completion.nextStep.type === "report") {
-      await prepareAndStartReportLlmRun({
-        deckId: completion.deckId,
-        simulationId: completion.simulationId,
-        requireAutoSimulateNextStep: true,
-      })
-    }
   } catch (error) {
     if (isBenignAutoAdvanceAbortError(error)) {
       console.log(
         `Simulation auto-advance skipped: simulationId=${completion.simulationId} reason=${getErrorMessage(error)}`
       )
-      return
-    }
-
-    if (completion.nextStep.type === "report") {
-      console.error("Failed to auto-start simulation report:", error)
-      await publishSimulationResultsState({
-        deckId: completion.deckId,
-        simulationId: completion.simulationId,
-      })
       return
     }
 
@@ -3155,18 +2919,6 @@ async function startClaimedQueuedLlmRun(run: ClaimedQueuedLlmRun) {
       return
     }
 
-    startReportLlmRun({
-      attemptNumber: run.attemptNumber,
-      config,
-      createdAt: run.createdAt,
-      deckId: run.deckId,
-      fullPrompt: run.fullPrompt,
-      llmRunId: run.llmRunId,
-      reasoningSummariesEnabled: run.reasoningSummariesEnabled,
-      runtimeStreamKey: run.runtimeStreamKey,
-      simulationId: run.simulationId,
-      startedAt: run.startedAt,
-    })
   } catch (error) {
     console.error("Failed to start queued LLM run:", error)
     await failClaimedQueuedLlmRun(run, getErrorMessage(error))
@@ -3246,11 +2998,7 @@ async function failClaimedQueuedLlmRun(
   run: ClaimedQueuedLlmRun,
   failureMessage: string
 ) {
-  if (run.phase === "report") {
-    await failReportLlmRun(run.llmRunId, failureMessage)
-  } else {
-    await failLlmRun(run.llmRunId, failureMessage)
-  }
+  await failLlmRun(run.llmRunId, failureMessage)
 
   await publishSimulationResultsState({
     deckId: run.deckId,
@@ -3277,17 +3025,14 @@ type CompletedLlmStreamResult = {
 type OpenAiRequestPayload =
   | ReturnType<typeof buildOpeningHandOpenAiRequestPayload>
   | ReturnType<typeof buildTurnSimulationOpenAiRequestPayload>
-  | ReturnType<typeof buildReportOpenAiRequestPayload>
 type OpenRouterRequestPayload =
   | OpeningHandOpenRouterRequestPayload
   | TurnSimulationOpenRouterRequestPayload
-  | ReportOpenRouterRequestPayload
 
 function isOpenAiRequestPayload(
   requestPayload:
     | OpeningHandLlmRequestPayload
     | TurnSimulationLlmRequestPayload
-    | ReportLlmRequestPayload
 ): requestPayload is OpenAiRequestPayload {
   return "stream" in requestPayload
 }
@@ -3296,7 +3041,6 @@ function isOpenRouterRequestPayload(
   requestPayload:
     | OpeningHandLlmRequestPayload
     | TurnSimulationLlmRequestPayload
-    | ReportLlmRequestPayload
 ): requestPayload is OpenRouterRequestPayload {
   return asRecord(requestPayload).providerType === "openrouter"
 }
@@ -3305,7 +3049,6 @@ function isLlamaCppRequestPayload(
   requestPayload:
     | OpeningHandLlmRequestPayload
     | TurnSimulationLlmRequestPayload
-    | ReportLlmRequestPayload
 ): requestPayload is LlamaCppRequestPayload {
   return asRecord(requestPayload).providerType === "llamacpp"
 }
@@ -3314,7 +3057,6 @@ function requireOpenAiRequestPayload(
   requestPayload:
     | OpeningHandLlmRequestPayload
     | TurnSimulationLlmRequestPayload
-    | ReportLlmRequestPayload
 ) {
   if (!isOpenAiRequestPayload(requestPayload)) {
     throw new Error("LLM run config and request payload provider mismatch.")
@@ -3327,7 +3069,6 @@ function requireOpenRouterRequestPayload(
   requestPayload:
     | OpeningHandLlmRequestPayload
     | TurnSimulationLlmRequestPayload
-    | ReportLlmRequestPayload
 ) {
   if (!isOpenRouterRequestPayload(requestPayload)) {
     throw new Error("LLM run config and request payload provider mismatch.")
@@ -3340,7 +3081,6 @@ function requireLlamaCppRequestPayload(
   requestPayload:
     | OpeningHandLlmRequestPayload
     | TurnSimulationLlmRequestPayload
-    | ReportLlmRequestPayload
 ) {
   if (!isLlamaCppRequestPayload(requestPayload)) {
     throw new Error("LLM run config and request payload provider mismatch.")
@@ -3904,21 +3644,12 @@ async function runOpeningHandLlmRun({
     })
     runtime.status = "completed"
 
-    if (completion.nextStep?.type === "report") {
-      await handleSimulationCompletionNextStep(completion)
-      await publishSimulationResultsState({
-        deckId,
-        llmRunId,
-        simulationId,
-      })
-    } else {
-      await publishSimulationResultsState({
-        deckId,
-        llmRunId,
-        simulationId,
-      })
-      await handleSimulationCompletionNextStep(completion)
-    }
+    await publishSimulationResultsState({
+      deckId,
+      llmRunId,
+      simulationId,
+    })
+    await handleSimulationCompletionNextStep(completion)
   } catch (error) {
     if (isAbortError(error) || runtime.abortController.signal.aborted) {
       logLlmApiCallCancelled({
@@ -4158,21 +3889,12 @@ async function runTurnLlmRun({
     })
     runtime.status = "completed"
 
-    if (completion.nextStep?.type === "report") {
-      await handleSimulationCompletionNextStep(completion)
-      await publishSimulationResultsState({
-        deckId,
-        llmRunId,
-        simulationId,
-      })
-    } else {
-      await publishSimulationResultsState({
-        deckId,
-        llmRunId,
-        simulationId,
-      })
-      await handleSimulationCompletionNextStep(completion)
-    }
+    await publishSimulationResultsState({
+      deckId,
+      llmRunId,
+      simulationId,
+    })
+    await handleSimulationCompletionNextStep(completion)
   } catch (error) {
     if (isAbortError(error) || runtime.abortController.signal.aborted) {
       logLlmApiCallCancelled({
@@ -4225,218 +3947,6 @@ async function runTurnLlmRun({
   }
 }
 
-function startReportLlmRun({
-  attemptNumber,
-  config,
-  createdAt,
-  deckId,
-  fullPrompt,
-  llmRunId,
-  reasoningSummariesEnabled,
-  runtimeStreamKey,
-  simulationId,
-  startedAt,
-}: {
-  attemptNumber: number
-  config: ResolvedTurnSimulationLlmRunConfig
-  createdAt: string
-  deckId: string
-  fullPrompt: string
-  llmRunId: string
-  reasoningSummariesEnabled: boolean
-  runtimeStreamKey: string
-  simulationId: string
-  startedAt: string
-}) {
-  void runReportLlmRun({
-    attemptNumber,
-    config,
-    createdAt,
-    deckId,
-    fullPrompt,
-    llmRunId,
-    reasoningSummariesEnabled,
-    runtimeStreamKey,
-    simulationId,
-    startedAt,
-  })
-}
-
-async function runReportLlmRun({
-  attemptNumber,
-  config,
-  createdAt,
-  deckId,
-  fullPrompt,
-  llmRunId,
-  reasoningSummariesEnabled,
-  runtimeStreamKey,
-  simulationId,
-  startedAt,
-}: {
-  attemptNumber: number
-  config: ResolvedTurnSimulationLlmRunConfig
-  createdAt: string
-  deckId: string
-  fullPrompt: string
-  llmRunId: string
-  reasoningSummariesEnabled: boolean
-  runtimeStreamKey: string
-  simulationId: string
-  startedAt: string
-}) {
-  const completion = createRuntimeCompletion()
-  const runtime: ActiveLlmRunRuntime = {
-    abortController: new AbortController(),
-    attemptNumber,
-    chunkBuffer: [],
-    completionPromise: completion.completionPromise,
-    createdAt,
-    deckId,
-    flushTimer: null,
-    flushPromise: null,
-    llmRunId,
-    llmModelPresetId: config.modelPresetId,
-    model: config.model,
-    fullPrompt,
-    nextSequence: 1,
-    openrouterGenerations: [],
-    phase: "report",
-    provider: config.provider,
-    reasoningEffort: config.reasoningEffort,
-    serviceTier: getLlmRunServiceTier(config),
-    recentChunks: [],
-    resolveCompletion: completion.resolveCompletion,
-    runtimeStreamKey,
-    simulationId,
-    startedAt,
-    status: "streaming",
-  }
-
-  activeLlmRunRuntimes.set(runtimeStreamKey, runtime)
-
-  try {
-    throwIfRuntimeAborted(runtime.abortController.signal)
-    await publishSimulationResultsState({
-      deckId,
-      llmRunId,
-      simulationId,
-    })
-
-    const requestPayload = buildReportLlmRequestPayload(
-      config,
-      fullPrompt,
-      simulationId,
-      reasoningSummariesEnabled
-    )
-    await updateLlmRunRequestData({
-      llmRunId,
-      fullPrompt,
-      requestPayload: getPersistableLlmRequestPayload(requestPayload),
-    })
-    throwIfRuntimeAborted(runtime.abortController.signal)
-
-    const streamResult =
-      config.provider === "openai"
-        ? await collectOpenAiLlmStream({
-          config,
-          llmRunId,
-          phase: "report",
-          requestPayload: requireOpenAiRequestPayload(requestPayload),
-          runtime,
-        })
-        : config.provider === "openrouter"
-          ? await collectOpenRouterLlmStream({
-            config,
-            llmRunId,
-            phase: "report",
-            requestPayload: requireOpenRouterRequestPayload(requestPayload),
-            runtime,
-          })
-          : await collectLlamaCppLlmStream({
-            config,
-            llmRunId,
-            phase: "report",
-            requestPayload: requireLlamaCppRequestPayload(requestPayload),
-            runtime,
-            toolDefinitions: [],
-          })
-
-    throwIfRuntimeAborted(runtime.abortController.signal)
-    await forceFlushRuntimeChunks(runtime)
-    throwIfRuntimeAborted(runtime.abortController.signal)
-
-    const report = streamResult.outputText.trim()
-
-    if (!report) {
-      throw new Error("Report LLM completed response was empty.")
-    }
-
-    await appendRuntimeChunk(runtime, createFinalParsedOutputChunk({ report }))
-    await forceFlushRuntimeChunks(runtime)
-    throwIfRuntimeAborted(runtime.abortController.signal)
-
-    await completeReportLlmRun({
-      llmRunId,
-      report,
-      responseMetadata: streamResult.responseMetadata,
-      usage: streamResult.usage,
-    })
-    runtime.status = "completed"
-    await publishSimulationResultsState({
-      deckId,
-      llmRunId,
-      simulationId,
-    })
-  } catch (error) {
-    if (isAbortError(error) || runtime.abortController.signal.aborted) {
-      logLlmApiCallCancelled({
-        llmRunId,
-        phase: "report",
-        provider: config.provider,
-      })
-      await appendRuntimeChunk(
-        runtime,
-        createCancellationChunk("Report LLM run was cancelled.")
-      )
-      await tryForceFlushRuntimeChunks(runtime, "cancelled report run")
-      await cancelReportLlmRun(llmRunId, "Report LLM run was cancelled.")
-      runtime.status = "cancelled"
-      await publishSimulationResultsState({
-        deckId,
-        llmRunId,
-        simulationId,
-      })
-      return
-    }
-
-    if (!(error instanceof ProviderTerminalEventError)) {
-      await appendRuntimeChunk(runtime, createServerErrorChunk(error))
-    }
-
-    await tryForceFlushRuntimeChunks(runtime, "failed report run")
-    logLlmApiCallStoppedWithError({
-      error,
-      llmRunId,
-      phase: "report",
-      provider: config.provider,
-    })
-    console.error("Report LLM run failed:", error)
-    await failReportLlmRun(llmRunId, getErrorMessage(error))
-    runtime.status = "failed"
-    await publishSimulationResultsState({
-      deckId,
-      llmRunId,
-      simulationId,
-    })
-  } finally {
-    clearRuntimeFlushTimer(runtime)
-    activeLlmRunRuntimes.delete(runtimeStreamKey)
-    runtime.resolveCompletion()
-    nudgeLlmRunQueue()
-  }
-}
-
 async function stopActiveAdminUserSimulations(userId: string) {
   const activeSimulations = await listActiveAdminUserSimulations(userId)
 
@@ -4456,13 +3966,7 @@ async function stopActiveSimulationLlmRuns(
   const stoppedRunIds: string[] = []
   const cancelRequestedRunIds: string[] = []
   const runtimeCompletionPromises: Promise<void>[] = []
-  let stoppedGameplayRun = false
-
   for (const run of activeRuns) {
-    if (run.phase !== "report") {
-      stoppedGameplayRun = true
-    }
-
     const runtime = activeLlmRunRuntimes.get(run.runtimeStreamKey)
 
     if (runtime) {
@@ -4476,11 +3980,7 @@ async function stopActiveSimulationLlmRuns(
         run.llmRunId,
         createCancellationChunk(cancellationMessage)
       )
-      if (run.phase === "report") {
-        await cancelReportLlmRun(run.llmRunId, cancellationMessage)
-      } else {
-        await cancelLlmRun(run.llmRunId, cancellationMessage)
-      }
+      await cancelLlmRun(run.llmRunId, cancellationMessage)
       cancelRequestedRunIds.push(run.llmRunId)
     }
   }
@@ -4496,7 +3996,7 @@ async function stopActiveSimulationLlmRuns(
     throw new SimulationStopTimeoutError()
   }
 
-  if (stoppedGameplayRun) {
+  if (activeRuns.length > 0) {
     await markSimulationCancelled(simulationId, "Simulation was stopped.")
   }
 
@@ -5726,44 +5226,6 @@ async function main() {
         console.error("Failed to start turn LLM run:", error)
         res.status(500).json({
           error: "Failed to start turn LLM run.",
-        })
-      }
-    }
-  )
-
-  app.post(
-    "/decks/:deckId/simulations/:simulationId/report-llm-runs",
-    async (req: Request, res: Response) => {
-      const deckId = String(req.params.deckId)
-      const simulationId = String(req.params.simulationId)
-
-      try {
-        const reportRun = await prepareAndStartReportLlmRun({
-          deckId,
-          simulationId,
-        })
-
-        res.status(202).json(reportRun)
-      } catch (error) {
-        if (error instanceof SimulationValidationError) {
-          const status = error.message === "Simulation not found." ? 404 : 400
-
-          res.status(status).json({
-            error: error.message,
-          })
-          return
-        }
-
-        if (error instanceof LlmConfigurationError) {
-          res.status(500).json({
-            error: error.message,
-          })
-          return
-        }
-
-        console.error("Failed to start report LLM run:", error)
-        res.status(500).json({
-          error: "Failed to start report LLM run.",
         })
       }
     }
@@ -7064,90 +6526,6 @@ ${formatJsonForPrompt(resolvedGameState)}
 
 LLM Run ID: ${llmRunId}
 `.trim()
-}
-
-export async function buildSimulationReportPrompt({
-  deckId,
-  simulationId,
-}: {
-  deckId: string
-  simulationId: string
-}) {
-  const promptData = await getSimulationReportPromptData(deckId, simulationId)
-
-  return buildSimulationReportPromptFromData(promptData)
-}
-
-function buildSimulationReportPromptFromData({
-  startingHand,
-  openingHandSummary,
-  turns,
-}: SimulationReportPromptData) {
-  const openingHandSection =
-    openingHandSummary === null
-      ? `Preset opening hand:\n${formatReportList(startingHand)}`
-      : `Opening hand summary:\n${openingHandSummary}\n\nKept hand:\n${formatReportList(startingHand)}`
-  const turnSections =
-    turns.length === 0
-      ? "No turns have been simulated yet."
-      : turns.map(formatReportTurnPromptSection).join("\n\n")
-
-  return `
-You are analyzing a Magic: The Gathering Commander goldfish simulation.
-
-Generate a concise Markdown report for this simulation.
-
-The report should help the deck user understand:
-- how the opening hand performed
-- what each simulated turn accomplished
-- a short overall takeaway
-
-Keep the report practical and focused. The goal is not to sumarize everything that happened.
-
-=== Opening Hand ===
-
-${openingHandSection}
-
-=== Turns ===
-
-${turnSections}
-`.trim()
-}
-
-function formatReportTurnPromptSection({
-  gameState,
-  turnActions,
-  turnNumber,
-}: SimulationReportTurnPromptData) {
-  return `
-## Turn ${turnNumber}
-
-Turn actions:
-${formatReportTurnActions(turnActions)}
-
-End-of-turn game state:
-${formatJsonForPrompt(gameState)}
-`.trim()
-}
-
-function formatReportTurnActions(
-  turnActions: SimulationReportTurnPromptData["turnActions"]
-) {
-  return TURN_PHASE_CHANGES.map((phaseChange) => {
-    const actions = turnActions[phaseChange]
-    const actionList =
-      actions.length === 0
-        ? "- none"
-        : actions.map((action) => `- ${action}`).join("\n")
-
-    return `${phaseChange}\n${actionList}`
-  }).join("\n\n")
-}
-
-function formatReportList(items: readonly string[]) {
-  return items.length === 0
-    ? "- none"
-    : items.map((item) => `- ${item}`).join("\n")
 }
 
 function buildInitialTurnGameState({

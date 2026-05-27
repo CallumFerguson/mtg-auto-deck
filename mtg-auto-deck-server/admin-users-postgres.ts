@@ -295,9 +295,6 @@ export async function listActiveAdminUserSimulations(
         UNION ALL
         SELECT simulation_id, llm_run_id
         FROM simulation_turn_llm_runs
-        UNION ALL
-        SELECT simulation_id, llm_run_id
-        FROM simulation_report_llm_runs
       ) linked_run
         ON linked_run.simulation_id = simulation.id
       JOIN llm_runs llm_run
@@ -366,10 +363,6 @@ export async function deleteAdminUser(
           UNION
           SELECT llm_run_id AS id
           FROM simulation_turn_llm_runs
-          WHERE simulation_id IN (SELECT id FROM user_simulations)
-          UNION
-          SELECT llm_run_id AS id
-          FROM simulation_report_llm_runs
           WHERE simulation_id IN (SELECT id FROM user_simulations)
         ),
         target_llm_runs AS (

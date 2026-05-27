@@ -21,11 +21,10 @@ export type SimulationResultsStreamRun = Omit<
 
 export type SimulationResultsStreamInfo = Omit<
   SimulationResultsInfo,
-  "openingHandLlmRuns" | "turnLlmRuns" | "reportLlmRuns"
+  "openingHandLlmRuns" | "turnLlmRuns"
 > & {
   openingHandLlmRuns: SimulationResultsStreamRun[]
   turnLlmRuns: SimulationResultsStreamRun[]
-  reportLlmRuns: SimulationResultsStreamRun[]
 }
 
 export type SimulationResultsStreamEvent =

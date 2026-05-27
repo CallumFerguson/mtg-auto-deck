@@ -72,7 +72,6 @@ type FakeSimulation = {
   mulligan_count: number
   has_drawn_starting_hand: boolean
   auto_simulate_next_step: boolean
-  auto_generate_report: boolean
   status: SimulationStatus
   started_at: Date | null
   completed_at: Date | null
@@ -85,7 +84,7 @@ type FakeSimulation = {
 
 type FakeLlmRun = {
   id: string
-  phase: "opening_hand" | "turn" | "report" | "other"
+  phase: "opening_hand" | "turn" | "other"
   provider: string
   model: string
   openrouter_model_provider: string | null
@@ -136,15 +135,6 @@ type FakeTurnRun = {
   created_at: Date
 }
 
-type FakeReportRun = {
-  simulation_id: string
-  llm_run_id: string
-  attempt_number: number
-  report: string | null
-  outdated: boolean
-  created_at: Date
-}
-
 type FakeChunk = {
   id: number
   llm_run_id: string
@@ -178,7 +168,6 @@ class FakeStarterDeckCopyClient {
   llmRuns: FakeLlmRun[] = []
   openingHandRuns: FakeOpeningHandRun[] = []
   turnRuns: FakeTurnRun[] = []
-  reportRuns: FakeReportRun[] = []
   chunks: FakeChunk[] = []
   starterDeckCopies: {
     copied_deck_id: string | null
@@ -262,14 +251,6 @@ class FakeStarterDeckCopyClient {
 
       case "copy-turn-llm-run":
         return this.copyTurnRun<T>(values)
-
-      case "list-report-llm-runs":
-        return this.result<T>(
-          this.reportRuns.filter((run) => run.simulation_id === values[0])
-        )
-
-      case "copy-report-llm-run":
-        return this.copyReportRun<T>(values)
 
       case "copy-llm-run-chunks":
         return this.copyLlmRunChunks<T>(values) as QueryResult<T>
@@ -443,15 +424,14 @@ class FakeStarterDeckCopyClient {
 
   copySimulationShell<T>(values: unknown[]) {
     const copiedSimulation: FakeSimulation = {
-      auto_generate_report: getBoolean(values[11]),
       auto_simulate_next_step: getBoolean(values[10]),
-      cancel_requested_at: getDateOrNull(values[16]),
-      completed_at: getDateOrNull(values[14]),
-      created_at: getDate(values[18]),
+      cancel_requested_at: getDateOrNull(values[15]),
+      completed_at: getDateOrNull(values[13]),
+      created_at: getDate(values[17]),
       created_via: getCreatedVia(values[1]),
       deck_id: getString(values[0]),
-      failed_at: getDateOrNull(values[15]),
-      failure_message: getStringOrNull(values[17]),
+      failed_at: getDateOrNull(values[14]),
+      failure_message: getStringOrNull(values[16]),
       has_drawn_starting_hand: getBoolean(values[9]),
       id: `copied-simulation-${this.simulationIdSequence}`,
       library: getJsonStringArray(values[7]),
@@ -459,11 +439,11 @@ class FakeStarterDeckCopyClient {
       mulligan_count: getNumber(values[8]),
       random_state: getNumber(values[4]),
       seed: getString(values[3]),
-      started_at: getDateOrNull(values[13]),
+      started_at: getDateOrNull(values[12]),
       starting_hand_id: getStringOrNull(values[6]),
-      status: getSimulationStatus(values[12]),
+      status: getSimulationStatus(values[11]),
       turns_to_simulate: getNumber(values[5]),
-      updated_at: getDate(values[19]),
+      updated_at: getDate(values[18]),
     }
 
     this.simulationIdSequence += 1
@@ -552,19 +532,6 @@ class FakeStarterDeckCopyClient {
     return this.result<T>([])
   }
 
-  copyReportRun<T>(values: unknown[]) {
-    this.reportRuns.push({
-      attempt_number: getNumber(values[2]),
-      created_at: getDate(values[5]),
-      llm_run_id: getString(values[1]),
-      outdated: getBoolean(values[4]),
-      report: getStringOrNull(values[3]),
-      simulation_id: getString(values[0]),
-    })
-
-    return this.result<T>([])
-  }
-
   copyLlmRunChunks<T>(values: unknown[]) {
     const sourceLlmRunId = getString(values[0])
     const copiedLlmRunId = getString(values[1])
@@ -611,9 +578,6 @@ class FakeStarterDeckCopyClient {
         run.simulation_id === simulationId ? [run.llm_run_id] : []
       ),
       ...this.turnRuns.flatMap((run) =>
-        run.simulation_id === simulationId ? [run.llm_run_id] : []
-      ),
-      ...this.reportRuns.flatMap((run) =>
         run.simulation_id === simulationId ? [run.llm_run_id] : []
       ),
     ]
@@ -678,7 +642,7 @@ test("starter deck copy clones deck data, presets, terminal history, and remaps 
     (run) => run.owner_user_id === "new-user"
   )
 
-  assert.equal(copiedRuns.length, 3)
+  assert.equal(copiedRuns.length, 2)
 
   for (const run of copiedRuns) {
     assert.equal(run.runtime_stream_key, null)
@@ -695,16 +659,11 @@ test("starter deck copy clones deck data, presets, terminal history, and remaps 
   const copiedTurnRun = db.turnRuns.find(
     (run) => run.simulation_id === copiedSimulations[0].id
   )
-  const copiedReportRun = db.reportRuns.find(
-    (run) => run.simulation_id === copiedSimulations[0].id
-  )
 
   assert.ok(copiedOpeningRun)
   assert.ok(copiedTurnRun)
-  assert.ok(copiedReportRun)
   assert.equal(copiedOpeningRun.llm_run_id.startsWith("copied-run-"), true)
   assert.equal(copiedTurnRun.llm_run_id.startsWith("copied-run-"), true)
-  assert.equal(copiedReportRun.llm_run_id.startsWith("copied-run-"), true)
   assert.deepEqual(copiedTurnRun.turn_actions, {
     untap: [],
     upkeep: [],
@@ -897,11 +856,6 @@ function createStarterDeckFixture() {
       status: "completed",
     }),
     createLlmRun({
-      id: "run-report",
-      phase: "report",
-      status: "completed",
-    }),
-    createLlmRun({
       id: "run-pending",
       phase: "opening_hand",
       status: "pending",
@@ -968,14 +922,6 @@ function createStarterDeckFixture() {
     simulation_id: "sim-completed",
     turn_number: 1,
   })
-  db.reportRuns.push({
-    attempt_number: 1,
-    created_at: now,
-    llm_run_id: "run-report",
-    outdated: false,
-    report: "Good keep.",
-    simulation_id: "sim-completed",
-  })
   db.chunks.push({
     id: 10,
     kind: "mcp_call_complete",
@@ -1009,7 +955,6 @@ function createSimulation({
   const now = new Date("2026-01-01T00:00:00.000Z")
 
   return {
-    auto_generate_report: true,
     auto_simulate_next_step: false,
     cancel_requested_at: null,
     completed_at: status === "completed" ? now : null,
@@ -1231,7 +1176,7 @@ function getCreatedVia(value: unknown) {
 function getLlmRunPhase(value: unknown) {
   const phase = getString(value)
 
-  assert.equal(["opening_hand", "turn", "report", "other"].includes(phase), true)
+  assert.equal(["opening_hand", "turn", "other"].includes(phase), true)
 
   return phase as FakeLlmRun["phase"]
 }
