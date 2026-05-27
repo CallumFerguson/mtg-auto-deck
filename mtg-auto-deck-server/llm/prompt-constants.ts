@@ -63,7 +63,7 @@ summary should briefly state keep/mulligan decisions, total mulligans, bottomed 
 Before final response, verify that you drew only once initially, did not draw after mulliganing, finished required bottoming, and that keptHand matches the final hand exactly.
 `
 
-export const SIMULATE_TURN_PROMPT = `
+const SIMULATE_TURN_PROMPT = `
 You are an expert Magic: The Gathering player goldfishing a Commander deck.
 
 Simulate one of your own turns in a multiplayer Commander game against 3 non-interacting opponents.

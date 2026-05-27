@@ -3,7 +3,6 @@ import pg from "pg"
 import { queryDatabase, withDatabaseTransaction } from "./db.js"
 
 const CARD_IMPORT_BATCH_SIZE = 500
-const DEFAULT_SEARCH_LIMIT = 20
 
 type ScryfallImageUris = {
   normal?: string
@@ -57,11 +56,6 @@ type ImportScryfallOracleCardsOptions = {
   oracleCardsPath: string
   downloadedAt: string
   scryfallUpdatedAt?: string
-}
-
-type SearchScryfallOracleCardsOptions = {
-  name: string
-  limit?: number
 }
 
 type DbClient = pg.Client | pg.PoolClient
@@ -120,79 +114,6 @@ export async function importScryfallOracleCardsToPostgres({
   console.error(
     `Imported ${importedCount} Scryfall oracle_cards into Postgres in ${formatElapsedSeconds(importStartedAt)}s.`
   )
-}
-
-export async function searchScryfallOracleCardsByName({
-  name,
-  limit = DEFAULT_SEARCH_LIMIT,
-}: SearchScryfallOracleCardsOptions) {
-  const normalizedName = normalizeCardName(name)
-
-  const result = await queryDatabase(
-    `
-      WITH matches AS (
-        SELECT
-          card.oracle_id,
-          similarity(card.normalized_name, $1) AS score,
-          CASE
-            WHEN card.layout NOT IN ('art_series', 'emblem', 'token')
-              AND COALESCE(card.type_line, '') NOT ILIKE 'Token%'
-              AND card.games && ARRAY['arena', 'mtgo', 'paper']::text[]
-              AND card.legalities->>'commander' IN ('banned', 'legal')
-              THEN 0
-            WHEN card.layout NOT IN ('art_series', 'emblem', 'token')
-              AND COALESCE(card.type_line, '') NOT ILIKE 'Token%'
-              AND card.games && ARRAY['arena', 'mtgo', 'paper']::text[]
-              THEN 1
-            ELSE 2
-          END AS card_priority
-        FROM scryfall_oracle_cards card
-        WHERE card.normalized_name % $1
-
-        UNION ALL
-
-        SELECT
-          face.oracle_id,
-          similarity(face.normalized_name, $1) AS score,
-          CASE
-            WHEN card.layout NOT IN ('art_series', 'emblem', 'token')
-              AND COALESCE(card.type_line, '') NOT ILIKE 'Token%'
-              AND card.games && ARRAY['arena', 'mtgo', 'paper']::text[]
-              AND card.legalities->>'commander' IN ('banned', 'legal')
-              THEN 0
-            WHEN card.layout NOT IN ('art_series', 'emblem', 'token')
-              AND COALESCE(card.type_line, '') NOT ILIKE 'Token%'
-              AND card.games && ARRAY['arena', 'mtgo', 'paper']::text[]
-              THEN 1
-            ELSE 2
-          END AS card_priority
-        FROM scryfall_card_faces face
-        JOIN scryfall_oracle_cards card ON card.oracle_id = face.oracle_id
-        WHERE face.normalized_name % $1
-      ),
-      ranked_matches AS (
-        SELECT oracle_id, max(score) AS score, min(card_priority) AS card_priority
-        FROM matches
-        GROUP BY oracle_id
-      )
-      SELECT card.*, ranked_matches.score
-      FROM ranked_matches
-      JOIN scryfall_oracle_cards card ON card.oracle_id = ranked_matches.oracle_id
-      ORDER BY ranked_matches.score DESC, ranked_matches.card_priority ASC, card.name ASC
-      LIMIT $2
-      `,
-    [normalizedName, limit]
-  )
-
-  return result.rows
-}
-
-export async function findMissingExactScryfallOracleCardNames(
-  cardNames: readonly string[]
-) {
-  const resolution = await resolveExactScryfallOracleCards(cardNames)
-
-  return resolution.missingNames
 }
 
 export async function resolveExactScryfallOracleCards(

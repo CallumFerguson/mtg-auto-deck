@@ -11,7 +11,7 @@ export type DeckSummary = {
   updatedAt: string
 }
 
-export type DeckCard = {
+type DeckCard = {
   deckCardId: number
   oracleId: string
   name: string
@@ -26,7 +26,7 @@ export type DeckDetails = DeckSummary & {
   cards: DeckCard[]
 }
 
-export type CreateDeckCardInput = {
+type CreateDeckCardInput = {
   oracleId: string
   quantity: number
 }

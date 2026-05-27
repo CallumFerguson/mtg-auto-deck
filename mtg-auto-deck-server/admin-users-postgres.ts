@@ -10,7 +10,7 @@ import {
   type BillingTier,
 } from "./subscription-tiers.js"
 
-export type AdminUserSummary = {
+type AdminUserSummary = {
   activeAdminTierGrant: ActiveAdminSubscriptionTierGrant | null
   id: string
   email: string

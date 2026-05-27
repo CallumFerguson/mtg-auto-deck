@@ -22,7 +22,7 @@ export type LlmModelPreset = {
   updatedAt: string
 }
 
-export type AdminLlmModelPreset = LlmModelPreset & {
+type AdminLlmModelPreset = LlmModelPreset & {
   simulationReferenceCount: number
   llmRunReferenceCount: number
   canDelete: boolean
@@ -235,7 +235,7 @@ export async function listAdminLlmModelPresets() {
   })
 }
 
-export async function getLlmModelPreset(presetId: string) {
+async function getLlmModelPreset(presetId: string) {
   const result = await queryDatabase<LlmModelPresetRow>(
     `
       ${LLM_MODEL_PRESET_SELECT_SQL}
@@ -476,22 +476,6 @@ export async function deleteUnusedLlmModelPreset(presetId: string) {
 
     return (result.rowCount ?? 0) > 0
   })
-}
-
-export function getLlmModelPresetLabel(
-  preset: Pick<
-    LlmModelPreset,
-    "model" | "openrouterModelProvider" | "provider" | "reasoningEffort"
-  >
-) {
-  return [
-    preset.provider,
-    preset.model,
-    preset.openrouterModelProvider,
-    preset.reasoningEffort,
-  ]
-    .filter(Boolean)
-    .join(" / ")
 }
 
 const LLM_MODEL_PRESET_SELECT_SQL = `

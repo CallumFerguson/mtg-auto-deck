@@ -17,7 +17,7 @@ type Queryable = {
   }>
 }
 
-export type UsageLimitWindowKind = BillingUsageLimitWindowKind
+type UsageLimitWindowKind = BillingUsageLimitWindowKind
 
 export type UsageLimitWindowStatus = {
   kind: UsageLimitWindowKind
@@ -68,7 +68,7 @@ const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
 export const USAGE_LIMIT_OUT_OF_USAGE_MESSAGE =
   "Out of usage limits. Wait until your usage limits reset, then try again."
 
-export const USAGE_LIMIT_WINDOW_CONFIGS: readonly UsageLimitWindowConfig[] = [
+const USAGE_LIMIT_WINDOW_CONFIGS: readonly UsageLimitWindowConfig[] = [
   {
     durationMs: FIVE_HOURS_MS,
     kind: "five_hour",

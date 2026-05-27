@@ -31,7 +31,7 @@ export function resolveSimulationCard(
   return cardLookup.get(getSimulationCardLookupKey(cardName)) ?? null
 }
 
-export function getSimulationCardLookupKey(cardName: string) {
+function getSimulationCardLookupKey(cardName: string) {
   return cardName.trim().toLowerCase()
 }
 

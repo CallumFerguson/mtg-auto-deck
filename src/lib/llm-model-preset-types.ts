@@ -40,14 +40,6 @@ export type AdminLlmModelPresetsResponse = {
   total: number
 }
 
-export type CreateLlmModelPresetResponse = {
-  preset: LlmModelPreset
-}
-
-export type UpdateLlmModelPresetResponse = {
-  preset: LlmModelPreset | null
-}
-
 export function getLlmModelPresetLabel(
   preset: Pick<
     LlmModelPreset,

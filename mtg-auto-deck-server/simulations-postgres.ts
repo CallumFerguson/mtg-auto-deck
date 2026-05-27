@@ -46,7 +46,7 @@ export function canApplyLateLlmRunTerminalUpdate(status: LlmRunStatus) {
   return status === "pending" || status === "streaming"
 }
 
-export function isTerminalLlmRunStatus(status: LlmRunStatus) {
+function isTerminalLlmRunStatus(status: LlmRunStatus) {
   return (
     status === "completed" || status === "failed" || status === "cancelled"
   )
@@ -88,7 +88,7 @@ export type OpeningHandLlmRun = {
   createdAt: string
 }
 
-export type TurnLlmRun = OpeningHandLlmRun & {
+type TurnLlmRun = OpeningHandLlmRun & {
   turnNumber: number
 }
 
@@ -116,7 +116,7 @@ export type ClaimedQueuedLlmRun = {
   turnNumber?: number
 }
 
-export type UsageLimitedQueuedLlmRun = {
+type UsageLimitedQueuedLlmRun = {
   usageLimitExceeded: true
   simulationId: string
   deckId: string
@@ -135,16 +135,9 @@ export type UpdateLlmRunRequestDataInput = {
   requestPayload: unknown
 }
 
-export type RecordOpenRouterLlmRunGenerationInput = {
-  llmRunId: string
-  openrouterTurnIndex: number
-  generationId: string
-  responseMetadata: unknown
-}
-
 export type LlmRunMcpFunctionCallStatus = "completed" | "failed"
 
-export type LlmRunMcpFunctionCall = {
+type LlmRunMcpFunctionCall = {
   id: number
   mcpFunctionName: string
   status: LlmRunMcpFunctionCallStatus
@@ -162,7 +155,7 @@ export type ActiveSimulationLlmRun = {
   status: LlmRunStatus
 }
 
-export type OpenRouterGeneration = {
+type OpenRouterGeneration = {
   openrouterTurnIndex: number
   generationId: string
   createdAt: string
@@ -217,7 +210,7 @@ export type SimulationDebugLlmRun = {
   mcpFunctionCalls: LlmRunMcpFunctionCall[]
 }
 
-export type SimulationDebugLlmRunMetadata = {
+type SimulationDebugLlmRunMetadata = {
   llmRunId: string
   llmModelPresetId: string | null
   phase: LlmRunPhase
@@ -273,7 +266,7 @@ export const SIMULATION_AUTO_ADVANCE_DISABLED_MESSAGE =
 export const SIMULATION_AUTO_ADVANCE_NOT_RUNNING_MESSAGE =
   "Simulation auto-advance requires a running simulation."
 
-export type SimulationNextStep =
+type SimulationNextStep =
   | {
       type: "opening_hand"
     }
@@ -368,7 +361,7 @@ export type LibraryTakeCardsResult = {
   cardsRemaining: number
 }
 
-export const TURN_PHASE_CHANGES = [
+const TURN_PHASE_CHANGES = [
   "untap",
   "upkeep",
   "draw",
@@ -378,7 +371,7 @@ export const TURN_PHASE_CHANGES = [
   "end_step_cleanup",
 ] as const
 
-export type TurnPhaseChange = (typeof TURN_PHASE_CHANGES)[number]
+type TurnPhaseChange = (typeof TURN_PHASE_CHANGES)[number]
 
 export type CreateSimulationInput = {
   seed: string
@@ -507,7 +500,7 @@ export function getTurnCompletionDecision({
   }
 }
 
-export type SimulationPromptCardFace = {
+type SimulationPromptCardFace = {
   name: string
   manaCost: string | null
   typeLine: string | null
@@ -537,19 +530,6 @@ export type StartingHandSimulationPromptData = {
   simulationId: string
   deckId: string
   mulliganGuidelines: string | null
-  commanders: SimulationPromptCard[]
-  library: SimulationPromptCard[]
-}
-
-export type DeckCardReferenceData = {
-  deckId: string
-  name: string
-  description: string | null
-  mulliganGuidelines: string | null
-  strategyGuidelines: string | null
-  format: string
-  createdAt: string
-  updatedAt: string
   commanders: SimulationPromptCard[]
   library: SimulationPromptCard[]
 }
@@ -1693,14 +1673,6 @@ export async function setSimulationPublic(
   return mapSimulationSummaryRow(simulation)
 }
 
-export async function updateSimulationLlmModelPreset(
-  deckId: string,
-  simulationId: string,
-  llmModelPresetId: string
-): Promise<SimulationSummary> {
-  return updateSimulation(deckId, simulationId, { llmModelPresetId })
-}
-
 export async function markSimulationCompleted(simulationId: string) {
   await withDatabaseTransaction(async (client) => {
     await markSimulationCompletedWithClient(client, simulationId)
@@ -2224,33 +2196,6 @@ export async function createOpeningHandLlmRun(
       createdAt: llmRun.created_at.toISOString(),
     }
   })
-}
-
-export async function verifySimulationCanStartOpeningHandLlmRun(
-  deckId: string,
-  simulationId: string
-) {
-  const simulationResult = await queryDatabase<{
-    starting_hand_id: string | null
-  }>(
-    `
-      SELECT starting_hand_id
-      FROM simulations
-      WHERE id = $1
-        AND deck_id = $2
-    `,
-    [simulationId, deckId]
-  )
-
-  if (simulationResult.rowCount === 0) {
-    throw new SimulationValidationError("Simulation not found.")
-  }
-
-  if (simulationResult.rows[0].starting_hand_id !== null) {
-    throw new SimulationValidationError(
-      "This simulation uses a preset starting hand, so opening-hand LLM runs are not allowed."
-    )
-  }
 }
 
 export async function resetSimulationForOpeningHandLlmRun(
@@ -3366,73 +3311,6 @@ async function estimatePartialLlmRunCostUsdWithClient(
   })
 }
 
-export async function recordOpenRouterLlmRunGeneration({
-  generationId,
-  llmRunId,
-  openrouterTurnIndex,
-  responseMetadata,
-}: RecordOpenRouterLlmRunGenerationInput): Promise<OpenRouterGeneration | null> {
-  const trimmedGenerationId = generationId.trim()
-
-  if (!Number.isInteger(openrouterTurnIndex) || openrouterTurnIndex < 0) {
-    throw new SimulationValidationError(
-      "OpenRouter turn index must be a non-negative integer."
-    )
-  }
-
-  if (!trimmedGenerationId) {
-    throw new SimulationValidationError(
-      "OpenRouter generation ID must not be empty."
-    )
-  }
-
-  const result = await queryDatabase<{
-    openrouter_turn_index: number
-    generation_id: string
-    created_at: Date
-  }>(
-    `
-      INSERT INTO llm_run_openrouter_generations (
-        llm_run_id,
-        openrouter_turn_index,
-        generation_id,
-        response_metadata
-      )
-      SELECT
-        llm_run.id,
-        $2,
-        $3,
-        $4::jsonb
-      FROM llm_runs llm_run
-      WHERE llm_run.id = $1
-        AND llm_run.provider = 'openrouter'
-      ON CONFLICT (llm_run_id, openrouter_turn_index)
-      DO UPDATE
-      SET generation_id = EXCLUDED.generation_id,
-          response_metadata = EXCLUDED.response_metadata,
-          updated_at = now()
-      RETURNING openrouter_turn_index, generation_id, created_at
-    `,
-    [
-      llmRunId,
-      openrouterTurnIndex,
-      trimmedGenerationId,
-      JSON.stringify(responseMetadata ?? {}),
-    ]
-  )
-  const generation = result.rows[0]
-
-  if (!generation) {
-    return null
-  }
-
-  return {
-    openrouterTurnIndex: generation.openrouter_turn_index,
-    generationId: generation.generation_id,
-    createdAt: generation.created_at.toISOString(),
-  }
-}
-
 export async function failLlmRun(llmRunId: string, failureMessage: string) {
   await withDatabaseTransaction(async (client) => {
     const estimatedCostUsd = await estimatePartialLlmRunCostUsdWithClient(
@@ -3990,7 +3868,7 @@ export async function deleteSimulation(
   })
 }
 
-export async function resolveSimulationIdForActiveLlmRun(llmRunId: string) {
+async function resolveSimulationIdForActiveLlmRun(llmRunId: string) {
   const result = await queryDatabase<{
     simulation_id: string
     status: LlmRunStatus
@@ -4121,71 +3999,6 @@ export async function getStartingHandSimulationPromptData(
     simulationId: firstRow.simulation_id,
     deckId: firstRow.deck_id,
     mulliganGuidelines: firstRow.deck_mulligan_guidelines ?? null,
-    commanders: cards.filter((card) => card.zone === "commander"),
-    library: cards.filter((card) => card.zone === "library"),
-  }
-}
-
-export async function getDeckCardReferenceData(
-  deckId: string
-): Promise<DeckCardReferenceData | null> {
-  const result = await queryDatabase<DeckCardReferenceRow>(
-    `
-      SELECT
-        deck.id AS deck_id,
-        deck.name AS deck_name,
-        deck.description AS deck_description,
-        deck.mulligan_guidelines AS deck_mulligan_guidelines,
-        deck.strategy_guidelines AS deck_strategy_guidelines,
-        deck.format AS deck_format,
-        deck.created_at AS deck_created_at,
-        deck.updated_at AS deck_updated_at,
-        deck_card.id AS deck_card_id,
-        deck_card.oracle_id,
-        deck_card.quantity,
-        deck_card.zone,
-        card.name,
-        card.mana_cost,
-        card.cmc,
-        card.type_line,
-        card.oracle_text,
-        card.power,
-        card.toughness,
-        card.loyalty,
-        card.card_faces
-      FROM decks deck
-      JOIN deck_cards deck_card
-        ON deck_card.deck_id = deck.id
-      JOIN scryfall_oracle_cards card
-        ON card.oracle_id = deck_card.oracle_id
-      WHERE deck.id = $1
-      ORDER BY
-        CASE deck_card.zone
-          WHEN 'commander' THEN 0
-          ELSE 1
-        END,
-        card.name ASC
-    `,
-    [deckId]
-  )
-
-  const firstRow = result.rows[0]
-
-  if (!firstRow) {
-    return null
-  }
-
-  const cards = result.rows.map(mapSimulationPromptCard)
-
-  return {
-    deckId: firstRow.deck_id,
-    name: firstRow.deck_name,
-    description: firstRow.deck_description,
-    mulliganGuidelines: firstRow.deck_mulligan_guidelines,
-    strategyGuidelines: firstRow.deck_strategy_guidelines,
-    format: firstRow.deck_format,
-    createdAt: firstRow.deck_created_at.toISOString(),
-    updatedAt: firstRow.deck_updated_at.toISOString(),
     commanders: cards.filter((card) => card.zone === "commander"),
     library: cards.filter((card) => card.zone === "library"),
   }
@@ -4707,17 +4520,6 @@ type SimulationPromptCardRow = PromptCardRow & {
   deck_id: string
   deck_mulligan_guidelines?: string | null
   deck_strategy_guidelines?: string | null
-}
-
-type DeckCardReferenceRow = PromptCardRow & {
-  deck_id: string
-  deck_name: string
-  deck_description: string | null
-  deck_mulligan_guidelines: string | null
-  deck_strategy_guidelines: string | null
-  deck_format: string
-  deck_created_at: Date
-  deck_updated_at: Date
 }
 
 type LibrarySimulationRow = {

@@ -1,11 +1,11 @@
-export type DeckCardInput = {
+type DeckCardInput = {
   name: string
   quantity: number
 }
 
 export const DECK_GUIDELINES_MAX_LENGTH = 1000
 
-export type ParsedDeckInput = {
+type ParsedDeckInput = {
   name: string
   desc: string
   mulliganGuidelines: string
@@ -138,7 +138,7 @@ export function validateAndParseDeckInput({
   }
 }
 
-export function parseDeckList(deckList: string): DeckCardInput[] {
+function parseDeckList(deckList: string): DeckCardInput[] {
   return deckList
     .split(/\r?\n/)
     .map(parseCardLine)

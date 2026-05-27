@@ -16,7 +16,6 @@ export const BILLING_TIER_LIMITS = {
 } as const
 
 export type BillingTier = keyof typeof BILLING_TIER_LIMITS
-export type StripeBillingTier = "plus" | "pro"
 export type AdminGrantBillingTier = Exclude<BillingTier, "free">
 export type BillingUsageLimitWindowKind = "five_hour" | "weekly"
 
@@ -42,7 +41,7 @@ export const BILLING_TIER_USAGE_LIMITS_USD = {
   Record<BillingUsageLimitWindowKind, number>
 >
 
-export const BILLING_TIER_RANKS = {
+const BILLING_TIER_RANKS = {
   free: 0,
   plus: 1,
   pro: 2,
@@ -86,7 +85,7 @@ export function normalizeBillingTier(value: string | null | undefined) {
   return isBillingTier(tier) ? tier : null
 }
 
-export function isBillingTier(value: unknown): value is BillingTier {
+function isBillingTier(value: unknown): value is BillingTier {
   return (
     value === "free" ||
     value === "plus" ||

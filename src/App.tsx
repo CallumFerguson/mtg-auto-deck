@@ -57,7 +57,7 @@ type VerifiedPageProps = {
   user: AuthUser
 } & ImpersonationProps
 
-export function App() {
+function App() {
   const session = authClient.useSession()
   const location = useLocation()
   const navigate = useNavigate()

@@ -58,7 +58,7 @@ export type OpenRouterRunConfig = ConfiguredModelLlmRunConfig & {
   stopWhenStepCount: number
 }
 
-export type LlamaCppRunConfig = BaseLlmRunConfig & {
+type LlamaCppRunConfig = BaseLlmRunConfig & {
   provider: "llamacpp"
   baseUrl: string
   model: string
@@ -172,10 +172,6 @@ export function getTurnSimulationLlmRunConfig(
   }
 
   return config
-}
-
-export function getOpenRouterApiKey(environment: Environment = process.env) {
-  return getRequiredEnvironmentVariable(environment, "OPENROUTER_API_KEY")
 }
 
 export function getLlmRunQueueConfig(

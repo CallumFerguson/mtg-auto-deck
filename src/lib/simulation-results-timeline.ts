@@ -72,7 +72,7 @@ export function buildSimulationResultsTimelineSteps({
   return steps
 }
 
-export function getFallbackSimulationResultsTimelineStepId(
+function getFallbackSimulationResultsTimelineStepId(
   steps: readonly SimulationResultsTimelineStep[]
 ) {
   return getPreferredSimulationResultsTimelineStep(steps)?.id ?? null

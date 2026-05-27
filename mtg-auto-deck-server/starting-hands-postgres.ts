@@ -1,6 +1,6 @@
 import { queryDatabase, withDatabaseTransaction } from "./db.js"
 
-export type StartingHandCard = {
+type StartingHandCard = {
   deckCardId: number
   oracleId: string
   name: string

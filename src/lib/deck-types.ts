@@ -29,7 +29,7 @@ export type DeckResponse = {
   deck: DeckDetails
 }
 
-export type SimulationStatus =
+type SimulationStatus =
   | "pending"
   | "unmanaged"
   | "running"
@@ -37,7 +37,7 @@ export type SimulationStatus =
   | "failed"
   | "cancelled"
 
-export type SimulationCreatedVia = "app" | "external_mcp"
+type SimulationCreatedVia = "app" | "external_mcp"
 
 export type Simulation = {
   id: string
@@ -71,26 +71,13 @@ export type UpdateSimulationResponse = {
   simulation: Simulation
 }
 
-export type CreateOpeningHandLlmRunResponse = {
-  simulationId: string
-  llmRunId: string
-  attemptNumber: number
-  runtimeStreamKey: string
-  status: string
-  createdAt: string
-}
-
-export type CreateTurnLlmRunResponse = CreateOpeningHandLlmRunResponse & {
-  turnNumber: number
-}
-
 export type StopSimulationResponse = {
   simulationId: string
   stoppedLlmRunIds: string[]
   cancelRequestedLlmRunIds: string[]
 }
 
-export type OpenRouterGeneration = {
+type OpenRouterGeneration = {
   openrouterTurnIndex: number
   generationId: string
   createdAt: string
@@ -136,7 +123,7 @@ export type SimulationDebugLlmRun = {
   openrouterGenerations: OpenRouterGeneration[]
 }
 
-export type SimulationDebugLlmRunMetadata = {
+type SimulationDebugLlmRunMetadata = {
   llmRunId: string
   llmModelPresetId: string | null
   phase: string
@@ -195,10 +182,6 @@ export type SimulationResultsInfo = {
   turnLlmRuns: SimulationDebugLlmRun[]
 }
 
-export type SimulationResultsResponse = {
-  results: SimulationResultsInfo
-}
-
 export type PublicSimulationResponse = {
   deck: DeckDetails
   simulation: Simulation
@@ -234,7 +217,7 @@ export type SimulationResultsStreamEvent =
       message: string
     }
 
-export type StartingHandCard = {
+type StartingHandCard = {
   deckCardId: number
   oracleId: string
   name: string

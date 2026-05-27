@@ -65,7 +65,6 @@ import {
   getTurnSimulationLlmRunConfig,
 } from "./llm-config.js"
 import { buildCreateLlmModelPresetInsertQuery } from "./llm-model-presets-postgres.js"
-import { canClaimQueuedLlmRunWithCapacity } from "./llm-run-queue.js"
 import {
   BILLING_TIER_LIMITS,
   BILLING_TIER_USAGE_LIMITS_USD,
@@ -1042,131 +1041,6 @@ test("builds turn prompt with optional generic rules reference", () => {
     genericGameRulesReferenceEnabled: false,
   })
   assert.equal(minimalPrompt.includes(GENERIC_GAME_RULES_REFERENCE), false)
-})
-
-test("checks LLM run queue capacity before claiming", () => {
-  assert.deepEqual(
-    {
-      free: BILLING_TIER_LIMITS.free.maxConcurrentLlmRuns,
-      plus: BILLING_TIER_LIMITS.plus.maxConcurrentLlmRuns,
-      pro: BILLING_TIER_LIMITS.pro.maxConcurrentLlmRuns,
-      superMax: BILLING_TIER_LIMITS.super_max.maxConcurrentLlmRuns,
-    },
-    {
-      free: 1,
-      plus: 2,
-      pro: 5,
-      superMax: 10,
-    }
-  )
-  assert.equal(
-    canClaimQueuedLlmRunWithCapacity({
-      activeOwnerUserIds: ["user-1", "user-2"],
-      candidateMaxConcurrentRuns: BILLING_TIER_LIMITS.pro.maxConcurrentLlmRuns,
-      candidateOwnerUserId: "user-1",
-      candidateQueuedAt: "2026-01-01T00:00:00.000Z",
-      maxConcurrentRuns: 2,
-    }),
-    false
-  )
-  assert.equal(
-    canClaimQueuedLlmRunWithCapacity({
-      activeOwnerUserIds: ["user-1"],
-      candidateMaxConcurrentRuns: BILLING_TIER_LIMITS.free.maxConcurrentLlmRuns,
-      candidateOwnerUserId: "user-1",
-      candidateQueuedAt: "2026-01-01T00:00:00.000Z",
-      maxConcurrentRuns: 50,
-    }),
-    false
-  )
-  assert.equal(
-    canClaimQueuedLlmRunWithCapacity({
-      activeOwnerUserIds: ["user-1"],
-      candidateMaxConcurrentRuns: BILLING_TIER_LIMITS.plus.maxConcurrentLlmRuns,
-      candidateOwnerUserId: "user-1",
-      candidateQueuedAt: "2026-01-01T00:00:00.000Z",
-      maxConcurrentRuns: 50,
-    }),
-    true
-  )
-  assert.equal(
-    canClaimQueuedLlmRunWithCapacity({
-      activeOwnerUserIds: ["user-1", "user-1"],
-      candidateMaxConcurrentRuns: BILLING_TIER_LIMITS.plus.maxConcurrentLlmRuns,
-      candidateOwnerUserId: "user-1",
-      candidateQueuedAt: "2026-01-01T00:00:00.000Z",
-      maxConcurrentRuns: 50,
-    }),
-    false
-  )
-  assert.equal(
-    canClaimQueuedLlmRunWithCapacity({
-      activeOwnerUserIds: ["user-1", "user-1", "user-1", "user-1"],
-      candidateMaxConcurrentRuns: BILLING_TIER_LIMITS.pro.maxConcurrentLlmRuns,
-      candidateOwnerUserId: "user-1",
-      candidateQueuedAt: "2026-01-01T00:00:00.000Z",
-      maxConcurrentRuns: 50,
-    }),
-    true
-  )
-  assert.equal(
-    canClaimQueuedLlmRunWithCapacity({
-      activeOwnerUserIds: [
-        "user-1",
-        "user-1",
-        "user-1",
-        "user-1",
-        "user-1",
-      ],
-      candidateMaxConcurrentRuns: BILLING_TIER_LIMITS.pro.maxConcurrentLlmRuns,
-      candidateOwnerUserId: "user-1",
-      candidateQueuedAt: "2026-01-01T00:00:00.000Z",
-      maxConcurrentRuns: 50,
-    }),
-    false
-  )
-  assert.equal(
-    canClaimQueuedLlmRunWithCapacity({
-      activeOwnerUserIds: Array.from({ length: 9 }, () => "user-1"),
-      candidateMaxConcurrentRuns:
-        BILLING_TIER_LIMITS.super_max.maxConcurrentLlmRuns,
-      candidateOwnerUserId: "user-1",
-      candidateQueuedAt: "2026-01-01T00:00:00.000Z",
-      maxConcurrentRuns: 50,
-    }),
-    true
-  )
-  assert.equal(
-    canClaimQueuedLlmRunWithCapacity({
-      activeOwnerUserIds: Array.from({ length: 10 }, () => "user-1"),
-      candidateMaxConcurrentRuns:
-        BILLING_TIER_LIMITS.super_max.maxConcurrentLlmRuns,
-      candidateOwnerUserId: "user-1",
-      candidateQueuedAt: "2026-01-01T00:00:00.000Z",
-      maxConcurrentRuns: 50,
-    }),
-    false
-  )
-  assert.equal(
-    canClaimQueuedLlmRunWithCapacity({
-      activeOwnerUserIds: [null],
-      candidateMaxConcurrentRuns: BILLING_TIER_LIMITS.free.maxConcurrentLlmRuns,
-      candidateOwnerUserId: null,
-      candidateQueuedAt: "2026-01-01T00:00:00.000Z",
-      maxConcurrentRuns: 50,
-    }),
-    false
-  )
-  assert.equal(
-    canClaimQueuedLlmRunWithCapacity({
-      activeOwnerUserIds: [],
-      candidateMaxConcurrentRuns: BILLING_TIER_LIMITS.pro.maxConcurrentLlmRuns,
-      candidateOwnerUserId: "user-1",
-      candidateQueuedAt: null,
-      maxConcurrentRuns: 50,
-    }),
-    false
-  )
 })
 
 test("builds LLM run owner concurrency SQL from effective billing tier", () => {

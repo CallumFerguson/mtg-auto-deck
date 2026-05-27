@@ -1,4 +1,4 @@
-export const SIMULATION_STOP_TIMEOUT_MS = 10_000
+const SIMULATION_STOP_TIMEOUT_MS = 10_000
 
 const SIMULATION_STOP_TIMEOUT_MESSAGE =
   "Simulation stop timed out before all active LLM runs were cancelled."

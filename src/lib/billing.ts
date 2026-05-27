@@ -4,7 +4,7 @@ import { APP_PUBLIC_URL } from "@/lib/app-url"
 import { readApiError } from "@/lib/api-error"
 import type { BillingTier } from "@/lib/subscription-tiers"
 
-export function getBillingReturnUrl(result: string) {
+function getBillingReturnUrl(result: string) {
   return `${APP_PUBLIC_URL}/settings?billing=${encodeURIComponent(
     result
   )}`

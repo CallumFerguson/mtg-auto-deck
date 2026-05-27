@@ -28,7 +28,7 @@ export function applySimulationResultsStreamEvent(
   return currentResults
 }
 
-export function upsertSimulationResultsRun(
+function upsertSimulationResultsRun(
   currentResults: SimulationResultsInfo | null,
   incomingRun: SimulationDebugLlmRun
 ) {

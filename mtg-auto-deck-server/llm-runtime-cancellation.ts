@@ -1,6 +1,6 @@
 const DEFAULT_RUNTIME_ABORT_MESSAGE = "LLM run was cancelled."
 
-export class RuntimeAbortError extends Error {
+class RuntimeAbortError extends Error {
   constructor(message = DEFAULT_RUNTIME_ABORT_MESSAGE) {
     super(message)
     this.name = "AbortError"
