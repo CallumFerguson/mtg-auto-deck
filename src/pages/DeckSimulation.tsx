@@ -917,6 +917,28 @@ export function DeckSimulation({
   const selectedModelPresetSupportsFlex = Boolean(
     selectedModelPreset?.supportsFlex
   )
+  const savedSeedSummary = selectedSavedSeed
+    ? `${selectedSavedSeed.name} - ${selectedSavedSeed.seed}`
+    : savedSeedLoadError
+      ? "Saved seeds could not be loaded."
+      : isLoadingSavedSeeds
+        ? "Loading saved seeds..."
+        : "Choose a saved seed"
+  const savedSeedActionLabel = selectedSavedSeed ? "Change" : "Choose"
+  const savedSeedActionDescription = selectedSavedSeed
+    ? "Change saved seed"
+    : "Choose saved seed"
+  const openingHandSummary = selectedOpeningHand
+    ? selectedOpeningHand.name
+    : startingHandLoadError
+      ? "Starting hands could not be loaded."
+      : isLoadingStartingHands
+        ? "Loading starting hands..."
+        : "Choose a saved hand"
+  const openingHandActionLabel = selectedOpeningHand ? "Change" : "Choose"
+  const openingHandActionDescription = selectedOpeningHand
+    ? "Change saved starting hand"
+    : "Choose saved starting hand"
   const selectedSimulation = useMemo(
     () =>
       simulations.find(
@@ -1728,153 +1750,83 @@ export function DeckSimulation({
                   <div className="flex flex-col gap-6 rounded-lg border border-border bg-card/70 p-6 shadow-sm">
                     <div className="grid gap-6">
                       <fieldset className="grid gap-3">
-                        <legend className="text-sm font-medium text-foreground">
+                        <legend className="sr-only">
                           Simulation seed
                         </legend>
                         <div className="grid gap-2 sm:grid-cols-2">
-                          <label
-                            className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
-                              seedMode === "random"
-                                ? "border-ring bg-accent text-accent-foreground"
-                                : "border-border bg-background/35 text-muted-foreground"
-                            }`}
-                          >
-                            <input
-                              className="size-4 accent-sky-300"
-                              type="radio"
-                              name="seed-mode"
-                              checked={seedMode === "random"}
-                              onChange={() => setSeedMode("random")}
-                            />
-                            Random seed
-                          </label>
-                          <label
-                            className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
-                              seedMode === "set"
-                                ? "border-ring bg-accent text-accent-foreground"
-                                : "border-border bg-background/35 text-muted-foreground"
-                            }`}
-                          >
-                            <input
-                              className="size-4 accent-sky-300"
-                              type="radio"
-                              name="seed-mode"
-                              checked={seedMode === "set"}
-                              onChange={handleSetSeedModeSelected}
-                            />
-                            Set seed
-                          </label>
+                          <SimulationSetupChoiceCard
+                            checked={seedMode === "random"}
+                            inputId="seed-mode-random"
+                            label="Random seed"
+                            name="seed-mode"
+                            onChange={() => setSeedMode("random")}
+                          />
+                          <SimulationSetupChoiceCard
+                            action={
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="w-24"
+                                aria-label={savedSeedActionDescription}
+                                title={savedSeedActionDescription}
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  setIsChooseSeedModalOpen(true)
+                                }}
+                              >
+                                <Shuffle data-icon="inline-start" />
+                                {savedSeedActionLabel}
+                              </Button>
+                            }
+                            checked={seedMode === "set"}
+                            inputId="seed-mode-set"
+                            label="Set seed"
+                            name="seed-mode"
+                            summary={savedSeedSummary}
+                            summaryTitle={savedSeedSummary}
+                            onChange={handleSetSeedModeSelected}
+                          />
                         </div>
-
-                        {seedMode === "set" ? (
-                          <div className="flex flex-col gap-2 rounded-md border border-border bg-background/35 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="min-w-0">
-                              {selectedSavedSeed ? (
-                                <p className="min-w-0 text-sm text-muted-foreground">
-                                  <span className="font-medium text-foreground">
-                                    {selectedSavedSeed.name}
-                                  </span>
-                                  <span className="mx-2 text-muted-foreground/60">
-                                    -
-                                  </span>
-                                  <span className="break-all">
-                                    {selectedSavedSeed.seed}
-                                  </span>
-                                </p>
-                              ) : (
-                                <div className="space-y-1">
-                                  <p className="text-sm font-medium text-foreground">
-                                    No saved seed selected
-                                  </p>
-                                  <p className="text-sm text-muted-foreground">
-                                    {savedSeedLoadError
-                                      ? "Saved seeds could not be loaded."
-                                      : isLoadingSavedSeeds
-                                        ? "Loading saved seeds..."
-                                        : "Choose a saved seed to continue."}
-                                  </p>
-                                </div>
-                              )}
-                            </div>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={() => setIsChooseSeedModalOpen(true)}
-                            >
-                              <Shuffle data-icon="inline-start" />
-                              Change
-                            </Button>
-                          </div>
-                        ) : null}
                       </fieldset>
 
                       <fieldset className="grid gap-3">
-                        <legend className="text-sm font-medium text-foreground">
+                        <legend className="sr-only">
                           Opening hand
                         </legend>
                         <div className="grid gap-2 sm:grid-cols-2">
-                          <label
-                            className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
-                              openingHandMode === "simulate"
-                                ? "border-ring bg-accent text-accent-foreground"
-                                : "border-border bg-background/35 text-muted-foreground"
-                            }`}
-                          >
-                            <input
-                              className="size-4 accent-sky-300"
-                              type="radio"
-                              name="opening-hand-mode"
-                              checked={openingHandMode === "simulate"}
-                              onChange={() => setOpeningHandMode("simulate")}
-                            />
-                            Simulate opening hand
-                          </label>
-                          <label
-                            className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
-                              openingHandMode === "provide"
-                                ? "border-ring bg-accent text-accent-foreground"
-                                : "border-border bg-background/35 text-muted-foreground"
-                            }`}
-                          >
-                            <input
-                              className="size-4 accent-sky-300"
-                              type="radio"
-                              name="opening-hand-mode"
-                              checked={openingHandMode === "provide"}
-                              onChange={handleProvideOpeningHandModeSelected}
-                            />
-                            Set opening hand
-                          </label>
+                          <SimulationSetupChoiceCard
+                            checked={openingHandMode === "simulate"}
+                            inputId="opening-hand-mode-simulate"
+                            label="Simulate opening hand"
+                            name="opening-hand-mode"
+                            onChange={() => setOpeningHandMode("simulate")}
+                          />
+                          <SimulationSetupChoiceCard
+                            action={
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="w-24"
+                                aria-label={openingHandActionDescription}
+                                title={openingHandActionDescription}
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  setIsChooseHandModalOpen(true)
+                                }}
+                              >
+                                <Hand data-icon="inline-start" />
+                                {openingHandActionLabel}
+                              </Button>
+                            }
+                            checked={openingHandMode === "provide"}
+                            inputId="opening-hand-mode-provide"
+                            label="Set opening hand"
+                            name="opening-hand-mode"
+                            summary={openingHandSummary}
+                            summaryTitle={openingHandSummary}
+                            onChange={handleProvideOpeningHandModeSelected}
+                          />
                         </div>
-
-                        {openingHandMode === "provide" ? (
-                          <div className="flex flex-col gap-2 rounded-md border border-border bg-background/35 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-foreground">
-                                {selectedOpeningHand
-                                  ? selectedOpeningHand.name
-                                  : "No starting hand selected"}
-                              </p>
-                              {!selectedOpeningHand ? (
-                                <p className="mt-1 text-sm text-muted-foreground">
-                                  {startingHandLoadError
-                                    ? "Starting hands could not be loaded."
-                                    : isLoadingStartingHands
-                                      ? "Loading starting hands..."
-                                      : "Choose a saved starting hand to continue."}
-                                </p>
-                              ) : null}
-                            </div>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={() => setIsChooseHandModalOpen(true)}
-                            >
-                              <Hand data-icon="inline-start" />
-                              Change
-                            </Button>
-                          </div>
-                        ) : null}
                       </fieldset>
 
                       <div className="grid gap-3">
@@ -2305,6 +2257,80 @@ function FlexServiceTierSwitch({
           </span>
         ) : null}
       </span>
+    </div>
+  )
+}
+
+function SimulationSetupChoiceCard({
+  action,
+  checked,
+  inputId,
+  label,
+  name,
+  summary,
+  summaryTitle,
+  onChange,
+}: {
+  action?: ReactNode
+  checked: boolean
+  inputId: string
+  label: string
+  name: string
+  summary?: ReactNode
+  summaryTitle?: string
+  onChange: () => void
+}) {
+  return (
+    <div
+      className={`grid min-h-16 cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm transition-colors ${
+        checked
+          ? "border-ring bg-accent text-accent-foreground"
+          : "border-border bg-background/35 text-muted-foreground"
+      } ${action ? "grid-cols-[minmax(0,1fr)_auto]" : "grid-cols-1"}`}
+      onClick={() => {
+        if (!checked) {
+          onChange()
+        }
+      }}
+    >
+      <label
+        className="flex min-w-0 cursor-pointer items-center gap-2"
+        htmlFor={inputId}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <input
+          id={inputId}
+          className="size-4 shrink-0 accent-sky-300"
+          type="radio"
+          name={name}
+          checked={checked}
+          onChange={(event) => {
+            if (event.currentTarget.checked) {
+              onChange()
+            }
+          }}
+        />
+        <span className="grid min-w-0 gap-1">
+          <span
+            className={`font-medium ${
+              checked ? "text-accent-foreground" : "text-foreground"
+            }`}
+          >
+            {label}
+          </span>
+          {summary ? (
+            <span
+              className={`truncate text-xs leading-5 ${
+                checked ? "text-accent-foreground/80" : "text-muted-foreground"
+              }`}
+              title={summaryTitle}
+            >
+              {summary}
+            </span>
+          ) : null}
+        </span>
+      </label>
+      {action ? <div className="shrink-0 self-center">{action}</div> : null}
     </div>
   )
 }
