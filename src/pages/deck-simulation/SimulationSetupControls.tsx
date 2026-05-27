@@ -13,7 +13,7 @@ export function FlexServiceTierSwitch({
   activeWarning?: string
   onCheckedChange: (checked: boolean) => void
 }) {
-  const visibleWarning = checked ? activeWarning : null
+  const hasWarning = Boolean(activeWarning)
 
   return (
     <div
@@ -42,11 +42,16 @@ export function FlexServiceTierSwitch({
           }`}
         />
       </button>
-      <span className="grid gap-1">
+      <span className="grid min-w-0 gap-1">
         <span className="font-medium">{label}</span>
-        {visibleWarning ? (
-          <span className="text-xs leading-5 text-amber-100/90" role="alert">
-            {visibleWarning}
+        {hasWarning ? (
+          <span
+            className={`text-xs leading-5 transition-colors ${
+              checked ? "text-amber-100/90" : "text-muted-foreground/80"
+            }`}
+            role={checked ? "alert" : undefined}
+          >
+            {activeWarning}
           </span>
         ) : null}
       </span>
