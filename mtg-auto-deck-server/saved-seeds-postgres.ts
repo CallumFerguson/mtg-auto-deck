@@ -5,6 +5,7 @@ export type SavedSeed = {
   deckId: string
   name: string
   seed: string
+  isEnabled: boolean
   createdAt: string
   updatedAt: string
 }
@@ -30,12 +31,26 @@ export async function ensureSavedSeedsSchema() {
       deck_id uuid NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
       name text NOT NULL,
       seed text NOT NULL,
+      is_enabled boolean NOT NULL DEFAULT true,
 
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now(),
 
       UNIQUE (deck_id, name)
     )
+  `)
+  await queryDatabase(`
+    ALTER TABLE saved_seeds
+    ADD COLUMN IF NOT EXISTS is_enabled boolean NOT NULL DEFAULT true
+  `)
+  await queryDatabase(`
+    ALTER TABLE saved_seeds
+    DROP CONSTRAINT IF EXISTS saved_seeds_deck_id_name_key
+  `)
+  await queryDatabase(`
+    CREATE UNIQUE INDEX IF NOT EXISTS saved_seeds_deck_id_name_enabled_idx
+      ON saved_seeds (deck_id, name)
+      WHERE is_enabled = true
   `)
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS saved_seeds_deck_id_idx
@@ -53,10 +68,12 @@ export async function listSavedSeedsForDeck(
         deck_id,
         name,
         seed,
+        is_enabled,
         created_at,
         updated_at
       FROM saved_seeds
       WHERE deck_id = $1
+        AND is_enabled = true
       ORDER BY created_at DESC, name ASC
     `,
     [deckId]
@@ -93,7 +110,7 @@ export async function createSavedSeed(
       `
         INSERT INTO saved_seeds (deck_id, name, seed)
         VALUES ($1, $2, $3)
-        RETURNING id, deck_id, name, seed, created_at, updated_at
+        RETURNING id, deck_id, name, seed, is_enabled, created_at, updated_at
       `,
       [deckId, name, seed]
     )
@@ -110,11 +127,31 @@ export async function createSavedSeed(
   }
 }
 
+export async function disableSavedSeed(
+  deckId: string,
+  savedSeedId: string
+): Promise<boolean> {
+  const result = await queryDatabase(
+    `
+      UPDATE saved_seeds
+      SET is_enabled = false,
+          updated_at = now()
+      WHERE id = $1
+        AND deck_id = $2
+        AND is_enabled = true
+    `,
+    [savedSeedId, deckId]
+  )
+
+  return (result.rowCount ?? 0) > 0
+}
+
 type SavedSeedRow = {
   id: string
   deck_id: string
   name: string
   seed: string
+  is_enabled: boolean
   created_at: Date
   updated_at: Date
 }
@@ -125,6 +162,7 @@ function mapSavedSeedRow(row: SavedSeedRow): SavedSeed {
     deckId: row.deck_id,
     name: row.name,
     seed: row.seed,
+    isEnabled: row.is_enabled,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   }

@@ -529,6 +529,21 @@ function getOpeningHandCardOptions(
     )
 }
 
+function mergeStartingHandLists(
+  primaryHands: readonly StartingHand[],
+  secondaryHands: readonly StartingHand[]
+) {
+  const handsById = new Map<string, StartingHand>()
+
+  for (const hand of [...primaryHands, ...secondaryHands]) {
+    if (!handsById.has(hand.id)) {
+      handsById.set(hand.id, hand)
+    }
+  }
+
+  return Array.from(handsById.values())
+}
+
 function UsageLimitReachedNotice({
   onUpgradeUsage,
   shouldShowUsageUpgradeAction,
@@ -770,14 +785,24 @@ export function DeckSimulation({
     () => getOpeningHandCardOptions(cards),
     [cards]
   )
+  const enabledStartingHands = useMemo(
+    () => startingHands.filter((hand) => hand.isEnabled),
+    [startingHands]
+  )
+  const enabledSavedSeeds = useMemo(
+    () => savedSeeds.filter((seed) => seed.isEnabled),
+    [savedSeeds]
+  )
   const selectedOpeningHand = useMemo(
     () =>
-      startingHands.find((hand) => hand.id === selectedOpeningHandId) ?? null,
-    [startingHands, selectedOpeningHandId]
+      enabledStartingHands.find((hand) => hand.id === selectedOpeningHandId) ??
+      null,
+    [enabledStartingHands, selectedOpeningHandId]
   )
   const selectedSavedSeed = useMemo(
-    () => savedSeeds.find((seed) => seed.id === selectedSavedSeedId) ?? null,
-    [savedSeeds, selectedSavedSeedId]
+    () =>
+      enabledSavedSeeds.find((seed) => seed.id === selectedSavedSeedId) ?? null,
+    [enabledSavedSeeds, selectedSavedSeedId]
   )
   const selectedModelPreset = useMemo(
     () =>
@@ -895,7 +920,12 @@ export function DeckSimulation({
       }
 
       const data = (await response.json()) as StartingHandsResponse
-      setStartingHands(data.startingHands)
+      setStartingHands((currentStartingHands) =>
+        mergeStartingHandLists(
+          data.startingHands,
+          currentStartingHands.filter((hand) => !hand.isEnabled)
+        )
+      )
       setSelectedOpeningHandId((currentStartingHandId) => {
         if (
           currentStartingHandId &&
@@ -912,6 +942,33 @@ export function DeckSimulation({
       setIsLoadingStartingHands(false)
     }
   }, [deckId])
+
+  const loadStartingHandById = useCallback(
+    async (startingHandId: string) => {
+      try {
+        const response = await apiFetch(
+          `${API_BASE_URL}/decks/${deckId}/starting-hands/${encodeURIComponent(
+            startingHandId
+          )}`
+        )
+
+        if (!response.ok) {
+          setStartingHandLoadError(
+            await readApiError(response, "Starting hand could not be loaded.")
+          )
+          return
+        }
+
+        const data = (await response.json()) as CreateStartingHandResponse
+        setStartingHands((currentStartingHands) =>
+          mergeStartingHandLists([data.startingHand], currentStartingHands)
+        )
+      } catch {
+        setStartingHandLoadError("Starting hand could not be loaded.")
+      }
+    },
+    [deckId]
+  )
 
   const loadSavedSeeds = useCallback(async () => {
     setIsLoadingSavedSeeds(true)
@@ -1025,6 +1082,31 @@ export function DeckSimulation({
   }, [loadStartingHands])
 
   useEffect(() => {
+    if (isLoadingStartingHands) {
+      return
+    }
+
+    const referencedStartingHandIds = [
+      selectedSimulation?.startingHandId,
+      detailsSimulation?.startingHandId,
+    ].filter((handId): handId is string => Boolean(handId))
+
+    for (const startingHandId of new Set(referencedStartingHandIds)) {
+      if (startingHands.some((hand) => hand.id === startingHandId)) {
+        continue
+      }
+
+      void loadStartingHandById(startingHandId)
+    }
+  }, [
+    detailsSimulation?.startingHandId,
+    isLoadingStartingHands,
+    loadStartingHandById,
+    selectedSimulation?.startingHandId,
+    startingHands,
+  ])
+
+  useEffect(() => {
     void loadSavedSeeds()
   }, [loadSavedSeeds])
 
@@ -1044,7 +1126,9 @@ export function DeckSimulation({
   }, [selectedSimulationIdFromUrl])
 
   function selectCreatedStartingHand(hand: StartingHand) {
-    setStartingHands((currentStartingHands) => [hand, ...currentStartingHands])
+    setStartingHands((currentStartingHands) =>
+      mergeStartingHandLists([hand], currentStartingHands)
+    )
     setSelectedOpeningHandId(hand.id)
     setOpeningHandMode("provide")
     setIsChooseHandModalOpen(false)
@@ -1073,6 +1157,56 @@ export function DeckSimulation({
     setIsChooseHandModalOpen(false)
   }
 
+  function handleSavedSeedDeleted(savedSeedId: string) {
+    const remainingSavedSeeds = enabledSavedSeeds.filter(
+      (seed) => seed.id !== savedSeedId
+    )
+    const wasSelectedSeed = selectedSavedSeedId === savedSeedId
+
+    setSavedSeeds((currentSavedSeeds) =>
+      currentSavedSeeds.filter((seed) => seed.id !== savedSeedId)
+    )
+
+    if (wasSelectedSeed) {
+      const nextSavedSeedId = remainingSavedSeeds[0]?.id ?? ""
+
+      setSelectedSavedSeedId(nextSavedSeedId)
+
+      if (!nextSavedSeedId) {
+        setSeedMode("random")
+      }
+    }
+
+    setCreateSimulationError(null)
+  }
+
+  function handleStartingHandDeleted(startingHandId: string) {
+    const remainingStartingHands = enabledStartingHands.filter(
+      (hand) => hand.id !== startingHandId
+    )
+    const wasSelectedHand = selectedOpeningHandId === startingHandId
+
+    setStartingHands((currentStartingHands) =>
+      currentStartingHands.map((hand) =>
+        hand.id === startingHandId
+          ? { ...hand, isEnabled: false, updatedAt: new Date().toISOString() }
+          : hand
+      )
+    )
+
+    if (wasSelectedHand) {
+      const nextStartingHandId = remainingStartingHands[0]?.id ?? ""
+
+      setSelectedOpeningHandId(nextStartingHandId)
+
+      if (!nextStartingHandId) {
+        setOpeningHandMode("simulate")
+      }
+    }
+
+    setCreateSimulationError(null)
+  }
+
   function openCreateSeedFromChooser() {
     setIsChooseSeedModalOpen(false)
     setIsCreateSeedModalOpen(true)
@@ -1085,11 +1219,11 @@ export function DeckSimulation({
 
   function resetCreateSimulationForm() {
     setSeedMode("random")
-    setSelectedSavedSeedId(savedSeeds[0]?.id ?? "")
+    setSelectedSavedSeedId(enabledSavedSeeds[0]?.id ?? "")
     setSelectedModelPresetId(defaultModelPresetId ?? "")
     setTurnsToSimulate(DEFAULT_TURNS_TO_SIMULATE)
     setOpeningHandMode("simulate")
-    setSelectedOpeningHandId(startingHands[0]?.id ?? "")
+    setSelectedOpeningHandId(enabledStartingHands[0]?.id ?? "")
   }
 
   function handleCreateSimulationUseFlexChange(nextEnabled: boolean) {
@@ -1693,27 +1827,31 @@ export function DeckSimulation({
 
       {isChooseSeedModalOpen ? (
         <ChooseSavedSeedModal
+          deckId={deckId}
           isLoadingSavedSeeds={isLoadingSavedSeeds}
           loadError={savedSeedLoadError}
           onApply={applyChosenSavedSeed}
           onClose={() => setIsChooseSeedModalOpen(false)}
           onCreateSeed={openCreateSeedFromChooser}
+          onDeleted={handleSavedSeedDeleted}
           onRetry={() => void loadSavedSeeds()}
-          savedSeeds={savedSeeds}
+          savedSeeds={enabledSavedSeeds}
           selectedSavedSeedId={selectedSavedSeedId}
         />
       ) : null}
 
       {isChooseHandModalOpen ? (
         <ChooseStartingHandModal
+          deckId={deckId}
           isLoadingStartingHands={isLoadingStartingHands}
           loadError={startingHandLoadError}
           onApply={applyChosenStartingHand}
           onClose={() => setIsChooseHandModalOpen(false)}
           onCreateHand={openCreateHandFromChooser}
+          onDeleted={handleStartingHandDeleted}
           onRetry={() => void loadStartingHands()}
           selectedStartingHandId={selectedOpeningHandId}
-          startingHands={startingHands}
+          startingHands={enabledStartingHands}
         />
       ) : null}
 
@@ -1925,6 +2063,96 @@ function FlexServiceTierSwitch({
           </span>
         ) : null}
       </span>
+    </div>
+  )
+}
+
+function DeleteSavedItemModal({
+  error,
+  isDeleting,
+  itemName,
+  itemType,
+  onClose,
+  onConfirm,
+}: {
+  error: string | null
+  isDeleting: boolean
+  itemName: string
+  itemType: "seed" | "starting hand"
+  onClose: () => void
+  onConfirm: () => void
+}) {
+  const title = itemType === "seed" ? "Delete seed" : "Delete starting hand"
+  const confirmLabel =
+    itemType === "seed" ? "Delete seed" : "Delete starting hand"
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-background/80 px-4 py-6 backdrop-blur-sm"
+      role="presentation"
+      onMouseDown={isDeleting ? undefined : onClose}
+    >
+      <section
+        aria-labelledby="delete-saved-item-title"
+        className="w-full max-w-md rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
+        role="dialog"
+        aria-modal="true"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+          <div className="space-y-1">
+            <h2 id="delete-saved-item-title" className="text-xl font-semibold">
+              {title}
+            </h2>
+            <p className="text-sm break-words text-muted-foreground">
+              This will hide {itemName} from future simulations. Existing
+              simulations that already use it will keep working.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Close"
+            title="Close"
+            onClick={onClose}
+            disabled={isDeleting}
+          >
+            <X />
+          </Button>
+        </header>
+
+        <div className="grid gap-4 px-5 py-5">
+          {error ? (
+            <p
+              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              role="alert"
+            >
+              {error}
+            </p>
+          ) : null}
+
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onClose}
+              disabled={isDeleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={onConfirm}
+              disabled={isDeleting}
+            >
+              <Trash2 data-icon="inline-start" />
+              {isDeleting ? "Deleting..." : confirmLabel}
+            </Button>
+          </div>
+        </div>
+      </section>
     </div>
   )
 }
@@ -6875,24 +7103,31 @@ function getSelectedStartingHandCards(
 }
 
 function ChooseSavedSeedModal({
+  deckId,
   isLoadingSavedSeeds,
   loadError,
   onApply,
   onClose,
   onCreateSeed,
+  onDeleted,
   onRetry,
   savedSeeds,
   selectedSavedSeedId,
 }: {
+  deckId: string
   isLoadingSavedSeeds: boolean
   loadError: string | null
   onApply: (seedId: string) => void
   onClose: () => void
   onCreateSeed: () => void
+  onDeleted: (seedId: string) => void
   onRetry: () => void
   savedSeeds: SavedSeed[]
   selectedSavedSeedId: string
 }) {
+  const [deleteSeed, setDeleteSeed] = useState<SavedSeed | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [isDeletingSeed, setIsDeletingSeed] = useState(false)
   const [draftSeedId, setDraftSeedId] = useState(() =>
     savedSeeds.some((seed) => seed.id === selectedSavedSeedId)
       ? selectedSavedSeedId
@@ -6918,132 +7153,221 @@ function ChooseSavedSeedModal({
     }
   }
 
+  async function handleDeleteSeed(seed: SavedSeed) {
+    if (isDeletingSeed) {
+      return
+    }
+
+    setIsDeletingSeed(true)
+    setDeleteError(null)
+
+    try {
+      const response = await apiFetch(
+        `${API_BASE_URL}/decks/${deckId}/saved-seeds/${encodeURIComponent(
+          seed.id
+        )}`,
+        {
+          method: "DELETE",
+        }
+      )
+
+      if (!response.ok) {
+        setDeleteError(
+          await readApiError(response, "Seed could not be deleted.")
+        )
+        return
+      }
+
+      const nextSeedId =
+        savedSeeds.find((candidateSeed) => candidateSeed.id !== seed.id)?.id ??
+        ""
+
+      setDraftSeedId(nextSeedId)
+      onDeleted(seed.id)
+      setDeleteSeed(null)
+    } catch {
+      setDeleteError("Seed could not be sent to the server.")
+    } finally {
+      setIsDeletingSeed(false)
+    }
+  }
+
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 py-6 backdrop-blur-sm"
-      role="presentation"
-      onMouseDown={onClose}
-    >
-      <section
-        aria-labelledby="choose-saved-seed-title"
-        className="flex max-h-[calc(100svh-3rem)] w-full max-w-lg flex-col rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
-        role="dialog"
-        aria-modal="true"
-        onMouseDown={(event) => event.stopPropagation()}
+    <>
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 py-6 backdrop-blur-sm"
+        role="presentation"
+        onMouseDown={onClose}
       >
-        <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
-          <div className="space-y-1">
-            <h2 id="choose-saved-seed-title" className="text-xl font-semibold">
-              Set simulation seed
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              Choose a saved seed for this simulation.
-            </p>
-          </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label="Close"
-            title="Close"
-            onClick={onClose}
-          >
-            <X />
-          </Button>
-        </header>
-
-        <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSubmit}>
-          <div className="grid min-h-0 gap-4 overflow-y-auto px-5 py-5">
-            {loadError ? (
-              <div className="grid gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2">
-                <p className="text-sm text-destructive">{loadError}</p>
-                <Button type="button" variant="outline" onClick={onRetry}>
-                  <RefreshCw data-icon="inline-start" />
-                  Try again
-                </Button>
-              </div>
-            ) : null}
-
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-              <label
-                className="grid gap-2 text-sm font-medium"
-                htmlFor="choose-saved-seed"
+        <section
+          aria-labelledby="choose-saved-seed-title"
+          className="flex max-h-[calc(100svh-3rem)] w-full max-w-lg flex-col rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+            <div className="space-y-1">
+              <h2
+                id="choose-saved-seed-title"
+                className="text-xl font-semibold"
               >
-                <span>Saved seed</span>
-                <select
-                  id="choose-saved-seed"
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground transition-colors outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
-                  value={effectiveDraftSeedId}
-                  disabled={isLoadingSavedSeeds || savedSeeds.length === 0}
-                  onChange={(event) => setDraftSeedId(event.target.value)}
-                >
-                  {isLoadingSavedSeeds && savedSeeds.length === 0 ? (
-                    <option value="">Loading saved seeds...</option>
-                  ) : !isLoadingSavedSeeds && savedSeeds.length === 0 ? (
-                    <option value="">No saved seeds yet</option>
-                  ) : null}
-                  {savedSeeds.map((seed) => (
-                    <option key={seed.id} value={seed.id}>
-                      {seed.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                Set simulation seed
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Choose a saved seed for this simulation.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label="Close"
+              title="Close"
+              onClick={onClose}
+            >
+              <X />
+            </Button>
+          </header>
 
-              <Button type="button" variant="outline" onClick={onCreateSeed}>
-                <Plus data-icon="inline-start" />
-                New seed
-              </Button>
+          <form
+            className="flex min-h-0 flex-1 flex-col"
+            onSubmit={handleSubmit}
+          >
+            <div className="grid min-h-0 gap-4 overflow-y-auto px-5 py-5">
+              {loadError ? (
+                <div className="grid gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2">
+                  <p className="text-sm text-destructive">{loadError}</p>
+                  <Button type="button" variant="outline" onClick={onRetry}>
+                    <RefreshCw data-icon="inline-start" />
+                    Try again
+                  </Button>
+                </div>
+              ) : null}
+
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                <label
+                  className="grid gap-2 text-sm font-medium"
+                  htmlFor="choose-saved-seed"
+                >
+                  <span>Saved seed</span>
+                  <select
+                    id="choose-saved-seed"
+                    className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground transition-colors outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
+                    value={effectiveDraftSeedId}
+                    disabled={isLoadingSavedSeeds || savedSeeds.length === 0}
+                    onChange={(event) => setDraftSeedId(event.target.value)}
+                  >
+                    {isLoadingSavedSeeds && savedSeeds.length === 0 ? (
+                      <option value="">Loading saved seeds...</option>
+                    ) : !isLoadingSavedSeeds && savedSeeds.length === 0 ? (
+                      <option value="">No saved seeds yet</option>
+                    ) : null}
+                    {savedSeeds.map((seed) => (
+                      <option key={seed.id} value={seed.id}>
+                        {seed.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <div className="flex flex-wrap gap-2 sm:justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={onCreateSeed}
+                  >
+                    <Plus data-icon="inline-start" />
+                    New seed
+                  </Button>
+                  <Button
+                    className="text-destructive hover:text-destructive"
+                    type="button"
+                    variant="outline"
+                    disabled={!selectedSeed || isLoadingSavedSeeds}
+                    onClick={() => {
+                      setDeleteError(null)
+                      setDeleteSeed(selectedSeed)
+                    }}
+                  >
+                    <Trash2 data-icon="inline-start" />
+                    Delete
+                  </Button>
+                </div>
+              </div>
+
+              {selectedSeed ? (
+                <dl className="grid gap-1 text-sm">
+                  <dt className="text-muted-foreground">Seed value</dt>
+                  <dd className="rounded-md bg-muted/30 px-3 py-2 font-medium break-all text-foreground">
+                    {selectedSeed.seed}
+                  </dd>
+                </dl>
+              ) : !isLoadingSavedSeeds ? (
+                <p className="text-sm text-muted-foreground">
+                  Create a seed before using set seed.
+                </p>
+              ) : null}
             </div>
 
-            {selectedSeed ? (
-              <dl className="grid gap-1 text-sm">
-                <dt className="text-muted-foreground">Seed value</dt>
-                <dd className="rounded-md bg-muted/30 px-3 py-2 font-medium break-all text-foreground">
-                  {selectedSeed.seed}
-                </dd>
-              </dl>
-            ) : !isLoadingSavedSeeds ? (
-              <p className="text-sm text-muted-foreground">
-                Create a seed before using set seed.
-              </p>
-            ) : null}
-          </div>
+            <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+              <Button type="button" variant="outline" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!selectedSeed}>
+                <Check data-icon="inline-start" />
+                Use seed
+              </Button>
+            </div>
+          </form>
+        </section>
+      </div>
 
-          <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
-            <Button type="button" variant="outline" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={!selectedSeed}>
-              <Check data-icon="inline-start" />
-              Use seed
-            </Button>
-          </div>
-        </form>
-      </section>
-    </div>
+      {deleteSeed ? (
+        <DeleteSavedItemModal
+          error={deleteError}
+          isDeleting={isDeletingSeed}
+          itemName={deleteSeed.name}
+          itemType="seed"
+          onClose={() => {
+            if (!isDeletingSeed) {
+              setDeleteSeed(null)
+              setDeleteError(null)
+            }
+          }}
+          onConfirm={() => void handleDeleteSeed(deleteSeed)}
+        />
+      ) : null}
+    </>
   )
 }
 
 function ChooseStartingHandModal({
+  deckId,
   isLoadingStartingHands,
   loadError,
   onApply,
   onClose,
   onCreateHand,
+  onDeleted,
   onRetry,
   selectedStartingHandId,
   startingHands,
 }: {
+  deckId: string
   isLoadingStartingHands: boolean
   loadError: string | null
   onApply: (handId: string) => void
   onClose: () => void
   onCreateHand: () => void
+  onDeleted: (handId: string) => void
   onRetry: () => void
   selectedStartingHandId: string
   startingHands: StartingHand[]
 }) {
+  const [deleteHand, setDeleteHand] = useState<StartingHand | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [isDeletingHand, setIsDeletingHand] = useState(false)
   const [draftStartingHandId, setDraftStartingHandId] = useState(() =>
     startingHands.some((hand) => hand.id === selectedStartingHandId)
       ? selectedStartingHandId
@@ -7071,131 +7395,211 @@ function ChooseStartingHandModal({
     }
   }
 
+  async function handleDeleteHand(hand: StartingHand) {
+    if (isDeletingHand) {
+      return
+    }
+
+    setIsDeletingHand(true)
+    setDeleteError(null)
+
+    try {
+      const response = await apiFetch(
+        `${API_BASE_URL}/decks/${deckId}/starting-hands/${encodeURIComponent(
+          hand.id
+        )}`,
+        {
+          method: "DELETE",
+        }
+      )
+
+      if (!response.ok) {
+        setDeleteError(
+          await readApiError(response, "Starting hand could not be deleted.")
+        )
+        return
+      }
+
+      const nextHandId =
+        startingHands.find((candidateHand) => candidateHand.id !== hand.id)
+          ?.id ?? ""
+
+      setDraftStartingHandId(nextHandId)
+      onDeleted(hand.id)
+      setDeleteHand(null)
+    } catch {
+      setDeleteError("Starting hand could not be sent to the server.")
+    } finally {
+      setIsDeletingHand(false)
+    }
+  }
+
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 py-6 backdrop-blur-sm"
-      role="presentation"
-      onMouseDown={onClose}
-    >
-      <section
-        aria-labelledby="choose-starting-hand-title"
-        className="flex max-h-[calc(100svh-3rem)] w-full max-w-2xl flex-col rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
-        role="dialog"
-        aria-modal="true"
-        onMouseDown={(event) => event.stopPropagation()}
+    <>
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 py-6 backdrop-blur-sm"
+        role="presentation"
+        onMouseDown={onClose}
       >
-        <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
-          <div className="space-y-1">
-            <h2
-              id="choose-starting-hand-title"
-              className="text-xl font-semibold"
-            >
-              Provide opening hand
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              Choose a saved starting hand for this simulation.
-            </p>
-          </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label="Close"
-            title="Close"
-            onClick={onClose}
-          >
-            <X />
-          </Button>
-        </header>
-
-        <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSubmit}>
-          <div className="grid min-h-0 gap-4 overflow-y-auto px-5 py-5">
-            {loadError ? (
-              <div className="grid gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2">
-                <p className="text-sm text-destructive">{loadError}</p>
-                <Button type="button" variant="outline" onClick={onRetry}>
-                  <RefreshCw data-icon="inline-start" />
-                  Try again
-                </Button>
-              </div>
-            ) : null}
-
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-              <label
-                className="grid gap-2 text-sm font-medium"
-                htmlFor="choose-starting-hand"
+        <section
+          aria-labelledby="choose-starting-hand-title"
+          className="flex max-h-[calc(100svh-3rem)] w-full max-w-2xl flex-col rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+            <div className="space-y-1">
+              <h2
+                id="choose-starting-hand-title"
+                className="text-xl font-semibold"
               >
-                <span>Starting hand</span>
-                <select
-                  id="choose-starting-hand"
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground transition-colors outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
-                  value={effectiveDraftStartingHandId}
-                  disabled={
-                    isLoadingStartingHands || startingHands.length === 0
-                  }
-                  onChange={(event) =>
-                    setDraftStartingHandId(event.target.value)
-                  }
-                >
-                  {isLoadingStartingHands && startingHands.length === 0 ? (
-                    <option value="">Loading starting hands...</option>
-                  ) : !isLoadingStartingHands && startingHands.length === 0 ? (
-                    <option value="">No starting hands yet</option>
-                  ) : null}
-                  {startingHands.map((hand) => (
-                    <option key={hand.id} value={hand.id}>
-                      {hand.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <Button type="button" variant="outline" onClick={onCreateHand}>
-                <Plus data-icon="inline-start" />
-                New starting hand
-              </Button>
+                Provide opening hand
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Choose a saved starting hand for this simulation.
+              </p>
             </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label="Close"
+              title="Close"
+              onClick={onClose}
+            >
+              <X />
+            </Button>
+          </header>
 
-            {selectedHand ? (
-              <div className="grid gap-2">
-                <p className="text-sm text-sky-300">Cards</p>
-                <div className="max-h-56 overflow-y-auto rounded-md border border-border bg-background/35 p-2">
-                  <ul className="grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
-                    {selectedHand.cards.map((card) => (
-                      <li
-                        key={card.deckCardId}
-                        className="rounded-md bg-muted/30 px-3 py-2"
-                      >
-                        {card.quantity > 1 ? (
-                          <span className="mr-2 text-sky-300">
-                            {card.quantity}x
-                          </span>
-                        ) : null}
-                        {card.name}
-                      </li>
+          <form
+            className="flex min-h-0 flex-1 flex-col"
+            onSubmit={handleSubmit}
+          >
+            <div className="grid min-h-0 gap-4 overflow-y-auto px-5 py-5">
+              {loadError ? (
+                <div className="grid gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2">
+                  <p className="text-sm text-destructive">{loadError}</p>
+                  <Button type="button" variant="outline" onClick={onRetry}>
+                    <RefreshCw data-icon="inline-start" />
+                    Try again
+                  </Button>
+                </div>
+              ) : null}
+
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                <label
+                  className="grid gap-2 text-sm font-medium"
+                  htmlFor="choose-starting-hand"
+                >
+                  <span>Starting hand</span>
+                  <select
+                    id="choose-starting-hand"
+                    className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground transition-colors outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
+                    value={effectiveDraftStartingHandId}
+                    disabled={
+                      isLoadingStartingHands || startingHands.length === 0
+                    }
+                    onChange={(event) =>
+                      setDraftStartingHandId(event.target.value)
+                    }
+                  >
+                    {isLoadingStartingHands && startingHands.length === 0 ? (
+                      <option value="">Loading starting hands...</option>
+                    ) : !isLoadingStartingHands &&
+                      startingHands.length === 0 ? (
+                      <option value="">No starting hands yet</option>
+                    ) : null}
+                    {startingHands.map((hand) => (
+                      <option key={hand.id} value={hand.id}>
+                        {hand.name}
+                      </option>
                     ))}
-                  </ul>
+                  </select>
+                </label>
+
+                <div className="flex flex-wrap gap-2 sm:justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={onCreateHand}
+                  >
+                    <Plus data-icon="inline-start" />
+                    New starting hand
+                  </Button>
+                  <Button
+                    className="text-destructive hover:text-destructive"
+                    type="button"
+                    variant="outline"
+                    disabled={!selectedHand || isLoadingStartingHands}
+                    onClick={() => {
+                      setDeleteError(null)
+                      setDeleteHand(selectedHand)
+                    }}
+                  >
+                    <Trash2 data-icon="inline-start" />
+                    Delete
+                  </Button>
                 </div>
               </div>
-            ) : !isLoadingStartingHands ? (
-              <p className="text-sm text-muted-foreground">
-                Create a starting hand before providing an opening hand.
-              </p>
-            ) : null}
-          </div>
 
-          <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
-            <Button type="button" variant="outline" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={!selectedHand}>
-              <Check data-icon="inline-start" />
-              Use hand
-            </Button>
-          </div>
-        </form>
-      </section>
-    </div>
+              {selectedHand ? (
+                <div className="grid gap-2">
+                  <p className="text-sm text-sky-300">Cards</p>
+                  <div className="max-h-56 overflow-y-auto rounded-md border border-border bg-background/35 p-2">
+                    <ul className="grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
+                      {selectedHand.cards.map((card) => (
+                        <li
+                          key={card.deckCardId}
+                          className="rounded-md bg-muted/30 px-3 py-2"
+                        >
+                          {card.quantity > 1 ? (
+                            <span className="mr-2 text-sky-300">
+                              {card.quantity}x
+                            </span>
+                          ) : null}
+                          {card.name}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              ) : !isLoadingStartingHands ? (
+                <p className="text-sm text-muted-foreground">
+                  Create a starting hand before providing an opening hand.
+                </p>
+              ) : null}
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+              <Button type="button" variant="outline" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!selectedHand}>
+                <Check data-icon="inline-start" />
+                Use hand
+              </Button>
+            </div>
+          </form>
+        </section>
+      </div>
+
+      {deleteHand ? (
+        <DeleteSavedItemModal
+          error={deleteError}
+          isDeleting={isDeletingHand}
+          itemName={deleteHand.name}
+          itemType="starting hand"
+          onClose={() => {
+            if (!isDeletingHand) {
+              setDeleteHand(null)
+              setDeleteError(null)
+            }
+          }}
+          onConfirm={() => void handleDeleteHand(deleteHand)}
+        />
+      ) : null}
+    </>
   )
 }
 

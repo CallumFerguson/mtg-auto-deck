@@ -255,6 +255,7 @@ export type StartingHand = {
   deckId: string
   name: string
   cards: StartingHandCard[]
+  isEnabled: boolean
   createdAt: string
   updatedAt: string
 }
@@ -272,6 +273,7 @@ export type SavedSeed = {
   deckId: string
   name: string
   seed: string
+  isEnabled: boolean
   createdAt: string
   updatedAt: string
 }

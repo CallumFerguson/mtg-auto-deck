@@ -15,6 +15,7 @@ export type StartingHand = {
   deckId: string
   name: string
   cards: StartingHandCard[]
+  isEnabled: boolean
   createdAt: string
   updatedAt: string
 }
@@ -42,6 +43,7 @@ export async function ensureStartingHandsSchema() {
 
       deck_id uuid NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
       name text NOT NULL,
+      is_enabled boolean NOT NULL DEFAULT true,
 
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now(),
@@ -57,6 +59,19 @@ export async function ensureStartingHandsSchema() {
 
       PRIMARY KEY (starting_hand_id, deck_card_id)
     )
+  `)
+  await queryDatabase(`
+    ALTER TABLE starting_hands
+    ADD COLUMN IF NOT EXISTS is_enabled boolean NOT NULL DEFAULT true
+  `)
+  await queryDatabase(`
+    ALTER TABLE starting_hands
+    DROP CONSTRAINT IF EXISTS starting_hands_deck_id_name_key
+  `)
+  await queryDatabase(`
+    CREATE UNIQUE INDEX IF NOT EXISTS starting_hands_deck_id_name_enabled_idx
+      ON starting_hands (deck_id, name)
+      WHERE is_enabled = true
   `)
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS starting_hands_deck_id_idx
@@ -77,6 +92,7 @@ export async function listStartingHandsForDeck(
         hand.id,
         hand.deck_id,
         hand.name,
+        hand.is_enabled,
         hand.created_at,
         hand.updated_at,
         hand_card.deck_card_id,
@@ -94,12 +110,50 @@ export async function listStartingHandsForDeck(
       LEFT JOIN scryfall_oracle_cards card
         ON card.oracle_id = deck_card.oracle_id
       WHERE hand.deck_id = $1
+        AND hand.is_enabled = true
       ORDER BY hand.created_at DESC, hand.name ASC, card.name ASC
     `,
     [deckId]
   )
 
   return mapStartingHandRows(result.rows)
+}
+
+export async function getStartingHandForDeck(
+  deckId: string,
+  startingHandId: string
+): Promise<StartingHand | null> {
+  const result = await queryDatabase<StartingHandRow>(
+    `
+      SELECT
+        hand.id,
+        hand.deck_id,
+        hand.name,
+        hand.is_enabled,
+        hand.created_at,
+        hand.updated_at,
+        hand_card.deck_card_id,
+        hand_card.quantity,
+        deck_card.oracle_id,
+        card.name AS card_name,
+        card.scryfall_uri,
+        card.default_image_url,
+        card.type_line
+      FROM starting_hands hand
+      LEFT JOIN starting_hand_cards hand_card
+        ON hand_card.starting_hand_id = hand.id
+      LEFT JOIN deck_cards deck_card
+        ON deck_card.id = hand_card.deck_card_id
+      LEFT JOIN scryfall_oracle_cards card
+        ON card.oracle_id = deck_card.oracle_id
+      WHERE hand.deck_id = $1
+        AND hand.id = $2
+      ORDER BY card.name ASC
+    `,
+    [deckId, startingHandId]
+  )
+
+  return mapStartingHandRows(result.rows)[0] ?? null
 }
 
 export async function createStartingHand(
@@ -176,13 +230,14 @@ export async function createStartingHand(
         id: string
         deck_id: string
         name: string
+        is_enabled: boolean
         created_at: Date
         updated_at: Date
       }>(
         `
           INSERT INTO starting_hands (deck_id, name)
           VALUES ($1, $2)
-          RETURNING id, deck_id, name, created_at, updated_at
+          RETURNING id, deck_id, name, is_enabled, created_at, updated_at
         `,
         [deckId, name]
       )
@@ -218,6 +273,7 @@ export async function createStartingHand(
           hand.id,
           hand.deck_id,
           hand.name,
+          hand.is_enabled,
           hand.created_at,
           hand.updated_at,
           hand_card.deck_card_id,
@@ -250,10 +306,30 @@ export async function createStartingHand(
   })
 }
 
+export async function disableStartingHand(
+  deckId: string,
+  startingHandId: string
+): Promise<boolean> {
+  const result = await queryDatabase(
+    `
+      UPDATE starting_hands
+      SET is_enabled = false,
+          updated_at = now()
+      WHERE id = $1
+        AND deck_id = $2
+        AND is_enabled = true
+    `,
+    [startingHandId, deckId]
+  )
+
+  return (result.rowCount ?? 0) > 0
+}
+
 type StartingHandRow = {
   id: string
   deck_id: string
   name: string
+  is_enabled: boolean
   created_at: Date
   updated_at: Date
   deck_card_id: number | null
@@ -277,6 +353,7 @@ function mapStartingHandRows(rows: readonly StartingHandRow[]) {
         deckId: row.deck_id,
         name: row.name,
         cards: [],
+        isEnabled: row.is_enabled,
         createdAt: row.created_at.toISOString(),
         updatedAt: row.updated_at.toISOString(),
       }

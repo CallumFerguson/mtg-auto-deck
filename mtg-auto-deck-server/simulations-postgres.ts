@@ -1435,13 +1435,14 @@ export async function createSimulation(
         FROM starting_hands
         WHERE id = $1
           AND deck_id = $2
+          AND is_enabled = true
       `,
       [input.startingHandId, deckId]
     )
 
     if (startingHandResult.rowCount === 0) {
       throw new SimulationValidationError(
-        "Starting hand does not exist for this deck."
+        "Starting hand does not exist or is disabled for this deck."
       )
     }
   }

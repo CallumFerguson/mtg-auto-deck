@@ -144,12 +144,15 @@ import {
 } from "./usage-limits-postgres.js"
 import {
   createStartingHand,
+  disableStartingHand,
   ensureStartingHandsSchema,
+  getStartingHandForDeck,
   listStartingHandsForDeck,
   StartingHandValidationError,
 } from "./starting-hands-postgres.js"
 import {
   createSavedSeed,
+  disableSavedSeed,
   ensureSavedSeedsSchema,
   listSavedSeedsForDeck,
   SavedSeedValidationError,
@@ -4326,9 +4329,10 @@ async function main() {
         const startingHand =
           simulation.startingHandId === null
             ? null
-            : (
-                await listStartingHandsForDeck(simulation.deckId)
-              ).find((hand) => hand.id === simulation.startingHandId) ?? null
+            : await getStartingHandForDeck(
+                simulation.deckId,
+                simulation.startingHandId
+              )
         const snapshot = await getPublicSimulationResultsStreamSnapshot(
           simulation.id
         )
@@ -5662,6 +5666,46 @@ async function main() {
     }
   )
 
+  app.get(
+    "/decks/:deckId/starting-hands/:startingHandId",
+    async (req: Request, res: Response) => {
+      const deckId = String(req.params.deckId)
+      const startingHandId = String(req.params.startingHandId)
+
+      try {
+        const deck = await getDeck(deckId)
+
+        if (!deck) {
+          res.status(404).json({
+            error: "Deck not found.",
+          })
+          return
+        }
+
+        const startingHand = await getStartingHandForDeck(
+          deckId,
+          startingHandId
+        )
+
+        if (!startingHand) {
+          res.status(404).json({
+            error: "Starting hand not found.",
+          })
+          return
+        }
+
+        res.status(200).json({
+          startingHand,
+        })
+      } catch (error) {
+        console.error("Failed to load starting hand:", error)
+        res.status(500).json({
+          error: "Failed to load starting hand.",
+        })
+      }
+    }
+  )
+
   app.post(
     "/decks/:deckId/starting-hands",
     async (req: Request, res: Response) => {
@@ -5697,6 +5741,32 @@ async function main() {
         console.error("Failed to create starting hand:", error)
         res.status(500).json({
           error: "Failed to create starting hand.",
+        })
+      }
+    }
+  )
+
+  app.delete(
+    "/decks/:deckId/starting-hands/:startingHandId",
+    async (req: Request, res: Response) => {
+      const deckId = String(req.params.deckId)
+      const startingHandId = String(req.params.startingHandId)
+
+      try {
+        const wasDisabled = await disableStartingHand(deckId, startingHandId)
+
+        if (!wasDisabled) {
+          res.status(404).json({
+            error: "Starting hand not found.",
+          })
+          return
+        }
+
+        res.status(204).send()
+      } catch (error) {
+        console.error("Failed to delete starting hand:", error)
+        res.status(500).json({
+          error: "Failed to delete starting hand.",
         })
       }
     }
@@ -5758,6 +5828,32 @@ async function main() {
         console.error("Failed to create saved seed:", error)
         res.status(500).json({
           error: "Failed to create saved seed.",
+        })
+      }
+    }
+  )
+
+  app.delete(
+    "/decks/:deckId/saved-seeds/:savedSeedId",
+    async (req: Request, res: Response) => {
+      const deckId = String(req.params.deckId)
+      const savedSeedId = String(req.params.savedSeedId)
+
+      try {
+        const wasDisabled = await disableSavedSeed(deckId, savedSeedId)
+
+        if (!wasDisabled) {
+          res.status(404).json({
+            error: "Saved seed not found.",
+          })
+          return
+        }
+
+        res.status(204).send()
+      } catch (error) {
+        console.error("Failed to delete saved seed:", error)
+        res.status(500).json({
+          error: "Failed to delete saved seed.",
         })
       }
     }

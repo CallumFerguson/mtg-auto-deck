@@ -41,6 +41,7 @@ type FakeSavedSeed = {
   deck_id: string
   name: string
   seed: string
+  is_enabled: boolean
   created_at: Date
   updated_at: Date
 }
@@ -49,6 +50,7 @@ type FakeStartingHand = {
   id: string
   deck_id: string
   name: string
+  is_enabled: boolean
   created_at: Date
   updated_at: Date
 }
@@ -606,12 +608,14 @@ test("starter deck copy clones deck data, presets, terminal history, and remaps 
   assert.ok(copiedSeed)
   assert.equal(copiedSeed.name, "Keepable opener")
   assert.equal(copiedSeed.seed, "seed-1")
+  assert.equal(copiedSeed.is_enabled, false)
 
   const copiedHand = db.startingHands.find(
     (hand) => hand.deck_id === copiedDeck.id
   )
 
   assert.ok(copiedHand)
+  assert.equal(copiedHand.is_enabled, false)
 
   const copiedDeckCardIds = db.deckCards
     .filter((card) => card.deck_id === copiedDeck.id)
@@ -800,6 +804,7 @@ function createStarterDeckFixture() {
     created_at: now,
     deck_id: "starter-deck",
     id: "seed-id",
+    is_enabled: false,
     name: "Keepable opener",
     seed: "seed-1",
     updated_at: now,
@@ -808,6 +813,7 @@ function createStarterDeckFixture() {
     created_at: now,
     deck_id: "starter-deck",
     id: "hand-1",
+    is_enabled: false,
     name: "Preset hand",
     updated_at: now,
   })

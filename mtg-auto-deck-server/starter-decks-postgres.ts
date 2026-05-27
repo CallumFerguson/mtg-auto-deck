@@ -435,6 +435,7 @@ async function copySavedSeeds({
         deck_id,
         name,
         seed,
+        is_enabled,
         created_at,
         updated_at
       )
@@ -442,12 +443,13 @@ async function copySavedSeeds({
         $2,
         name,
         seed,
+        is_enabled,
         created_at,
         updated_at
       FROM saved_seeds
       WHERE deck_id = $1
       ORDER BY created_at ASC, name ASC
-      ON CONFLICT (deck_id, name) DO NOTHING
+      ON CONFLICT DO NOTHING
     `,
     [sourceDeckId, copiedDeckId]
   )
@@ -469,6 +471,7 @@ async function copyStartingHands({
         SELECT
           id AS source_starting_hand_id,
           name,
+          is_enabled,
           created_at,
           updated_at
         FROM starting_hands
@@ -478,17 +481,24 @@ async function copyStartingHands({
         INSERT INTO starting_hands (
           deck_id,
           name,
+          is_enabled,
           created_at,
           updated_at
         )
         SELECT
           $2,
           name,
+          is_enabled,
           created_at,
           updated_at
         FROM source_hands
         ORDER BY created_at ASC, name ASC
-        RETURNING id AS copied_starting_hand_id, name
+        RETURNING
+          id AS copied_starting_hand_id,
+          name,
+          is_enabled,
+          created_at,
+          updated_at
       )
       SELECT
         source_hands.source_starting_hand_id,
@@ -496,6 +506,9 @@ async function copyStartingHands({
       FROM source_hands
       JOIN inserted_hands
         ON inserted_hands.name = source_hands.name
+       AND inserted_hands.is_enabled = source_hands.is_enabled
+       AND inserted_hands.created_at = source_hands.created_at
+       AND inserted_hands.updated_at = source_hands.updated_at
       ORDER BY source_hands.created_at ASC, source_hands.name ASC
     `,
     [sourceDeckId, copiedDeckId]
