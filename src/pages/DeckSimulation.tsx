@@ -824,6 +824,12 @@ export function DeckSimulation({
   const selectedModelPresetSupportsFlex = Boolean(
     selectedModelPreset?.supportsFlex
   )
+  const isModelPresetSelectionResolved =
+    !isLoadingModelPresets &&
+    (modelPresetLoadError !== null ||
+      modelPresets.length === 0 ||
+      defaultModelPresetId === null ||
+      selectedModelPreset !== null)
   const savedSeedSummary = selectedSavedSeed
     ? `${selectedSavedSeed.name} - ${selectedSavedSeed.seed}`
     : savedSeedLoadError
@@ -1863,15 +1869,18 @@ export function DeckSimulation({
                         ) : null}
                       </div>
 
-                      <FlexServiceTierSwitch
-                        checked={
-                          selectedModelPresetSupportsFlex && useFlexServiceTier
-                        }
-                        disabled={!selectedModelPresetSupportsFlex}
-                        label="Flex processing"
-                        activeWarning="Less usage, but simulation may be slower and has a higher chance of failing."
-                        onCheckedChange={handleCreateSimulationUseFlexChange}
-                      />
+                      {isModelPresetSelectionResolved ? (
+                        <FlexServiceTierSwitch
+                          checked={
+                            selectedModelPresetSupportsFlex &&
+                            useFlexServiceTier
+                          }
+                          disabled={!selectedModelPresetSupportsFlex}
+                          label="Flex processing"
+                          activeWarning="Less usage, but simulation may be slower and has a higher chance of failing."
+                          onCheckedChange={handleCreateSimulationUseFlexChange}
+                        />
+                      ) : null}
                     </div>
 
                     <div>
