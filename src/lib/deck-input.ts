@@ -1,11 +1,11 @@
-type DeckCardInput = {
+export type DeckCardInput = {
   name: string
   quantity: number
 }
 
 export const DECK_GUIDELINES_MAX_LENGTH = 1000
 
-type ParsedDeckInput = {
+export type ParsedDeckInput = {
   name: string
   desc: string
   mulliganGuidelines: string
@@ -14,10 +14,48 @@ type ParsedDeckInput = {
   cards: DeckCardInput[]
 }
 
+export type ParsedDeckCardsInput = Pick<ParsedDeckInput, "commanders" | "cards">
+
 export type DeckInputValidationResult =
   | {
       ok: true
       deck: ParsedDeckInput
+    }
+  | {
+      ok: false
+      errors: string[]
+    }
+
+export type DeckCardsInputValidationResult =
+  | {
+      ok: true
+      deckCards: ParsedDeckCardsInput
+    }
+  | {
+      ok: false
+      errors: string[]
+    }
+
+export type DeckDetailsInputValidationResult =
+  | {
+      ok: true
+      details: {
+        name: string
+        description: string
+      }
+    }
+  | {
+      ok: false
+      errors: string[]
+    }
+
+export type DeckGuidelinesInputValidationResult =
+  | {
+      ok: true
+      guidelines: {
+        mulliganGuidelines: string
+        strategyGuidelines: string
+      }
     }
   | {
       ok: false
@@ -46,9 +84,53 @@ export function validateAndParseDeckInput({
   name: string
   strategyGuidelines: string
 }): DeckInputValidationResult {
-  const trimmedName = name.trim()
-  const trimmedMulliganGuidelines = mulliganGuidelines.trim()
-  const trimmedStrategyGuidelines = strategyGuidelines.trim()
+  const cardsResult = validateAndParseDeckCardsInput({
+    commanderOne,
+    commanderTwo,
+    deckList,
+  })
+  const detailsResult = validateDeckDetailsInput({
+    description,
+    name,
+  })
+  const guidelinesResult = validateDeckGuidelinesInput({
+    mulliganGuidelines,
+    strategyGuidelines,
+  })
+
+  if (!cardsResult.ok || !detailsResult.ok || !guidelinesResult.ok) {
+    return {
+      ok: false,
+      errors: [
+        ...(cardsResult.ok ? [] : cardsResult.errors),
+        ...(detailsResult.ok ? [] : detailsResult.errors),
+        ...(guidelinesResult.ok ? [] : guidelinesResult.errors),
+      ],
+    }
+  }
+
+  return {
+    ok: true,
+    deck: {
+      name: detailsResult.details.name,
+      desc: detailsResult.details.description,
+      mulliganGuidelines: guidelinesResult.guidelines.mulliganGuidelines,
+      strategyGuidelines: guidelinesResult.guidelines.strategyGuidelines,
+      commanders: cardsResult.deckCards.commanders,
+      cards: cardsResult.deckCards.cards,
+    },
+  }
+}
+
+export function validateAndParseDeckCardsInput({
+  commanderOne,
+  commanderTwo,
+  deckList,
+}: {
+  commanderOne: string
+  commanderTwo: string
+  deckList: string
+}): DeckCardsInputValidationResult {
   const trimmedCommanderOne = commanderOne.trim()
   const trimmedCommanderTwo = commanderTwo.trim()
   const parsedCommanderOne = trimmedCommanderOne
@@ -59,20 +141,8 @@ export function validateAndParseDeckInput({
     : null
   const errors: string[] = []
 
-  if (!trimmedName) {
-    errors.push("Deck name is required.")
-  }
-
   if (!trimmedCommanderOne) {
     errors.push("Commander 1 is required.")
-  }
-
-  if (trimmedMulliganGuidelines.length > DECK_GUIDELINES_MAX_LENGTH) {
-    errors.push("Mulligan guidelines must be 1000 characters or fewer.")
-  }
-
-  if (trimmedStrategyGuidelines.length > DECK_GUIDELINES_MAX_LENGTH) {
-    errors.push("Strategy guidelines must be 1000 characters or fewer.")
   }
 
   if (trimmedCommanderOne && !parsedCommanderOne) {
@@ -125,15 +195,71 @@ export function validateAndParseDeckInput({
 
   return {
     ok: true,
-    deck: {
-      name: trimmedName,
-      desc: description.trim(),
-      mulliganGuidelines: trimmedMulliganGuidelines,
-      strategyGuidelines: trimmedStrategyGuidelines,
+    deckCards: {
       commanders: [parsedCommanderOne, parsedCommanderTwo]
         .filter((commander): commander is ParsedDeckLine => commander !== null)
         .map((commander) => commander.name),
       cards: parsedCards,
+    },
+  }
+}
+
+export function validateDeckDetailsInput({
+  description,
+  name,
+}: {
+  description: string
+  name: string
+}): DeckDetailsInputValidationResult {
+  const trimmedName = name.trim()
+
+  if (!trimmedName) {
+    return {
+      ok: false,
+      errors: ["Deck name is required."],
+    }
+  }
+
+  return {
+    ok: true,
+    details: {
+      name: trimmedName,
+      description: description.trim(),
+    },
+  }
+}
+
+export function validateDeckGuidelinesInput({
+  mulliganGuidelines,
+  strategyGuidelines,
+}: {
+  mulliganGuidelines: string
+  strategyGuidelines: string
+}): DeckGuidelinesInputValidationResult {
+  const trimmedMulliganGuidelines = mulliganGuidelines.trim()
+  const trimmedStrategyGuidelines = strategyGuidelines.trim()
+  const errors: string[] = []
+
+  if (trimmedMulliganGuidelines.length > DECK_GUIDELINES_MAX_LENGTH) {
+    errors.push("Mulligan guidelines must be 1000 characters or fewer.")
+  }
+
+  if (trimmedStrategyGuidelines.length > DECK_GUIDELINES_MAX_LENGTH) {
+    errors.push("Strategy guidelines must be 1000 characters or fewer.")
+  }
+
+  if (errors.length > 0) {
+    return {
+      ok: false,
+      errors,
+    }
+  }
+
+  return {
+    ok: true,
+    guidelines: {
+      mulliganGuidelines: trimmedMulliganGuidelines,
+      strategyGuidelines: trimmedStrategyGuidelines,
     },
   }
 }

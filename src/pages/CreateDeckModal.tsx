@@ -1,13 +1,73 @@
-import { useState, type FormEvent, type ReactNode } from "react"
-import { X } from "lucide-react"
+import { useMemo, useState, type FormEvent, type ReactNode } from "react"
+import {
+  ArrowLeft,
+  ArrowRight,
+  CheckCircle2,
+  Loader2,
+  X,
+} from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { API_BASE_URL, apiFetch } from "@/lib/api"
 import { readApiError } from "@/lib/api-error"
 import {
   DECK_GUIDELINES_MAX_LENGTH,
+  type DeckCardsInputValidationResult,
+  validateAndParseDeckCardsInput,
   validateAndParseDeckInput,
+  validateDeckDetailsInput,
+  validateDeckGuidelinesInput,
 } from "@/lib/deck-input"
+import { cn } from "@/lib/utils"
+
+type DeckDraft = {
+  name: string
+  description: string
+  mulliganGuidelines: string
+  strategyGuidelines: string
+  commanderOne: string
+  commanderTwo: string
+  deckList: string
+}
+
+const CARD_ENTRY_STEP = 0
+const DETAILS_STEP = 1
+const GUIDELINES_STEP = 2
+const CONFIRM_STEP = 3
+
+const CREATE_DECK_STEPS = [
+  {
+    title: "Cards",
+    description: "Commanders and library",
+  },
+  {
+    title: "Details",
+    description: "Name and description",
+  },
+  {
+    title: "Guidelines",
+    description: "Mulligan and strategy",
+  },
+  {
+    title: "Confirm",
+    description: "Review and create",
+  },
+]
+
+const EMPTY_DECK_DRAFT: DeckDraft = {
+  name: "",
+  description: "",
+  mulliganGuidelines: "",
+  strategyGuidelines: "",
+  commanderOne: "",
+  commanderTwo: "",
+  deckList: "",
+}
+
+const INPUT_CLASS_NAME =
+  "h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground transition outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-60"
+const TEXTAREA_CLASS_NAME =
+  "w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground transition outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-60"
 
 export function CreateDeckModal({
   onClose,
@@ -16,22 +76,133 @@ export function CreateDeckModal({
   onClose: () => void
   onCreated: () => void
 }) {
+  const [draft, setDraft] = useState<DeckDraft>(EMPTY_DECK_DRAFT)
+  const [currentStep, setCurrentStep] = useState(CARD_ENTRY_STEP)
   const [errors, setErrors] = useState<string[]>([])
+  const [validatedCardSignature, setValidatedCardSignature] = useState<
+    string | null
+  >(null)
+  const [isValidatingCards, setIsValidatingCards] = useState(false)
   const [isCreating, setIsCreating] = useState(false)
+  const cardSignature = useMemo(() => createCardSignature(draft), [draft])
+  const cardValidationResult = useMemo(
+    () =>
+      validateAndParseDeckCardsInput({
+        commanderOne: draft.commanderOne,
+        commanderTwo: draft.commanderTwo,
+        deckList: draft.deckList,
+      }),
+    [draft.commanderOne, draft.commanderTwo, draft.deckList]
+  )
+  const cardsAreVerified =
+    cardValidationResult.ok && validatedCardSignature === cardSignature
+  const isBusy = isValidatingCards || isCreating
+
+  function updateDraftField(field: keyof DeckDraft, value: string) {
+    setDraft((currentDraft) => ({
+      ...currentDraft,
+      [field]: value,
+    }))
+    setErrors([])
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
-    const formData = new FormData(event.currentTarget)
-    const result = validateAndParseDeckInput({
-      name: String(formData.get("name") ?? ""),
-      description: String(formData.get("description") ?? ""),
-      mulliganGuidelines: String(formData.get("mulliganGuidelines") ?? ""),
-      strategyGuidelines: String(formData.get("strategyGuidelines") ?? ""),
-      commanderOne: String(formData.get("commanderOne") ?? ""),
-      commanderTwo: String(formData.get("commanderTwo") ?? ""),
-      deckList: String(formData.get("deckList") ?? ""),
-    })
+    if (currentStep === CONFIRM_STEP) {
+      await handleCreateDeck()
+      return
+    }
+
+    await handleNextStep()
+  }
+
+  async function handleNextStep() {
+    if (currentStep === CARD_ENTRY_STEP) {
+      await validateCardsAndAdvance()
+      return
+    }
+
+    if (currentStep === DETAILS_STEP) {
+      const result = validateDeckDetailsInput({
+        name: draft.name,
+        description: draft.description,
+      })
+
+      if (!result.ok) {
+        setErrors(result.errors)
+        return
+      }
+
+      setErrors([])
+      setCurrentStep(GUIDELINES_STEP)
+      return
+    }
+
+    if (currentStep === GUIDELINES_STEP) {
+      const result = validateDeckGuidelinesInput({
+        mulliganGuidelines: draft.mulliganGuidelines,
+        strategyGuidelines: draft.strategyGuidelines,
+      })
+
+      if (!result.ok) {
+        setErrors(result.errors)
+        return
+      }
+
+      setErrors([])
+      setCurrentStep(CONFIRM_STEP)
+    }
+  }
+
+  async function validateCardsAndAdvance() {
+    if (!cardValidationResult.ok) {
+      setErrors(cardValidationResult.errors)
+      return
+    }
+
+    if (cardsAreVerified) {
+      setErrors([])
+      setCurrentStep(DETAILS_STEP)
+      return
+    }
+
+    setErrors([])
+    setIsValidatingCards(true)
+
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/decks/validate-cards`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(cardValidationResult.deckCards),
+      })
+
+      if (!response.ok) {
+        setErrors([
+          await readApiError(response, "Deck cards could not be validated."),
+        ])
+        return
+      }
+
+      setValidatedCardSignature(cardSignature)
+      setCurrentStep(DETAILS_STEP)
+    } catch {
+      setErrors(["Deck cards could not be validated with the server."])
+    } finally {
+      setIsValidatingCards(false)
+    }
+  }
+
+  async function handleCreateDeck() {
+    if (!cardsAreVerified) {
+      setCurrentStep(CARD_ENTRY_STEP)
+      setErrors(["Cards must be verified before creating the deck."])
+      return
+    }
+
+    const result = validateAndParseDeckInput(draft)
 
     if (!result.ok) {
       setErrors(result.errors)
@@ -51,7 +222,14 @@ export function CreateDeckModal({
       })
 
       if (!response.ok) {
-        setErrors([await readApiError(response, "Deck could not be created.")])
+        const error = await readApiError(response, "Deck could not be created.")
+
+        if (isCardValidationError(error)) {
+          setCurrentStep(CARD_ENTRY_STEP)
+          setValidatedCardSignature(null)
+        }
+
+        setErrors([error])
         return
       }
 
@@ -63,15 +241,20 @@ export function CreateDeckModal({
     }
   }
 
+  function handleBack() {
+    setErrors([])
+    setCurrentStep((step) => Math.max(CARD_ENTRY_STEP, step - 1))
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 py-6 backdrop-blur-sm"
       role="presentation"
-      onMouseDown={onClose}
+      onMouseDown={isBusy ? undefined : onClose}
     >
       <section
         aria-labelledby="create-deck-title"
-        className="max-h-full w-full max-w-2xl overflow-y-auto rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
+        className="flex h-[46rem] max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
         role="dialog"
         aria-modal="true"
         onMouseDown={(event) => event.stopPropagation()}
@@ -82,7 +265,8 @@ export function CreateDeckModal({
               New deck
             </h2>
             <p className="text-sm text-muted-foreground">
-              Paste a Commander deck list and add its details.
+              Step {currentStep + 1} of {CREATE_DECK_STEPS.length}:{" "}
+              {CREATE_DECK_STEPS[currentStep].description}
             </p>
           </div>
           <Button
@@ -92,87 +276,65 @@ export function CreateDeckModal({
             aria-label="Close"
             title="Close"
             onClick={onClose}
+            disabled={isBusy}
           >
             <X />
           </Button>
         </header>
 
-        <form className="grid gap-4 px-5 py-5" onSubmit={handleSubmit}>
-          <Field label="Deck name" htmlFor="deck-name">
-            <input
-              id="deck-name"
-              name="name"
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground transition outline-none focus:border-ring focus:ring-3 focus:ring-ring/25"
-              type="text"
-            />
-          </Field>
+        <form
+          className="flex min-h-0 flex-1 flex-col gap-5 px-5 py-5"
+          onSubmit={handleSubmit}
+        >
+          <StepProgress currentStep={currentStep} />
 
-          <Field label="Description" htmlFor="deck-description">
-            <textarea
-              id="deck-description"
-              name="description"
-              className="min-h-24 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground transition outline-none focus:border-ring focus:ring-3 focus:ring-ring/25"
-              placeholder="Optional description"
-            />
-          </Field>
-
-          <Field label="Mulligan guidelines" htmlFor="deck-mulligan-guidelines">
-            <textarea
-              id="deck-mulligan-guidelines"
-              name="mulliganGuidelines"
-              className="min-h-24 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground transition outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/25"
-              maxLength={DECK_GUIDELINES_MAX_LENGTH}
-              placeholder="(optional) A good starting hand usually has around 3 lands and some ramp so you can play the commander on turn 4."
-            />
-          </Field>
-
-          <Field label="Strategy guidelines" htmlFor="deck-strategy-guidelines">
-            <textarea
-              id="deck-strategy-guidelines"
-              name="strategyGuidelines"
-              className="min-h-24 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground transition outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/25"
-              maxLength={DECK_GUIDELINES_MAX_LENGTH}
-              placeholder="(optional) Use the commander as a Voltron threat and win through commander damage."
-            />
-          </Field>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Commander 1" htmlFor="main-commander">
-              <input
-                id="main-commander"
-                name="commanderOne"
-                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground transition outline-none focus:border-ring focus:ring-3 focus:ring-ring/25"
-                placeholder="The Ur-Dragon"
-                type="text"
+          <div className="min-h-0 flex-1 overflow-hidden">
+            {currentStep === CARD_ENTRY_STEP ? (
+              <CardEntryStep
+                cardsAreVerified={cardsAreVerified}
+                disabled={isBusy}
+                draft={draft}
+                onFieldChange={updateDraftField}
+                validationResult={cardValidationResult}
+                validatedCardSignature={validatedCardSignature}
               />
-            </Field>
+            ) : null}
 
-            <Field label="Commander 2" htmlFor="secondary-commander">
-              <input
-                id="secondary-commander"
-                name="commanderTwo"
-                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground transition outline-none focus:border-ring focus:ring-3 focus:ring-ring/25"
-                placeholder="Optional partner / background / etc."
-                type="text"
+            {currentStep === DETAILS_STEP ? (
+              <DetailsStep
+                disabled={isBusy}
+                draft={draft}
+                onFieldChange={updateDraftField}
               />
-            </Field>
+            ) : null}
+
+            {currentStep === GUIDELINES_STEP ? (
+              <GuidelinesStep
+                disabled={isBusy}
+                draft={draft}
+                onFieldChange={updateDraftField}
+              />
+            ) : null}
+
+            {currentStep === CONFIRM_STEP ? (
+              <ConfirmStep
+                cardsAreVerified={cardsAreVerified}
+                draft={draft}
+                validationResult={cardValidationResult}
+              />
+            ) : null}
           </div>
-
-          <Field label="Deck list" htmlFor="deck-list">
-            <textarea
-              id="deck-list"
-              name="deckList"
-              className="min-h-72 w-full resize-y rounded-md border border-input bg-background px-3 py-3 font-mono text-sm text-foreground transition outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/25"
-              placeholder="1 Sol Ring&#10;1 Command Tower&#10;1 Arcane Signet"
-            />
-          </Field>
 
           {errors.length > 0 ? (
             <div
               className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
               role="alert"
             >
-              <p className="font-medium">Deck could not be created.</p>
+              <p className="font-medium">
+                {currentStep === CONFIRM_STEP
+                  ? "Deck could not be created."
+                  : "Before continuing, fix this."}
+              </p>
               <ul className="mt-2 list-disc space-y-1 pl-5">
                 {errors.map((error) => (
                   <li key={error}>{error}</li>
@@ -181,18 +343,30 @@ export function CreateDeckModal({
             </div>
           ) : null}
 
-          <div className="flex justify-end gap-2 border-t border-border pt-4">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onClose}
-              disabled={isCreating}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={isCreating}>
-              {isCreating ? "Creating..." : "Create deck"}
-            </Button>
+          <div className="flex flex-col-reverse gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              {currentStep > CARD_ENTRY_STEP ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleBack}
+                  disabled={isBusy}
+                >
+                  <ArrowLeft data-icon="inline-start" />
+                  Back
+                </Button>
+              ) : null}
+            </div>
+
+            <div className="flex justify-end">
+              <Button type="submit" disabled={isBusy}>
+                <PrimaryActionContent
+                  currentStep={currentStep}
+                  isCreating={isCreating}
+                  isValidatingCards={isValidatingCards}
+                />
+              </Button>
+            </div>
           </div>
         </form>
       </section>
@@ -200,19 +374,412 @@ export function CreateDeckModal({
   )
 }
 
+function CardEntryStep({
+  cardsAreVerified,
+  disabled,
+  draft,
+  onFieldChange,
+  validatedCardSignature,
+  validationResult,
+}: {
+  cardsAreVerified: boolean
+  disabled: boolean
+  draft: DeckDraft
+  onFieldChange: (field: keyof DeckDraft, value: string) => void
+  validatedCardSignature: string | null
+  validationResult: DeckCardsInputValidationResult
+}) {
+  const parsedLibraryCount = validationResult.ok
+    ? countCards(validationResult.deckCards.cards)
+    : null
+
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Commander 1" htmlFor="main-commander">
+          <input
+            id="main-commander"
+            name="commanderOne"
+            className={INPUT_CLASS_NAME}
+            placeholder="The Ur-Dragon"
+            type="text"
+            value={draft.commanderOne}
+            onChange={(event) =>
+              onFieldChange("commanderOne", event.target.value)
+            }
+            disabled={disabled}
+          />
+        </Field>
+
+        <Field label="Commander 2" htmlFor="secondary-commander">
+          <input
+            id="secondary-commander"
+            name="commanderTwo"
+            className={INPUT_CLASS_NAME}
+            placeholder="Optional partner / background / etc."
+            type="text"
+            value={draft.commanderTwo}
+            onChange={(event) =>
+              onFieldChange("commanderTwo", event.target.value)
+            }
+            disabled={disabled}
+          />
+        </Field>
+      </div>
+
+      <Field
+        className="min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)]"
+        label="Deck list"
+        htmlFor="deck-list"
+      >
+        <textarea
+          id="deck-list"
+          name="deckList"
+          className={cn(
+            TEXTAREA_CLASS_NAME,
+            "h-full min-h-0 resize-none py-3 font-mono"
+          )}
+          placeholder="1 Sol Ring&#10;1 Command Tower&#10;1 Arcane Signet"
+          value={draft.deckList}
+          onChange={(event) => onFieldChange("deckList", event.target.value)}
+          disabled={disabled}
+        />
+      </Field>
+
+      {cardsAreVerified ? (
+        <p className="flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
+          <CheckCircle2 className="size-4" />
+          Cards verified with Scryfall. Parsed {parsedLibraryCount} library
+          cards.
+        </p>
+      ) : validatedCardSignature ? (
+        <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+          Cards changed since the last verification.
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+function DetailsStep({
+  disabled,
+  draft,
+  onFieldChange,
+}: {
+  disabled: boolean
+  draft: DeckDraft
+  onFieldChange: (field: keyof DeckDraft, value: string) => void
+}) {
+  return (
+    <div className="grid gap-4">
+      <Field label="Deck name" htmlFor="deck-name">
+        <input
+          id="deck-name"
+          name="name"
+          className={INPUT_CLASS_NAME}
+          type="text"
+          value={draft.name}
+          onChange={(event) => onFieldChange("name", event.target.value)}
+          disabled={disabled}
+        />
+      </Field>
+
+      <Field label="Description" htmlFor="deck-description">
+        <textarea
+          id="deck-description"
+          name="description"
+          className={cn(TEXTAREA_CLASS_NAME, "min-h-40")}
+          placeholder="Optional description"
+          value={draft.description}
+          onChange={(event) =>
+            onFieldChange("description", event.target.value)
+          }
+          disabled={disabled}
+        />
+      </Field>
+    </div>
+  )
+}
+
+function GuidelinesStep({
+  disabled,
+  draft,
+  onFieldChange,
+}: {
+  disabled: boolean
+  draft: DeckDraft
+  onFieldChange: (field: keyof DeckDraft, value: string) => void
+}) {
+  return (
+    <div className="grid gap-4">
+      <Field label="Mulligan guidelines" htmlFor="deck-mulligan-guidelines">
+        <textarea
+          id="deck-mulligan-guidelines"
+          name="mulliganGuidelines"
+          className={cn(TEXTAREA_CLASS_NAME, "min-h-36")}
+          maxLength={DECK_GUIDELINES_MAX_LENGTH}
+          placeholder="(optional) A good starting hand usually has around 3 lands and some ramp so you can play the commander on turn 4."
+          value={draft.mulliganGuidelines}
+          onChange={(event) =>
+            onFieldChange("mulliganGuidelines", event.target.value)
+          }
+          disabled={disabled}
+        />
+      </Field>
+
+      <Field label="Strategy guidelines" htmlFor="deck-strategy-guidelines">
+        <textarea
+          id="deck-strategy-guidelines"
+          name="strategyGuidelines"
+          className={cn(TEXTAREA_CLASS_NAME, "min-h-36")}
+          maxLength={DECK_GUIDELINES_MAX_LENGTH}
+          placeholder="(optional) Use the commander as a Voltron threat and win through commander damage."
+          value={draft.strategyGuidelines}
+          onChange={(event) =>
+            onFieldChange("strategyGuidelines", event.target.value)
+          }
+          disabled={disabled}
+        />
+      </Field>
+    </div>
+  )
+}
+
+function ConfirmStep({
+  cardsAreVerified,
+  draft,
+  validationResult,
+}: {
+  cardsAreVerified: boolean
+  draft: DeckDraft
+  validationResult: DeckCardsInputValidationResult
+}) {
+  const commanders = validationResult.ok
+    ? validationResult.deckCards.commanders
+    : [draft.commanderOne.trim(), draft.commanderTwo.trim()].filter(Boolean)
+  const libraryCount = validationResult.ok
+    ? countCards(validationResult.deckCards.cards)
+    : null
+  const rows = [
+    {
+      label: "Commanders",
+      value: commanders.length > 0 ? commanders.join(" / ") : "Missing",
+      isPlaceholder: commanders.length === 0,
+    },
+    {
+      label: "Library",
+      value: libraryCount === null ? "Needs review" : `${libraryCount} cards`,
+      isPlaceholder: libraryCount === null,
+    },
+    {
+      label: "Deck name",
+      ...summarizeText(draft.name, "Missing"),
+    },
+    {
+      label: "Description",
+      ...summarizeText(draft.description, "No description"),
+    },
+    {
+      label: "Mulligan",
+      ...summarizeText(draft.mulliganGuidelines, "No mulligan guidelines"),
+    },
+    {
+      label: "Strategy",
+      ...summarizeText(draft.strategyGuidelines, "No strategy guidelines"),
+    },
+  ]
+
+  return (
+    <div className="grid gap-4">
+      <div className="flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
+        <CheckCircle2 className="size-4" />
+        {cardsAreVerified
+          ? "Cards verified with Scryfall."
+          : "Cards need verification before creation."}
+      </div>
+
+      <dl className="divide-y divide-border border-y border-border">
+        {rows.map((row) => (
+          <div
+            className="grid gap-1 py-3 sm:grid-cols-[9rem_1fr] sm:gap-4"
+            key={row.label}
+          >
+            <dt className="text-sm font-medium text-muted-foreground">
+              {row.label}
+            </dt>
+            <dd
+              className={cn(
+                "break-words text-sm",
+                row.isPlaceholder
+                  ? "italic text-muted-foreground"
+                  : "text-foreground"
+              )}
+            >
+              {row.value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  )
+}
+
+function StepProgress({ currentStep }: { currentStep: number }) {
+  return (
+    <ol
+      aria-label="Create deck progress"
+      className="grid grid-cols-2 gap-2 sm:grid-cols-4"
+    >
+      {CREATE_DECK_STEPS.map((step, index) => {
+        const isCurrent = currentStep === index
+        const isComplete = currentStep > index
+
+        return (
+          <li
+            aria-current={isCurrent ? "step" : undefined}
+            className={cn(
+              "rounded-md border px-3 py-2 transition",
+              isCurrent
+                ? "border-primary/50 bg-primary/10 text-primary"
+                : isComplete
+                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100"
+                  : "border-border bg-background/40 text-muted-foreground"
+            )}
+            key={step.title}
+          >
+            <div className="flex min-w-0 items-center gap-2">
+              <span
+                className={cn(
+                  "flex size-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold",
+                  isCurrent
+                    ? "border-primary/60 bg-primary/15"
+                    : isComplete
+                      ? "border-emerald-500/50 bg-emerald-500/15"
+                      : "border-border bg-background"
+                )}
+              >
+                {isComplete ? <CheckCircle2 className="size-3.5" /> : index + 1}
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-medium">
+                  {step.title}
+                </span>
+                <span className="block truncate text-xs opacity-80">
+                  {step.description}
+                </span>
+              </span>
+            </div>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+function PrimaryActionContent({
+  currentStep,
+  isCreating,
+  isValidatingCards,
+}: {
+  currentStep: number
+  isCreating: boolean
+  isValidatingCards: boolean
+}) {
+  if (isValidatingCards) {
+    return (
+      <>
+        <Loader2 className="animate-spin" data-icon="inline-start" />
+        Validating...
+      </>
+    )
+  }
+
+  if (currentStep === CONFIRM_STEP) {
+    return (
+      <>
+        {isCreating ? (
+          <Loader2 className="animate-spin" data-icon="inline-start" />
+        ) : (
+          <CheckCircle2 data-icon="inline-start" />
+        )}
+        {isCreating ? "Creating..." : "Create deck"}
+      </>
+    )
+  }
+
+  return (
+    <>
+      Next
+      <ArrowRight data-icon="inline-end" />
+    </>
+  )
+}
+
 function Field({
   children,
+  className,
   htmlFor,
   label,
 }: {
   children: ReactNode
+  className?: string
   htmlFor: string
   label: string
 }) {
   return (
-    <label className="grid gap-2 text-sm font-medium" htmlFor={htmlFor}>
+    <label
+      className={cn("grid gap-2 text-sm font-medium", className)}
+      htmlFor={htmlFor}
+    >
       <span>{label}</span>
       {children}
     </label>
+  )
+}
+
+function createCardSignature({
+  commanderOne,
+  commanderTwo,
+  deckList,
+}: DeckDraft) {
+  return JSON.stringify({
+    commanderOne,
+    commanderTwo,
+    deckList,
+  })
+}
+
+function countCards(cards: readonly { quantity: number }[]) {
+  return cards.reduce((total, card) => total + card.quantity, 0)
+}
+
+function summarizeText(value: string, emptyLabel: string) {
+  const trimmedValue = value.trim()
+
+  if (!trimmedValue) {
+    return {
+      value: emptyLabel,
+      isPlaceholder: true,
+    }
+  }
+
+  if (trimmedValue.length <= 160) {
+    return {
+      value: trimmedValue,
+      isPlaceholder: false,
+    }
+  }
+
+  return {
+    value: `${trimmedValue.slice(0, 157)}...`,
+    isPlaceholder: false,
+  }
+}
+
+function isCardValidationError(error: string) {
+  return (
+    error.includes("Commander") ||
+    error.includes("Deck list") ||
+    error.includes("exact matches")
   )
 }

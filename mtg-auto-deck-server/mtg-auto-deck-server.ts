@@ -253,18 +253,19 @@ const llmRunIdSchema = z
 const llmRunIdentifierSchema = {
   llmRunId: llmRunIdSchema,
 }
-const createDeckSchema = z.object({
+const deckCardInputSchema = z.object({
+  name: z.string().trim().min(1),
+  quantity: z.number().int().positive(),
+})
+const createDeckCardsSchema = z.object({
+  commanders: z.array(z.string().trim().min(1)).min(1).max(2),
+  cards: z.array(deckCardInputSchema),
+})
+const createDeckSchema = createDeckCardsSchema.extend({
   name: z.string().trim().min(1),
   desc: z.string(),
   mulliganGuidelines: createDeckGuidelinesSchema(),
   strategyGuidelines: createDeckGuidelinesSchema(),
-  commanders: z.array(z.string().trim().min(1)).min(1).max(2),
-  cards: z.array(
-    z.object({
-      name: z.string().trim().min(1),
-      quantity: z.number().int().positive(),
-    })
-  ),
 })
 const appSignUpSchema = z.object({
   email: z.email(),
@@ -5366,6 +5367,35 @@ async function main() {
     }
   )
 
+  app.post("/decks/validate-cards", async (req: Request, res: Response) => {
+    const parsedDeckCards = createDeckCardsSchema.safeParse(req.body)
+
+    if (!parsedDeckCards.success) {
+      res.status(400).json({
+        error: "Deck card payload is not in the expected format.",
+      })
+      return
+    }
+
+    try {
+      const cardValidation = await validateCreateDeckCards(parsedDeckCards.data)
+
+      if (!cardValidation.ok) {
+        res.status(cardValidation.status).json(cardValidation.body)
+        return
+      }
+
+      res.status(200).json({
+        ok: true,
+      })
+    } catch (error) {
+      console.error("Failed to validate deck cards:", error)
+      res.status(500).json({
+        error: "Deck cards could not be validated.",
+      })
+    }
+  })
+
   app.use("/decks/:deckId", async (req: Request, res: Response, next) => {
     try {
       const deckId = String(req.params.deckId)
@@ -6277,57 +6307,11 @@ async function main() {
       return
     }
 
-    const commanderNames = new Set(
-      parsedDeck.data.commanders.map((commander) =>
-        commander.toLocaleLowerCase()
-      )
-    )
-
-    if (commanderNames.size !== parsedDeck.data.commanders.length) {
-      res.status(400).json({
-        error: "Commander cards must be different.",
-      })
-      return
-    }
-
-    const expectedDeckSize = parsedDeck.data.commanders.length === 2 ? 98 : 99
-    const actualDeckSize = parsedDeck.data.cards.reduce(
-      (total, card) => total + card.quantity,
-      0
-    )
-
-    if (actualDeckSize !== expectedDeckSize) {
-      res.status(400).json({
-        error: `Deck list must contain exactly ${expectedDeckSize} cards. Parsed ${actualDeckSize}.`,
-      })
-      return
-    }
-
     try {
-      const cardResolution = await resolveExactScryfallOracleCards([
-        ...parsedDeck.data.commanders,
-        ...parsedDeck.data.cards.map((card) => card.name),
-      ])
+      const cardValidation = await validateCreateDeckCards(parsedDeck.data)
 
-      if (cardResolution.missingNames.length > 0) {
-        res.status(400).json({
-          error: `Could not find exact matches for: ${cardResolution.missingNames.join(", ")}.`,
-          unmatchedCards: cardResolution.missingNames,
-        })
-        return
-      }
-
-      const exactMatchesByName = createExactScryfallOracleCardMatchMap(
-        cardResolution.matches
-      )
-      const commanderOracleIds = parsedDeck.data.commanders.map((commander) =>
-        getExactMatchOracleId(exactMatchesByName, commander)
-      )
-
-      if (new Set(commanderOracleIds).size !== commanderOracleIds.length) {
-        res.status(400).json({
-          error: "Commander cards must be different.",
-        })
+      if (!cardValidation.ok) {
+        res.status(cardValidation.status).json(cardValidation.body)
         return
       }
 
@@ -6337,12 +6321,15 @@ async function main() {
         mulliganGuidelines: parsedDeck.data.mulliganGuidelines,
         strategyGuidelines: parsedDeck.data.strategyGuidelines,
         ownerUserId: user.id,
-        commanders: commanderOracleIds.map((oracleId) => ({
+        commanders: cardValidation.commanderOracleIds.map((oracleId) => ({
           oracleId,
           quantity: 1,
         })),
         cards: parsedDeck.data.cards.map((card) => ({
-          oracleId: getExactMatchOracleId(exactMatchesByName, card.name),
+          oracleId: getExactMatchOracleId(
+            cardValidation.exactMatchesByName,
+            card.name
+          ),
           quantity: card.quantity,
         })),
       })
@@ -6426,6 +6413,98 @@ async function promoteConfiguredAutoAdminUserOnStartup() {
       environmentVariable: AUTO_ADMIN_EMAIL_ENVIRONMENT_VARIABLE,
       userId: promotion.id,
     })
+  }
+}
+
+type CreateDeckCardValidationInput = z.infer<typeof createDeckCardsSchema>
+
+type CreateDeckCardValidationResult =
+  | {
+      ok: true
+      exactMatchesByName: ReturnType<
+        typeof createExactScryfallOracleCardMatchMap
+      >
+      commanderOracleIds: string[]
+    }
+  | {
+      ok: false
+      status: number
+      body: {
+        error: string
+        unmatchedCards?: string[]
+      }
+    }
+
+async function validateCreateDeckCards(
+  deckCards: CreateDeckCardValidationInput
+): Promise<CreateDeckCardValidationResult> {
+  const commanderNames = new Set(
+    deckCards.commanders.map((commander) => commander.toLocaleLowerCase())
+  )
+
+  if (commanderNames.size !== deckCards.commanders.length) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: "Commander cards must be different.",
+      },
+    }
+  }
+
+  const expectedDeckSize = deckCards.commanders.length === 2 ? 98 : 99
+  const actualDeckSize = deckCards.cards.reduce(
+    (total, card) => total + card.quantity,
+    0
+  )
+
+  if (actualDeckSize !== expectedDeckSize) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: `Deck list must contain exactly ${expectedDeckSize} cards. Parsed ${actualDeckSize}.`,
+      },
+    }
+  }
+
+  const cardResolution = await resolveExactScryfallOracleCards([
+    ...deckCards.commanders,
+    ...deckCards.cards.map((card) => card.name),
+  ])
+
+  if (cardResolution.missingNames.length > 0) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: `Could not find exact matches for: ${cardResolution.missingNames.join(", ")}.`,
+        unmatchedCards: cardResolution.missingNames,
+      },
+    }
+  }
+
+  const exactMatchesByName = createExactScryfallOracleCardMatchMap(
+    cardResolution.matches
+  )
+  const commanderOracleIds = deckCards.commanders.map((commander) =>
+    getExactMatchOracleId(exactMatchesByName, commander)
+  )
+
+  if (new Set(commanderOracleIds).size !== commanderOracleIds.length) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: "Commander cards must be different.",
+      },
+    }
+  }
+
+  return {
+    ok: true,
+    exactMatchesByName,
+    commanderOracleIds,
   }
 }
 
