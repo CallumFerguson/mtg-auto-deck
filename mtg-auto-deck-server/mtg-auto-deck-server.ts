@@ -3606,6 +3606,7 @@ async function runOpeningHandLlmRun({
   }
 
   activeLlmRunRuntimes.set(runtimeStreamKey, runtime)
+  let responseResult: CompletedLlmResponseResult | null = null
 
   try {
     throwIfRuntimeAborted(runtime.abortController.signal)
@@ -3640,7 +3641,7 @@ async function runOpeningHandLlmRun({
     })
     throwIfRuntimeAborted(runtime.abortController.signal)
 
-    const responseResult =
+    responseResult =
       config.provider === "openai"
         ? await collectOpenAiLlmResponse({
           config,
@@ -3683,6 +3684,7 @@ async function runOpeningHandLlmRun({
     throwIfRuntimeAborted(runtime.abortController.signal)
 
     const completion = await completeOpeningHandLlmRun({
+      finalOutputText: responseResult.outputText,
       llmRunId,
       openingHand: parsedOpeningHand.keptHand,
       rawResponse: responseResult.rawResponse,
@@ -3705,7 +3707,11 @@ async function runOpeningHandLlmRun({
         phase: "opening_hand",
         provider: config.provider,
       })
-      await cancelLlmRun(llmRunId, "Opening-hand LLM run was cancelled.")
+      await cancelLlmRun(
+        llmRunId,
+        "Opening-hand LLM run was cancelled.",
+        responseResult?.outputText
+      )
       runtime.status = "cancelled"
       await publishSimulationResultsState({
         deckId,
@@ -3722,7 +3728,11 @@ async function runOpeningHandLlmRun({
       provider: config.provider,
     })
     console.error("Opening-hand LLM run failed:", error)
-    await failLlmRun(llmRunId, getErrorMessage(error))
+    await failLlmRun(
+      llmRunId,
+      getErrorMessage(error),
+      responseResult?.outputText
+    )
     runtime.status = "failed"
     await publishSimulationResultsState({
       deckId,
@@ -3828,6 +3838,7 @@ async function runTurnLlmRun({
   }
 
   activeLlmRunRuntimes.set(runtimeStreamKey, runtime)
+  let responseResult: CompletedLlmResponseResult | null = null
 
   try {
     throwIfRuntimeAborted(runtime.abortController.signal)
@@ -3863,7 +3874,7 @@ async function runTurnLlmRun({
     })
     throwIfRuntimeAborted(runtime.abortController.signal)
 
-    const responseResult =
+    responseResult =
       config.provider === "openai"
         ? await collectOpenAiLlmResponse({
           config,
@@ -3906,6 +3917,7 @@ async function runTurnLlmRun({
     throwIfRuntimeAborted(runtime.abortController.signal)
 
     const completion = await completeTurnLlmRun({
+      finalOutputText: responseResult.outputText,
       llmRunId,
       gameState: parsedTurn.gameState,
       rawResponse: responseResult.rawResponse,
@@ -3928,7 +3940,11 @@ async function runTurnLlmRun({
         phase: "turn",
         provider: config.provider,
       })
-      await cancelLlmRun(llmRunId, "Turn LLM run was cancelled.")
+      await cancelLlmRun(
+        llmRunId,
+        "Turn LLM run was cancelled.",
+        responseResult?.outputText
+      )
       runtime.status = "cancelled"
       await publishSimulationResultsState({
         deckId,
@@ -3945,7 +3961,11 @@ async function runTurnLlmRun({
       provider: config.provider,
     })
     console.error("Turn LLM run failed:", error)
-    await failLlmRun(llmRunId, getErrorMessage(error))
+    await failLlmRun(
+      llmRunId,
+      getErrorMessage(error),
+      responseResult?.outputText
+    )
     runtime.status = "failed"
     await publishSimulationResultsState({
       deckId,

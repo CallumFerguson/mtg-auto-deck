@@ -99,6 +99,7 @@ type FakeLlmRun = {
   queued_at: Date | null
   full_prompt: string
   request_payload: unknown
+  final_output_text: string | null
   raw_response: unknown
   response_metadata: unknown
   usage: unknown
@@ -464,13 +465,14 @@ class FakeStarterDeckCopyClient {
 
   copyLlmRun<T>(values: unknown[]) {
     const copiedRun: FakeLlmRun = {
-      cancel_requested_at: getDateOrNull(values[17]),
-      cancelled_at: getDateOrNull(values[18]),
-      completed_at: getDateOrNull(values[15]),
-      created_at: getDate(values[20]),
+      cancel_requested_at: getDateOrNull(values[18]),
+      cancelled_at: getDateOrNull(values[19]),
+      completed_at: getDateOrNull(values[16]),
+      created_at: getDate(values[21]),
       estimated_cost_usd: null,
-      failed_at: getDateOrNull(values[16]),
-      failure_message: getStringOrNull(values[19]),
+      failed_at: getDateOrNull(values[17]),
+      failure_message: getStringOrNull(values[20]),
+      final_output_text: getStringOrNull(values[11]),
       full_prompt: getString(values[9]),
       id: `copied-run-${this.llmRunIdSequence}`,
       llm_model_preset_id: getStringOrNull(values[6]),
@@ -483,14 +485,14 @@ class FakeStarterDeckCopyClient {
       queued_at: null,
       reasoning_effort: getStringOrNull(values[5]),
       request_payload: getJsonObject(values[10]),
-      raw_response: getJsonObject(values[11]),
-      response_metadata: getJsonObject(values[12]),
+      raw_response: getJsonObject(values[12]),
+      response_metadata: getJsonObject(values[13]),
       runtime_stream_key: null,
       service_tier: getStringOrNull(values[4]),
-      started_at: getDateOrNull(values[14]),
+      started_at: getDateOrNull(values[15]),
       status: getLlmRunStatus(values[8]),
-      updated_at: getDate(values[21]),
-      usage: getJsonObject(values[13]),
+      updated_at: getDate(values[22]),
+      usage: getJsonObject(values[14]),
     }
 
     this.llmRunIdSequence += 1
@@ -651,6 +653,7 @@ test("starter deck copy clones deck data, presets, terminal history, and remaps 
     assert.equal(run.queued_at, null)
     assert.equal(run.estimated_cost_usd, null)
     assert.equal(run.openrouter_reported_cost_usd, null)
+    assert.equal(run.final_output_text, "Final output")
     assert.equal(run.service_tier, "priority")
     assert.equal(run.status, "completed")
   }
@@ -1002,6 +1005,7 @@ function createLlmRun({
     estimated_cost_usd: 0.01,
     failed_at: null,
     failure_message: null,
+    final_output_text: "Final output",
     full_prompt: "Prompt",
     id,
     llm_model_preset_id: "55555555-5555-4555-8555-555555555555",

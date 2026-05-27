@@ -93,6 +93,7 @@ type LlmRunRow = {
   status: LlmRunStatus
   full_prompt: string
   request_payload: unknown
+  final_output_text: string | null
   raw_response: unknown
   response_metadata: unknown
   usage: unknown
@@ -834,6 +835,7 @@ async function listLinkedLlmRuns({
         llm_run.status,
         llm_run.full_prompt,
         llm_run.request_payload,
+        llm_run.final_output_text,
         llm_run.raw_response,
         llm_run.response_metadata,
         llm_run.usage,
@@ -890,6 +892,7 @@ async function copyLlmRun({
         queued_at,
         full_prompt,
         request_payload,
+        final_output_text,
         raw_response,
         response_metadata,
         usage,
@@ -918,19 +921,20 @@ async function copyLlmRun({
         NULL,
         $10,
         $11::jsonb,
-        $12::jsonb,
+        $12,
         $13::jsonb,
         $14::jsonb,
+        $15::jsonb,
         NULL,
         NULL,
-        $15,
         $16,
         $17,
         $18,
         $19,
         $20,
         $21,
-        $22
+        $22,
+        $23
       )
       RETURNING id
     `,
@@ -946,6 +950,7 @@ async function copyLlmRun({
       sourceRun.status,
       sourceRun.full_prompt,
       toJsonParameter(sourceRun.request_payload),
+      sourceRun.final_output_text,
       toJsonParameter(sourceRun.raw_response),
       toJsonParameter(sourceRun.response_metadata),
       toJsonParameter(sourceRun.usage),

@@ -671,6 +671,7 @@ export async function ensureSimulationsSchema() {
 
       full_prompt text NOT NULL DEFAULT '',
       request_payload jsonb NOT NULL DEFAULT '{}',
+      final_output_text text,
       response_metadata jsonb NOT NULL DEFAULT '{}',
       raw_response jsonb NOT NULL DEFAULT '{}',
       usage jsonb NOT NULL DEFAULT '{}',
@@ -779,6 +780,10 @@ export async function ensureSimulationsSchema() {
   await queryDatabase(`
     ALTER TABLE llm_runs
     ADD COLUMN IF NOT EXISTS raw_response jsonb NOT NULL DEFAULT '{}'
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_runs
+    ADD COLUMN IF NOT EXISTS final_output_text text
   `)
   await queryDatabase(`
     ALTER TABLE llm_runs
@@ -2919,6 +2924,104 @@ export function buildFailQueuedLlmRunUsageLimitQuery(
   }
 }
 
+export function buildCompleteLlmRunQuery({
+  estimatedCostUsd,
+  finalOutputText,
+  llmRunId,
+  openrouterReportedCostUsd,
+  rawResponse,
+  responseMetadata,
+  usage,
+}: {
+  llmRunId: string
+  responseMetadata: unknown
+  usage: unknown
+  estimatedCostUsd: number | null
+  openrouterReportedCostUsd: number | null
+  rawResponse: unknown
+  finalOutputText: string
+}) {
+  return {
+    text: `
+      UPDATE llm_runs
+      SET status = 'completed',
+          response_metadata = $2::jsonb,
+          usage = $3::jsonb,
+          estimated_cost_usd = $4,
+          openrouter_reported_cost_usd = $5,
+          raw_response = $6::jsonb,
+          final_output_text = $7,
+          completed_at = now(),
+          updated_at = now()
+      WHERE id = $1
+        AND status IN ('pending', 'streaming')
+    `,
+    values: [
+      llmRunId,
+      JSON.stringify(responseMetadata),
+      JSON.stringify(usage),
+      estimatedCostUsd,
+      openrouterReportedCostUsd,
+      JSON.stringify(rawResponse ?? {}),
+      finalOutputText,
+    ],
+  }
+}
+
+export function buildFailLlmRunQuery(
+  llmRunId: string,
+  failureMessage: string,
+  estimatedCostUsd: number | null,
+  finalOutputText?: string
+) {
+  return {
+    text: `
+      UPDATE llm_runs
+      SET status = 'failed',
+          estimated_cost_usd = $3,
+          final_output_text = $4,
+          failed_at = now(),
+          failure_message = $2,
+          updated_at = now()
+      WHERE id = $1
+        AND status IN ('pending', 'streaming')
+    `,
+    values: [
+      llmRunId,
+      failureMessage,
+      estimatedCostUsd,
+      finalOutputText ?? null,
+    ],
+  }
+}
+
+export function buildCancelLlmRunQuery(
+  llmRunId: string,
+  failureMessage: string | null,
+  estimatedCostUsd: number | null,
+  finalOutputText?: string
+) {
+  return {
+    text: `
+      UPDATE llm_runs
+      SET status = 'cancelled',
+          estimated_cost_usd = $3,
+          final_output_text = $4,
+          cancelled_at = now(),
+          failure_message = COALESCE($2, failure_message),
+          updated_at = now()
+      WHERE id = $1
+        AND status IN ('pending', 'streaming', 'cancel_requested')
+    `,
+    values: [
+      llmRunId,
+      failureMessage,
+      estimatedCostUsd,
+      finalOutputText ?? null,
+    ],
+  }
+}
+
 export async function isLlmRunActive(llmRunId: string) {
   const result = await queryDatabase(
     `
@@ -2935,6 +3038,7 @@ export async function isLlmRunActive(llmRunId: string) {
 }
 
 export async function completeOpeningHandLlmRun({
+  finalOutputText,
   llmRunId,
   openingHand,
   rawResponse,
@@ -2942,6 +3046,7 @@ export async function completeOpeningHandLlmRun({
   summary,
   usage,
 }: {
+  finalOutputText: string
   llmRunId: string
   openingHand: readonly string[]
   rawResponse: unknown
@@ -3041,29 +3146,16 @@ export async function completeOpeningHandLlmRun({
       ]
     )
 
-    await client.query(
-      `
-        UPDATE llm_runs
-        SET status = 'completed',
-            response_metadata = $2::jsonb,
-            usage = $3::jsonb,
-            estimated_cost_usd = $4,
-            openrouter_reported_cost_usd = $5,
-            raw_response = $6::jsonb,
-            completed_at = now(),
-            updated_at = now()
-        WHERE id = $1
-          AND status IN ('pending', 'streaming')
-      `,
-      [
-        llmRunId,
-        JSON.stringify(responseMetadata),
-        JSON.stringify(usage),
-        costValues.estimatedCostUsd,
-        costValues.openrouterReportedCostUsd,
-        JSON.stringify(rawResponse ?? {}),
-      ]
-    )
+    const completeRunQuery = buildCompleteLlmRunQuery({
+      estimatedCostUsd: costValues.estimatedCostUsd,
+      finalOutputText,
+      llmRunId,
+      openrouterReportedCostUsd: costValues.openrouterReportedCostUsd,
+      rawResponse,
+      responseMetadata,
+      usage,
+    })
+    await client.query(completeRunQuery.text, completeRunQuery.values)
 
     const decision = getOpeningHandCompletionDecision({
       autoSimulateNextStep: snapshot.auto_simulate_next_step,
@@ -3086,6 +3178,7 @@ export async function completeOpeningHandLlmRun({
 }
 
 export async function completeTurnLlmRun({
+  finalOutputText,
   gameState,
   llmRunId,
   rawResponse,
@@ -3093,6 +3186,7 @@ export async function completeTurnLlmRun({
   turnActions,
   usage,
 }: {
+  finalOutputText: string
   llmRunId: string
   gameState: unknown
   rawResponse: unknown
@@ -3175,29 +3269,16 @@ export async function completeTurnLlmRun({
       ]
     )
 
-    await client.query(
-      `
-        UPDATE llm_runs
-        SET status = 'completed',
-            response_metadata = $2::jsonb,
-            usage = $3::jsonb,
-            estimated_cost_usd = $4,
-            openrouter_reported_cost_usd = $5,
-            raw_response = $6::jsonb,
-            completed_at = now(),
-            updated_at = now()
-        WHERE id = $1
-          AND status IN ('pending', 'streaming')
-      `,
-      [
-        llmRunId,
-        JSON.stringify(responseMetadata),
-        JSON.stringify(usage),
-        costValues.estimatedCostUsd,
-        costValues.openrouterReportedCostUsd,
-        JSON.stringify(rawResponse ?? {}),
-      ]
-    )
+    const completeRunQuery = buildCompleteLlmRunQuery({
+      estimatedCostUsd: costValues.estimatedCostUsd,
+      finalOutputText,
+      llmRunId,
+      openrouterReportedCostUsd: costValues.openrouterReportedCostUsd,
+      rawResponse,
+      responseMetadata,
+      usage,
+    })
+    await client.query(completeRunQuery.text, completeRunQuery.values)
 
     const decision = getTurnCompletionDecision({
       autoSimulateNextStep: snapshot.auto_simulate_next_step,
@@ -3311,26 +3392,24 @@ async function estimatePartialLlmRunCostUsdWithClient(
   })
 }
 
-export async function failLlmRun(llmRunId: string, failureMessage: string) {
+export async function failLlmRun(
+  llmRunId: string,
+  failureMessage: string,
+  finalOutputText?: string
+) {
   await withDatabaseTransaction(async (client) => {
     const estimatedCostUsd = await estimatePartialLlmRunCostUsdWithClient(
       client,
       llmRunId
     )
 
-    await client.query(
-      `
-        UPDATE llm_runs
-        SET status = 'failed',
-            estimated_cost_usd = $3,
-            failed_at = now(),
-            failure_message = $2,
-            updated_at = now()
-        WHERE id = $1
-          AND status IN ('pending', 'streaming')
-      `,
-      [llmRunId, failureMessage, estimatedCostUsd]
+    const failRunQuery = buildFailLlmRunQuery(
+      llmRunId,
+      failureMessage,
+      estimatedCostUsd,
+      finalOutputText
     )
+    await client.query(failRunQuery.text, failRunQuery.values)
 
     await client.query(
       `
@@ -3362,26 +3441,24 @@ export async function failLlmRun(llmRunId: string, failureMessage: string) {
   })
 }
 
-export async function cancelLlmRun(llmRunId: string, failureMessage?: string) {
+export async function cancelLlmRun(
+  llmRunId: string,
+  failureMessage?: string,
+  finalOutputText?: string
+) {
   await withDatabaseTransaction(async (client) => {
     const estimatedCostUsd = await estimatePartialLlmRunCostUsdWithClient(
       client,
       llmRunId
     )
 
-    await client.query(
-      `
-        UPDATE llm_runs
-        SET status = 'cancelled',
-            estimated_cost_usd = $3,
-            cancelled_at = now(),
-            failure_message = COALESCE($2, failure_message),
-            updated_at = now()
-        WHERE id = $1
-          AND status IN ('pending', 'streaming', 'cancel_requested')
-      `,
-      [llmRunId, failureMessage ?? null, estimatedCostUsd]
+    const cancelRunQuery = buildCancelLlmRunQuery(
+      llmRunId,
+      failureMessage ?? null,
+      estimatedCostUsd,
+      finalOutputText
     )
+    await client.query(cancelRunQuery.text, cancelRunQuery.values)
 
     await client.query(
       `

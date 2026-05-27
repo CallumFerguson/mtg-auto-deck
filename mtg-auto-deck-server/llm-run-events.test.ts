@@ -13,8 +13,11 @@ import {
   INVALID_OPENING_HAND_SIMULATION_FAILURE_MESSAGE,
   STALE_IN_FLIGHT_LLM_RUN_CANCELLATION_MESSAGE,
   STALE_RUNNING_SIMULATION_CANCELLATION_MESSAGE,
+  buildCancelLlmRunQuery,
   buildClaimQueuedLlmRunStartQuery,
+  buildCompleteLlmRunQuery,
   buildFailQueuedLlmRunUsageLimitQuery,
+  buildFailLlmRunQuery,
   buildPartialLlmRunCostSnapshotQuery,
   buildRecordLlmRunMcpFunctionCallQuery,
   canApplyLateLlmRunTerminalUpdate,
@@ -952,6 +955,72 @@ test("builds usage-limit queue failure query with null stored costs", () => {
   assert.match(normalizedSql, /estimated_cost_usd = NULL/)
   assert.match(normalizedSql, /openrouter_reported_cost_usd = NULL/)
   assert.match(normalizedSql, /status = 'failed'/)
+})
+
+test("builds completed LLM run query with exact final output text", () => {
+  const finalOutputText = ' {"keptHand":["Sol Ring"],"error":null}\n'
+  const query = buildCompleteLlmRunQuery({
+    estimatedCostUsd: 0.01,
+    finalOutputText,
+    llmRunId: "00000000-0000-0000-0000-000000000001",
+    openrouterReportedCostUsd: null,
+    rawResponse: { raw: true },
+    responseMetadata: { metadata: true },
+    usage: { inputTokens: 10, outputTokens: 20 },
+  })
+  const normalizedSql = query.text.replace(/\s+/g, " ")
+
+  assert.deepEqual(query.values, [
+    "00000000-0000-0000-0000-000000000001",
+    JSON.stringify({ metadata: true }),
+    JSON.stringify({ inputTokens: 10, outputTokens: 20 }),
+    0.01,
+    null,
+    JSON.stringify({ raw: true }),
+    finalOutputText,
+  ])
+  assert.match(normalizedSql, /status = 'completed'/)
+  assert.match(normalizedSql, /final_output_text = \$7/)
+})
+
+test("builds failed LLM run query with parse-failure final output text", () => {
+  const finalOutputText = '{"keptHand":'
+  const query = buildFailLlmRunQuery(
+    "00000000-0000-0000-0000-000000000001",
+    "Opening-hand LLM completed response was not valid JSON.",
+    0.02,
+    finalOutputText
+  )
+  const normalizedSql = query.text.replace(/\s+/g, " ")
+
+  assert.deepEqual(query.values, [
+    "00000000-0000-0000-0000-000000000001",
+    "Opening-hand LLM completed response was not valid JSON.",
+    0.02,
+    finalOutputText,
+  ])
+  assert.match(normalizedSql, /status = 'failed'/)
+  assert.match(normalizedSql, /final_output_text = \$4/)
+})
+
+test("builds cancelled LLM run query with optional final output text", () => {
+  const finalOutputText = '{"gameState":{},"turnActions":{},"error":null}'
+  const query = buildCancelLlmRunQuery(
+    "00000000-0000-0000-0000-000000000001",
+    "Turn LLM run was cancelled.",
+    0.03,
+    finalOutputText
+  )
+  const normalizedSql = query.text.replace(/\s+/g, " ")
+
+  assert.deepEqual(query.values, [
+    "00000000-0000-0000-0000-000000000001",
+    "Turn LLM run was cancelled.",
+    0.03,
+    finalOutputText,
+  ])
+  assert.match(normalizedSql, /status = 'cancelled'/)
+  assert.match(normalizedSql, /final_output_text = \$4/)
 })
 
 test("requires a positive integer OpenRouter stop step count", () => {
