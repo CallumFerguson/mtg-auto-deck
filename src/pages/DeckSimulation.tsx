@@ -161,6 +161,8 @@ type SimulationResultsAction =
       turnNumber: number
     }
 
+type SimulationRunActivityCopyMode = "run_text" | "with_prompt"
+
 type SimulationResultsNextTurnTimelineStep = {
   id: string
   kind: "simulate_turn"
@@ -3308,11 +3310,8 @@ function SimulationDetails({
 
   const activityPanel = activityPanelRun ? (
     <SimulationRunActivityPanel
-      deckId={deckId}
-      isAdmin={isAdmin}
       isOpen={isActivityPanelOpen}
       run={activityPanelRun}
-      simulationId={simulation.id}
       onClose={closeActivityPanel}
       onExited={handleActivityPanelExited}
     />
@@ -4047,6 +4046,13 @@ function SimulationResultsPanel({
     llmRunId: string
     resultKind: "opening_hand" | "turn"
   } | null>(null)
+  const copyActivityResetTimeoutRef = useRef<number | null>(null)
+  const [copiedActivityState, setCopiedActivityState] = useState<{
+    llmRunId: string
+    mode: SimulationRunActivityCopyMode
+  } | null>(null)
+  const [copyingActivityWithPromptRunId, setCopyingActivityWithPromptRunId] =
+    useState<string | null>(null)
   const evaluationRun = useMemo(() => {
     if (evaluationRunSelection === null) {
       return null
@@ -4083,6 +4089,20 @@ function SimulationResultsPanel({
     resultsInfo.openingHandLlmRuns,
     resultsInfo.turnLlmRuns,
   ])
+
+  const clearCopyActivityResetTimeout = useCallback(() => {
+    if (copyActivityResetTimeoutRef.current === null) {
+      return
+    }
+
+    window.clearTimeout(copyActivityResetTimeoutRef.current)
+    copyActivityResetTimeoutRef.current = null
+  }, [])
+
+  useEffect(
+    () => clearCopyActivityResetTimeout,
+    [clearCopyActivityResetTimeout]
+  )
 
   useEffect(() => {
     if (!simulationAction) {
@@ -4122,6 +4142,49 @@ function SimulationResultsPanel({
 
     onModelPresetRequired()
     return false
+  }
+
+  async function handleCopyActivityRunText(
+    run: SimulationDebugLlmRun,
+    mode: SimulationRunActivityCopyMode
+  ) {
+    if (!isAdmin) {
+      return
+    }
+
+    try {
+      let text = formatSimulationRunClipboardText(run)
+
+      if (mode === "with_prompt") {
+        setCopyingActivityWithPromptRunId(run.llmRunId)
+        const fullPrompt = await loadLlmRunFullPrompt({
+          deckId,
+          llmRunId: run.llmRunId,
+          simulationId: simulation.id,
+        })
+
+        text = formatSimulationRunClipboardText(run, { fullPrompt })
+      }
+
+      await writePlainTextToClipboard(text)
+      setCopiedActivityState({
+        llmRunId: run.llmRunId,
+        mode,
+      })
+      clearCopyActivityResetTimeout()
+      copyActivityResetTimeoutRef.current = window.setTimeout(() => {
+        setCopiedActivityState(null)
+        copyActivityResetTimeoutRef.current = null
+      }, 1400)
+    } catch (error) {
+      console.error("Failed to copy LLM run text:", error)
+    } finally {
+      if (mode === "with_prompt") {
+        setCopyingActivityWithPromptRunId((currentRunId) =>
+          currentRunId === run.llmRunId ? null : currentRunId
+        )
+      }
+    }
   }
 
   const runs = [
@@ -4325,7 +4388,14 @@ function SimulationResultsPanel({
       run.outdated ? "outdated" : null,
     ].filter(Boolean)
     const shouldShowRunMetadata = !run.isActive && runMetadata.length > 0
-    const shouldShowRunActions = run.canEvaluate || run.canRerun
+    const shouldShowRunActions = isAdmin || run.canEvaluate || run.canRerun
+    const runClipboardText = formatSimulationRunClipboardText(run)
+    const copiedActivityMode =
+      copiedActivityState?.llmRunId === run.llmRunId
+        ? copiedActivityState.mode
+        : null
+    const isCopyingActivityWithPrompt =
+      copyingActivityWithPromptRunId === run.llmRunId
     const hasLiveReport =
       run.resultKind === "report" &&
       !run.hasFinalParsedOutputChunk &&
@@ -4428,6 +4498,56 @@ function SimulationResultsPanel({
               <div className="min-w-0" aria-hidden="true" />
             )}
             <div className="flex shrink-0 items-center justify-end gap-1">
+              {isAdmin ? (
+                <>
+                  <Button
+                    className={
+                      copiedActivityMode === "with_prompt"
+                        ? "text-emerald-300 hover:text-emerald-200"
+                        : "text-muted-foreground hover:text-foreground"
+                    }
+                    type="button"
+                    variant="outline"
+                    size="icon-sm"
+                    aria-label="Copy activity with prompt"
+                    title="Copy activity with prompt"
+                    disabled={isCopyingActivityWithPrompt}
+                    onClick={() =>
+                      void handleCopyActivityRunText(run, "with_prompt")
+                    }
+                  >
+                    {isCopyingActivityWithPrompt ? (
+                      <LoaderCircle className="animate-spin" />
+                    ) : copiedActivityMode === "with_prompt" ? (
+                      <ClipboardCheck />
+                    ) : (
+                      <BookCopy />
+                    )}
+                  </Button>
+                  <Button
+                    className={
+                      copiedActivityMode === "run_text"
+                        ? "text-emerald-300 hover:text-emerald-200"
+                        : "text-muted-foreground hover:text-foreground"
+                    }
+                    type="button"
+                    variant="outline"
+                    size="icon-sm"
+                    aria-label="Copy activity text"
+                    title="Copy activity text"
+                    disabled={runClipboardText.length === 0}
+                    onClick={() =>
+                      void handleCopyActivityRunText(run, "run_text")
+                    }
+                  >
+                    {copiedActivityMode === "run_text" ? (
+                      <ClipboardCheck />
+                    ) : (
+                      <ClipboardCopy />
+                    )}
+                  </Button>
+                </>
+              ) : null}
               {run.canEvaluate ? (
                 <Button
                   className={
@@ -5829,35 +5949,23 @@ function SimulationResultThinkingStatus({
 }
 
 function SimulationRunActivityPanel({
-  deckId,
-  isAdmin,
   isOpen,
   onClose,
   onExited,
   run,
-  simulationId,
 }: {
-  deckId: string
-  isAdmin: boolean
   isOpen: boolean
   onClose: () => void
   onExited: () => void
   run: SimulationDebugLlmRun
-  simulationId: string
 }) {
   const activityScrollRef = useRef<HTMLDivElement | null>(null)
   const keepActivityScrolledDownRef = useRef(true)
   const isProgrammaticActivityScrollRef = useRef(false)
   const previousActivityScrollTopRef = useRef(0)
   const exitTimeoutRef = useRef<number | null>(null)
-  const copyResetTimeoutRef = useRef<number | null>(null)
   const hasOpenedRef = useRef(false)
   const [currentTimeMs, setCurrentTimeMs] = useState(() => Date.now())
-  const [copiedState, setCopiedState] = useState<{
-    llmRunId: string
-    mode: "run_text" | "with_prompt"
-  } | null>(null)
-  const [isCopyingWithPrompt, setIsCopyingWithPrompt] = useState(false)
   const activityBlocks = useMemo(
     () => getSimulationRunActivityBlocks(run.chunks),
     [run.chunks]
@@ -5866,12 +5974,6 @@ function SimulationRunActivityPanel({
     () => getSimulationRunActivityTimelineItems(activityBlocks),
     [activityBlocks]
   )
-  const runClipboardText = useMemo(
-    () => formatSimulationRunClipboardText(run),
-    [run]
-  )
-  const copiedMode =
-    copiedState?.llmRunId === run.llmRunId ? copiedState.mode : null
   const runStartTimeMs = getSimulationRunStartTimeMs(run)
   const runFinishedTimeMs = getSimulationRunFinishedTimeMs(run)
   const durationText =
@@ -5897,15 +5999,6 @@ function SimulationRunActivityPanel({
 
     window.clearTimeout(exitTimeoutRef.current)
     exitTimeoutRef.current = null
-  }, [])
-
-  const clearCopyResetTimeout = useCallback(() => {
-    if (copyResetTimeoutRef.current === null) {
-      return
-    }
-
-    window.clearTimeout(copyResetTimeoutRef.current)
-    copyResetTimeoutRef.current = null
   }, [])
 
   const finishExit = useCallback(() => {
@@ -5953,8 +6046,6 @@ function SimulationRunActivityPanel({
 
     return clearExitTimeout
   }, [clearExitTimeout, finishExit, isOpen])
-
-  useEffect(() => clearCopyResetTimeout, [clearCopyResetTimeout, run.llmRunId])
 
   useEffect(() => {
     keepActivityScrolledDownRef.current = true
@@ -6021,44 +6112,6 @@ function SimulationRunActivityPanel({
     previousActivityScrollTopRef.current = activityScrollElement.scrollTop
   }
 
-  async function handleCopyRunText(mode: "run_text" | "with_prompt") {
-    if (!isAdmin) {
-      return
-    }
-
-    try {
-      let text = runClipboardText
-
-      if (mode === "with_prompt") {
-        setIsCopyingWithPrompt(true)
-        const fullPrompt = await loadLlmRunFullPrompt({
-          deckId,
-          llmRunId: run.llmRunId,
-          simulationId,
-        })
-
-        text = formatSimulationRunClipboardText(run, { fullPrompt })
-      }
-
-      await writePlainTextToClipboard(text)
-      setCopiedState({
-        llmRunId: run.llmRunId,
-        mode,
-      })
-      clearCopyResetTimeout()
-      copyResetTimeoutRef.current = window.setTimeout(() => {
-        setCopiedState(null)
-        copyResetTimeoutRef.current = null
-      }, 1400)
-    } catch (error) {
-      console.error("Failed to copy LLM run text:", error)
-    } finally {
-      if (mode === "with_prompt") {
-        setIsCopyingWithPrompt(false)
-      }
-    }
-  }
-
   function handlePanelTransitionEnd(event: TransitionEvent<HTMLDivElement>) {
     if (
       event.target !== event.currentTarget ||
@@ -6086,52 +6139,6 @@ function SimulationRunActivityPanel({
             {durationText ? `Activity • ${durationText}` : "Activity"}
           </h3>
           <div className="flex shrink-0 items-center gap-1">
-            {isAdmin ? (
-              <>
-                <Button
-                  className={
-                    copiedMode === "with_prompt"
-                      ? "text-emerald-300 hover:text-emerald-200"
-                      : "text-muted-foreground hover:text-foreground"
-                  }
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Copy activity with prompt"
-                  title="Copy activity with prompt"
-                  disabled={isCopyingWithPrompt}
-                  onClick={() => void handleCopyRunText("with_prompt")}
-                >
-                  {isCopyingWithPrompt ? (
-                    <LoaderCircle className="animate-spin" />
-                  ) : copiedMode === "with_prompt" ? (
-                    <ClipboardCheck />
-                  ) : (
-                    <BookCopy />
-                  )}
-                </Button>
-                <Button
-                  className={
-                    copiedMode === "run_text"
-                      ? "text-emerald-300 hover:text-emerald-200"
-                      : "text-muted-foreground hover:text-foreground"
-                  }
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Copy activity text"
-                  title="Copy activity text"
-                  disabled={runClipboardText.length === 0}
-                  onClick={() => void handleCopyRunText("run_text")}
-                >
-                  {copiedMode === "run_text" ? (
-                    <ClipboardCheck />
-                  ) : (
-                    <ClipboardCopy />
-                  )}
-                </Button>
-              </>
-            ) : null}
             <Button
               type="button"
               variant="ghost"
