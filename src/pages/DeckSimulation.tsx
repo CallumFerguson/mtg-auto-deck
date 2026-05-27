@@ -1571,7 +1571,7 @@ export function DeckSimulation({
                           }
                           disabled={!selectedModelPresetSupportsFlex}
                           label="Flex processing"
-                          activeWarning="Simulation may be slower and has a higher chance of failing."
+                          activeWarning="Less usage, but simulation may be slower and has a higher chance of failing."
                           onCheckedChange={handleCreateSimulationUseFlexChange}
                         />
                       </div>
