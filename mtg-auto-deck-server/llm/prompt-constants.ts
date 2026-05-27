@@ -59,6 +59,7 @@ Successful output must be exactly this JSON shape:
 Never omit keptHand, summary, or error. Use null for any field that does not apply.
 keptHand must be the exact final hand after all mulligans and any cards bottomed to the library.
 summary should briefly state keep/mulligan decisions, total mulligans, bottomed cards if any, and why the final hand was kept.
+The JSON examples are formatted for readability. Your final response should be a minified JSON object.
 
 Before final response, verify that you drew only once initially, did not draw after mulliganing, finished required bottoming, and that keptHand matches the final hand exactly.
 `
@@ -210,6 +211,7 @@ Before final response, verify legality, mana payments/colors, tools used for hid
 Never omit gameState or error. Use null for any field that does not apply.
 gameState is a compact end-of-turn state dump, complete enough to resume later.
 future turns will be given the full gameState from the previous turn
+The JSON examples are formatted for readability. Your final response should be a minified JSON object.
 `
 
 export function buildSimulateTurnPrompt({
