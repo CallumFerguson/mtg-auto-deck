@@ -43,6 +43,7 @@ import {
   listEnabledLlmModelPresets,
   setDefaultLlmModelPreset,
   setLlmModelPresetEnabled,
+  updateLlmModelPreset,
   LlmModelPresetValidationError,
   type LlmModelPreset,
 } from "./llm-model-presets-postgres.js"
@@ -336,6 +337,17 @@ const createLlmModelPresetSchema = z.object({
   isEnabled: z.boolean().default(true),
   isDefault: z.boolean().default(false),
 })
+const updateLlmModelPresetSchema = z
+  .object({
+    model: z.string().trim().min(1),
+    reasoningEffort: reasoningEffortSchema,
+    openrouterModelProvider: z.string().trim().nullable().default(null),
+    supportsFlex: z.boolean().default(false),
+    inputTokenCostUsdPerMillion: optionalTokenCostSchema,
+    cachedInputTokenCostUsdPerMillion: optionalTokenCostSchema,
+    outputTokenCostUsdPerMillion: optionalTokenCostSchema,
+  })
+  .strict()
 const updateLlmModelPresetEnabledSchema = z.object({
   isEnabled: z.boolean(),
 })
@@ -4788,6 +4800,52 @@ async function main() {
         console.error("Failed to create model preset:", error)
         res.status(500).json({
           error: "Failed to create model preset.",
+        })
+      }
+    }
+  )
+
+  app.patch(
+    "/admin/llm-model-presets/:presetId",
+    async (req: Request, res: Response) => {
+      if (!requireAdminUser(req, res)) {
+        return
+      }
+
+      const presetId = String(req.params.presetId)
+      const parsedUpdate = updateLlmModelPresetSchema.safeParse(req.body)
+
+      if (!parsedUpdate.success) {
+        res.status(400).json({
+          error: "Model preset update payload is not in the expected format.",
+        })
+        return
+      }
+
+      try {
+        const preset = await updateLlmModelPreset(presetId, parsedUpdate.data)
+
+        if (!preset) {
+          res.status(404).json({
+            error: "Model preset not found.",
+          })
+          return
+        }
+
+        res.status(200).json({
+          preset,
+        })
+      } catch (error) {
+        if (error instanceof LlmModelPresetValidationError) {
+          res.status(400).json({
+            error: error.message,
+          })
+          return
+        }
+
+        console.error("Failed to update model preset:", error)
+        res.status(500).json({
+          error: "Failed to update model preset.",
         })
       }
     }

@@ -16,6 +16,7 @@ import {
   BrainCircuit,
   CheckCircle2,
   CircleOff,
+  Edit3,
   LayoutDashboard,
   LogIn,
   MoreVertical,
@@ -95,11 +96,24 @@ const ADMIN_SECTIONS: readonly AdminSection[] = [
 const ADMIN_USER_ACTIONS_MENU_WIDTH = 208
 const ADMIN_USER_ACTIONS_MENU_GAP = 6
 const ADMIN_USER_ACTIONS_MENU_VIEWPORT_MARGIN = 8
+const ADMIN_MODEL_PRESET_ACTIONS_MENU_WIDTH = 192
+const ADMIN_MODEL_PRESET_ACTIONS_MENU_GAP = 6
+const ADMIN_MODEL_PRESET_ACTIONS_MENU_VIEWPORT_MARGIN = 8
 
 type FloatingMenuPosition = {
   left: number
   maxHeight: number
   top: number
+}
+
+type UpdateLlmModelPresetPayload = {
+  model: string
+  reasoningEffort: ReasoningEffort
+  openrouterModelProvider: string | null
+  supportsFlex: boolean
+  inputTokenCostUsdPerMillion: number | null
+  cachedInputTokenCostUsdPerMillion: number | null
+  outputTokenCostUsdPerMillion: number | null
 }
 
 const REASONING_EFFORT_OPTIONS: readonly ReasoningEffort[] = [
@@ -970,7 +984,13 @@ function AdminModelPresetsSection() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [isCreating, setIsCreating] = useState(false)
+  const [openPresetMenuId, setOpenPresetMenuId] = useState<string | null>(null)
   const [workingPresetId, setWorkingPresetId] = useState<string | null>(null)
+  const [presetToEdit, setPresetToEdit] = useState<AdminLlmModelPreset | null>(
+    null
+  )
+  const [editingPresetId, setEditingPresetId] = useState<string | null>(null)
+  const [editPresetError, setEditPresetError] = useState<string | null>(null)
   const [presetToDelete, setPresetToDelete] =
     useState<AdminLlmModelPreset | null>(null)
   const [deletingPresetId, setDeletingPresetId] = useState<string | null>(null)
@@ -1084,6 +1104,42 @@ function AdminModelPresetsSection() {
       setActionError("Model preset could not be created.")
     } finally {
       setIsCreating(false)
+    }
+  }
+
+  async function handleUpdatePreset(payload: UpdateLlmModelPresetPayload) {
+    if (!presetToEdit) {
+      return
+    }
+
+    setEditingPresetId(presetToEdit.id)
+    setEditPresetError(null)
+
+    try {
+      const response = await apiFetch(
+        `${API_BASE_URL}/admin/llm-model-presets/${presetToEdit.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        }
+      )
+
+      if (!response.ok) {
+        setEditPresetError(
+          await readApiError(response, "Model preset could not be updated.")
+        )
+        return
+      }
+
+      setPresetToEdit(null)
+      await loadPresets()
+    } catch {
+      setEditPresetError("Model preset could not be updated.")
+    } finally {
+      setEditingPresetId(null)
     }
   }
 
@@ -1543,22 +1599,23 @@ function AdminModelPresetsSection() {
                     />
                   </TableCell>
                   <TableCell>
-                    <div className="flex flex-wrap justify-end gap-1.5">
-                      <Button
-                        type="button"
-                        variant="destructive"
-                        size="icon-sm"
-                        aria-label="Delete model preset"
-                        disabled={workingPresetId === preset.id}
-                        title="Delete preset"
-                        onClick={() => {
-                          setPresetToDelete(preset)
-                          setDeletePresetError(null)
-                        }}
-                      >
-                        <Trash2 />
-                      </Button>
-                    </div>
+                    <AdminModelPresetActionsMenu
+                      deletingPresetId={deletingPresetId}
+                      editingPresetId={editingPresetId}
+                      menuId={`preset-${preset.id}`}
+                      openPresetMenuId={openPresetMenuId}
+                      preset={preset}
+                      setOpenPresetMenuId={setOpenPresetMenuId}
+                      workingPresetId={workingPresetId}
+                      onDeletePreset={(selectedPreset) => {
+                        setPresetToDelete(selectedPreset)
+                        setDeletePresetError(null)
+                      }}
+                      onEditPreset={(selectedPreset) => {
+                        setPresetToEdit(selectedPreset)
+                        setEditPresetError(null)
+                      }}
+                    />
                   </TableCell>
                 </tr>
               ))}
@@ -1568,6 +1625,19 @@ function AdminModelPresetsSection() {
       ) : (
         <AdminPanelMessage>No model presets found.</AdminPanelMessage>
       )}
+
+      {presetToEdit ? (
+        <EditLlmModelPresetModal
+          error={editPresetError}
+          isSaving={editingPresetId === presetToEdit.id}
+          preset={presetToEdit}
+          onClose={() => {
+            setPresetToEdit(null)
+            setEditPresetError(null)
+          }}
+          onSave={(payload) => void handleUpdatePreset(payload)}
+        />
+      ) : null}
 
       {presetToDelete ? (
         <DeleteLlmModelPresetModal
@@ -1608,6 +1678,436 @@ function UnknownAdminSection() {
         </div>
       </div>
     </section>
+  )
+}
+
+function AdminModelPresetActionsMenu({
+  deletingPresetId,
+  editingPresetId,
+  menuId,
+  onDeletePreset,
+  onEditPreset,
+  openPresetMenuId,
+  preset,
+  setOpenPresetMenuId,
+  workingPresetId,
+}: {
+  deletingPresetId: string | null
+  editingPresetId: string | null
+  menuId: string
+  onDeletePreset: (preset: AdminLlmModelPreset) => void
+  onEditPreset: (preset: AdminLlmModelPreset) => void
+  openPresetMenuId: string | null
+  preset: AdminLlmModelPreset
+  setOpenPresetMenuId: Dispatch<SetStateAction<string | null>>
+  workingPresetId: string | null
+}) {
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [menuPosition, setMenuPosition] = useState<FloatingMenuPosition | null>(
+    null
+  )
+  const isDeleting = deletingPresetId === preset.id
+  const isEditing = editingPresetId === preset.id
+  const isUpdatingStatus = workingPresetId === preset.id
+  const isOpen = openPresetMenuId === menuId
+  const isWorking = isDeleting || isEditing || isUpdatingStatus
+
+  const updateMenuPosition = useCallback(() => {
+    const trigger = triggerRef.current
+
+    if (!trigger || trigger.getClientRects().length === 0) {
+      setOpenPresetMenuId(null)
+      return
+    }
+
+    const triggerRect = trigger.getBoundingClientRect()
+    const menuWidth =
+      menuRef.current?.offsetWidth ?? ADMIN_MODEL_PRESET_ACTIONS_MENU_WIDTH
+    const menuHeight = menuRef.current?.offsetHeight ?? 0
+    const viewportWidth = window.innerWidth
+    const viewportHeight = window.innerHeight
+    const minimumLeft = ADMIN_MODEL_PRESET_ACTIONS_MENU_VIEWPORT_MARGIN
+    const maximumLeft = Math.max(
+      minimumLeft,
+      viewportWidth -
+        menuWidth -
+        ADMIN_MODEL_PRESET_ACTIONS_MENU_VIEWPORT_MARGIN
+    )
+    const left = Math.min(
+      Math.max(triggerRect.right - menuWidth, minimumLeft),
+      maximumLeft
+    )
+    const belowTop = triggerRect.bottom + ADMIN_MODEL_PRESET_ACTIONS_MENU_GAP
+    const aboveTop =
+      triggerRect.top - menuHeight - ADMIN_MODEL_PRESET_ACTIONS_MENU_GAP
+    const shouldOpenBelow =
+      belowTop + menuHeight <=
+      viewportHeight - ADMIN_MODEL_PRESET_ACTIONS_MENU_VIEWPORT_MARGIN
+    const preferredTop = shouldOpenBelow ? belowTop : aboveTop
+    const maximumTop = Math.max(
+      ADMIN_MODEL_PRESET_ACTIONS_MENU_VIEWPORT_MARGIN,
+      viewportHeight -
+        menuHeight -
+        ADMIN_MODEL_PRESET_ACTIONS_MENU_VIEWPORT_MARGIN
+    )
+    const top = Math.min(
+      Math.max(preferredTop, ADMIN_MODEL_PRESET_ACTIONS_MENU_VIEWPORT_MARGIN),
+      maximumTop
+    )
+    const maxHeight = Math.max(
+      80,
+      Math.floor(
+        viewportHeight - top - ADMIN_MODEL_PRESET_ACTIONS_MENU_VIEWPORT_MARGIN
+      )
+    )
+    const nextPosition = {
+      left: Math.round(left),
+      maxHeight,
+      top: Math.round(top),
+    }
+
+    setMenuPosition((currentPosition) =>
+      currentPosition?.left === nextPosition.left &&
+      currentPosition.maxHeight === nextPosition.maxHeight &&
+      currentPosition.top === nextPosition.top
+        ? currentPosition
+        : nextPosition
+    )
+  }, [setOpenPresetMenuId])
+
+  useLayoutEffect(() => {
+    if (isOpen) {
+      updateMenuPosition()
+    }
+  }, [isOpen, updateMenuPosition])
+
+  useEffect(() => {
+    if (!isOpen) {
+      return
+    }
+
+    window.addEventListener("resize", updateMenuPosition)
+    window.addEventListener("scroll", updateMenuPosition, true)
+
+    return () => {
+      window.removeEventListener("resize", updateMenuPosition)
+      window.removeEventListener("scroll", updateMenuPosition, true)
+    }
+  }, [isOpen, updateMenuPosition])
+
+  useEffect(() => {
+    if (!isOpen) {
+      return
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpenPresetMenuId(null)
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [isOpen, setOpenPresetMenuId])
+
+  const menuStyle: CSSProperties = menuPosition
+    ? {
+        left: menuPosition.left,
+        maxHeight: menuPosition.maxHeight,
+        top: menuPosition.top,
+      }
+    : {
+        left: 0,
+        top: 0,
+        visibility: "hidden",
+      }
+
+  return (
+    <div className="flex justify-end">
+      <Button
+        ref={triggerRef}
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        aria-label={`Open actions for ${getLlmModelPresetLabel(preset)}`}
+        aria-expanded={isOpen}
+        aria-haspopup="menu"
+        title="Preset actions"
+        disabled={isWorking}
+        onClick={() =>
+          setOpenPresetMenuId((currentPresetMenuId) =>
+            currentPresetMenuId === menuId ? null : menuId
+          )
+        }
+      >
+        <MoreVertical />
+      </Button>
+
+      {isOpen && typeof document !== "undefined"
+        ? createPortal(
+            <>
+              <button
+                className="fixed inset-0 z-10 cursor-default"
+                type="button"
+                aria-label="Close preset actions"
+                onClick={() => setOpenPresetMenuId(null)}
+              />
+              <div
+                ref={menuRef}
+                className="fixed z-20 w-48 max-w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-2xl shadow-black/40"
+                role="menu"
+                style={menuStyle}
+              >
+                <button
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-sky-100 transition-colors hover:bg-sky-400/10 hover:text-sky-100 focus:bg-sky-400/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                  type="button"
+                  role="menuitem"
+                  disabled={isWorking}
+                  onClick={() => {
+                    setOpenPresetMenuId(null)
+                    onEditPreset(preset)
+                  }}
+                >
+                  <Edit3 data-icon="inline-start" />
+                  {isEditing ? "Editing..." : "Edit preset"}
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                  type="button"
+                  role="menuitem"
+                  disabled={isWorking}
+                  onClick={() => {
+                    setOpenPresetMenuId(null)
+                    onDeletePreset(preset)
+                  }}
+                >
+                  <Trash2 data-icon="inline-start" />
+                  {isDeleting ? "Deleting..." : "Delete preset"}
+                </button>
+              </div>
+            </>,
+            document.body
+          )
+        : null}
+    </div>
+  )
+}
+
+function EditLlmModelPresetModal({
+  error,
+  isSaving,
+  onClose,
+  onSave,
+  preset,
+}: {
+  error: string | null
+  isSaving: boolean
+  onClose: () => void
+  onSave: (payload: UpdateLlmModelPresetPayload) => void
+  preset: AdminLlmModelPreset
+}) {
+  const [model, setModel] = useState(preset.model)
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(
+    preset.reasoningEffort
+  )
+  const [openrouterModelProvider, setOpenrouterModelProvider] = useState(
+    preset.openrouterModelProvider ?? ""
+  )
+  const [supportsFlex, setSupportsFlex] = useState(preset.supportsFlex)
+  const [inputTokenCostUsdPerMillion, setInputTokenCostUsdPerMillion] =
+    useState(formatCostInputValue(preset.inputTokenCostUsdPerMillion))
+  const [
+    cachedInputTokenCostUsdPerMillion,
+    setCachedInputTokenCostUsdPerMillion,
+  ] = useState(formatCostInputValue(preset.cachedInputTokenCostUsdPerMillion))
+  const [outputTokenCostUsdPerMillion, setOutputTokenCostUsdPerMillion] =
+    useState(formatCostInputValue(preset.outputTokenCostUsdPerMillion))
+  const [localError, setLocalError] = useState<string | null>(null)
+  const isOpenRouterPreset = preset.provider === "openrouter"
+  const isFlexEditable = preset.provider !== "llamacpp"
+  const closeIfAllowed = () => {
+    if (!isSaving) {
+      onClose()
+    }
+  }
+
+  function handleSubmit(event: FormEvent) {
+    event.preventDefault()
+
+    const trimmedModel = model.trim()
+
+    if (!trimmedModel) {
+      setLocalError("Model is required.")
+      return
+    }
+
+    setLocalError(null)
+    onSave({
+      model: trimmedModel,
+      reasoningEffort,
+      openrouterModelProvider: isOpenRouterPreset
+        ? openrouterModelProvider.trim() || null
+        : null,
+      supportsFlex: isFlexEditable ? supportsFlex : false,
+      inputTokenCostUsdPerMillion: parseOptionalCost(
+        inputTokenCostUsdPerMillion
+      ),
+      cachedInputTokenCostUsdPerMillion: parseOptionalCost(
+        cachedInputTokenCostUsdPerMillion
+      ),
+      outputTokenCostUsdPerMillion: parseOptionalCost(
+        outputTokenCostUsdPerMillion
+      ),
+    })
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 py-6 backdrop-blur-sm"
+      role="presentation"
+      onMouseDown={closeIfAllowed}
+    >
+      <section
+        aria-labelledby="edit-model-preset-title"
+        className="w-full max-w-2xl rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
+        role="dialog"
+        aria-modal="true"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+          <div className="flex items-start gap-3">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-sky-300/30 bg-sky-400/10 text-sky-300">
+              <Edit3 className="size-4" aria-hidden />
+            </div>
+            <div className="min-w-0 space-y-1">
+              <h2
+                id="edit-model-preset-title"
+                className="text-xl font-semibold"
+              >
+                Edit model preset
+              </h2>
+              <p className="text-sm break-words text-muted-foreground">
+                {formatProviderLabel(preset.provider)}
+                {preset.isDefault ? " / default" : ""}
+                {preset.isEnabled ? " / enabled" : " / disabled"}
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Close"
+            title="Close"
+            disabled={isSaving}
+            onClick={onClose}
+          >
+            <X />
+          </Button>
+        </header>
+
+        <form className="grid gap-4 px-5 py-5" onSubmit={handleSubmit}>
+          <div className="grid gap-3 md:grid-cols-2">
+            <AdminFormField label="Model">
+              <input
+                className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:opacity-50"
+                value={model}
+                disabled={isSaving}
+                onChange={(event) => setModel(event.target.value)}
+              />
+            </AdminFormField>
+            <AdminFormField label="Reasoning">
+              <select
+                className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:opacity-50"
+                value={reasoningEffort}
+                disabled={isSaving}
+                onChange={(event) =>
+                  setReasoningEffort(event.target.value as ReasoningEffort)
+                }
+              >
+                {REASONING_EFFORT_OPTIONS.map((effort) => (
+                  <option key={effort} value={effort}>
+                    {effort}
+                  </option>
+                ))}
+              </select>
+            </AdminFormField>
+            {isOpenRouterPreset ? (
+              <AdminFormField label="OpenRouter provider">
+                <input
+                  className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:opacity-50"
+                  value={openrouterModelProvider}
+                  placeholder="openai"
+                  disabled={isSaving}
+                  onChange={(event) =>
+                    setOpenrouterModelProvider(event.target.value)
+                  }
+                />
+              </AdminFormField>
+            ) : null}
+            <AdminFormField label="Flex">
+              <label className="flex h-10 items-center gap-2 rounded-md border border-border bg-background/35 px-3 text-sm">
+                <input
+                  className="size-4 accent-sky-300"
+                  type="checkbox"
+                  checked={supportsFlex && isFlexEditable}
+                  disabled={isSaving || !isFlexEditable}
+                  onChange={(event) => setSupportsFlex(event.target.checked)}
+                />
+                Supports flex
+              </label>
+            </AdminFormField>
+            <AdminFormField label="Input $/M">
+              <CostInput
+                value={inputTokenCostUsdPerMillion}
+                disabled={isSaving}
+                onChange={setInputTokenCostUsdPerMillion}
+              />
+            </AdminFormField>
+            <AdminFormField label="Cached input $/M">
+              <CostInput
+                value={cachedInputTokenCostUsdPerMillion}
+                disabled={isSaving}
+                onChange={setCachedInputTokenCostUsdPerMillion}
+              />
+            </AdminFormField>
+            <AdminFormField label="Output $/M">
+              <CostInput
+                value={outputTokenCostUsdPerMillion}
+                disabled={isSaving}
+                onChange={setOutputTokenCostUsdPerMillion}
+              />
+            </AdminFormField>
+          </div>
+
+          {localError || error ? (
+            <p
+              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              role="alert"
+            >
+              {localError ?? error}
+            </p>
+          ) : null}
+
+          <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isSaving}
+              onClick={onClose}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isSaving}>
+              <CheckCircle2 data-icon="inline-start" />
+              {isSaving ? "Saving..." : "Save preset"}
+            </Button>
+          </div>
+        </form>
+      </section>
+    </div>
   )
 }
 
@@ -2134,10 +2634,7 @@ function ManageAdminTierGrantModal({
                   : "No active grant"
               }
             />
-            <AdminTierMetric
-              label="Effective tier"
-              tier={user.effectiveTier}
-            />
+            <AdminTierMetric label="Effective tier" tier={user.effectiveTier} />
           </dl>
 
           <form className="grid gap-4" onSubmit={handleSubmit}>
@@ -2229,9 +2726,7 @@ function AdminTierMetric({
         {tier ? BILLING_TIER_LABELS[tier] : "None"}
       </dd>
       {detail ? (
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-          {detail}
-        </p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">{detail}</p>
       ) : null}
     </div>
   )
@@ -2532,20 +3027,23 @@ function AdminFormField({
 }
 
 function CostInput({
+  disabled = false,
   onChange,
   value,
 }: {
+  disabled?: boolean
   onChange: (value: string) => void
   value: string
 }) {
   return (
     <input
-      className="no-number-spinner h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/30"
+      className="no-number-spinner h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:opacity-50"
       type="number"
       min="0"
       step="0.000001"
       value={value}
       placeholder="optional"
+      disabled={disabled}
       onChange={(event) => onChange(event.target.value)}
     />
   )
@@ -2587,6 +3085,10 @@ function formatOptionalCost(value: number | null) {
   return value === null
     ? "n/a"
     : `$${value.toFixed(6).replace(/0+$/u, "").replace(/\.$/u, "")}`
+}
+
+function formatCostInputValue(value: number | null) {
+  return value === null ? "" : String(value)
 }
 
 function formatUsdCost(value: number) {

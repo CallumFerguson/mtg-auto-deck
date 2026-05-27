@@ -41,6 +41,16 @@ export type CreateLlmModelPresetInput = {
   isDefault: boolean
 }
 
+export type UpdateLlmModelPresetInput = {
+  model: string
+  reasoningEffort: ReasoningEffort
+  openrouterModelProvider: string | null
+  supportsFlex: boolean
+  inputTokenCostUsdPerMillion: number | null
+  cachedInputTokenCostUsdPerMillion: number | null
+  outputTokenCostUsdPerMillion: number | null
+}
+
 export type CreateLlmModelPresetInsertQuery = {
   text: string
   values: [
@@ -54,6 +64,20 @@ export type CreateLlmModelPresetInsertQuery = {
     number | null,
     boolean,
     boolean,
+  ]
+}
+
+export type UpdateLlmModelPresetUpdateQuery = {
+  text: string
+  values: [
+    string,
+    string,
+    ReasoningEffort,
+    string | null,
+    boolean,
+    number | null,
+    number | null,
+    number | null,
   ]
 }
 
@@ -87,6 +111,15 @@ export class LlmModelPresetValidationError extends Error {
 
 const PROVIDER_VALUES = llmProviderSchema.options
 const REASONING_EFFORT_VALUES = reasoningEffortSchema.options
+const UPDATE_LLM_MODEL_PRESET_INPUT_KEYS = new Set([
+  "model",
+  "reasoningEffort",
+  "openrouterModelProvider",
+  "supportsFlex",
+  "inputTokenCostUsdPerMillion",
+  "cachedInputTokenCostUsdPerMillion",
+  "outputTokenCostUsdPerMillion",
+])
 
 export async function ensureLlmModelPresetsSchema() {
   await queryDatabase(`
@@ -330,6 +363,94 @@ function buildValidatedCreateLlmModelPresetInsertQuery(
       normalizedInput.outputTokenCostUsdPerMillion,
       normalizedInput.isEnabled,
       normalizedInput.isDefault,
+    ],
+  }
+}
+
+export async function updateLlmModelPreset(
+  presetId: string,
+  input: UpdateLlmModelPresetInput
+) {
+  return withDatabaseTransaction(async (client) => {
+    const presetResult = await client.query<{ provider: LlmProvider }>(
+      `
+        SELECT provider
+        FROM llm_model_presets
+        WHERE id = $1
+        FOR UPDATE
+      `,
+      [presetId]
+    )
+
+    if (presetResult.rowCount === 0) {
+      return null
+    }
+
+    const updateQuery = buildUpdateLlmModelPresetUpdateQuery(
+      presetId,
+      presetResult.rows[0].provider,
+      input
+    )
+    const result = await client.query<LlmModelPresetRow>(
+      updateQuery.text,
+      updateQuery.values
+    )
+
+    return result.rows[0] ? mapLlmModelPresetRow(result.rows[0]) : null
+  })
+}
+
+export function buildUpdateLlmModelPresetUpdateQuery(
+  presetId: string,
+  provider: LlmProvider,
+  input: UpdateLlmModelPresetInput
+): UpdateLlmModelPresetUpdateQuery {
+  return buildValidatedUpdateLlmModelPresetUpdateQuery(
+    presetId,
+    validateUpdateLlmModelPresetInput(provider, input)
+  )
+}
+
+function buildValidatedUpdateLlmModelPresetUpdateQuery(
+  presetId: string,
+  normalizedInput: UpdateLlmModelPresetInput
+): UpdateLlmModelPresetUpdateQuery {
+  return {
+    text: `
+      UPDATE llm_model_presets
+      SET model = $2,
+          reasoning_effort = $3,
+          openrouter_model_provider = $4,
+          supports_flex = $5,
+          input_token_cost_usd_per_million = $6,
+          cached_input_token_cost_usd_per_million = $7,
+          output_token_cost_usd_per_million = $8,
+          updated_at = now()
+      WHERE id = $1
+      RETURNING
+        id,
+        provider,
+        model,
+        reasoning_effort,
+        openrouter_model_provider,
+        supports_flex,
+        input_token_cost_usd_per_million,
+        cached_input_token_cost_usd_per_million,
+        output_token_cost_usd_per_million,
+        is_enabled,
+        is_default,
+        created_at,
+        updated_at
+    `,
+    values: [
+      presetId,
+      normalizedInput.model,
+      normalizedInput.reasoningEffort,
+      normalizedInput.openrouterModelProvider,
+      normalizedInput.supportsFlex,
+      normalizedInput.inputTokenCostUsdPerMillion,
+      normalizedInput.cachedInputTokenCostUsdPerMillion,
+      normalizedInput.outputTokenCostUsdPerMillion,
     ],
   }
 }
@@ -645,6 +766,71 @@ function validateCreateLlmModelPresetInput(
       "Output token cost"
     ),
     isDefault: input.isDefault && input.isEnabled,
+  }
+}
+
+function validateUpdateLlmModelPresetInput(
+  provider: LlmProvider,
+  input: UpdateLlmModelPresetInput
+): UpdateLlmModelPresetInput {
+  const inputKeys = Object.keys(input as Record<string, unknown>)
+
+  if (
+    inputKeys.some(
+      (inputKey) => !UPDATE_LLM_MODEL_PRESET_INPUT_KEYS.has(inputKey)
+    )
+  ) {
+    throw new LlmModelPresetValidationError(
+      "Model preset update cannot change provider, enabled status, or default status."
+    )
+  }
+
+  const parsedProvider = llmProviderSchema.safeParse(provider)
+
+  if (!parsedProvider.success) {
+    throw new LlmModelPresetValidationError(
+      "Provider must be openai, openrouter, or llamacpp."
+    )
+  }
+
+  const parsedReasoningEffort = reasoningEffortSchema.safeParse(
+    input.reasoningEffort
+  )
+
+  if (!parsedReasoningEffort.success) {
+    throw new LlmModelPresetValidationError(
+      "Reasoning effort must be one of: none, minimal, low, medium, high, xhigh."
+    )
+  }
+
+  const model = input.model.trim()
+
+  if (!model) {
+    throw new LlmModelPresetValidationError("Model is required.")
+  }
+
+  const openrouterModelProvider = input.openrouterModelProvider?.trim() || null
+
+  return {
+    ...input,
+    model,
+    reasoningEffort: parsedReasoningEffort.data,
+    openrouterModelProvider:
+      parsedProvider.data === "openrouter" ? openrouterModelProvider : null,
+    supportsFlex:
+      parsedProvider.data === "llamacpp" ? false : input.supportsFlex,
+    inputTokenCostUsdPerMillion: validateOptionalCost(
+      input.inputTokenCostUsdPerMillion,
+      "Input token cost"
+    ),
+    cachedInputTokenCostUsdPerMillion: validateOptionalCost(
+      input.cachedInputTokenCostUsdPerMillion,
+      "Cached input token cost"
+    ),
+    outputTokenCostUsdPerMillion: validateOptionalCost(
+      input.outputTokenCostUsdPerMillion,
+      "Output token cost"
+    ),
   }
 }
 

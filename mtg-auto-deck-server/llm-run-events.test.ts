@@ -67,7 +67,11 @@ import {
   getOpeningHandLlmRunConfig,
   getTurnSimulationLlmRunConfig,
 } from "./llm-config.js"
-import { buildCreateLlmModelPresetInsertQuery } from "./llm-model-presets-postgres.js"
+import {
+  buildCreateLlmModelPresetInsertQuery,
+  buildUpdateLlmModelPresetUpdateQuery,
+  LlmModelPresetValidationError,
+} from "./llm-model-presets-postgres.js"
 import {
   BILLING_TIER_LIMITS,
   BILLING_TIER_USAGE_LIMITS_USD,
@@ -1277,6 +1281,124 @@ test("builds model preset insert with a supports-flex placeholder", () => {
   )
   assert.equal(query.values.length, 10)
   assert.equal(query.values[4], true)
+})
+
+test("builds model preset update with trimmed model and editable costs", () => {
+  const query = buildUpdateLlmModelPresetUpdateQuery(
+    "preset-openrouter",
+    "openrouter",
+    {
+      model: " openai/gpt-5-nano ",
+      reasoningEffort: "high",
+      openrouterModelProvider: " openai ",
+      supportsFlex: true,
+      inputTokenCostUsdPerMillion: 1,
+      cachedInputTokenCostUsdPerMillion: 0.1,
+      outputTokenCostUsdPerMillion: 10,
+    }
+  )
+  const normalizedSql = query.text.replace(/\s+/g, " ")
+
+  assert.match(normalizedSql, /UPDATE llm_model_presets/)
+  assert.match(normalizedSql, /model = \$2/)
+  assert.match(normalizedSql, /reasoning_effort = \$3/)
+  assert.match(normalizedSql, /openrouter_model_provider = \$4/)
+  assert.match(normalizedSql, /supports_flex = \$5/)
+  assert.equal(query.values[0], "preset-openrouter")
+  assert.equal(query.values[1], "openai/gpt-5-nano")
+  assert.equal(query.values[2], "high")
+  assert.equal(query.values[3], "openai")
+  assert.equal(query.values[4], true)
+  assert.equal(query.values[5], 1)
+  assert.equal(query.values[6], 0.1)
+  assert.equal(query.values[7], 10)
+})
+
+test("rejects blank model preset updates", () => {
+  assert.throws(
+    () =>
+      buildUpdateLlmModelPresetUpdateQuery("preset-openai", "openai", {
+        model: "   ",
+        reasoningEffort: "medium",
+        openrouterModelProvider: null,
+        supportsFlex: false,
+        inputTokenCostUsdPerMillion: null,
+        cachedInputTokenCostUsdPerMillion: null,
+        outputTokenCostUsdPerMillion: null,
+      }),
+    LlmModelPresetValidationError
+  )
+})
+
+test("normalizes OpenRouter provider override by existing preset provider", () => {
+  const openRouterQuery = buildUpdateLlmModelPresetUpdateQuery(
+    "preset-openrouter",
+    "openrouter",
+    {
+      model: "openai/gpt-5-nano",
+      reasoningEffort: "medium",
+      openrouterModelProvider: " openai ",
+      supportsFlex: false,
+      inputTokenCostUsdPerMillion: null,
+      cachedInputTokenCostUsdPerMillion: null,
+      outputTokenCostUsdPerMillion: null,
+    }
+  )
+  const openAiQuery = buildUpdateLlmModelPresetUpdateQuery(
+    "preset-openai",
+    "openai",
+    {
+      model: "gpt-5-nano",
+      reasoningEffort: "medium",
+      openrouterModelProvider: "openai",
+      supportsFlex: false,
+      inputTokenCostUsdPerMillion: null,
+      cachedInputTokenCostUsdPerMillion: null,
+      outputTokenCostUsdPerMillion: null,
+    }
+  )
+
+  assert.equal(openRouterQuery.values[3], "openai")
+  assert.equal(openAiQuery.values[3], null)
+})
+
+test("keeps llama.cpp model preset updates from supporting flex", () => {
+  const query = buildUpdateLlmModelPresetUpdateQuery(
+    "preset-llamacpp",
+    "llamacpp",
+    {
+      model: "local-model",
+      reasoningEffort: "none",
+      openrouterModelProvider: null,
+      supportsFlex: true,
+      inputTokenCostUsdPerMillion: null,
+      cachedInputTokenCostUsdPerMillion: null,
+      outputTokenCostUsdPerMillion: null,
+    }
+  )
+
+  assert.equal(query.values[4], false)
+})
+
+test("rejects immutable model preset fields in update payloads", () => {
+  assert.throws(
+    () =>
+      buildUpdateLlmModelPresetUpdateQuery("preset-openai", "openai", {
+        model: "gpt-5-nano",
+        reasoningEffort: "medium",
+        openrouterModelProvider: null,
+        supportsFlex: false,
+        inputTokenCostUsdPerMillion: null,
+        cachedInputTokenCostUsdPerMillion: null,
+        outputTokenCostUsdPerMillion: null,
+        provider: "openrouter",
+        isEnabled: false,
+        isDefault: true,
+      } as unknown as Parameters<
+        typeof buildUpdateLlmModelPresetUpdateQuery
+      >[2]),
+    LlmModelPresetValidationError
+  )
 })
 
 test("uses flex service tier only when requested for a flex-capable preset", () => {
