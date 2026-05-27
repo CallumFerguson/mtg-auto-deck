@@ -124,10 +124,9 @@ test("builds provider reasoning options with summaries when enabled", () => {
   })
 })
 
-test("builds OpenRouter reasoning options with excluded returned reasoning when summaries are disabled", () => {
+test("builds OpenRouter reasoning options that preserve tool-call reasoning when summaries are disabled", () => {
   assert.deepEqual(buildOpenRouterReasoningOptions("high", false), {
     effort: "high",
-    exclude: true,
   })
 })
 
@@ -650,28 +649,45 @@ test("aggregates OpenRouter usage across agent turns", () => {
         upstream_inference_output_cost: 0.0625,
       },
     },
+    {
+      prompt_tokens: 300,
+      prompt_tokens_details: {
+        cached_tokens: 75,
+      },
+      completion_tokens: 120,
+      completion_tokens_details: {
+        reasoning_tokens: 30,
+      },
+      total_tokens: 420,
+      cost: 0.5,
+      cost_details: {
+        upstream_inference_cost: 0.25,
+        upstream_inference_input_cost: 0.125,
+        upstream_inference_output_cost: 0.125,
+      },
+    },
   ])
 
   assert.deepEqual(usage, {
-    inputTokens: 300,
+    inputTokens: 600,
     inputTokensDetails: {
-      cachedTokens: 75,
+      cachedTokens: 150,
     },
-    outputTokens: 120,
+    outputTokens: 240,
     outputTokensDetails: {
-      reasoningTokens: 30,
+      reasoningTokens: 60,
     },
-    totalTokens: 420,
-    cost: 0.375,
+    totalTokens: 840,
+    cost: 0.875,
     costDetails: {
-      upstreamInferenceCost: 0.1875,
-      upstreamInferenceInputCost: 0.09375,
-      upstreamInferenceOutputCost: 0.09375,
+      upstreamInferenceCost: 0.4375,
+      upstreamInferenceInputCost: 0.21875,
+      upstreamInferenceOutputCost: 0.21875,
     },
   })
   assert.equal(
     formatUsdCostAsCents(getOpenRouterReportedCostUsd(usage)),
-    "37.5"
+    "87.5"
   )
 })
 

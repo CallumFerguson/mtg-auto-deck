@@ -156,6 +156,7 @@ import {
   createLlamaCppChatCompletionTools,
   type LlamaCppChatCompletionRequestPayload,
   type LlamaCppToolDefinition,
+  type LlamaCppChatCompletionCreateNonStreaming,
 } from "./llamacpp-chat.js"
 import {
   callWithRuntimeAbortSignal,
@@ -3055,6 +3056,18 @@ async function collectOpenRouterLlmResponse({
   runtime: ActiveLlmRunRuntime
   toolDefinitions: readonly LlamaCppToolDefinition[]
 }): Promise<CompletedLlmResponseResult> {
+  if (shouldUseOpenRouterChatCompletionsToolLoop(requestPayload.model)) {
+    return collectOpenRouterChatCompletionLlmResponse({
+      config,
+      llmRunId,
+      mcpPath,
+      phase,
+      requestPayload,
+      runtime,
+      toolDefinitions,
+    })
+  }
+
   const signal = runtime.abortController.signal
   const mcpClient =
     mcpPath && toolDefinitions.length > 0
@@ -3108,6 +3121,7 @@ async function collectOpenRouterLlmResponse({
         const response = await createOpenRouterResponsesApiResponse(
           config,
           {
+            include: ["reasoning.encrypted_content"],
             input,
             max_output_tokens: requestPayload.maxOutputTokens,
             metadata: requestPayload.metadata,
@@ -3186,6 +3200,7 @@ async function collectOpenRouterLlmResponse({
 
           toolOutputItems.push({
             type: "function_call_output",
+            id: `${toolCall.itemId ?? toolCall.callId}_output`,
             call_id: toolCall.callId,
             output: formatToolOutputForProviderMessage(toolOutput),
             status: "completed",
@@ -3216,7 +3231,216 @@ async function collectOpenRouterLlmResponse({
   )
 }
 
+async function collectOpenRouterChatCompletionLlmResponse({
+  config,
+  llmRunId,
+  mcpPath,
+  phase,
+  requestPayload,
+  runtime,
+  toolDefinitions,
+}: {
+  config: OpenRouterRunConfig
+  llmRunId: string
+  mcpPath?: string
+  phase: LlmRunPhase
+  requestPayload: OpenRouterRequestPayload
+  runtime: ActiveLlmRunRuntime
+  toolDefinitions: readonly LlamaCppToolDefinition[]
+}): Promise<CompletedLlmResponseResult> {
+  const signal = runtime.abortController.signal
+  const mcpClient =
+    mcpPath && toolDefinitions.length > 0
+      ? await createProviderMcpClient({
+        clientName: "openrouter-chat-agent",
+        path: mcpPath,
+        signal,
+      })
+      : null
+  let mcpClientClosePromise: Promise<void> | null = null
+
+  const closeMcpClient = () => {
+    if (!mcpClient) {
+      return Promise.resolve()
+    }
+
+    mcpClientClosePromise ??= mcpClient.close().catch((error: unknown) => {
+      console.error("Failed to close OpenRouter chat MCP client:", error)
+    })
+
+    return mcpClientClosePromise
+  }
+
+  try {
+    logLlmApiCallStarted({
+      llmRunId,
+      model: requestPayload.model,
+      phase,
+      provider: config.provider,
+    })
+
+    const removeAbortHandler = registerRuntimeAbortHandler(signal, () => {
+      void closeMcpClient()
+    })
+
+    try {
+      const result = await collectLlamaCppChatCompletionNonStreaming({
+        callTool: (name, args, toolSignal) =>
+          mcpClient
+            ? callMcpToolForProvider(
+              mcpClient,
+              name,
+              args,
+              toolSignal,
+              "OpenRouter"
+            )
+            : Promise.reject(new Error("No MCP tools are available.")),
+        createChatCompletion: createOpenRouterChatCompletion(config),
+        requestPayload: createOpenRouterChatCompletionToolLoopPayload(
+          requestPayload,
+          toolDefinitions
+        ),
+        signal,
+        toolDefinitions,
+      })
+      const rawResponse = result.rawResponse ?? {}
+      const usage = aggregateOpenRouterUsage(
+        getProviderRawResponseList(rawResponse).map(
+          (response) => asRecord(response).usage ?? {}
+        )
+      )
+
+      logLlmApiCallFinished({
+        llmRunId,
+        model: requestPayload.model,
+        phase,
+        provider: config.provider,
+        serviceTier: config.serviceTier,
+        tokenCosts: config.tokenCosts,
+        usage,
+      })
+
+      return {
+        outputText: result.outputText,
+        rawResponse,
+        usage,
+      }
+    } catch (error) {
+      if (signal.aborted) {
+        throw createRuntimeAbortError()
+      }
+
+      throw error
+    } finally {
+      removeAbortHandler()
+    }
+  } finally {
+    await closeMcpClient()
+  }
+}
+
+function shouldUseOpenRouterChatCompletionsToolLoop(model: string) {
+  return model.toLowerCase().startsWith("deepseek/")
+}
+
+function createOpenRouterChatCompletionToolLoopPayload(
+  requestPayload: OpenRouterRequestPayload,
+  toolDefinitions: readonly LlamaCppToolDefinition[]
+): LlamaCppChatCompletionRequestPayload {
+  return {
+    providerType: "openrouter",
+    model: requestPayload.model,
+    max_tokens: requestPayload.maxOutputTokens,
+    messages: normalizeOpenRouterChatCompletionMessages(requestPayload.input),
+    metadata: requestPayload.metadata,
+    parallel_tool_calls: requestPayload.parallelToolCalls,
+    tools: createLlamaCppChatCompletionTools(toolDefinitions),
+    stopWhenStepCount: requestPayload.stopWhenStepCount,
+    extraBody: {
+      provider: requestPayload.provider,
+      reasoning: requestPayload.reasoning,
+      ...(requestPayload.serviceTier
+        ? { service_tier: requestPayload.serviceTier }
+        : {}),
+    },
+  }
+}
+
+function normalizeOpenRouterChatCompletionMessages(
+  input: unknown
+): LlamaCppChatCompletionRequestPayload["messages"] {
+  if (typeof input === "string") {
+    return [
+      {
+        role: "user",
+        content: input,
+      },
+    ]
+  }
+
+  return [
+    {
+      role: "user",
+      content: String(input ?? ""),
+    },
+  ]
+}
+
+function createOpenRouterChatCompletion(
+  config: OpenRouterRunConfig
+): LlamaCppChatCompletionCreateNonStreaming {
+  return async (body, { signal }) => {
+    const response = await callWithRuntimeAbortSignal(
+      signal,
+      (options) =>
+        fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${config.apiKey}`,
+            "Content-Type": "application/json",
+            "X-OpenRouter-Experimental-Metadata": "enabled",
+          },
+          body: JSON.stringify(body),
+          signal: options.signal,
+        }),
+      "OpenRouter Chat Completions API request was cancelled."
+    )
+    const responseText = await response.text()
+
+    if (!response.ok) {
+      const responseMetadata = formatProviderHttpResponseMetadata(response)
+
+      throw new Error(
+        `OpenRouter Chat Completions API request failed (${response.status}): ${formatProviderHttpErrorBody(responseText)}${responseMetadata ? ` (${responseMetadata})` : ""}`
+      )
+    }
+
+    if (!responseText.trim()) {
+      return {} as Awaited<
+        ReturnType<LlamaCppChatCompletionCreateNonStreaming>
+      >
+    }
+
+    try {
+      return JSON.parse(responseText) as Awaited<
+        ReturnType<LlamaCppChatCompletionCreateNonStreaming>
+      >
+    } catch (error) {
+      throw new Error("OpenRouter Chat Completions API returned non-JSON output.", {
+        cause: error,
+      })
+    }
+  }
+}
+
+function getProviderRawResponseList(rawResponse: unknown): unknown[] {
+  const responses = asRecord(rawResponse).responses
+
+  return Array.isArray(responses) ? responses : []
+}
+
 type OpenRouterResponsesApiRequestBody = {
+  include?: ["reasoning.encrypted_content"]
   input: unknown
   max_output_tokens: number
   metadata: Record<string, string>
@@ -3233,6 +3457,7 @@ type OpenRouterResponsesApiRequestBody = {
 type OpenRouterFunctionCall = {
   argumentsText: string
   callId: string
+  itemId: string | null
   name: string
   rawItem: unknown
 }
@@ -3308,6 +3533,7 @@ function getOpenRouterFunctionCalls(response: unknown): OpenRouterFunctionCall[]
       {
         argumentsText: getStringProperty(itemRecord, "arguments") ?? "{}",
         callId,
+        itemId: getStringProperty(itemRecord, "id"),
         name,
         rawItem: item,
       },

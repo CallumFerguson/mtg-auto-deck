@@ -16,7 +16,7 @@ export type LlamaCppToolDefinition = {
 }
 
 export type LlamaCppChatCompletionRequestPayload = {
-  providerType: "llamacpp"
+  providerType: "llamacpp" | "openrouter"
   model: string
   max_tokens: number
   messages: ChatCompletionMessageParam[]
@@ -24,6 +24,7 @@ export type LlamaCppChatCompletionRequestPayload = {
   parallel_tool_calls: false
   tools: ChatCompletionTool[]
   stopWhenStepCount: number
+  extraBody?: Record<string, unknown>
 }
 
 export type LlamaCppChatCompletionCreateNonStreaming = (
@@ -47,6 +48,7 @@ export type LlamaCppChatCompletionResult = {
 type LlamaCppChatCompletionStepResult = {
   finishReason: string | null
   outputText: string
+  rawMessage: unknown
   toolCalls: LlamaCppChatCompletionToolCall[]
   usage: unknown
 }
@@ -122,7 +124,13 @@ export async function collectLlamaCppChatCompletionNonStreaming({
       }
     }
 
-    messages.push(createAssistantToolCallMessage(stepResult.outputText, toolCalls))
+    messages.push(
+      createAssistantToolCallMessage(
+        stepResult.outputText,
+        toolCalls,
+        stepResult.rawMessage
+      )
+    )
 
     for (const toolCall of toolCalls) {
       const toolDefinition = toolDefinitionsByName.get(toolCall.name)
@@ -172,6 +180,7 @@ function collectLlamaCppChatCompletionNonStreamingStep(
   return {
     finishReason: choice?.finish_reason ?? null,
     outputText: getLlamaCppChatCompletionMessageText(message),
+    rawMessage: message,
     toolCalls: getLlamaCppChatCompletionToolCalls(message, stepNumber),
     usage: response.usage ?? {},
   }
@@ -199,6 +208,7 @@ function createNonStreamingChatCompletionApiPayload(
     parallel_tool_calls: requestPayload.parallel_tool_calls,
     tools: requestPayload.tools,
     stream: false,
+    ...requestPayload.extraBody,
   }
 
   return payload
@@ -259,13 +269,38 @@ function normalizeLlamaCppToolCall(
 
 function createAssistantToolCallMessage(
   outputText: string,
-  toolCalls: readonly LlamaCppChatCompletionToolCall[]
+  toolCalls: readonly LlamaCppChatCompletionToolCall[],
+  rawMessage: unknown
 ): ChatCompletionMessageParam {
   return {
     role: "assistant",
     content: outputText || null,
+    ...getPreservedAssistantReasoningFields(rawMessage),
     tool_calls: toolCalls.map(createOpenAiToolCall),
+  } as ChatCompletionMessageParam
+}
+
+function getPreservedAssistantReasoningFields(rawMessage: unknown) {
+  const messageRecord = asRecord(rawMessage)
+  const preservedFields: Record<string, unknown> = {}
+  const reasoningContent = getStringProperty(messageRecord, "reasoning_content")
+  const reasoning = getStringProperty(messageRecord, "reasoning")
+  const reasoningDetails = messageRecord.reasoning_details
+
+  if (reasoningContent) {
+    preservedFields.reasoning_content = reasoningContent
   }
+
+  if (reasoning) {
+    preservedFields.reasoning = reasoning
+    preservedFields.reasoning_content ??= reasoning
+  }
+
+  if (Array.isArray(reasoningDetails)) {
+    preservedFields.reasoning_details = reasoningDetails
+  }
+
+  return preservedFields
 }
 
 function createOpenAiToolCall(

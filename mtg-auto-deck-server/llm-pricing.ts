@@ -179,10 +179,14 @@ export function aggregateOpenRouterUsage(
   const inputTokens = sumRequiredNumberProperties(usageRecords, [
     "inputTokens",
     "input_tokens",
+    "promptTokens",
+    "prompt_tokens",
   ])
   const outputTokens = sumRequiredNumberProperties(usageRecords, [
     "outputTokens",
     "output_tokens",
+    "completionTokens",
+    "completion_tokens",
   ])
   const reportedTotalTokens = sumRequiredNumberProperties(usageRecords, [
     "totalTokens",
@@ -196,7 +200,12 @@ export function aggregateOpenRouterUsage(
       cachedTokens: Math.min(
         sumOptionalNestedNumberProperties(
           usageRecords,
-          ["inputTokensDetails", "input_tokens_details"],
+          [
+            "inputTokensDetails",
+            "input_tokens_details",
+            "promptTokensDetails",
+            "prompt_tokens_details",
+          ],
           ["cachedTokens", "cached_tokens"]
         ),
         inputTokens
@@ -209,7 +218,12 @@ export function aggregateOpenRouterUsage(
     aggregate.outputTokensDetails = {
       reasoningTokens: sumOptionalNestedNumberProperties(
         usageRecords,
-        ["outputTokensDetails", "output_tokens_details"],
+        [
+          "outputTokensDetails",
+          "output_tokens_details",
+          "completionTokensDetails",
+          "completion_tokens_details",
+        ],
         ["reasoningTokens", "reasoning_tokens"]
       ),
     }

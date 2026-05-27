@@ -106,6 +106,57 @@ test("collects a non-streaming llama.cpp opening-hand tool loop", async () => {
   assert.equal(rawResponse.responses?.length, 2)
 })
 
+test("preserves reasoning content on assistant tool-call messages", async () => {
+  const chatRequests: ChatCompletionCreateParamsNonStreaming[] = []
+  const responses = [
+    createChatCompletion({
+      finishReason: "tool_calls",
+      reasoning: "Need to draw before choosing a keep.",
+      toolCalls: [
+        {
+          id: "call_1",
+          type: "function",
+          function: {
+            name: "draw_starting_hand",
+            arguments: '{"llmRunId":"run_1"}',
+          },
+        },
+      ],
+    }),
+    createChatCompletion({
+      content: '{"keptHand":["Sol Ring"]}',
+      finishReason: "stop",
+    }),
+  ]
+
+  await collectLlamaCppChatCompletionNonStreaming({
+    callTool: async () => ({ cards: ["Sol Ring"] }),
+    createChatCompletion: async (body) => {
+      chatRequests.push(body)
+      const response = responses.shift()
+
+      assert.ok(response)
+      return response
+    },
+    requestPayload: createRequestPayload(openingHandToolDefinitions),
+    signal: new AbortController().signal,
+    toolDefinitions: openingHandToolDefinitions,
+  })
+
+  const assistantMessage = chatRequests[1]?.messages[1] as unknown as
+    | Record<string, unknown>
+    | undefined
+
+  assert.equal(
+    assistantMessage?.reasoning,
+    "Need to draw before choosing a keep."
+  )
+  assert.equal(
+    assistantMessage?.reasoning_content,
+    "Need to draw before choosing a keep."
+  )
+})
+
 test("collects a non-streaming llama.cpp turn tool loop with shorthand calls", async () => {
   const toolCalls: Array<{ args: Record<string, unknown>; name: string }> = []
   const finalOutput =
@@ -315,11 +366,17 @@ function createRequestPayload(
 function createChatCompletion({
   content = null,
   finishReason = null,
+  reasoning,
+  reasoningContent,
+  reasoningDetails,
   toolCalls,
   usage = null,
 }: {
   content?: string | null
   finishReason?: ChatCompletion["choices"][number]["finish_reason"] | null
+  reasoning?: string
+  reasoningContent?: string
+  reasoningDetails?: unknown[]
   toolCalls?: unknown[]
   usage?: unknown
 }): ChatCompletion {
@@ -334,6 +391,9 @@ function createChatCompletion({
           role: "assistant",
           content,
           refusal: null,
+          ...(reasoning ? { reasoning } : {}),
+          ...(reasoningContent ? { reasoning_content: reasoningContent } : {}),
+          ...(reasoningDetails ? { reasoning_details: reasoningDetails } : {}),
           tool_calls: toolCalls,
         },
       },

@@ -121,9 +121,7 @@ export function buildOpenRouterReasoningOptions(
 ) {
   return {
     effort: reasoningEffort,
-    ...(reasoningSummariesEnabled
-      ? { summary: "auto" as const }
-      : { exclude: true as const }),
+    ...(reasoningSummariesEnabled ? { summary: "auto" as const } : {}),
   }
 }
 
