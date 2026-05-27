@@ -158,6 +158,10 @@ const DEFAULT_TURNS_TO_SIMULATE = "1"
 const USAGE_LIMIT_FAILURE_MESSAGE_PATTERN = /\bout of usage limits\b/i
 const CREATE_SIMULATION_USE_FLEX_STORAGE_KEY =
   "mtg-auto-deck:create-simulation-use-flex-service-tier"
+const CREATE_SIMULATION_LAST_SAVED_SEED_STORAGE_KEY_PREFIX =
+  "mtg-auto-deck:create-simulation-last-saved-seed:"
+const CREATE_SIMULATION_LAST_STARTING_HAND_STORAGE_KEY_PREFIX =
+  "mtg-auto-deck:create-simulation-last-starting-hand:"
 const MANA_SYMBOL_TEXT_PATTERN = /(\{[^{}\s]+\})/g
 const MANA_SYMBOL_CLASS_NAMES = new Set([
   "0",
@@ -507,6 +511,101 @@ function storeCreateSimulationUseFlexServiceTier(isEnabled: boolean) {
   } catch {
     // Local storage is only a convenience for this form preference.
   }
+}
+
+function getCreateSimulationDeckStorageKey(
+  storageKeyPrefix: string,
+  deckId: string
+) {
+  return `${storageKeyPrefix}${encodeURIComponent(deckId)}`
+}
+
+function getStoredCreateSimulationDeckItemId(
+  storageKeyPrefix: string,
+  deckId: string
+) {
+  try {
+    return (
+      window.localStorage.getItem(
+        getCreateSimulationDeckStorageKey(storageKeyPrefix, deckId)
+      ) ?? ""
+    )
+  } catch {
+    return ""
+  }
+}
+
+function storeCreateSimulationDeckItemId(
+  storageKeyPrefix: string,
+  deckId: string,
+  itemId: string
+) {
+  try {
+    const storageKey = getCreateSimulationDeckStorageKey(
+      storageKeyPrefix,
+      deckId
+    )
+
+    if (itemId) {
+      window.localStorage.setItem(storageKey, itemId)
+    } else {
+      window.localStorage.removeItem(storageKey)
+    }
+  } catch {
+    // Local storage is only a convenience for remembered saved items.
+  }
+}
+
+function getStoredCreateSimulationSavedSeedId(deckId: string) {
+  return getStoredCreateSimulationDeckItemId(
+    CREATE_SIMULATION_LAST_SAVED_SEED_STORAGE_KEY_PREFIX,
+    deckId
+  )
+}
+
+function storeCreateSimulationSavedSeedId(
+  deckId: string,
+  savedSeedId: string
+) {
+  storeCreateSimulationDeckItemId(
+    CREATE_SIMULATION_LAST_SAVED_SEED_STORAGE_KEY_PREFIX,
+    deckId,
+    savedSeedId
+  )
+}
+
+function getStoredCreateSimulationStartingHandId(deckId: string) {
+  return getStoredCreateSimulationDeckItemId(
+    CREATE_SIMULATION_LAST_STARTING_HAND_STORAGE_KEY_PREFIX,
+    deckId
+  )
+}
+
+function storeCreateSimulationStartingHandId(
+  deckId: string,
+  startingHandId: string
+) {
+  storeCreateSimulationDeckItemId(
+    CREATE_SIMULATION_LAST_STARTING_HAND_STORAGE_KEY_PREFIX,
+    deckId,
+    startingHandId
+  )
+}
+
+function resolveCreateSimulationDeckItemId<TItem extends { id: string }>(
+  items: readonly TItem[],
+  currentItemId: string,
+  storedItemId: string
+) {
+  if (currentItemId && items.some((item) => item.id === currentItemId)) {
+    return currentItemId
+  }
+
+  if (storedItemId && items.some((item) => item.id === storedItemId)) {
+    return storedItemId
+  }
+
+  return items[0]?.id ?? ""
 }
 
 function isUsageLimitFailureMessage(message: string | null) {
@@ -926,16 +1025,13 @@ export function DeckSimulation({
           currentStartingHands.filter((hand) => !hand.isEnabled)
         )
       )
-      setSelectedOpeningHandId((currentStartingHandId) => {
-        if (
-          currentStartingHandId &&
-          data.startingHands.some((hand) => hand.id === currentStartingHandId)
-        ) {
-          return currentStartingHandId
-        }
-
-        return data.startingHands[0]?.id ?? ""
-      })
+      setSelectedOpeningHandId((currentStartingHandId) =>
+        resolveCreateSimulationDeckItemId(
+          data.startingHands,
+          currentStartingHandId,
+          getStoredCreateSimulationStartingHandId(deckId)
+        )
+      )
     } catch {
       setStartingHandLoadError("Starting hands could not be loaded.")
     } finally {
@@ -988,16 +1084,13 @@ export function DeckSimulation({
 
       const data = (await response.json()) as SavedSeedsResponse
       setSavedSeeds(data.savedSeeds)
-      setSelectedSavedSeedId((currentSavedSeedId) => {
-        if (
-          currentSavedSeedId &&
-          data.savedSeeds.some((seed) => seed.id === currentSavedSeedId)
-        ) {
-          return currentSavedSeedId
-        }
-
-        return data.savedSeeds[0]?.id ?? ""
-      })
+      setSelectedSavedSeedId((currentSavedSeedId) =>
+        resolveCreateSimulationDeckItemId(
+          data.savedSeeds,
+          currentSavedSeedId,
+          getStoredCreateSimulationSavedSeedId(deckId)
+        )
+      )
     } catch {
       setSavedSeedLoadError("Saved seeds could not be loaded.")
     } finally {
@@ -1129,6 +1222,7 @@ export function DeckSimulation({
     setStartingHands((currentStartingHands) =>
       mergeStartingHandLists([hand], currentStartingHands)
     )
+    storeCreateSimulationStartingHandId(deckId, hand.id)
     setSelectedOpeningHandId(hand.id)
     setOpeningHandMode("provide")
     setIsChooseHandModalOpen(false)
@@ -1137,6 +1231,7 @@ export function DeckSimulation({
 
   function selectCreatedSavedSeed(seed: SavedSeed) {
     setSavedSeeds((currentSavedSeeds) => [seed, ...currentSavedSeeds])
+    storeCreateSimulationSavedSeedId(deckId, seed.id)
     setSelectedSavedSeedId(seed.id)
     setSeedMode("set")
     setIsChooseSeedModalOpen(false)
@@ -1144,6 +1239,7 @@ export function DeckSimulation({
   }
 
   function applyChosenSavedSeed(seedId: string) {
+    storeCreateSimulationSavedSeedId(deckId, seedId)
     setSelectedSavedSeedId(seedId)
     setSeedMode("set")
     setCreateSimulationError(null)
@@ -1151,6 +1247,7 @@ export function DeckSimulation({
   }
 
   function applyChosenStartingHand(handId: string) {
+    storeCreateSimulationStartingHandId(deckId, handId)
     setSelectedOpeningHandId(handId)
     setOpeningHandMode("provide")
     setCreateSimulationError(null)
@@ -1162,10 +1259,18 @@ export function DeckSimulation({
       (seed) => seed.id !== savedSeedId
     )
     const wasSelectedSeed = selectedSavedSeedId === savedSeedId
+    const wasRememberedSeed =
+      getStoredCreateSimulationSavedSeedId(deckId) === savedSeedId
 
     setSavedSeeds((currentSavedSeeds) =>
       currentSavedSeeds.filter((seed) => seed.id !== savedSeedId)
     )
+
+    if (wasSelectedSeed || wasRememberedSeed) {
+      const nextSavedSeedId = remainingSavedSeeds[0]?.id ?? ""
+
+      storeCreateSimulationSavedSeedId(deckId, nextSavedSeedId)
+    }
 
     if (wasSelectedSeed) {
       const nextSavedSeedId = remainingSavedSeeds[0]?.id ?? ""
@@ -1185,6 +1290,8 @@ export function DeckSimulation({
       (hand) => hand.id !== startingHandId
     )
     const wasSelectedHand = selectedOpeningHandId === startingHandId
+    const wasRememberedHand =
+      getStoredCreateSimulationStartingHandId(deckId) === startingHandId
 
     setStartingHands((currentStartingHands) =>
       currentStartingHands.map((hand) =>
@@ -1193,6 +1300,12 @@ export function DeckSimulation({
           : hand
       )
     )
+
+    if (wasSelectedHand || wasRememberedHand) {
+      const nextStartingHandId = remainingStartingHands[0]?.id ?? ""
+
+      storeCreateSimulationStartingHandId(deckId, nextStartingHandId)
+    }
 
     if (wasSelectedHand) {
       const nextStartingHandId = remainingStartingHands[0]?.id ?? ""
@@ -1219,11 +1332,59 @@ export function DeckSimulation({
 
   function resetCreateSimulationForm() {
     setSeedMode("random")
-    setSelectedSavedSeedId(enabledSavedSeeds[0]?.id ?? "")
+    setSelectedSavedSeedId((currentSavedSeedId) =>
+      resolveCreateSimulationDeckItemId(
+        enabledSavedSeeds,
+        currentSavedSeedId,
+        getStoredCreateSimulationSavedSeedId(deckId)
+      )
+    )
     setSelectedModelPresetId(defaultModelPresetId ?? "")
     setTurnsToSimulate(DEFAULT_TURNS_TO_SIMULATE)
     setOpeningHandMode("simulate")
-    setSelectedOpeningHandId(enabledStartingHands[0]?.id ?? "")
+    setSelectedOpeningHandId((currentStartingHandId) =>
+      resolveCreateSimulationDeckItemId(
+        enabledStartingHands,
+        currentStartingHandId,
+        getStoredCreateSimulationStartingHandId(deckId)
+      )
+    )
+  }
+
+  function handleSetSeedModeSelected() {
+    const nextSavedSeedId = resolveCreateSimulationDeckItemId(
+      enabledSavedSeeds,
+      selectedSavedSeedId,
+      getStoredCreateSimulationSavedSeedId(deckId)
+    )
+
+    if (!nextSavedSeedId) {
+      setIsChooseSeedModalOpen(true)
+      return
+    }
+
+    storeCreateSimulationSavedSeedId(deckId, nextSavedSeedId)
+    setSelectedSavedSeedId(nextSavedSeedId)
+    setSeedMode("set")
+    setCreateSimulationError(null)
+  }
+
+  function handleProvideOpeningHandModeSelected() {
+    const nextStartingHandId = resolveCreateSimulationDeckItemId(
+      enabledStartingHands,
+      selectedOpeningHandId,
+      getStoredCreateSimulationStartingHandId(deckId)
+    )
+
+    if (!nextStartingHandId) {
+      setIsChooseHandModalOpen(true)
+      return
+    }
+
+    storeCreateSimulationStartingHandId(deckId, nextStartingHandId)
+    setSelectedOpeningHandId(nextStartingHandId)
+    setOpeningHandMode("provide")
+    setCreateSimulationError(null)
   }
 
   function handleCreateSimulationUseFlexChange(nextEnabled: boolean) {
@@ -1583,7 +1744,7 @@ export function DeckSimulation({
                               type="radio"
                               name="seed-mode"
                               checked={seedMode === "set"}
-                              onChange={() => setIsChooseSeedModalOpen(true)}
+                              onChange={handleSetSeedModeSelected}
                             />
                             Set seed
                           </label>
@@ -1652,7 +1813,7 @@ export function DeckSimulation({
                               type="radio"
                               name="opening-hand-mode"
                               checked={openingHandMode === "provide"}
-                              onChange={() => setIsChooseHandModalOpen(true)}
+                              onChange={handleProvideOpeningHandModeSelected}
                             />
                             Provide opening hand
                           </label>
