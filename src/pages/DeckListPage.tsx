@@ -5,7 +5,6 @@ import {
   MoreVertical,
   Play,
   Plus,
-  RefreshCw,
   Trash2,
 } from "lucide-react"
 import { useNavigate } from "react-router-dom"
@@ -116,44 +115,30 @@ export function DeckListPage({
   return (
     <main className="min-h-svh bg-background px-4 py-6 text-foreground sm:px-6 lg:px-8">
       <section className="mx-auto flex w-full max-w-4xl flex-col gap-6">
-        <header className="flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-end sm:justify-between">
-          <div className="space-y-2">
-            <p className="text-sm font-medium tracking-[0.18em] text-sky-300 uppercase">
-              MTG Auto Deck
-            </p>
-            <h1 className="text-3xl font-semibold text-foreground sm:text-4xl">
-              Decks
-            </h1>
-          </div>
+        <header className="flex items-center justify-between gap-4 border-b border-border pb-5">
+          <h1 className="text-sm font-medium tracking-[0.18em] text-sky-300 uppercase">
+            MTG Auto Deck
+          </h1>
 
-          <div className="flex items-center gap-2">
-            <AccountMenu
-              adminOptionsEnabled={adminOptionsEnabled}
-              isImpersonating={isImpersonating}
-              onAdminOptionsEnabledChange={onAdminOptionsEnabledChange}
-              onSignedOut={onSignedOut}
-              onStopImpersonating={onStopImpersonating}
-              user={user}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              aria-label="Refresh decks"
-              title="Refresh decks"
-              onClick={() => void loadDecks()}
-              disabled={isLoadingDecks}
-            >
-              <RefreshCw
-                className={isLoadingDecks ? "animate-spin" : undefined}
-              />
-            </Button>
-            <Button type="button" onClick={() => setIsCreateDeckOpen(true)}>
-              <Plus data-icon="inline-start" />
-              New deck
-            </Button>
-          </div>
+          <AccountMenu
+            adminOptionsEnabled={adminOptionsEnabled}
+            isImpersonating={isImpersonating}
+            onAdminOptionsEnabledChange={onAdminOptionsEnabledChange}
+            onSignedOut={onSignedOut}
+            onStopImpersonating={onStopImpersonating}
+            user={user}
+          />
         </header>
+
+        <section className="flex flex-col items-start gap-3">
+          <h2 className="text-2xl font-semibold text-foreground">
+            Your Decks
+          </h2>
+          <Button type="button" onClick={() => setIsCreateDeckOpen(true)}>
+            <Plus data-icon="inline-start" />
+            Create new deck
+          </Button>
+        </section>
 
         <div className="rounded-lg border border-border bg-card/70">
           {isLoadingDecks ? (
