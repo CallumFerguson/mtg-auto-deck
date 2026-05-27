@@ -7858,6 +7858,8 @@ function CreateSavedSeedModal({
   const [seedValue, setSeedValue] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
+  const canSaveSeed =
+    seedName.trim().length > 0 && seedValue.trim().length > 0
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -7954,6 +7956,7 @@ function CreateSavedSeedModal({
                 className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground transition outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-50"
                 type="text"
                 value={seedName}
+                required
                 disabled={isSaving}
                 onChange={(event) => {
                   setSeedName(event.target.value)
@@ -7972,6 +7975,7 @@ function CreateSavedSeedModal({
                 className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground transition outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-50"
                 type="text"
                 value={seedValue}
+                required
                 disabled={isSaving}
                 onChange={(event) => {
                   setSeedValue(event.target.value)
@@ -7999,7 +8003,7 @@ function CreateSavedSeedModal({
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={isSaving}>
+            <Button type="submit" disabled={isSaving || !canSaveSeed}>
               <Save data-icon="inline-start" />
               {isSaving ? "Saving..." : "Save seed"}
             </Button>
@@ -8025,11 +8029,13 @@ function CreateStartingHandModal({
   const [selectedCardIds, setSelectedCardIds] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
+  const hasHandName = handName.trim().length > 0
   const selectedCardIdSet = useMemo(
     () => new Set(selectedCardIds),
     [selectedCardIds]
   )
   const hasExactlySevenCards = selectedCardIds.length === 7
+  const canSaveStartingHand = hasHandName && hasExactlySevenCards
 
   function toggleCard(cardId: string) {
     setSelectedCardIds((currentCardIds) => {
@@ -8147,6 +8153,7 @@ function CreateStartingHandModal({
                 type="text"
                 value={handName}
                 placeholder="Fast Sol Ring hand"
+                required
                 disabled={isSaving}
                 onChange={(event) => {
                   setHandName(event.target.value)
@@ -8229,7 +8236,7 @@ function CreateStartingHandModal({
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={isSaving || !hasExactlySevenCards}>
+            <Button type="submit" disabled={isSaving || !canSaveStartingHand}>
               <Save data-icon="inline-start" />
               {isSaving ? "Saving..." : "Save hand"}
             </Button>
