@@ -1539,7 +1539,6 @@ function AdminModelPresetsSection() {
                       items={[
                         ["sims", String(preset.simulationReferenceCount)],
                         ["runs", String(preset.llmRunReferenceCount)],
-                        ["evals", String(preset.evaluationReferenceCount)],
                       ]}
                     />
                   </TableCell>
@@ -1705,7 +1704,6 @@ function DeleteLlmModelPresetModal({
                   items={[
                     ["sims", String(preset.simulationReferenceCount)],
                     ["runs", String(preset.llmRunReferenceCount)],
-                    ["evals", String(preset.evaluationReferenceCount)],
                   ]}
                 />
               </div>

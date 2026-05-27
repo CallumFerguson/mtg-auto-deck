@@ -159,32 +159,6 @@ type FakeChunk = {
   received_at: Date
 }
 
-type FakeOpeningEvaluation = {
-  id: number
-  simulation_id: string
-  opening_hand_llm_run_id: string
-  llm_model_preset_id: string | null
-  legal_simulation_pass: boolean
-  reasoning_pass: boolean
-  simulation_quality_score: number
-  evaluation_json: unknown
-  created_at: Date
-  updated_at: Date
-}
-
-type FakeTurnEvaluation = {
-  id: number
-  simulation_id: string
-  turn_llm_run_id: string
-  llm_model_preset_id: string | null
-  legal_turn_pass: boolean
-  reasoning_pass: boolean
-  simulation_quality_score: number
-  evaluation_json: unknown
-  created_at: Date
-  updated_at: Date
-}
-
 class FakeStarterDeckCopyClient {
   deckIdSequence = 1
   deckCardIdSequence = 100
@@ -206,8 +180,6 @@ class FakeStarterDeckCopyClient {
   turnRuns: FakeTurnRun[] = []
   reportRuns: FakeReportRun[] = []
   chunks: FakeChunk[] = []
-  openingEvaluations: FakeOpeningEvaluation[] = []
-  turnEvaluations: FakeTurnEvaluation[] = []
   starterDeckCopies: {
     copied_deck_id: string | null
     id: number
@@ -301,26 +273,6 @@ class FakeStarterDeckCopyClient {
 
       case "copy-llm-run-chunks":
         return this.copyLlmRunChunks<T>(values) as QueryResult<T>
-
-      case "list-opening-hand-evaluations":
-        return this.result<T>(
-          this.openingEvaluations.filter(
-            (evaluation) => evaluation.simulation_id === values[0]
-          )
-        )
-
-      case "copy-opening-hand-evaluation":
-        return this.copyOpeningEvaluation<T>(values)
-
-      case "list-turn-evaluations":
-        return this.result<T>(
-          this.turnEvaluations.filter(
-            (evaluation) => evaluation.simulation_id === values[0]
-          )
-        )
-
-      case "copy-turn-evaluation":
-        return this.copyTurnEvaluation<T>(values)
 
       default:
         throw new Error(`Unhandled fake query operation: ${operation}`)
@@ -637,40 +589,6 @@ class FakeStarterDeckCopyClient {
     return this.result(rows as T[])
   }
 
-  copyOpeningEvaluation<T>(values: unknown[]) {
-    this.openingEvaluations.push({
-      created_at: getDate(values[7]),
-      evaluation_json: getJsonObject(values[6]),
-      id: this.openingEvaluations.length + 1,
-      legal_simulation_pass: getBoolean(values[3]),
-      llm_model_preset_id: getStringOrNull(values[2]),
-      opening_hand_llm_run_id: getString(values[1]),
-      reasoning_pass: getBoolean(values[4]),
-      simulation_id: getString(values[0]),
-      simulation_quality_score: getNumber(values[5]),
-      updated_at: getDate(values[8]),
-    })
-
-    return this.result<T>([])
-  }
-
-  copyTurnEvaluation<T>(values: unknown[]) {
-    this.turnEvaluations.push({
-      created_at: getDate(values[7]),
-      evaluation_json: getJsonObject(values[6]),
-      id: this.turnEvaluations.length + 1,
-      legal_turn_pass: getBoolean(values[3]),
-      llm_model_preset_id: getStringOrNull(values[2]),
-      reasoning_pass: getBoolean(values[4]),
-      simulation_id: getString(values[0]),
-      simulation_quality_score: getNumber(values[5]),
-      turn_llm_run_id: getString(values[1]),
-      updated_at: getDate(values[8]),
-    })
-
-    return this.result<T>([])
-  }
-
   getDeck(deckId: string) {
     const deck = this.decks.find((candidate) => candidate.id === deckId)
 
@@ -805,22 +723,6 @@ test("starter deck copy clones deck data, presets, terminal history, and remaps 
   assert.equal(copiedChunk.sequence, 1)
   assert.equal(copiedChunk.mcp_function_name, "draw_starting_hand")
 
-  assert.equal(
-    db.openingEvaluations.some(
-      (evaluation) =>
-        evaluation.simulation_id === copiedSimulations[0].id &&
-        evaluation.opening_hand_llm_run_id === copiedOpeningRun.llm_run_id
-    ),
-    true
-  )
-  assert.equal(
-    db.turnEvaluations.some(
-      (evaluation) =>
-        evaluation.simulation_id === copiedSimulations[0].id &&
-        evaluation.turn_llm_run_id === copiedTurnRun.llm_run_id
-    ),
-    true
-  )
   assert.equal(
     db.openrouterGenerations.some((generation) =>
       copiedRuns.some((run) => run.id === generation.llm_run_id)
@@ -1086,44 +988,6 @@ function createStarterDeckFixture() {
     reasoning_delta: null,
     received_at: now,
     sequence: 1,
-  })
-  db.openingEvaluations.push({
-    created_at: now,
-    evaluation_json: {
-      illegalActions: [],
-      legalSimulationPass: true,
-      reasoningMistakes: [],
-      reasoningPass: true,
-      simulationQualityScore: 9,
-      strategicMistakes: [],
-    },
-    id: 1,
-    legal_simulation_pass: true,
-    llm_model_preset_id: "44444444-4444-4444-8444-444444444444",
-    opening_hand_llm_run_id: "run-opening",
-    reasoning_pass: true,
-    simulation_id: "sim-completed",
-    simulation_quality_score: 9,
-    updated_at: now,
-  })
-  db.turnEvaluations.push({
-    created_at: now,
-    evaluation_json: {
-      illegalActions: [],
-      legalTurnPass: true,
-      reasoningMistakes: [],
-      reasoningPass: true,
-      simulationQualityScore: 8,
-      strategicMistakes: [],
-    },
-    id: 1,
-    legal_turn_pass: true,
-    llm_model_preset_id: "44444444-4444-4444-8444-444444444444",
-    reasoning_pass: true,
-    simulation_id: "sim-completed",
-    simulation_quality_score: 8,
-    turn_llm_run_id: "run-turn",
-    updated_at: now,
   })
   db.openrouterGenerations.push({ llm_run_id: "run-opening" })
   db.mcpTokens.push({ llm_run_id: "run-opening" })

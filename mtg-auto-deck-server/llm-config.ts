@@ -97,16 +97,6 @@ export type ResolvedTurnSimulationLlmRunConfig =
   | OpenRouterRunConfig
   | ResolvedLlamaCppRunConfig
 
-export type EvaluationLlmRunConfig =
-  | OpenAiRunConfig
-  | OpenRouterRunConfig
-  | LlamaCppRunConfig
-
-export type ResolvedEvaluationLlmRunConfig =
-  | OpenAiRunConfig
-  | OpenRouterRunConfig
-  | ResolvedLlamaCppRunConfig
-
 export type LlmRunQueueConfig = {
   maxConcurrentRuns: number
 }
@@ -182,13 +172,6 @@ export function getTurnSimulationLlmRunConfig(
   }
 
   return config
-}
-
-export function getEvaluationLlmRunConfig(
-  preset: LlmModelPresetRunConfig,
-  environment: Environment = process.env
-): EvaluationLlmRunConfig {
-  return getLlmRunConfig(preset, environment)
 }
 
 export function getOpenRouterApiKey(environment: Environment = process.env) {

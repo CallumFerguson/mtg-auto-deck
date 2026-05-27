@@ -27,7 +27,6 @@ export type LlmModelPreset = {
 export type AdminLlmModelPreset = LlmModelPreset & {
   simulationReferenceCount: number
   llmRunReferenceCount: number
-  evaluationReferenceCount: number
   canDelete: boolean
 }
 

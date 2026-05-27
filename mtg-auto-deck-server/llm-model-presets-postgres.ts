@@ -25,7 +25,6 @@ export type LlmModelPreset = {
 export type AdminLlmModelPreset = LlmModelPreset & {
   simulationReferenceCount: number
   llmRunReferenceCount: number
-  evaluationReferenceCount: number
   canDelete: boolean
 }
 
@@ -77,7 +76,6 @@ type LlmModelPresetRow = {
 type AdminLlmModelPresetRow = LlmModelPresetRow & {
   simulation_reference_count: string | number
   llm_run_reference_count: string | number
-  evaluation_reference_count: string | number
 }
 
 export class LlmModelPresetValidationError extends Error {
@@ -211,16 +209,7 @@ export async function listAdminLlmModelPresets() {
         SELECT COUNT(*)::integer
         FROM llm_runs llm_run
         WHERE llm_run.llm_model_preset_id = preset.id
-      ) AS llm_run_reference_count,
-      (
-        SELECT COUNT(*)::integer
-        FROM simulation_opening_hand_evaluations opening_evaluation
-        WHERE opening_evaluation.llm_model_preset_id = preset.id
-      ) + (
-        SELECT COUNT(*)::integer
-        FROM simulation_turn_evaluations turn_evaluation
-        WHERE turn_evaluation.llm_model_preset_id = preset.id
-      ) AS evaluation_reference_count
+      ) AS llm_run_reference_count
     FROM llm_model_presets preset
     ORDER BY preset.created_at DESC
   `)
@@ -235,20 +224,13 @@ export async function listAdminLlmModelPresets() {
       row.llm_run_reference_count,
       "LLM run reference count"
     )
-    const evaluationReferenceCount = toInteger(
-      row.evaluation_reference_count,
-      "evaluation reference count"
-    )
 
     return {
       ...preset,
       simulationReferenceCount,
       llmRunReferenceCount,
-      evaluationReferenceCount,
       canDelete:
-        simulationReferenceCount === 0 &&
-        llmRunReferenceCount === 0 &&
-        evaluationReferenceCount === 0,
+        simulationReferenceCount === 0 && llmRunReferenceCount === 0,
     } satisfies AdminLlmModelPreset
   })
 }
@@ -458,7 +440,6 @@ export async function deleteUnusedLlmModelPreset(presetId: string) {
     const referenceResult = await client.query<{
       simulation_reference_count: number
       llm_run_reference_count: number
-      evaluation_reference_count: number
     }>(
       `
         SELECT
@@ -471,24 +452,13 @@ export async function deleteUnusedLlmModelPreset(presetId: string) {
             SELECT COUNT(*)::integer
             FROM llm_runs
             WHERE llm_model_preset_id = $1
-          ) AS llm_run_reference_count,
-          (
-            SELECT COUNT(*)::integer
-            FROM simulation_opening_hand_evaluations
-            WHERE llm_model_preset_id = $1
-          ) + (
-            SELECT COUNT(*)::integer
-            FROM simulation_turn_evaluations
-            WHERE llm_model_preset_id = $1
-          ) AS evaluation_reference_count
+          ) AS llm_run_reference_count
       `,
       [presetId]
     )
     const references = referenceResult.rows[0]
     const referenceCount =
-      references.simulation_reference_count +
-      references.llm_run_reference_count +
-      references.evaluation_reference_count
+      references.simulation_reference_count + references.llm_run_reference_count
 
     if (referenceCount > 0) {
       throw new LlmModelPresetValidationError(

@@ -6,7 +6,6 @@ import {
   formatPreferredLlmRunCostAsCents,
   getOpenRouterReportedCostUsd,
 } from "./llm-pricing.js"
-import type { LlmProvider, ReasoningEffort } from "./llm-config.js"
 import { BILLING_TIER_LIMITS } from "./subscription-tiers.js"
 import {
   USAGE_LIMIT_OUT_OF_USAGE_MESSAGE,
@@ -233,167 +232,6 @@ export type RecordLlmRunMcpFunctionCallInput = {
   completedAt?: Date
 }
 
-export type TurnEvaluationJson = {
-  legalTurnPass: boolean
-  reasoningPass: boolean
-  simulationQualityScore: number
-  illegalActions: string[]
-  reasoningMistakes: string[]
-  strategicMistakes: string[]
-}
-
-export type EvaluationLlmModelPreset = {
-  id: string
-  provider: LlmProvider
-  model: string
-  reasoningEffort: ReasoningEffort
-  openrouterModelProvider: string | null
-  isEnabled: boolean
-}
-
-export type TurnEvaluation = {
-  id: number
-  simulationId: string
-  turnLlmRunId: string
-  llmModelPresetId: string | null
-  llmModelPreset: EvaluationLlmModelPreset | null
-  legalTurnPass: boolean
-  reasoningPass: boolean
-  simulationQualityScore: number
-  evaluationJson: TurnEvaluationJson
-  createdAt: string
-  updatedAt: string
-}
-
-export type OpeningHandEvaluationJson = {
-  legalSimulationPass: boolean
-  reasoningPass: boolean
-  simulationQualityScore: number
-  illegalActions: string[]
-  reasoningMistakes: string[]
-  strategicMistakes: string[]
-}
-
-export type OpeningHandEvaluation = {
-  id: number
-  simulationId: string
-  openingHandLlmRunId: string
-  llmModelPresetId: string | null
-  llmModelPreset: EvaluationLlmModelPreset | null
-  legalSimulationPass: boolean
-  reasoningPass: boolean
-  simulationQualityScore: number
-  evaluationJson: OpeningHandEvaluationJson
-  createdAt: string
-  updatedAt: string
-}
-
-export const TURN_EVALUATION_UPSERT_SQL = `
-  WITH upserted AS (
-    INSERT INTO simulation_turn_evaluations (
-      simulation_id,
-      turn_llm_run_id,
-      llm_model_preset_id,
-      legal_turn_pass,
-      reasoning_pass,
-      simulation_quality_score,
-      evaluation_json
-    )
-    VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
-    ON CONFLICT (turn_llm_run_id)
-    DO UPDATE
-    SET llm_model_preset_id = EXCLUDED.llm_model_preset_id,
-        legal_turn_pass = EXCLUDED.legal_turn_pass,
-        reasoning_pass = EXCLUDED.reasoning_pass,
-        simulation_quality_score = EXCLUDED.simulation_quality_score,
-        evaluation_json = EXCLUDED.evaluation_json,
-        updated_at = now()
-    RETURNING
-      id,
-      simulation_id,
-      turn_llm_run_id,
-      llm_model_preset_id,
-      legal_turn_pass,
-      reasoning_pass,
-      simulation_quality_score::float8 AS simulation_quality_score,
-      evaluation_json,
-      created_at,
-      updated_at
-  )
-  SELECT
-    upserted.id,
-    upserted.simulation_id,
-    upserted.turn_llm_run_id,
-    upserted.llm_model_preset_id,
-    preset.provider AS llm_model_preset_provider,
-    preset.model AS llm_model_preset_model,
-    preset.reasoning_effort AS llm_model_preset_reasoning_effort,
-    preset.openrouter_model_provider AS llm_model_preset_openrouter_model_provider,
-    preset.is_enabled AS llm_model_preset_is_enabled,
-    upserted.legal_turn_pass,
-    upserted.reasoning_pass,
-    upserted.simulation_quality_score,
-    upserted.evaluation_json,
-    upserted.created_at,
-    upserted.updated_at
-  FROM upserted
-  LEFT JOIN llm_model_presets preset
-    ON preset.id = upserted.llm_model_preset_id
-`
-
-export const OPENING_HAND_EVALUATION_UPSERT_SQL = `
-  WITH upserted AS (
-    INSERT INTO simulation_opening_hand_evaluations (
-      simulation_id,
-      opening_hand_llm_run_id,
-      llm_model_preset_id,
-      legal_simulation_pass,
-      reasoning_pass,
-      simulation_quality_score,
-      evaluation_json
-    )
-    VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
-    ON CONFLICT (opening_hand_llm_run_id)
-    DO UPDATE
-    SET llm_model_preset_id = EXCLUDED.llm_model_preset_id,
-        legal_simulation_pass = EXCLUDED.legal_simulation_pass,
-        reasoning_pass = EXCLUDED.reasoning_pass,
-        simulation_quality_score = EXCLUDED.simulation_quality_score,
-        evaluation_json = EXCLUDED.evaluation_json,
-        updated_at = now()
-    RETURNING
-      id,
-      simulation_id,
-      opening_hand_llm_run_id,
-      llm_model_preset_id,
-      legal_simulation_pass,
-      reasoning_pass,
-      simulation_quality_score::float8 AS simulation_quality_score,
-      evaluation_json,
-      created_at,
-      updated_at
-  )
-  SELECT
-    upserted.id,
-    upserted.simulation_id,
-    upserted.opening_hand_llm_run_id,
-    upserted.llm_model_preset_id,
-    preset.provider AS llm_model_preset_provider,
-    preset.model AS llm_model_preset_model,
-    preset.reasoning_effort AS llm_model_preset_reasoning_effort,
-    preset.openrouter_model_provider AS llm_model_preset_openrouter_model_provider,
-    preset.is_enabled AS llm_model_preset_is_enabled,
-    upserted.legal_simulation_pass,
-    upserted.reasoning_pass,
-    upserted.simulation_quality_score,
-    upserted.evaluation_json,
-    upserted.created_at,
-    upserted.updated_at
-  FROM upserted
-  LEFT JOIN llm_model_presets preset
-    ON preset.id = upserted.llm_model_preset_id
-`
-
 export type SimulationDebugLlmRun = {
   llmRunId: string
   llmModelPresetId: string | null
@@ -419,8 +257,6 @@ export type SimulationDebugLlmRun = {
   report?: string
   outdated?: boolean
   openingHandIsValid?: boolean
-  openingHandEvaluation?: OpeningHandEvaluation | null
-  turnEvaluation?: TurnEvaluation | null
   openrouterGenerations: OpenRouterGeneration[]
   chunks: SimulationDebugLlmRunChunk[]
 }
@@ -1161,30 +997,7 @@ export async function ensureSimulationsSchema() {
     ADD COLUMN IF NOT EXISTS opening_hand_is_valid boolean NOT NULL DEFAULT false
   `)
   await queryDatabase(`
-    CREATE TABLE IF NOT EXISTS simulation_opening_hand_evaluations (
-      id bigserial PRIMARY KEY,
-
-      simulation_id uuid NOT NULL REFERENCES simulations(id) ON DELETE CASCADE,
-      opening_hand_llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
-      llm_model_preset_id uuid REFERENCES llm_model_presets(id) ON DELETE RESTRICT,
-
-      legal_simulation_pass boolean NOT NULL,
-      reasoning_pass boolean NOT NULL,
-      simulation_quality_score numeric(4,2) NOT NULL CHECK (
-        simulation_quality_score >= 0
-        AND simulation_quality_score <= 10
-      ),
-      evaluation_json jsonb NOT NULL CHECK (jsonb_typeof(evaluation_json) = 'object'),
-
-      created_at timestamptz NOT NULL DEFAULT now(),
-      updated_at timestamptz NOT NULL DEFAULT now(),
-
-      UNIQUE (opening_hand_llm_run_id)
-    )
-  `)
-  await queryDatabase(`
-    ALTER TABLE simulation_opening_hand_evaluations
-    ADD COLUMN IF NOT EXISTS llm_model_preset_id uuid REFERENCES llm_model_presets(id) ON DELETE RESTRICT
+    DROP TABLE IF EXISTS simulation_opening_hand_evaluations
   `)
   await queryDatabase(`
     CREATE TABLE IF NOT EXISTS simulation_turn_llm_runs (
@@ -1238,30 +1051,7 @@ export async function ensureSimulationsSchema() {
     DROP TABLE IF EXISTS simulation_turn_actions
   `)
   await queryDatabase(`
-    CREATE TABLE IF NOT EXISTS simulation_turn_evaluations (
-      id bigserial PRIMARY KEY,
-
-      simulation_id uuid NOT NULL REFERENCES simulations(id) ON DELETE CASCADE,
-      turn_llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
-      llm_model_preset_id uuid REFERENCES llm_model_presets(id) ON DELETE RESTRICT,
-
-      legal_turn_pass boolean NOT NULL,
-      reasoning_pass boolean NOT NULL,
-      simulation_quality_score numeric(4,2) NOT NULL CHECK (
-        simulation_quality_score >= 0
-        AND simulation_quality_score <= 10
-      ),
-      evaluation_json jsonb NOT NULL CHECK (jsonb_typeof(evaluation_json) = 'object'),
-
-      created_at timestamptz NOT NULL DEFAULT now(),
-      updated_at timestamptz NOT NULL DEFAULT now(),
-
-      UNIQUE (turn_llm_run_id)
-    )
-  `)
-  await queryDatabase(`
-    ALTER TABLE simulation_turn_evaluations
-    ADD COLUMN IF NOT EXISTS llm_model_preset_id uuid REFERENCES llm_model_presets(id) ON DELETE RESTRICT
+    DROP TABLE IF EXISTS simulation_turn_evaluations
   `)
   await queryDatabase(`
     CREATE TABLE IF NOT EXISTS simulation_report_llm_runs (
@@ -1384,16 +1174,8 @@ export async function ensureSimulationsSchema() {
       ON simulation_opening_hand_llm_runs (simulation_id)
   `)
   await queryDatabase(`
-    CREATE INDEX IF NOT EXISTS simulation_opening_hand_evaluations_simulation_id_idx
-      ON simulation_opening_hand_evaluations (simulation_id)
-  `)
-  await queryDatabase(`
     CREATE INDEX IF NOT EXISTS simulation_turn_llm_runs_simulation_id_turn_number_idx
       ON simulation_turn_llm_runs (simulation_id, turn_number)
-  `)
-  await queryDatabase(`
-    CREATE INDEX IF NOT EXISTS simulation_turn_evaluations_simulation_id_idx
-      ON simulation_turn_evaluations (simulation_id)
   `)
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS simulation_report_llm_runs_simulation_id_idx
@@ -5155,230 +4937,6 @@ export async function getSimulationDebugInfo(
   }
 }
 
-export async function getOpeningHandLlmRunEvaluationData(
-  deckId: string,
-  simulationId: string,
-  llmRunId: string
-) {
-  const runResult = await queryDatabase<{
-    llm_run_id: string
-    full_prompt: string
-    phase: LlmRunPhase
-    status: LlmRunStatus
-    attempt_number: number
-    opening_hand_is_valid: boolean
-    reasoning_summaries_enabled: boolean
-  }>(
-    `
-      SELECT
-        llm_run.id AS llm_run_id,
-        llm_run.full_prompt,
-        llm_run.phase,
-        llm_run.status,
-        opening_run.attempt_number,
-        opening_run.opening_hand_is_valid,
-        simulation.reasoning_summaries_enabled
-      FROM simulations simulation
-      JOIN simulation_opening_hand_llm_runs opening_run
-        ON opening_run.simulation_id = simulation.id
-      JOIN llm_runs llm_run
-        ON llm_run.id = opening_run.llm_run_id
-      WHERE simulation.id = $1
-        AND simulation.deck_id = $2
-        AND opening_run.llm_run_id = $3
-      LIMIT 1
-    `,
-    [simulationId, deckId, llmRunId]
-  )
-  const run = runResult.rows[0]
-
-  if (!run) {
-    throw new SimulationValidationError("Opening-hand LLM run not found.")
-  }
-
-  const chunks = await getLlmRunEvaluationChunks(llmRunId)
-
-  return {
-    llmRunId: run.llm_run_id,
-    fullPrompt: run.full_prompt,
-    phase: run.phase,
-    status: run.status,
-    attemptNumber: run.attempt_number,
-    openingHandIsValid: run.opening_hand_is_valid,
-    reasoningSummariesEnabled: run.reasoning_summaries_enabled,
-    chunks,
-  }
-}
-
-export async function getTurnLlmRunEvaluationData(
-  deckId: string,
-  simulationId: string,
-  llmRunId: string
-) {
-  const runResult = await queryDatabase<{
-    llm_run_id: string
-    full_prompt: string
-    phase: LlmRunPhase
-    status: LlmRunStatus
-    turn_number: number
-    reasoning_summaries_enabled: boolean
-  }>(
-    `
-      SELECT
-        llm_run.id AS llm_run_id,
-        llm_run.full_prompt,
-        llm_run.phase,
-        llm_run.status,
-        turn_run.turn_number,
-        simulation.reasoning_summaries_enabled
-      FROM simulations simulation
-      JOIN simulation_turn_llm_runs turn_run
-        ON turn_run.simulation_id = simulation.id
-      JOIN llm_runs llm_run
-        ON llm_run.id = turn_run.llm_run_id
-      WHERE simulation.id = $1
-        AND simulation.deck_id = $2
-        AND turn_run.llm_run_id = $3
-      LIMIT 1
-    `,
-    [simulationId, deckId, llmRunId]
-  )
-  const run = runResult.rows[0]
-
-  if (!run) {
-    throw new SimulationValidationError("Turn LLM run not found.")
-  }
-
-  const chunks = await getLlmRunEvaluationChunks(llmRunId)
-
-  return {
-    llmRunId: run.llm_run_id,
-    fullPrompt: run.full_prompt,
-    phase: run.phase,
-    status: run.status,
-    turnNumber: run.turn_number,
-    reasoningSummariesEnabled: run.reasoning_summaries_enabled,
-    chunks,
-  }
-}
-
-async function getLlmRunEvaluationChunks(llmRunId: string) {
-  const chunksResult = await queryDatabase<{
-    id: string
-    sequence: number
-    kind: LlmChunkKind
-    mcp_function_name: string | null
-    mcp_function_output: unknown | null
-    mcp_function_reason: string | null
-    reasoning_delta: string | null
-    output_delta: string | null
-    payload: unknown | null
-    received_at: Date
-  }>(
-    `
-      SELECT
-        id,
-        sequence,
-        kind,
-        mcp_function_name,
-        mcp_function_output,
-        mcp_function_reason,
-        reasoning_delta,
-        output_delta,
-        payload,
-        received_at
-      FROM llm_run_chunks
-      WHERE llm_run_id = $1
-        AND (
-          COALESCE(array_length($2::llm_chunk_kind[], 1), 0) = 0
-          OR kind <> ALL($2::llm_chunk_kind[])
-        )
-      ORDER BY sequence ASC
-    `,
-    [llmRunId, SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS]
-  )
-  const chunks: SimulationDebugLlmRunChunk[] = chunksResult.rows.map((row) => ({
-    id: Number(row.id),
-    sequence: row.sequence,
-    kind: row.kind,
-    mcpFunctionName: row.mcp_function_name,
-    mcpFunctionOutput: row.mcp_function_output,
-    mcpFunctionReason: row.mcp_function_reason,
-    reasoningDelta: row.reasoning_delta,
-    outputDelta: row.output_delta,
-    payload: row.payload,
-    receivedAt: row.received_at.toISOString(),
-  }))
-
-  return chunks
-}
-
-export async function upsertOpeningHandEvaluation({
-  evaluationJson,
-  legalSimulationPass,
-  llmModelPresetId,
-  openingHandLlmRunId,
-  reasoningPass,
-  simulationId,
-  simulationQualityScore,
-}: {
-  simulationId: string
-  openingHandLlmRunId: string
-  llmModelPresetId: string
-  legalSimulationPass: boolean
-  reasoningPass: boolean
-  simulationQualityScore: number
-  evaluationJson: OpeningHandEvaluationJson
-}) {
-  const result = await queryDatabase<OpeningHandEvaluationRow>(
-    OPENING_HAND_EVALUATION_UPSERT_SQL,
-    [
-      simulationId,
-      openingHandLlmRunId,
-      llmModelPresetId,
-      legalSimulationPass,
-      reasoningPass,
-      simulationQualityScore,
-      JSON.stringify(evaluationJson),
-    ]
-  )
-
-  return mapOpeningHandEvaluationRow(result.rows[0])
-}
-
-export async function upsertTurnEvaluation({
-  evaluationJson,
-  legalTurnPass,
-  llmModelPresetId,
-  reasoningPass,
-  simulationId,
-  simulationQualityScore,
-  turnLlmRunId,
-}: {
-  simulationId: string
-  turnLlmRunId: string
-  llmModelPresetId: string
-  legalTurnPass: boolean
-  reasoningPass: boolean
-  simulationQualityScore: number
-  evaluationJson: TurnEvaluationJson
-}) {
-  const result = await queryDatabase<TurnEvaluationRow>(
-    TURN_EVALUATION_UPSERT_SQL,
-    [
-      simulationId,
-      turnLlmRunId,
-      llmModelPresetId,
-      legalTurnPass,
-      reasoningPass,
-      simulationQualityScore,
-      JSON.stringify(evaluationJson),
-    ]
-  )
-
-  return mapTurnEvaluationRow(result.rows[0])
-}
-
 export async function getSimulationResultsInfo(
   deckId: string,
   simulationId: string
@@ -5412,7 +4970,6 @@ export async function getSimulationResultsInfo(
       )
     `,
   })
-  await attachOpeningHandEvaluations(openingHandRuns)
   const turnRuns = await getSimulationDebugLlmRuns({
     simulationId,
     tableName: "simulation_turn_llm_runs",
@@ -5422,7 +4979,6 @@ export async function getSimulationResultsInfo(
     excludeChunkKinds: SIMULATION_RESULTS_EXCLUDED_CHUNK_KINDS,
     additionalWhereSql: "run.outdated = false",
   })
-  await attachTurnEvaluations(turnRuns)
   const reportRuns = await getSimulationDebugLlmRuns({
     simulationId,
     tableName: "simulation_report_llm_runs",
@@ -6080,42 +5636,6 @@ type OpenRouterGenerationRow = {
   created_at: Date
 }
 
-type OpeningHandEvaluationRow = {
-  id: string
-  simulation_id: string
-  opening_hand_llm_run_id: string
-  llm_model_preset_id: string | null
-  llm_model_preset_provider: LlmProvider | null
-  llm_model_preset_model: string | null
-  llm_model_preset_reasoning_effort: ReasoningEffort | null
-  llm_model_preset_openrouter_model_provider: string | null
-  llm_model_preset_is_enabled: boolean | null
-  legal_simulation_pass: boolean
-  reasoning_pass: boolean
-  simulation_quality_score: number
-  evaluation_json: unknown
-  created_at: Date
-  updated_at: Date
-}
-
-type TurnEvaluationRow = {
-  id: string
-  simulation_id: string
-  turn_llm_run_id: string
-  llm_model_preset_id: string | null
-  llm_model_preset_provider: LlmProvider | null
-  llm_model_preset_model: string | null
-  llm_model_preset_reasoning_effort: ReasoningEffort | null
-  llm_model_preset_openrouter_model_provider: string | null
-  llm_model_preset_is_enabled: boolean | null
-  legal_turn_pass: boolean
-  reasoning_pass: boolean
-  simulation_quality_score: number
-  evaluation_json: unknown
-  created_at: Date
-  updated_at: Date
-}
-
 async function getSimulationDebugLlmRunMetadata({
   orderBy,
   selectColumns,
@@ -6383,80 +5903,6 @@ async function getSimulationDebugLlmRuns({
   return runs
 }
 
-async function attachOpeningHandEvaluations(runs: SimulationDebugLlmRun[]) {
-  const evaluationsByRunId = await getOpeningHandEvaluationsByLlmRunIds(
-    runs.map((run) => run.llmRunId)
-  )
-
-  for (const run of runs) {
-    run.openingHandEvaluation = evaluationsByRunId.get(run.llmRunId) ?? null
-  }
-}
-
-async function getOpeningHandEvaluationsByLlmRunIds(
-  llmRunIds: readonly string[]
-) {
-  const evaluationsByRunId = new Map<string, OpeningHandEvaluation>()
-
-  if (llmRunIds.length === 0) {
-    return evaluationsByRunId
-  }
-
-  const result = await queryDatabase<OpeningHandEvaluationRow>(
-    `
-      SELECT
-        evaluation.id,
-        evaluation.simulation_id,
-        evaluation.opening_hand_llm_run_id,
-        evaluation.llm_model_preset_id,
-        preset.provider AS llm_model_preset_provider,
-        preset.model AS llm_model_preset_model,
-        preset.reasoning_effort AS llm_model_preset_reasoning_effort,
-        preset.openrouter_model_provider AS llm_model_preset_openrouter_model_provider,
-        preset.is_enabled AS llm_model_preset_is_enabled,
-        evaluation.legal_simulation_pass,
-        evaluation.reasoning_pass,
-        evaluation.simulation_quality_score::float8 AS simulation_quality_score,
-        evaluation.evaluation_json,
-        evaluation.created_at,
-        evaluation.updated_at
-      FROM simulation_opening_hand_evaluations evaluation
-      LEFT JOIN llm_model_presets preset
-        ON preset.id = evaluation.llm_model_preset_id
-      WHERE evaluation.opening_hand_llm_run_id = ANY($1::uuid[])
-      ORDER BY evaluation.opening_hand_llm_run_id ASC
-    `,
-    [llmRunIds]
-  )
-
-  for (const row of result.rows) {
-    evaluationsByRunId.set(
-      row.opening_hand_llm_run_id,
-      mapOpeningHandEvaluationRow(row)
-    )
-  }
-
-  return evaluationsByRunId
-}
-
-function mapOpeningHandEvaluationRow(
-  row: OpeningHandEvaluationRow
-): OpeningHandEvaluation {
-  return {
-    id: Number(row.id),
-    simulationId: row.simulation_id,
-    openingHandLlmRunId: row.opening_hand_llm_run_id,
-    llmModelPresetId: row.llm_model_preset_id,
-    llmModelPreset: mapEvaluationLlmModelPresetRow(row),
-    legalSimulationPass: row.legal_simulation_pass,
-    reasoningPass: row.reasoning_pass,
-    simulationQualityScore: Number(row.simulation_quality_score),
-    evaluationJson: row.evaluation_json as OpeningHandEvaluationJson,
-    createdAt: row.created_at.toISOString(),
-    updatedAt: row.updated_at.toISOString(),
-  }
-}
-
 async function getOpenRouterGenerationsByLlmRunIds(
   llmRunIds: readonly string[]
 ) {
@@ -6492,104 +5938,6 @@ async function getOpenRouterGenerationsByLlmRunIds(
   }
 
   return generationsByRunId
-}
-
-async function attachTurnEvaluations(runs: SimulationDebugLlmRun[]) {
-  const evaluationsByRunId = await getTurnEvaluationsByLlmRunIds(
-    runs.map((run) => run.llmRunId)
-  )
-
-  for (const run of runs) {
-    run.turnEvaluation = evaluationsByRunId.get(run.llmRunId) ?? null
-  }
-}
-
-async function getTurnEvaluationsByLlmRunIds(llmRunIds: readonly string[]) {
-  const evaluationsByRunId = new Map<string, TurnEvaluation>()
-
-  if (llmRunIds.length === 0) {
-    return evaluationsByRunId
-  }
-
-  const result = await queryDatabase<TurnEvaluationRow>(
-    `
-      SELECT
-        evaluation.id,
-        evaluation.simulation_id,
-        evaluation.turn_llm_run_id,
-        evaluation.llm_model_preset_id,
-        preset.provider AS llm_model_preset_provider,
-        preset.model AS llm_model_preset_model,
-        preset.reasoning_effort AS llm_model_preset_reasoning_effort,
-        preset.openrouter_model_provider AS llm_model_preset_openrouter_model_provider,
-        preset.is_enabled AS llm_model_preset_is_enabled,
-        evaluation.legal_turn_pass,
-        evaluation.reasoning_pass,
-        evaluation.simulation_quality_score::float8 AS simulation_quality_score,
-        evaluation.evaluation_json,
-        evaluation.created_at,
-        evaluation.updated_at
-      FROM simulation_turn_evaluations evaluation
-      LEFT JOIN llm_model_presets preset
-        ON preset.id = evaluation.llm_model_preset_id
-      WHERE evaluation.turn_llm_run_id = ANY($1::uuid[])
-      ORDER BY evaluation.turn_llm_run_id ASC
-    `,
-    [llmRunIds]
-  )
-
-  for (const row of result.rows) {
-    evaluationsByRunId.set(row.turn_llm_run_id, mapTurnEvaluationRow(row))
-  }
-
-  return evaluationsByRunId
-}
-
-function mapTurnEvaluationRow(row: TurnEvaluationRow): TurnEvaluation {
-  return {
-    id: Number(row.id),
-    simulationId: row.simulation_id,
-    turnLlmRunId: row.turn_llm_run_id,
-    llmModelPresetId: row.llm_model_preset_id,
-    llmModelPreset: mapEvaluationLlmModelPresetRow(row),
-    legalTurnPass: row.legal_turn_pass,
-    reasoningPass: row.reasoning_pass,
-    simulationQualityScore: Number(row.simulation_quality_score),
-    evaluationJson: row.evaluation_json as TurnEvaluationJson,
-    createdAt: row.created_at.toISOString(),
-    updatedAt: row.updated_at.toISOString(),
-  }
-}
-
-function mapEvaluationLlmModelPresetRow(
-  row: Pick<
-    OpeningHandEvaluationRow | TurnEvaluationRow,
-    | "llm_model_preset_id"
-    | "llm_model_preset_provider"
-    | "llm_model_preset_model"
-    | "llm_model_preset_reasoning_effort"
-    | "llm_model_preset_openrouter_model_provider"
-    | "llm_model_preset_is_enabled"
-  >
-): EvaluationLlmModelPreset | null {
-  if (
-    !row.llm_model_preset_id ||
-    !row.llm_model_preset_provider ||
-    !row.llm_model_preset_model ||
-    !row.llm_model_preset_reasoning_effort ||
-    row.llm_model_preset_is_enabled === null
-  ) {
-    return null
-  }
-
-  return {
-    id: row.llm_model_preset_id,
-    provider: row.llm_model_preset_provider,
-    model: row.llm_model_preset_model,
-    reasoningEffort: row.llm_model_preset_reasoning_effort,
-    openrouterModelProvider: row.llm_model_preset_openrouter_model_provider,
-    isEnabled: row.llm_model_preset_is_enabled,
-  }
 }
 
 type PromptCardRow = {

@@ -92,7 +92,6 @@ import {
   failLlmRun,
   failReportLlmRun,
   getActiveLlmRunMcpTokenContext,
-  getOpeningHandLlmRunEvaluationData,
   getPublicSimulationSummary,
   getSimulationCreationDecision,
   getSimulationDebugInfo,
@@ -100,7 +99,6 @@ import {
   getSimulationReportPromptData,
   getSimulationSummary,
   getStartingHandSimulationPromptData,
-  getTurnLlmRunEvaluationData,
   getTurnSimulationPromptData,
   isLlmRunStreaming,
   listActiveSimulationLlmRuns,
@@ -125,8 +123,6 @@ import {
   SimulationValidationError,
   takeCardsFromSimulationLibrary,
   TURN_PHASE_CHANGES,
-  upsertOpeningHandEvaluation,
-  upsertTurnEvaluation,
   updateLlmRunRequestData,
   updateSimulation,
 } from "./simulations-postgres.js"
@@ -149,8 +145,6 @@ import type {
   TurnSimulationPromptData,
   SimulationReportPromptData,
   SimulationReportTurnPromptData,
-  OpeningHandEvaluationJson,
-  TurnEvaluationJson,
 } from "./simulations-postgres.js"
 import {
   ensureUsageLimitsSchema,
@@ -205,20 +199,17 @@ import {
   buildProviderReasoningOptions,
   getGenericGameRulesReferenceEnabled,
   LlmConfigurationError,
-  getEvaluationLlmRunConfig,
   getLlmRunQueueConfig,
   getOpeningHandLlmRunConfig,
   getTurnSimulationLlmRunConfig,
   llmProviderSchema,
   reasoningEffortSchema,
-  type EvaluationLlmRunConfig,
   type OpenAiRunConfig,
   type OpenRouterRunConfig,
   type OpeningHandLlmRunConfig,
   type OpeningHandOpenAiRunConfig,
   type ResolvedLlamaCppRunConfig,
   type ResolvedOpeningHandLlmRunConfig,
-  type ResolvedEvaluationLlmRunConfig,
   type ResolvedTurnSimulationLlmRunConfig,
   type TurnSimulationLlmRunConfig,
   type TurnSimulationOpenAiRunConfig,
@@ -246,17 +237,6 @@ import {
   type TokenPrice,
 } from "./llm-pricing.js"
 import {
-  buildOpeningHandEvaluationInputText,
-  buildOpeningHandEvaluationPrompt,
-  buildTurnEvaluationInputText,
-  buildTurnEvaluationPrompt,
-  evaluationLlmRunRequestSchema,
-  getOpeningHandEvaluationIneligibilityMessage,
-  getTurnEvaluationIneligibilityMessage,
-  parseOpeningHandEvaluationResponseText,
-  parseTurnEvaluationResponseText,
-} from "./turn-evaluations.js"
-import {
   createExactScryfallOracleCardMatchMap,
   normalizeScryfallCardNameForExactMatch,
   resolveExactScryfallOracleCards,
@@ -281,8 +261,6 @@ const STREAM_RECENT_CHUNK_LIMIT = 500
 const SSE_KEEPALIVE_INTERVAL_MS = 15000
 const LLM_RUN_QUEUE_POLL_INTERVAL_MS = 1000
 const MCP_RUN_TOKEN_TTL_MS = 6 * 60 * 60 * 1000
-const OPENROUTER_CHAT_COMPLETIONS_ENDPOINT =
-  "https://openrouter.ai/api/v1/chat/completions"
 const QUEUED_MCP_RUN_TOKEN_PLACEHOLDER = "queued"
 const LOOPBACK_ALLOWED_ORIGINS = [
   "http://localhost:5173",
@@ -2416,10 +2394,7 @@ function getLlmRunOpenRouterModelProvider(
 }
 
 function getLlmRunServiceTier(
-  config:
-    | ResolvedEvaluationLlmRunConfig
-    | ResolvedOpeningHandLlmRunConfig
-    | ResolvedTurnSimulationLlmRunConfig
+  config: ResolvedOpeningHandLlmRunConfig | ResolvedTurnSimulationLlmRunConfig
 ) {
   return config.provider === "llamacpp" ? null : config.serviceTier
 }
@@ -2634,17 +2609,9 @@ async function resolveLlmRunConfigModel(
   config: TurnSimulationLlmRunConfig
 ): Promise<ResolvedTurnSimulationLlmRunConfig>
 async function resolveLlmRunConfigModel(
-  config: EvaluationLlmRunConfig
-): Promise<ResolvedEvaluationLlmRunConfig>
-async function resolveLlmRunConfigModel(
-  config:
-    | EvaluationLlmRunConfig
-    | OpeningHandLlmRunConfig
-    | TurnSimulationLlmRunConfig
+  config: OpeningHandLlmRunConfig | TurnSimulationLlmRunConfig
 ): Promise<
-  | ResolvedEvaluationLlmRunConfig
-  | ResolvedOpeningHandLlmRunConfig
-  | ResolvedTurnSimulationLlmRunConfig
+  ResolvedOpeningHandLlmRunConfig | ResolvedTurnSimulationLlmRunConfig
 > {
   return config
 }
@@ -2677,20 +2644,6 @@ async function getRequiredEnabledSimulationLlmModelPreset(
     preset,
     useFlexServiceTier: simulation.useFlexServiceTier,
   }
-}
-
-async function getRequiredEnabledEvaluationLlmModelPreset(
-  llmModelPresetId: string
-) {
-  const preset = await getEnabledLlmModelPreset(llmModelPresetId)
-
-  if (!preset) {
-    throw new SimulationValidationError(
-      "Choose an enabled model preset for this evaluation."
-    )
-  }
-
-  return preset
 }
 
 async function getRequiredEnabledQueuedRunLlmModelPreset(
@@ -3767,260 +3720,6 @@ async function collectLlamaCppLlmStream({
   } finally {
     await closeMcpClient()
   }
-}
-
-async function collectRunEvaluationCompletion({
-  config,
-  llmRunId,
-  metadata,
-  prompt,
-  reasoningSummariesEnabled,
-}: {
-  config: ResolvedEvaluationLlmRunConfig
-  llmRunId: string
-  metadata: Record<string, string>
-  prompt: string
-  reasoningSummariesEnabled: boolean
-}) {
-  logLlmApiCallStarted({
-    llmRunId,
-    model: config.model,
-    phase: "other",
-    provider: config.provider,
-  })
-
-  if (config.provider === "openai") {
-    const client = new OpenAI({
-      apiKey: config.apiKey,
-    })
-    const response = await client.responses.create({
-      model: config.model,
-      input: prompt,
-      max_output_tokens: config.maxOutputTokens,
-      ...(config.serviceTier ? { service_tier: config.serviceTier } : {}),
-      metadata,
-      reasoning: buildProviderReasoningOptions(
-        config.reasoningEffort,
-        reasoningSummariesEnabled
-      ),
-      text: {
-        format: {
-          type: "json_object",
-        },
-      },
-    } as unknown as Parameters<typeof client.responses.create>[0])
-    const outputText = getCompletedResponseOutputText(response)
-
-    logLlmApiCallFinished({
-      llmRunId,
-      model: config.model,
-      phase: "other",
-      provider: config.provider,
-      serviceTier: config.serviceTier,
-      tokenCosts: config.tokenCosts,
-      usage: asRecord(response).usage ?? {},
-    })
-
-    return outputText
-  }
-
-  if (config.provider === "openrouter") {
-    const result = await queryOpenRouterChatCompletion({
-      apiKey: config.apiKey,
-      body: {
-        model: config.model,
-        max_completion_tokens: config.maxOutputTokens,
-        ...(config.serviceTier ? { service_tier: config.serviceTier } : {}),
-        messages: [
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-        metadata,
-        provider: getOpenRouterChatProviderPreferences(config.modelProvider),
-        reasoning: buildOpenRouterReasoningOptions(
-          config.reasoningEffort,
-          reasoningSummariesEnabled
-        ),
-        response_format: {
-          type: "json_object",
-        },
-        stream: false,
-      },
-    })
-    const outputText = getChatCompletionOutputText(result)
-
-    logLlmApiCallFinished({
-      llmRunId,
-      model: config.model,
-      phase: "other",
-      provider: config.provider,
-      serviceTier: config.serviceTier,
-      tokenCosts: config.tokenCosts,
-      usage: asRecord(result).usage ?? {},
-    })
-
-    return outputText
-  }
-
-  const client = new OpenAI({
-    apiKey: config.apiKey,
-    baseURL: config.baseUrl,
-  })
-  const result = await client.chat.completions.create({
-    model: config.model,
-    max_tokens: config.maxOutputTokens,
-    messages: [
-      {
-        role: "user",
-        content: prompt,
-      },
-    ],
-    stream: false,
-  })
-  const outputText = getChatCompletionOutputText(result)
-
-  logLlmApiCallFinished({
-    llmRunId,
-    model: config.model,
-    phase: "other",
-    provider: config.provider,
-    tokenCosts: config.tokenCosts,
-    usage: asRecord(result).usage ?? {},
-  })
-
-  return outputText
-}
-
-function getChatCompletionOutputText(result: unknown) {
-  const choices = asRecord(result).choices
-
-  if (!Array.isArray(choices)) {
-    throw new Error("Turn evaluation response did not include choices.")
-  }
-
-  for (const choice of choices) {
-    const message = asRecord(asRecord(choice).message)
-    const contentText = getChatMessageContentText(message.content)
-
-    if (contentText.trim()) {
-      return contentText
-    }
-  }
-
-  throw new Error("Turn evaluation response did not include output text.")
-}
-
-async function queryOpenRouterChatCompletion({
-  apiKey,
-  body,
-}: {
-  apiKey: string
-  body: Record<string, unknown>
-}) {
-  let response: globalThis.Response
-
-  try {
-    response = await fetch(OPENROUTER_CHAT_COMPLETIONS_ENDPOINT, {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    })
-  } catch (error) {
-    throw new Error(
-      `OpenRouter chat completion could not be reached: ${getErrorMessage(error)}`
-    )
-  }
-
-  const result = await readOpenRouterResponseBody(response)
-
-  if (!response.ok) {
-    throw new Error(getOpenRouterChatCompletionFailureMessage(response, result))
-  }
-
-  return result
-}
-
-function getOpenRouterChatProviderPreferences(modelProvider: string | null) {
-  if (modelProvider === null) {
-    return undefined
-  }
-
-  return {
-    allow_fallbacks: false,
-    only: [modelProvider],
-  }
-}
-
-function getChatMessageContentText(content: unknown) {
-  if (typeof content === "string") {
-    return content
-  }
-
-  if (!Array.isArray(content)) {
-    return ""
-  }
-
-  return content
-    .map((part) => getStringProperty(asRecord(part), "text") ?? "")
-    .join("")
-}
-
-async function saveTurnEvaluation({
-  evaluationJson,
-  llmModelPresetId,
-  simulationId,
-  turnLlmRunId,
-}: {
-  evaluationJson: TurnEvaluationJson
-  llmModelPresetId: string
-  simulationId: string
-  turnLlmRunId: string
-}) {
-  return upsertTurnEvaluation({
-    simulationId,
-    turnLlmRunId,
-    llmModelPresetId,
-    legalTurnPass: evaluationJson.legalTurnPass,
-    reasoningPass: evaluationJson.reasoningPass,
-    simulationQualityScore: evaluationJson.simulationQualityScore,
-    evaluationJson,
-  })
-}
-
-async function saveOpeningHandEvaluation({
-  evaluationJson,
-  llmModelPresetId,
-  openingHandLlmRunId,
-  simulationId,
-}: {
-  evaluationJson: OpeningHandEvaluationJson
-  llmModelPresetId: string
-  openingHandLlmRunId: string
-  simulationId: string
-}) {
-  return upsertOpeningHandEvaluation({
-    simulationId,
-    openingHandLlmRunId,
-    llmModelPresetId,
-    legalSimulationPass: evaluationJson.legalSimulationPass,
-    reasoningPass: evaluationJson.reasoningPass,
-    simulationQualityScore: evaluationJson.simulationQualityScore,
-    evaluationJson,
-  })
-}
-
-function isEvaluationOutputError(error: unknown) {
-  return (
-    error instanceof Error &&
-    (error.message.startsWith("Turn evaluation response") ||
-      error.message.startsWith("Opening-hand evaluation response"))
-  )
 }
 
 function startOpeningHandLlmRun({
@@ -5977,124 +5676,6 @@ async function main() {
   )
 
   app.post(
-    "/decks/:deckId/simulations/:simulationId/opening-hand-llm-runs/:llmRunId/evaluation",
-    async (req: Request, res: Response) => {
-      if (!requireAdminUser(req, res)) {
-        return
-      }
-
-      const deckId = String(req.params.deckId)
-      const simulationId = String(req.params.simulationId)
-      const llmRunId = String(req.params.llmRunId)
-      const parsedEvaluationRequest = evaluationLlmRunRequestSchema.safeParse(
-        req.body
-      )
-
-      if (!parsedEvaluationRequest.success) {
-        res.status(400).json({
-          error: "Evaluation payload is not in the expected format.",
-        })
-        return
-      }
-
-      try {
-        const run = await getOpeningHandLlmRunEvaluationData(
-          deckId,
-          simulationId,
-          llmRunId
-        )
-
-        const ineligibilityMessage =
-          getOpeningHandEvaluationIneligibilityMessage(run)
-
-        if (ineligibilityMessage !== null) {
-          throw new SimulationValidationError(ineligibilityMessage)
-        }
-
-        const openingHandEvaluationInputText =
-          buildOpeningHandEvaluationInputText({
-            chunks: run.chunks,
-            fullPrompt: run.fullPrompt,
-          })
-
-        if (!openingHandEvaluationInputText.trim()) {
-          throw new SimulationValidationError(
-            "Opening-hand LLM run does not have evaluation text."
-          )
-        }
-
-        const prompt = buildOpeningHandEvaluationPrompt({
-          attemptNumber: run.attemptNumber,
-          openingHandEvaluationInputText,
-        })
-        const modelPreset = await getRequiredEnabledEvaluationLlmModelPreset(
-          parsedEvaluationRequest.data.llmModelPresetId
-        )
-        const config = await resolveLlmRunConfigModel(
-          getEvaluationLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
-        )
-        const responseText = await collectRunEvaluationCompletion({
-          config,
-          llmRunId,
-          metadata: {
-            simulationId,
-            phase: "opening_hand_evaluation",
-            openingHandLlmRunId: llmRunId,
-            attemptNumber: String(run.attemptNumber),
-            modelPresetId: config.modelPresetId,
-          },
-          prompt,
-          reasoningSummariesEnabled: run.reasoningSummariesEnabled,
-        })
-        const evaluationJson =
-          parseOpeningHandEvaluationResponseText(responseText)
-        const evaluation = await saveOpeningHandEvaluation({
-          evaluationJson,
-          llmModelPresetId: config.modelPresetId,
-          openingHandLlmRunId: llmRunId,
-          simulationId,
-        })
-
-        res.status(200).json({
-          evaluation,
-        })
-      } catch (error) {
-        if (error instanceof SimulationValidationError) {
-          const status =
-            error.message === "Opening-hand LLM run not found." ||
-              error.message === "Simulation not found."
-              ? 404
-              : 400
-
-          res.status(status).json({
-            error: error.message,
-          })
-          return
-        }
-
-        if (error instanceof LlmConfigurationError) {
-          res.status(500).json({
-            error: error.message,
-          })
-          return
-        }
-
-        if (isEvaluationOutputError(error)) {
-          res.status(502).json({
-            error: getErrorMessage(error),
-          })
-          return
-        }
-
-        console.error("Failed to evaluate opening-hand LLM run:", error)
-        res.status(500).json({
-          error: "Failed to evaluate opening-hand LLM run.",
-        })
-      }
-    }
-  )
-
-  app.post(
     "/decks/:deckId/simulations/:simulationId/turn-llm-runs",
     async (req: Request, res: Response) => {
       const deckId = String(req.params.deckId)
@@ -6145,122 +5726,6 @@ async function main() {
         console.error("Failed to start turn LLM run:", error)
         res.status(500).json({
           error: "Failed to start turn LLM run.",
-        })
-      }
-    }
-  )
-
-  app.post(
-    "/decks/:deckId/simulations/:simulationId/turn-llm-runs/:llmRunId/evaluation",
-    async (req: Request, res: Response) => {
-      if (!requireAdminUser(req, res)) {
-        return
-      }
-
-      const deckId = String(req.params.deckId)
-      const simulationId = String(req.params.simulationId)
-      const llmRunId = String(req.params.llmRunId)
-      const parsedEvaluationRequest = evaluationLlmRunRequestSchema.safeParse(
-        req.body
-      )
-
-      if (!parsedEvaluationRequest.success) {
-        res.status(400).json({
-          error: "Evaluation payload is not in the expected format.",
-        })
-        return
-      }
-
-      try {
-        const run = await getTurnLlmRunEvaluationData(
-          deckId,
-          simulationId,
-          llmRunId
-        )
-
-        const ineligibilityMessage =
-          getTurnEvaluationIneligibilityMessage(run)
-
-        if (ineligibilityMessage !== null) {
-          throw new SimulationValidationError(ineligibilityMessage)
-        }
-
-        const turnEvaluationInputText = buildTurnEvaluationInputText({
-          chunks: run.chunks,
-          fullPrompt: run.fullPrompt,
-        })
-
-        if (!turnEvaluationInputText.trim()) {
-          throw new SimulationValidationError(
-            "Turn LLM run does not have evaluation text."
-          )
-        }
-
-        const prompt = buildTurnEvaluationPrompt({
-          turnEvaluationInputText,
-          turnNumber: run.turnNumber,
-        })
-        const modelPreset = await getRequiredEnabledEvaluationLlmModelPreset(
-          parsedEvaluationRequest.data.llmModelPresetId
-        )
-        const config = await resolveLlmRunConfigModel(
-          getEvaluationLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
-        )
-        const responseText = await collectRunEvaluationCompletion({
-          config,
-          llmRunId,
-          metadata: {
-            simulationId,
-            phase: "turn_evaluation",
-            turnLlmRunId: llmRunId,
-            turnNumber: String(run.turnNumber),
-            modelPresetId: config.modelPresetId,
-          },
-          prompt,
-          reasoningSummariesEnabled: run.reasoningSummariesEnabled,
-        })
-        const evaluationJson = parseTurnEvaluationResponseText(responseText)
-        const evaluation = await saveTurnEvaluation({
-          evaluationJson,
-          llmModelPresetId: config.modelPresetId,
-          simulationId,
-          turnLlmRunId: llmRunId,
-        })
-
-        res.status(200).json({
-          evaluation,
-        })
-      } catch (error) {
-        if (error instanceof SimulationValidationError) {
-          const status =
-            error.message === "Turn LLM run not found." ||
-              error.message === "Simulation not found."
-              ? 404
-              : 400
-
-          res.status(status).json({
-            error: error.message,
-          })
-          return
-        }
-
-        if (error instanceof LlmConfigurationError) {
-          res.status(500).json({
-            error: error.message,
-          })
-          return
-        }
-
-        if (isEvaluationOutputError(error)) {
-          res.status(502).json({
-            error: getErrorMessage(error),
-          })
-          return
-        }
-
-        console.error("Failed to evaluate turn LLM run:", error)
-        res.status(500).json({
-          error: "Failed to evaluate turn LLM run.",
         })
       }
     }
@@ -7064,36 +6529,6 @@ function registerShutdownHandlers() {
   process.once("SIGTERM", shutdown)
 }
 
-async function readOpenRouterResponseBody(response: globalThis.Response) {
-  const bodyText = await response.text()
-
-  if (!bodyText.trim()) {
-    return null
-  }
-
-  try {
-    return JSON.parse(bodyText) as unknown
-  } catch {
-    return bodyText
-  }
-}
-
-function getOpenRouterChatCompletionFailureMessage(
-  response: globalThis.Response,
-  result: unknown
-) {
-  const resultRecord = asRecord(result)
-  const errorRecord = asRecord(resultRecord.error)
-  const message =
-    getStringProperty(errorRecord, "message") ??
-    getStringProperty(resultRecord, "error") ??
-    getStringProperty(resultRecord, "message") ??
-    response.statusText
-
-  return message
-    ? `OpenRouter chat completion failed (${response.status}): ${message}`
-    : `OpenRouter chat completion failed with status ${response.status}.`
-}
 
 function applyCors(
   req: Request,

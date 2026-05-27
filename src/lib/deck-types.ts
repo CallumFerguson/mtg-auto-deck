@@ -1,5 +1,3 @@
-import type { LlmProvider, ReasoningEffort } from "./llm-model-preset-types"
-
 export type Deck = {
   id: string
   name: string
@@ -114,65 +112,6 @@ export type OpenRouterGeneration = {
   createdAt: string
 }
 
-export type TurnEvaluationJson = {
-  legalTurnPass: boolean
-  reasoningPass: boolean
-  simulationQualityScore: number
-  illegalActions: string[]
-  reasoningMistakes: string[]
-  strategicMistakes: string[]
-}
-
-export type EvaluationLlmModelPreset = {
-  id: string
-  provider: LlmProvider
-  model: string
-  reasoningEffort: ReasoningEffort
-  openrouterModelProvider: string | null
-  isEnabled: boolean
-}
-
-export type EvaluationLlmRunRequest = {
-  llmModelPresetId: string
-}
-
-export type TurnEvaluation = {
-  id: number
-  simulationId: string
-  turnLlmRunId: string
-  llmModelPresetId: string | null
-  llmModelPreset: EvaluationLlmModelPreset | null
-  legalTurnPass: boolean
-  reasoningPass: boolean
-  simulationQualityScore: number
-  evaluationJson: TurnEvaluationJson
-  createdAt: string
-  updatedAt: string
-}
-
-export type OpeningHandEvaluationJson = {
-  legalSimulationPass: boolean
-  reasoningPass: boolean
-  simulationQualityScore: number
-  illegalActions: string[]
-  reasoningMistakes: string[]
-  strategicMistakes: string[]
-}
-
-export type OpeningHandEvaluation = {
-  id: number
-  simulationId: string
-  openingHandLlmRunId: string
-  llmModelPresetId: string | null
-  llmModelPreset: EvaluationLlmModelPreset | null
-  legalSimulationPass: boolean
-  reasoningPass: boolean
-  simulationQualityScore: number
-  evaluationJson: OpeningHandEvaluationJson
-  createdAt: string
-  updatedAt: string
-}
-
 export type SimulationDebugLlmRun = {
   llmRunId: string
   llmModelPresetId: string | null
@@ -198,8 +137,6 @@ export type SimulationDebugLlmRun = {
   report?: string
   outdated?: boolean
   openingHandIsValid?: boolean
-  openingHandEvaluation?: OpeningHandEvaluation | null
-  turnEvaluation?: TurnEvaluation | null
   openrouterGenerations: OpenRouterGeneration[]
   chunks: SimulationDebugLlmRunChunk[]
 }
@@ -256,14 +193,6 @@ export type SimulationDebugInfo = {
 
 export type SimulationDebugResponse = {
   debug: SimulationDebugInfo
-}
-
-export type TurnEvaluationResponse = {
-  evaluation: TurnEvaluation
-}
-
-export type OpeningHandEvaluationResponse = {
-  evaluation: OpeningHandEvaluation
 }
 
 export type SimulationResultsInfo = {
