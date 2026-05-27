@@ -35,7 +35,6 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
-  Search,
   Shuffle,
   Sparkles,
   Square,
@@ -60,7 +59,6 @@ import type {
   DeckCard,
   OpeningHandEvaluation,
   OpeningHandEvaluationResponse,
-  OpenRouterGenerationDetailsResponse,
   PublicSimulationResponse,
   SavedSeed,
   SavedSeedsResponse,
@@ -97,11 +95,6 @@ import {
   hasTurnActions,
   type ParsedSimulationFinalOutput,
 } from "@/lib/simulation-final-output"
-import {
-  formatDebugChunkBlocks,
-  getDebugChunkBlockId,
-  getDebugDeltaChunkLabel,
-} from "@/lib/simulation-debug-chunks"
 import { applySimulationResultsStreamEvent } from "@/lib/simulation-results-stream"
 import {
   buildSimulationResultsTimelineSteps,
@@ -398,7 +391,12 @@ function shouldRefreshUsageLimitsForFinishedStreamRun(
   return true
 }
 
-function getSimulationRunFinishedTimeMs(run: SimulationDebugLlmRun) {
+function getSimulationRunFinishedTimeMs(
+  run: Pick<
+    SimulationDebugLlmRun,
+    "completedAt" | "failedAt" | "cancelledAt"
+  >
+) {
   return (
     parseTimestampMs(run.completedAt) ??
     parseTimestampMs(run.failedAt) ??
@@ -406,7 +404,12 @@ function getSimulationRunFinishedTimeMs(run: SimulationDebugLlmRun) {
   )
 }
 
-function getSimulationRunFinishedDurationText(run: SimulationDebugLlmRun) {
+function getSimulationRunFinishedDurationText(
+  run: Pick<
+    SimulationDebugLlmRun,
+    "startedAt" | "completedAt" | "failedAt" | "cancelledAt"
+  >
+) {
   const startTimeMs = getSimulationRunStartTimeMs(run)
   const finishedTimeMs = getSimulationRunFinishedTimeMs(run)
 
@@ -564,10 +567,6 @@ function canGenerateReportFromVisibleResults(
 
 function hasGameState(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
-function formatGameStateJson(value: unknown) {
-  return JSON.stringify(value, null, 2) ?? ""
 }
 
 function getRandomDigit(maxExclusive: number) {
@@ -2563,10 +2562,10 @@ function SimulationDetailsModal({
 
       {isAdmin && isDebugModalOpen ? (
         <SimulationDebugModal
-          deckId={deckId}
           debugInfo={debugInfo}
           error={debugInfoError}
           isLoading={isLoadingDebugInfo}
+          modelPresets={modelPresets}
           onClose={() => setIsDebugModalOpen(false)}
           onRefresh={() => void handleRefreshDebugInfo()}
           simulationId={simulation.id}
@@ -3548,18 +3547,18 @@ function SimulationModelPresetSelector({
 }
 
 function SimulationDebugModal({
-  deckId,
   debugInfo,
   error,
   isLoading,
+  modelPresets,
   onClose,
   onRefresh,
   simulationId,
 }: {
-  deckId: string
   debugInfo: SimulationDebugInfo | null
   error: string | null
   isLoading: boolean
+  modelPresets: LlmModelPreset[]
   onClose: () => void
   onRefresh: () => void
   simulationId: string
@@ -3627,7 +3626,10 @@ function SimulationDebugModal({
             ) : null}
 
             {debugInfo ? (
-              <SimulationDebugPanel deckId={deckId} debugInfo={debugInfo} />
+              <SimulationDebugPanel
+                debugInfo={debugInfo}
+                modelPresets={modelPresets}
+              />
             ) : !isLoading && !error ? (
               <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
                 Debug info has not been loaded yet.
@@ -7839,191 +7841,221 @@ function getPayloadMessage(payload: unknown) {
 }
 
 function SimulationDebugPanel({
-  deckId,
   debugInfo,
+  modelPresets,
 }: {
-  deckId: string
   debugInfo: SimulationDebugInfo
+  modelPresets: LlmModelPreset[]
 }) {
   return (
     <div className="grid gap-4">
-      <dl className="grid gap-3 text-sm sm:grid-cols-2">
-        <div className="rounded-md border border-border bg-background/35 p-3">
-          <dt className="text-muted-foreground">Opening hand LLM runs</dt>
-          <dd className="mt-1 font-medium text-foreground">
-            {debugInfo.openingHandLlmRunCount}
-          </dd>
-        </div>
-        <div className="rounded-md border border-border bg-background/35 p-3">
-          <dt className="text-muted-foreground">Turn LLM runs</dt>
-          <dd className="mt-1 font-medium text-foreground">
-            {debugInfo.turnLlmRunCount}
-          </dd>
-        </div>
-        <div className="rounded-md border border-border bg-background/35 p-3">
-          <dt className="text-muted-foreground">Report LLM runs</dt>
-          <dd className="mt-1 font-medium text-foreground">
-            {debugInfo.reportLlmRunCount}
-          </dd>
-        </div>
-      </dl>
+      <section className="grid gap-2 rounded-md border border-border bg-background/35 p-3">
+        <h3 className="text-sm font-semibold text-foreground">
+          Simulation metadata
+        </h3>
+        <DebugMetadataGrid>
+          <DebugMetadataItem
+            label="Simulation ID"
+            value={debugInfo.simulationId}
+          />
+          <DebugMetadataItem label="Deck ID" value={debugInfo.deckId} />
+          <DebugMetadataItem label="Status" value={debugInfo.status} />
+          <DebugMetadataItem label="Created via" value={debugInfo.createdVia} />
+          <DebugMetadataItem
+            label="Model preset"
+            value={getDebugModelPresetLabel(
+              debugInfo.llmModelPresetId,
+              modelPresets
+            )}
+          />
+          <DebugMetadataItem label="Seed" value={debugInfo.seed} />
+          <DebugMetadataItem
+            label="Turns to simulate"
+            value={debugInfo.turnsToSimulate}
+          />
+          <DebugMetadataItem
+            label="Opening hand"
+            value={
+              debugInfo.startingHandId
+                ? `Saved hand ${debugInfo.startingHandId}`
+                : "Simulated"
+            }
+          />
+          <DebugMetadataItem
+            label="Auto-generate report"
+            value={formatDebugBoolean(debugInfo.autoGenerateReport)}
+          />
+          <DebugMetadataItem
+            label="Reasoning summaries"
+            value={formatDebugBoolean(debugInfo.reasoningSummariesEnabled)}
+          />
+          <DebugMetadataItem
+            label="Flex service tier"
+            value={formatDebugBoolean(debugInfo.useFlexServiceTier)}
+          />
+          <DebugMetadataItem
+            label="Public"
+            value={formatDebugBoolean(debugInfo.isPublic)}
+          />
+          <DebugMetadataItem
+            label="Simulated turns"
+            value={debugInfo.simulatedTurnCount}
+          />
+          <DebugMetadataItem
+            label="Completed runs"
+            value={debugInfo.completedLlmRunCount}
+          />
+          <DebugMetadataItem
+            label="Active runs"
+            value={debugInfo.activeLlmRunCount}
+          />
+          <DebugMetadataItem
+            label="Created"
+            value={formatDebugDateTime(debugInfo.createdAt)}
+          />
+          <DebugMetadataItem
+            label="Updated"
+            value={formatDebugDateTime(debugInfo.updatedAt)}
+          />
+        </DebugMetadataGrid>
+      </section>
+
+      <section className="grid gap-2 rounded-md border border-border bg-background/35 p-3">
+        <h3 className="text-sm font-semibold text-foreground">Run counts</h3>
+        <DebugMetadataGrid>
+          <DebugMetadataItem
+            label="Opening hand LLM runs"
+            value={debugInfo.openingHandLlmRunCount}
+          />
+          <DebugMetadataItem
+            label="Turn LLM runs"
+            value={debugInfo.turnLlmRunCount}
+          />
+          <DebugMetadataItem
+            label="Report LLM runs"
+            value={debugInfo.reportLlmRunCount}
+          />
+        </DebugMetadataGrid>
+      </section>
 
       <SimulationDebugRunGroup
-        deckId={deckId}
         heading="Opening hand runs"
+        modelPresets={modelPresets}
         runs={debugInfo.openingHandLlmRuns}
-        simulationId={debugInfo.simulationId}
       />
       <SimulationDebugRunGroup
-        deckId={deckId}
         heading="Turn runs"
+        modelPresets={modelPresets}
         runs={debugInfo.turnLlmRuns}
-        simulationId={debugInfo.simulationId}
       />
       <SimulationDebugRunGroup
-        deckId={deckId}
         heading="Report runs"
+        modelPresets={modelPresets}
         runs={debugInfo.reportLlmRuns}
-        simulationId={debugInfo.simulationId}
       />
     </div>
   )
 }
 
 function SimulationDebugRunGroup({
-  deckId,
   heading,
+  modelPresets,
   runs,
-  simulationId,
 }: {
-  deckId: string
   heading: string
+  modelPresets: LlmModelPreset[]
   runs: SimulationDebugInfo["openingHandLlmRuns"]
-  simulationId: string
 }) {
   return (
     <section className="grid gap-3">
-      <h5 className="text-sm font-medium text-foreground">{heading}</h5>
+      <h3 className="text-sm font-semibold text-foreground">{heading}</h3>
       {runs.length > 0 ? (
         runs.map((run) => (
-          <div
+          <article
             key={run.llmRunId}
-            className="grid gap-3 rounded-md border border-border bg-background/35 p-3"
+            className="grid gap-2 rounded-md border border-border bg-background/35 p-3"
           >
-            <div className="grid gap-2 text-sm sm:grid-cols-2">
-              <p className="break-all text-muted-foreground">
-                ID: <span className="text-foreground">{run.llmRunId}</span>
-              </p>
-              <p className="text-muted-foreground">
-                Status: <span className="text-foreground">{run.status}</span>
-              </p>
-              <p className="text-muted-foreground">
-                Attempt:{" "}
-                <span className="text-foreground">{run.attemptNumber}</span>
-              </p>
-              {run.openingHandIsValid !== undefined ? (
-                <p className="text-muted-foreground">
-                  Valid opening hand:{" "}
-                  <span className="text-foreground">
-                    {run.openingHandIsValid ? "Yes" : "No"}
-                  </span>
-                </p>
+            <DebugMetadataGrid>
+              <DebugMetadataItem label="Run ID" value={run.llmRunId} />
+              <DebugMetadataItem label="Phase" value={run.phase} />
+              <DebugMetadataItem label="Status" value={run.status} />
+              <DebugMetadataItem label="Attempt" value={run.attemptNumber} />
+              {run.turnNumber !== undefined ? (
+                <DebugMetadataItem label="Turn" value={run.turnNumber} />
               ) : null}
-              {run.turnNumber ? (
-                <p className="text-muted-foreground">
-                  Turn:{" "}
-                  <span className="text-foreground">{run.turnNumber}</span>
-                </p>
+              {run.openingHandIsValid !== undefined ? (
+                <DebugMetadataItem
+                  label="Valid opening hand"
+                  value={formatDebugBoolean(run.openingHandIsValid)}
+                />
               ) : null}
               {run.outdated !== undefined ? (
-                <p className="text-muted-foreground">
-                  Outdated:{" "}
-                  <span className="text-foreground">
-                    {run.outdated ? "Yes" : "No"}
-                  </span>
-                </p>
+                <DebugMetadataItem
+                  label="Outdated"
+                  value={formatDebugBoolean(run.outdated)}
+                />
               ) : null}
-              <p className="text-muted-foreground">
-                Model: <span className="text-foreground">{run.model}</span>
-              </p>
-              {getLlmRunEstimatedPriceText(run) ? (
-                <p className="text-muted-foreground">
-                  Estimated price:{" "}
-                  <span className="text-foreground">
-                    {getLlmRunEstimatedPriceText(run)}
-                  </span>
-                </p>
-              ) : null}
-              <p className="text-muted-foreground">
-                Reasoning effort:{" "}
-                <span className="text-foreground">
-                  {run.reasoningEffort || "N/A"}
-                </span>
-              </p>
-              <p className="text-muted-foreground">
-                Service tier:{" "}
-                <span className="text-foreground">
-                  {run.serviceTier || "N/A"}
-                </span>
-              </p>
-              <p className="break-all text-muted-foreground">
-                Runtime key:{" "}
-                <span className="text-foreground">
-                  {run.runtimeStreamKey ?? "none"}
-                </span>
-              </p>
-            </div>
-
-            {run.provider === "openrouter" &&
-            (run.openrouterGenerations?.length ?? 0) > 0 ? (
-              <OpenRouterGenerationsTable
-                deckId={deckId}
-                generations={run.openrouterGenerations ?? []}
-                simulationId={simulationId}
+              <DebugMetadataItem label="Provider" value={run.provider} />
+              <DebugMetadataItem label="Model" value={run.model} />
+              <DebugMetadataItem
+                label="Model preset"
+                value={getDebugModelPresetLabel(
+                  run.llmModelPresetId,
+                  modelPresets
+                )}
               />
-            ) : null}
-
-            {hasGameState(run.gameState) ? (
-              <details className="rounded-md border border-emerald-500/35 bg-emerald-950/20 shadow-sm shadow-emerald-950/20">
-                <summary className="cursor-pointer border-b border-emerald-500/20 px-3 py-2 text-sm font-medium text-emerald-200 transition-colors hover:text-emerald-100">
-                  Game state
-                </summary>
-                <pre className="debug-scrollbar-neutral max-h-96 max-w-full min-w-0 overflow-y-auto p-3 text-xs leading-5 break-words whitespace-pre-wrap text-emerald-50/80">
-                  {formatGameStateJson(run.gameState)}
-                </pre>
-              </details>
-            ) : null}
-
-            {run.report ? (
-              <details className="rounded-md border border-emerald-500/35 bg-emerald-950/20 shadow-sm shadow-emerald-950/20">
-                <summary className="cursor-pointer border-b border-emerald-500/20 px-3 py-2 text-sm font-medium text-emerald-200 transition-colors hover:text-emerald-100">
-                  Report
-                </summary>
-                <div className="p-3">
-                  <SimulationReportMarkdown report={run.report} />
-                </div>
-              </details>
-            ) : null}
-
-            <div className="grid gap-2">
-              <p className="text-sm text-muted-foreground">
-                Chunks: {run.chunks.length}
-              </p>
-              {run.chunks.length > 0 ? (
-                <>
-                  <details className="min-w-0 rounded-md border border-sky-500/35 bg-sky-950/20 shadow-sm shadow-sky-950/20">
-                    <summary className="cursor-pointer border-b border-sky-500/20 px-3 py-2 text-sm font-medium text-sky-200 transition-colors hover:text-sky-100">
-                      Raw chunk JSON
-                    </summary>
-                    <pre className="debug-scrollbar-neutral max-h-96 max-w-full min-w-0 overflow-y-auto p-3 text-xs leading-5 break-words whitespace-pre-wrap text-sky-50/80">
-                      {JSON.stringify(run.chunks, null, 2)}
-                    </pre>
-                  </details>
-                  <FormattedDebugChunks chunks={run.chunks} />
-                </>
-              ) : null}
-            </div>
-          </div>
+              <DebugMetadataItem
+                label="Estimated price"
+                value={getLlmRunEstimatedPriceText(run) ?? "N/A"}
+              />
+              <DebugMetadataItem
+                label="Reasoning effort"
+                value={run.reasoningEffort || "N/A"}
+              />
+              <DebugMetadataItem
+                label="Service tier"
+                value={run.serviceTier || "N/A"}
+              />
+              <DebugMetadataItem
+                label="Runtime key"
+                value={run.runtimeStreamKey ?? "none"}
+              />
+              <DebugMetadataItem
+                label="Created"
+                value={formatDebugDateTime(run.createdAt)}
+              />
+              <DebugMetadataItem
+                label="Started"
+                value={formatDebugDateTime(run.startedAt)}
+              />
+              <DebugMetadataItem
+                label="Completed"
+                value={formatDebugDateTime(run.completedAt)}
+              />
+              <DebugMetadataItem
+                label="Failed"
+                value={formatDebugDateTime(run.failedAt)}
+              />
+              <DebugMetadataItem
+                label="Cancelled"
+                value={formatDebugDateTime(run.cancelledAt)}
+              />
+              <DebugMetadataItem
+                label="Duration"
+                value={getSimulationRunFinishedDurationText(run) ?? "N/A"}
+              />
+              <DebugMetadataItem
+                label="Failure"
+                value={run.failureMessage?.trim() || "N/A"}
+              />
+              <DebugMetadataItem
+                label="OpenRouter generations"
+                value={formatOpenRouterGenerationMetadata(
+                  run.openrouterGenerations
+                )}
+              />
+            </DebugMetadataGrid>
+          </article>
         ))
       ) : (
         <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
@@ -8034,343 +8066,75 @@ function SimulationDebugRunGroup({
   )
 }
 
-type OpenRouterGenerationLookupState =
-  | {
-      status: "loading"
-    }
-  | {
-      status: "loaded"
-      providerName: string | null
-      providerEntry: unknown | null
-      providerSlug: string | null
-      result: unknown
-    }
-  | {
-      status: "error"
-      error: string
-    }
-
-function OpenRouterGenerationsTable({
-  deckId,
-  generations,
-  simulationId,
-}: {
-  deckId: string
-  generations: SimulationDebugInfo["openingHandLlmRuns"][number]["openrouterGenerations"]
-  simulationId: string
-}) {
-  const [generationLookups, setGenerationLookups] = useState<
-    Record<string, OpenRouterGenerationLookupState>
-  >({})
-
-  const handleQueryGeneration = useCallback(
-    async (generationId: string) => {
-      setGenerationLookups((currentLookups) => ({
-        ...currentLookups,
-        [generationId]: { status: "loading" },
-      }))
-
-      try {
-        const response = await apiFetch(
-          `${API_BASE_URL}/decks/${encodeURIComponent(deckId)}/simulations/${encodeURIComponent(simulationId)}/openrouter-generations/${encodeURIComponent(generationId)}`
-        )
-
-        if (!response.ok) {
-          const errorMessage = await readApiError(
-            response,
-            "OpenRouter generation could not be queried."
-          )
-
-          setGenerationLookups((currentLookups) => ({
-            ...currentLookups,
-            [generationId]: {
-              status: "error",
-              error: errorMessage,
-            },
-          }))
-          return
-        }
-
-        const data =
-          (await response.json()) as OpenRouterGenerationDetailsResponse
-        setGenerationLookups((currentLookups) => ({
-          ...currentLookups,
-          [generationId]: {
-            status: "loaded",
-            providerName: data.providerName ?? null,
-            providerEntry: data.providerEntry ?? null,
-            providerSlug: data.providerSlug ?? null,
-            result: data.result,
-          },
-        }))
-      } catch {
-        setGenerationLookups((currentLookups) => ({
-          ...currentLookups,
-          [generationId]: {
-            status: "error",
-            error: "OpenRouter generation could not be queried.",
-          },
-        }))
-      }
-    },
-    [deckId, simulationId]
-  )
-
+function DebugMetadataGrid({ children }: { children: ReactNode }) {
   return (
-    <section className="min-w-0 rounded-md border border-sky-500/35 bg-sky-950/20 shadow-sm shadow-sky-950/20">
-      <h6 className="border-b border-sky-500/20 px-3 py-2 text-sm font-medium text-sky-200">
-        OpenRouter generations
-      </h6>
-      <div className="debug-scrollbar-neutral max-w-full overflow-x-auto">
-        <table className="w-full min-w-[40rem] border-collapse text-left text-xs">
-          <thead className="text-sky-100/80">
-            <tr>
-              <th className="w-36 border-b border-sky-500/20 px-3 py-2 font-medium">
-                Turn
-              </th>
-              <th className="border-b border-sky-500/20 px-3 py-2 font-medium">
-                Generation ID
-              </th>
-              <th className="w-32 border-b border-sky-500/20 px-3 py-2 font-medium">
-                Details
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {generations.map((generation) => {
-              const lookup = generationLookups[generation.generationId]
-
-              return (
-                <Fragment key={generation.openrouterTurnIndex}>
-                  <tr>
-                    <td className="border-t border-sky-500/10 px-3 py-2 text-muted-foreground">
-                      OpenRouter turn {generation.openrouterTurnIndex + 1}
-                    </td>
-                    <td className="border-t border-sky-500/10 px-3 py-2 break-all text-foreground select-all">
-                      {generation.generationId}
-                    </td>
-                    <td className="border-t border-sky-500/10 px-3 py-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="xs"
-                        disabled={lookup?.status === "loading"}
-                        aria-expanded={lookup?.status === "loaded"}
-                        title="Query OpenRouter generation endpoint"
-                        onClick={() =>
-                          void handleQueryGeneration(generation.generationId)
-                        }
-                      >
-                        {lookup?.status === "loading" ? (
-                          <RefreshCw
-                            className="animate-spin"
-                            data-icon="inline-start"
-                          />
-                        ) : (
-                          <Search data-icon="inline-start" />
-                        )}
-                        {lookup?.status === "loading"
-                          ? "Querying..."
-                          : lookup?.status === "loaded"
-                            ? "Refresh"
-                            : "Query"}
-                      </Button>
-                    </td>
-                  </tr>
-                  {lookup ? (
-                    <tr>
-                      <td
-                        className="border-t border-sky-500/10 px-3 py-2"
-                        colSpan={3}
-                      >
-                        <OpenRouterGenerationLookupResult lookup={lookup} />
-                      </td>
-                    </tr>
-                  ) : null}
-                </Fragment>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  )
-}
-
-function OpenRouterGenerationLookupResult({
-  lookup,
-}: {
-  lookup: OpenRouterGenerationLookupState
-}) {
-  if (lookup.status === "loading") {
-    return (
-      <p className="rounded-md border border-sky-500/20 bg-black/20 px-3 py-2 text-xs text-muted-foreground">
-        Querying OpenRouter generation endpoint...
-      </p>
-    )
-  }
-
-  if (lookup.status === "error") {
-    return (
-      <p
-        className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-        role="alert"
-      >
-        {lookup.error}
-      </p>
-    )
-  }
-
-  return (
-    <details
-      className="min-w-0 rounded-md border border-sky-500/25 bg-black/20"
-      open
-    >
-      <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-sky-200 transition-colors hover:text-sky-100">
-        Generation endpoint result
-      </summary>
-      <OpenRouterGenerationProviderMetadata
-        providerName={lookup.providerName}
-        providerSlug={lookup.providerSlug}
-      />
-      <pre className="debug-scrollbar-neutral max-h-96 max-w-full min-w-0 overflow-y-auto border-t border-sky-500/20 p-3 text-xs leading-5 break-words whitespace-pre-wrap text-sky-50/80">
-        {JSON.stringify(lookup.result, null, 2)}
-      </pre>
-      <OpenRouterMatchedProviderEntry providerEntry={lookup.providerEntry} />
-    </details>
-  )
-}
-
-function OpenRouterGenerationProviderMetadata({
-  providerName,
-  providerSlug,
-}: {
-  providerName: string | null
-  providerSlug: string | null
-}) {
-  return (
-    <dl className="grid gap-3 border-t border-sky-500/20 px-3 py-2 text-xs sm:grid-cols-2">
-      <div className="min-w-0">
-        <dt className="text-sky-100/70">Provider name</dt>
-        <dd className="mt-1 break-all text-sky-50/90">
-          {providerName ?? "Not reported"}
-        </dd>
-      </div>
-      <div className="min-w-0">
-        <dt className="text-sky-100/70">Provider slug</dt>
-        <dd
-          className={
-            providerSlug
-              ? "mt-1 font-mono break-all text-sky-50/90"
-              : "mt-1 text-muted-foreground"
-          }
-        >
-          {providerSlug ?? "No matching provider slug"}
-        </dd>
-      </div>
+    <dl className="grid gap-x-4 gap-y-1.5 text-sm sm:grid-cols-2 xl:grid-cols-3">
+      {children}
     </dl>
   )
 }
 
-function OpenRouterMatchedProviderEntry({
-  providerEntry,
+function DebugMetadataItem({
+  label,
+  value,
 }: {
-  providerEntry: unknown | null
+  label: string
+  value: ReactNode
 }) {
   return (
-    <section className="border-t border-sky-500/20">
-      <p className="px-3 py-2 text-xs font-medium text-sky-200">
-        Matched provider entry
-      </p>
-      {providerEntry ? (
-        <pre className="debug-scrollbar-neutral max-h-96 max-w-full min-w-0 overflow-y-auto border-t border-sky-500/20 p-3 text-xs leading-5 break-words whitespace-pre-wrap text-sky-50/80">
-          {JSON.stringify(providerEntry, null, 2)}
-        </pre>
-      ) : (
-        <p className="border-t border-sky-500/20 px-3 py-2 text-xs text-muted-foreground">
-          No matching provider entry returned.
-        </p>
-      )}
-    </section>
-  )
-}
-
-function FormattedDebugChunks({
-  chunks,
-}: {
-  chunks: SimulationDebugLlmRunChunk[]
-}) {
-  const blocks = formatDebugChunkBlocks(chunks)
-
-  return (
-    <div className="grid gap-2">
-      {blocks.map((block) =>
-        block.type === "event" ? (
-          <details
-            key={block.id}
-            className="min-w-0 rounded-md border border-border bg-black/20"
-          >
-            <summary className="cursor-pointer px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground">
-              {getDebugChunkEventLabel(block.chunk)}
-            </summary>
-            <pre className="debug-scrollbar-neutral max-h-80 max-w-full min-w-0 overflow-y-auto border-t border-border p-3 text-xs leading-5 break-words whitespace-pre-wrap text-muted-foreground">
-              {JSON.stringify(block.chunk, null, 2)}
-            </pre>
-          </details>
-        ) : (
-          <section
-            key={block.id}
-            className="grid gap-3 rounded-md border border-border bg-black/20 p-3"
-          >
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs font-medium tracking-wide text-sky-300 uppercase">
-                {block.type === "reasoning" ? "Reasoning" : "Output"}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {block.chunks.length} chunk
-                {block.chunks.length === 1 ? "" : "s"}
-              </p>
-            </div>
-            <p className="text-sm leading-6 whitespace-pre-wrap text-foreground">
-              {block.text}
-            </p>
-            <DebugDeltaChunkList type={block.type} chunks={block.chunks} />
-          </section>
-        )
-      )}
+    <div className="min-w-0 leading-6">
+      <dt className="inline text-muted-foreground">{label}: </dt>
+      <dd className="inline font-medium break-words text-foreground">
+        {value}
+      </dd>
     </div>
   )
 }
 
-function DebugDeltaChunkList({
-  type,
-  chunks,
-}: {
-  type: "reasoning" | "output"
-  chunks: SimulationDebugLlmRunChunk[]
-}) {
-  return (
-    <details className="min-w-0 rounded-md border border-sky-500/25 bg-sky-950/15">
-      <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-sky-200 transition-colors hover:text-sky-100">
-        View all chunks
-      </summary>
-      <div className="grid gap-2 border-t border-sky-500/20 p-2">
-        {chunks.map((chunk) => (
-          <details
-            key={`${type}-${getDebugChunkBlockId(chunk)}`}
-            className="min-w-0 rounded-md border border-border bg-black/25"
-          >
-            <summary className="cursor-pointer px-3 py-2 text-xs leading-5 break-words text-muted-foreground transition-colors hover:text-foreground">
-              {getDebugDeltaChunkLabel(chunk, type)}
-            </summary>
-            <pre className="debug-scrollbar-neutral max-h-80 max-w-full min-w-0 overflow-y-auto border-t border-border p-3 text-xs leading-5 break-words whitespace-pre-wrap text-muted-foreground">
-              {JSON.stringify(chunk, null, 2)}
-            </pre>
-          </details>
-        ))}
-      </div>
-    </details>
-  )
+function getDebugModelPresetLabel(
+  presetId: string | null,
+  modelPresets: readonly LlmModelPreset[]
+) {
+  if (!presetId) {
+    return "N/A"
+  }
+
+  const preset = modelPresets.find((candidate) => candidate.id === presetId)
+
+  return preset ? getLlmModelPresetLabel(preset) : presetId
+}
+
+function formatDebugBoolean(value: boolean) {
+  return value ? "Yes" : "No"
+}
+
+function formatDebugDateTime(value: string | null) {
+  if (!value) {
+    return "N/A"
+  }
+
+  const timestampMs = Date.parse(value)
+
+  if (Number.isNaN(timestampMs)) {
+    return value
+  }
+
+  return new Date(timestampMs).toLocaleString()
+}
+
+function formatOpenRouterGenerationMetadata(
+  generations: SimulationDebugInfo["openingHandLlmRuns"][number]["openrouterGenerations"]
+) {
+  if (generations.length === 0) {
+    return "None"
+  }
+
+  return generations
+    .map(
+      (generation) =>
+        `Turn ${generation.openrouterTurnIndex + 1}: ${generation.generationId}`
+    )
+    .join("; ")
 }
 
 function getDebugChunkEventLabel(chunk: SimulationDebugLlmRunChunk) {

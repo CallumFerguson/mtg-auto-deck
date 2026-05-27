@@ -425,7 +425,41 @@ export type SimulationDebugLlmRun = {
   chunks: SimulationDebugLlmRunChunk[]
 }
 
-export type SimulationDebugInfo = {
+export type SimulationDebugLlmRunMetadata = {
+  llmRunId: string
+  llmModelPresetId: string | null
+  phase: LlmRunPhase
+  provider: string
+  model: string
+  estimatedPriceCents: string | null
+  reasoningEffort: string | null
+  serviceTier: string | null
+  status: LlmRunStatus
+  runtimeStreamKey: string | null
+  attemptNumber: number
+  failureMessage: string | null
+  createdAt: string
+  startedAt: string | null
+  completedAt: string | null
+  failedAt: string | null
+  cancelledAt: string | null
+  turnNumber?: number
+  outdated?: boolean
+  openingHandIsValid?: boolean
+  openrouterGenerations: OpenRouterGeneration[]
+}
+
+export type SimulationDebugInfo = Omit<SimulationSummary, "id" | "library"> & {
+  simulationId: string
+  openingHandLlmRunCount: number
+  turnLlmRunCount: number
+  reportLlmRunCount: number
+  openingHandLlmRuns: SimulationDebugLlmRunMetadata[]
+  turnLlmRuns: SimulationDebugLlmRunMetadata[]
+  reportLlmRuns: SimulationDebugLlmRunMetadata[]
+}
+
+export type SimulationResultsInfo = {
   simulationId: string
   openingHandLlmRunCount: number
   turnLlmRunCount: number
@@ -434,8 +468,6 @@ export type SimulationDebugInfo = {
   turnLlmRuns: SimulationDebugLlmRun[]
   reportLlmRuns: SimulationDebugLlmRun[]
 }
-
-export type SimulationResultsInfo = SimulationDebugInfo
 
 export type StaleInFlightLlmRunCleanupResult = {
   cancelledLlmRunIds: string[]
@@ -4538,66 +4570,6 @@ export async function recordOpenRouterLlmRunGeneration({
   }
 }
 
-export async function getOpenRouterGenerationForSimulation(
-  deckId: string,
-  simulationId: string,
-  generationId: string
-): Promise<OpenRouterGeneration | null> {
-  const trimmedGenerationId = generationId.trim()
-
-  if (!trimmedGenerationId) {
-    throw new SimulationValidationError(
-      "OpenRouter generation ID must not be empty."
-    )
-  }
-
-  const result = await queryDatabase<{
-    openrouter_turn_index: number
-    generation_id: string
-    created_at: Date
-  }>(
-    `
-      SELECT
-        generation.openrouter_turn_index,
-        generation.generation_id,
-        generation.created_at
-      FROM llm_run_openrouter_generations generation
-      JOIN llm_runs llm_run
-        ON llm_run.id = generation.llm_run_id
-      JOIN (
-        SELECT simulation_id, llm_run_id
-        FROM simulation_opening_hand_llm_runs
-        UNION ALL
-        SELECT simulation_id, llm_run_id
-        FROM simulation_turn_llm_runs
-        UNION ALL
-        SELECT simulation_id, llm_run_id
-        FROM simulation_report_llm_runs
-      ) simulation_run
-        ON simulation_run.llm_run_id = generation.llm_run_id
-      JOIN simulations simulation
-        ON simulation.id = simulation_run.simulation_id
-      WHERE simulation.id = $1
-        AND simulation.deck_id = $2
-        AND llm_run.provider = 'openrouter'
-        AND generation.generation_id = $3
-      LIMIT 1
-    `,
-    [simulationId, deckId, trimmedGenerationId]
-  )
-  const generation = result.rows[0]
-
-  if (!generation) {
-    return null
-  }
-
-  return {
-    openrouterTurnIndex: generation.openrouter_turn_index,
-    generationId: generation.generation_id,
-    createdAt: generation.created_at.toISOString(),
-  }
-}
-
 export async function failLlmRun(llmRunId: string, failureMessage: string) {
   await withDatabaseTransaction(async (client) => {
     const estimatedCostUsd = await estimatePartialLlmRunCostUsdWithClient(
@@ -5102,9 +5074,26 @@ export async function getSimulationDebugInfo(
   deckId: string,
   simulationId: string
 ): Promise<SimulationDebugInfo> {
-  const simulationResult = await queryDatabase(
+  const simulationResult = await queryDatabase<SimulationDebugSimulationRow>(
     `
-      SELECT id
+      SELECT
+        id,
+        deck_id,
+        created_via,
+        llm_model_preset_id,
+        starting_hand_id,
+        seed,
+        turns_to_simulate,
+        auto_generate_report,
+        reasoning_summaries_enabled,
+        use_flex_service_tier,
+        is_public,
+        ${SIMULATION_SUMMARY_SIMULATED_TURN_COUNT_SQL} AS simulated_turn_count,
+        ${SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL} AS completed_llm_run_count,
+        ${SIMULATION_SUMMARY_ACTIVE_RUN_COUNT_SQL} AS active_llm_run_count,
+        status,
+        created_at,
+        updated_at
       FROM simulations
       WHERE id = $1
         AND deck_id = $2
@@ -5116,32 +5105,47 @@ export async function getSimulationDebugInfo(
     throw new SimulationValidationError("Simulation not found.")
   }
 
-  const openingHandRuns = await getSimulationDebugLlmRuns({
+  const simulation = simulationResult.rows[0]
+  const openingHandRuns = await getSimulationDebugLlmRunMetadata({
     simulationId,
     tableName: "simulation_opening_hand_llm_runs",
     selectColumns:
-      "run.attempt_number, NULL::integer AS turn_number, NULL::jsonb AS turn_actions, NULL::jsonb AS game_state, run.library_snapshot, NULL::text AS report, NULL::boolean AS outdated, run.opening_hand_is_valid",
+      "run.attempt_number, NULL::integer AS turn_number, NULL::boolean AS outdated, run.opening_hand_is_valid",
     orderBy: "run.attempt_number ASC",
   })
-  await attachOpeningHandEvaluations(openingHandRuns)
-  const turnRuns = await getSimulationDebugLlmRuns({
+  const turnRuns = await getSimulationDebugLlmRunMetadata({
     simulationId,
     tableName: "simulation_turn_llm_runs",
     selectColumns:
-      "run.attempt_number, run.turn_number, run.turn_actions, run.game_state, run.library_snapshot, NULL::text AS report, run.outdated, NULL::boolean AS opening_hand_is_valid",
+      "run.attempt_number, run.turn_number, run.outdated, NULL::boolean AS opening_hand_is_valid",
     orderBy: "run.turn_number ASC, run.attempt_number ASC",
   })
-  await attachTurnEvaluations(turnRuns)
-  const reportRuns = await getSimulationDebugLlmRuns({
+  const reportRuns = await getSimulationDebugLlmRunMetadata({
     simulationId,
     tableName: "simulation_report_llm_runs",
     selectColumns:
-      "run.attempt_number, NULL::integer AS turn_number, NULL::jsonb AS turn_actions, NULL::jsonb AS game_state, NULL::jsonb AS library_snapshot, run.report, run.outdated, NULL::boolean AS opening_hand_is_valid",
+      "run.attempt_number, NULL::integer AS turn_number, run.outdated, NULL::boolean AS opening_hand_is_valid",
     orderBy: "run.attempt_number ASC",
   })
 
   return {
     simulationId,
+    deckId: simulation.deck_id,
+    createdVia: simulation.created_via,
+    llmModelPresetId: simulation.llm_model_preset_id,
+    startingHandId: simulation.starting_hand_id,
+    seed: simulation.seed,
+    turnsToSimulate: simulation.turns_to_simulate,
+    autoGenerateReport: simulation.auto_generate_report,
+    reasoningSummariesEnabled: simulation.reasoning_summaries_enabled,
+    useFlexServiceTier: simulation.use_flex_service_tier,
+    isPublic: simulation.is_public,
+    simulatedTurnCount: simulation.simulated_turn_count,
+    completedLlmRunCount: simulation.completed_llm_run_count,
+    activeLlmRunCount: simulation.active_llm_run_count,
+    status: simulation.status,
+    createdAt: simulation.created_at.toISOString(),
+    updatedAt: simulation.updated_at.toISOString(),
     openingHandLlmRunCount: openingHandRuns.length,
     turnLlmRunCount: turnRuns.length,
     reportLlmRunCount: reportRuns.length,
@@ -6025,6 +6029,50 @@ type SimulationDebugLlmRunRow = {
   received_at: Date | null
 }
 
+type SimulationDebugSimulationRow = {
+  id: string
+  deck_id: string
+  created_via: SimulationCreatedVia
+  llm_model_preset_id: string | null
+  starting_hand_id: string | null
+  seed: string
+  turns_to_simulate: number
+  auto_generate_report: boolean
+  reasoning_summaries_enabled: boolean
+  use_flex_service_tier: boolean
+  is_public: boolean
+  simulated_turn_count: number
+  completed_llm_run_count: number
+  active_llm_run_count: number
+  status: SimulationStatus
+  created_at: Date
+  updated_at: Date
+}
+
+type SimulationDebugLlmRunMetadataRow = {
+  llm_run_id: string
+  llm_model_preset_id: string | null
+  phase: LlmRunPhase
+  provider: string
+  model: string
+  estimated_cost_usd: string | number | null
+  openrouter_reported_cost_usd: string | number | null
+  reasoning_effort: string | null
+  service_tier: string | null
+  status: LlmRunStatus
+  runtime_stream_key: string | null
+  failure_message: string | null
+  created_at: Date
+  started_at: Date | null
+  completed_at: Date | null
+  failed_at: Date | null
+  cancelled_at: Date | null
+  attempt_number: number
+  turn_number: number | null
+  outdated: boolean | null
+  opening_hand_is_valid: boolean | null
+}
+
 type OpenRouterGenerationRow = {
   llm_run_id: string
   openrouter_turn_index: number
@@ -6066,6 +6114,111 @@ type TurnEvaluationRow = {
   evaluation_json: unknown
   created_at: Date
   updated_at: Date
+}
+
+async function getSimulationDebugLlmRunMetadata({
+  orderBy,
+  selectColumns,
+  simulationId,
+  tableName,
+}: {
+  simulationId: string
+  tableName:
+    | "simulation_opening_hand_llm_runs"
+    | "simulation_turn_llm_runs"
+    | "simulation_report_llm_runs"
+  selectColumns: string
+  orderBy: string
+}): Promise<SimulationDebugLlmRunMetadata[]> {
+  const result = await queryDatabase<SimulationDebugLlmRunMetadataRow>(
+    `
+      SELECT
+        llm_run.id AS llm_run_id,
+        llm_run.llm_model_preset_id,
+        llm_run.phase,
+        COALESCE(preset.provider, llm_run.provider) AS provider,
+        COALESCE(preset.model, llm_run.model) AS model,
+        llm_run.estimated_cost_usd,
+        llm_run.openrouter_reported_cost_usd,
+        COALESCE(preset.reasoning_effort, llm_run.reasoning_effort) AS reasoning_effort,
+        llm_run.service_tier,
+        llm_run.status,
+        llm_run.runtime_stream_key,
+        llm_run.failure_message,
+        llm_run.created_at,
+        llm_run.started_at,
+        llm_run.completed_at,
+        llm_run.failed_at,
+        llm_run.cancelled_at,
+        ${selectColumns}
+      FROM ${tableName} run
+      JOIN llm_runs llm_run
+        ON llm_run.id = run.llm_run_id
+      LEFT JOIN llm_model_presets preset
+        ON preset.id = llm_run.llm_model_preset_id
+      WHERE run.simulation_id = $1
+      ORDER BY ${orderBy}
+    `,
+    [simulationId]
+  )
+  const runs = result.rows.map(mapSimulationDebugLlmRunMetadataRow)
+  const openRouterGenerationsByRunId =
+    await getOpenRouterGenerationsByLlmRunIds(
+      runs
+        .filter((run) => run.provider === "openrouter")
+        .map((run) => run.llmRunId)
+    )
+
+  for (const run of runs) {
+    run.openrouterGenerations =
+      openRouterGenerationsByRunId.get(run.llmRunId) ?? []
+  }
+
+  return runs
+}
+
+function mapSimulationDebugLlmRunMetadataRow(
+  row: SimulationDebugLlmRunMetadataRow
+): SimulationDebugLlmRunMetadata {
+  const run: SimulationDebugLlmRunMetadata = {
+    llmRunId: row.llm_run_id,
+    llmModelPresetId: row.llm_model_preset_id,
+    phase: row.phase,
+    provider: row.provider,
+    model: row.model,
+    estimatedPriceCents: formatPreferredLlmRunCostAsCents({
+      estimatedCostUsd: toOptionalNumber(row.estimated_cost_usd),
+      openrouterReportedCostUsd: toOptionalNumber(
+        row.openrouter_reported_cost_usd
+      ),
+    }),
+    reasoningEffort: row.reasoning_effort || null,
+    serviceTier: row.service_tier || null,
+    status: row.status,
+    runtimeStreamKey: row.runtime_stream_key,
+    attemptNumber: row.attempt_number,
+    failureMessage: row.failure_message,
+    createdAt: row.created_at.toISOString(),
+    startedAt: row.started_at?.toISOString() ?? null,
+    completedAt: row.completed_at?.toISOString() ?? null,
+    failedAt: row.failed_at?.toISOString() ?? null,
+    cancelledAt: row.cancelled_at?.toISOString() ?? null,
+    openrouterGenerations: [],
+  }
+
+  if (row.turn_number !== null) {
+    run.turnNumber = row.turn_number
+  }
+
+  if (row.outdated !== null) {
+    run.outdated = row.outdated
+  }
+
+  if (row.opening_hand_is_valid !== null) {
+    run.openingHandIsValid = row.opening_hand_is_valid
+  }
+
+  return run
 }
 
 async function getSimulationDebugLlmRuns({

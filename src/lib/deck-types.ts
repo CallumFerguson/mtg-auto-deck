@@ -204,26 +204,58 @@ export type SimulationDebugLlmRun = {
   chunks: SimulationDebugLlmRunChunk[]
 }
 
+export type SimulationDebugLlmRunMetadata = {
+  llmRunId: string
+  llmModelPresetId: string | null
+  phase: string
+  provider: string
+  model: string
+  estimatedPriceCents: string | null
+  reasoningEffort: string | null
+  serviceTier: string | null
+  status: string
+  runtimeStreamKey: string | null
+  attemptNumber: number
+  failureMessage: string | null
+  createdAt: string
+  startedAt: string | null
+  completedAt: string | null
+  failedAt: string | null
+  cancelledAt: string | null
+  turnNumber?: number
+  outdated?: boolean
+  openingHandIsValid?: boolean
+  openrouterGenerations: OpenRouterGeneration[]
+}
+
 export type SimulationDebugInfo = {
   simulationId: string
+  deckId: string
+  createdVia: SimulationCreatedVia
+  llmModelPresetId: string | null
+  startingHandId: string | null
+  seed: string
+  turnsToSimulate: number
+  autoGenerateReport: boolean
+  reasoningSummariesEnabled: boolean
+  useFlexServiceTier: boolean
+  isPublic: boolean
+  simulatedTurnCount: number
+  completedLlmRunCount: number
+  activeLlmRunCount: number
+  status: SimulationStatus
+  createdAt: string
+  updatedAt: string
   openingHandLlmRunCount: number
   turnLlmRunCount: number
   reportLlmRunCount: number
-  openingHandLlmRuns: SimulationDebugLlmRun[]
-  turnLlmRuns: SimulationDebugLlmRun[]
-  reportLlmRuns: SimulationDebugLlmRun[]
+  openingHandLlmRuns: SimulationDebugLlmRunMetadata[]
+  turnLlmRuns: SimulationDebugLlmRunMetadata[]
+  reportLlmRuns: SimulationDebugLlmRunMetadata[]
 }
 
 export type SimulationDebugResponse = {
   debug: SimulationDebugInfo
-}
-
-export type OpenRouterGenerationDetailsResponse = {
-  generation: OpenRouterGeneration
-  providerName: string | null
-  providerEntry: unknown | null
-  providerSlug: string | null
-  result: unknown
 }
 
 export type TurnEvaluationResponse = {
@@ -234,7 +266,15 @@ export type OpeningHandEvaluationResponse = {
   evaluation: OpeningHandEvaluation
 }
 
-export type SimulationResultsInfo = SimulationDebugInfo
+export type SimulationResultsInfo = {
+  simulationId: string
+  openingHandLlmRunCount: number
+  turnLlmRunCount: number
+  reportLlmRunCount: number
+  openingHandLlmRuns: SimulationDebugLlmRun[]
+  turnLlmRuns: SimulationDebugLlmRun[]
+  reportLlmRuns: SimulationDebugLlmRun[]
+}
 
 export type SimulationResultsResponse = {
   results: SimulationResultsInfo

@@ -1,6 +1,8 @@
 import type { SimulationDebugLlmRun } from "./deck-types"
 
-export function getSimulationRunStartTimeMs(run: SimulationDebugLlmRun) {
+export function getSimulationRunStartTimeMs(
+  run: Pick<SimulationDebugLlmRun, "startedAt">
+) {
   return parseTimestampMs(run.startedAt)
 }
 
