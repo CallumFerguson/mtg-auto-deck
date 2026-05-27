@@ -6,8 +6,8 @@ import {
   getSimulationRunLibraryCardCount,
 } from "../src/lib/simulation-game-state-library.js"
 import { formatDebugChunkBlocks } from "../src/lib/simulation-debug-chunks.js"
+import { formatSimulationRunTranscriptText } from "../mtg-auto-deck-server/simulation-run-text.js"
 import {
-  formatSimulationRunClipboardText,
   getSimulationRunActiveToolCallName,
   getSimulationResultEntries,
   getSimulationResultChunks,
@@ -657,8 +657,8 @@ test("ignores invalid final parsed output payloads", () => {
   assert.equal(parsedOutput, null)
 })
 
-test("formats clipboard text from reasoning output lifecycle and tools", () => {
-  const text = formatSimulationRunClipboardText(
+test("formats transcript text from reasoning output lifecycle and tools", () => {
+  const text = formatSimulationRunTranscriptText(
     createRun({
       llmRunId: "opening-run",
       phase: "opening_hand",
@@ -744,8 +744,8 @@ test("formats clipboard text from reasoning output lifecycle and tools", () => {
   )
 })
 
-test("prepends full prompt in clipboard text without labels", () => {
-  const text = formatSimulationRunClipboardText(
+test("prepends full prompt in transcript text without labels", () => {
+  const text = formatSimulationRunTranscriptText(
     createRun({
       llmRunId: "opening-run",
       phase: "opening_hand",
@@ -763,8 +763,8 @@ test("prepends full prompt in clipboard text without labels", () => {
   assert.equal(text, "Prompt text\n\nRun text")
 })
 
-test("keeps clipboard text chunks in sequence order", () => {
-  const text = formatSimulationRunClipboardText(
+test("keeps transcript text chunks in sequence order", () => {
+  const text = formatSimulationRunTranscriptText(
     createRun({
       llmRunId: "opening-run",
       phase: "opening_hand",
@@ -786,8 +786,8 @@ test("keeps clipboard text chunks in sequence order", () => {
   assert.equal(text, "first second")
 })
 
-test("adds tool name for unpaired completed tool clipboard text", () => {
-  const text = formatSimulationRunClipboardText(
+test("adds tool name for unpaired completed tool transcript text", () => {
+  const text = formatSimulationRunTranscriptText(
     createRun({
       llmRunId: "turn-run",
       phase: "turn",
@@ -1215,8 +1215,8 @@ test("returns null for empty thinking previews", () => {
   )
 })
 
-test("separates clipboard reasoning blocks by summary part index", () => {
-  const text = formatSimulationRunClipboardText(
+test("separates transcript reasoning blocks by summary part index", () => {
+  const text = formatSimulationRunTranscriptText(
     createRun({
       llmRunId: "turn-run",
       phase: "turn",

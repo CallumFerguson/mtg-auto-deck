@@ -97,7 +97,6 @@ import {
   getPublicSimulationSummary,
   getSimulationCreationDecision,
   getSimulationDebugInfo,
-  getSimulationLlmRunFullPrompt,
   getSimulationResultsInfo,
   getSimulationReportPromptData,
   getSimulationSummary,
@@ -6470,43 +6469,6 @@ async function main() {
         console.error("Failed to load simulation results:", error)
         res.status(500).json({
           error: "Failed to load simulation results.",
-        })
-      }
-    }
-  )
-
-  app.get(
-    "/decks/:deckId/simulations/:simulationId/llm-runs/:llmRunId/full-prompt",
-    async (req: Request, res: Response) => {
-      if (!requireAdminUser(req, res)) {
-        return
-      }
-
-      const deckId = String(req.params.deckId)
-      const simulationId = String(req.params.simulationId)
-      const llmRunId = String(req.params.llmRunId)
-
-      try {
-        const fullPrompt = await getSimulationLlmRunFullPrompt(
-          deckId,
-          simulationId,
-          llmRunId
-        )
-
-        if (fullPrompt === null) {
-          res.status(404).json({
-            error: "LLM run prompt not found.",
-          })
-          return
-        }
-
-        res.status(200).json({
-          fullPrompt,
-        })
-      } catch (error) {
-        console.error("Failed to load LLM run prompt:", error)
-        res.status(500).json({
-          error: "Failed to load LLM run prompt.",
         })
       }
     }

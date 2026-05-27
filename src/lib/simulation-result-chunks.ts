@@ -1,8 +1,4 @@
 import type { SimulationDebugLlmRunChunk } from "./deck-types"
-export {
-  formatSimulationRunChunksClipboardText,
-  formatSimulationRunClipboardText,
-} from "../../mtg-auto-deck-server/simulation-run-text.js"
 
 export const TURN_PHASE_CHANGES = [
   "untap",

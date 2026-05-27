@@ -218,10 +218,6 @@ export type SimulationDebugResponse = {
   debug: SimulationDebugInfo
 }
 
-export type LlmRunFullPromptResponse = {
-  fullPrompt: string
-}
-
 export type OpenRouterGenerationDetailsResponse = {
   generation: OpenRouterGeneration
   providerName: string | null

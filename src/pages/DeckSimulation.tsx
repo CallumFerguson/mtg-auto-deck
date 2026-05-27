@@ -20,7 +20,6 @@ import {
   Bug,
   Check,
   ClipboardCheck,
-  ClipboardCopy,
   Dices,
   Eye,
   EyeOff,
@@ -59,7 +58,6 @@ import type {
   UpdateSimulationResponse,
   CreateStartingHandResponse,
   DeckCard,
-  LlmRunFullPromptResponse,
   OpeningHandEvaluation,
   OpeningHandEvaluationResponse,
   OpenRouterGenerationDetailsResponse,
@@ -119,7 +117,6 @@ import {
 } from "@/lib/simulation-run-timing"
 import {
   TURN_PHASE_CHANGES,
-  formatSimulationRunClipboardText,
   getSimulationRunActiveToolCallName,
   getSimulationResultEntries,
   hasSimulationRunFinalParsedOutputChunk,
@@ -156,8 +153,6 @@ type SimulationResultsAction =
       kind: "turn"
       turnNumber: number
     }
-
-type SimulationRunTranscriptCopyMode = "run_text" | "with_prompt"
 
 type SimulationResultsNextTurnTimelineStep = {
   id: string
@@ -293,28 +288,6 @@ async function writePlainTextToClipboard(text: string) {
   } finally {
     textarea.remove()
   }
-}
-
-async function loadLlmRunFullPrompt({
-  deckId,
-  llmRunId,
-  simulationId,
-}: {
-  deckId: string
-  llmRunId: string
-  simulationId: string
-}) {
-  const response = await apiFetch(
-    `${API_BASE_URL}/decks/${deckId}/simulations/${simulationId}/llm-runs/${llmRunId}/full-prompt`
-  )
-
-  if (!response.ok) {
-    throw new Error(await readApiError(response, "Prompt could not be loaded."))
-  }
-
-  const data = (await response.json()) as LlmRunFullPromptResponse
-
-  return data.fullPrompt
 }
 
 function getSimulationLabel(simulation: Simulation) {
@@ -3878,13 +3851,6 @@ function SimulationResultsPanel({
     llmRunId: string
     resultKind: "opening_hand" | "turn"
   } | null>(null)
-  const copyTranscriptResetTimeoutRef = useRef<number | null>(null)
-  const [copiedTranscriptState, setCopiedTranscriptState] = useState<{
-    llmRunId: string
-    mode: SimulationRunTranscriptCopyMode
-  } | null>(null)
-  const [copyingTranscriptWithPromptRunId, setCopyingTranscriptWithPromptRunId] =
-    useState<string | null>(null)
   const evaluationRun = useMemo(() => {
     if (evaluationRunSelection === null) {
       return null
@@ -3921,20 +3887,6 @@ function SimulationResultsPanel({
     resultsInfo.openingHandLlmRuns,
     resultsInfo.turnLlmRuns,
   ])
-
-  const clearCopyTranscriptResetTimeout = useCallback(() => {
-    if (copyTranscriptResetTimeoutRef.current === null) {
-      return
-    }
-
-    window.clearTimeout(copyTranscriptResetTimeoutRef.current)
-    copyTranscriptResetTimeoutRef.current = null
-  }, [])
-
-  useEffect(
-    () => clearCopyTranscriptResetTimeout,
-    [clearCopyTranscriptResetTimeout]
-  )
 
   useEffect(() => {
     if (!simulationAction) {
@@ -3974,49 +3926,6 @@ function SimulationResultsPanel({
 
     onModelPresetRequired()
     return false
-  }
-
-  async function handleCopyRunTranscript(
-    run: SimulationDebugLlmRun,
-    mode: SimulationRunTranscriptCopyMode
-  ) {
-    if (!isAdmin) {
-      return
-    }
-
-    try {
-      let text = formatSimulationRunClipboardText(run)
-
-      if (mode === "with_prompt") {
-        setCopyingTranscriptWithPromptRunId(run.llmRunId)
-        const fullPrompt = await loadLlmRunFullPrompt({
-          deckId,
-          llmRunId: run.llmRunId,
-          simulationId: simulation.id,
-        })
-
-        text = formatSimulationRunClipboardText(run, { fullPrompt })
-      }
-
-      await writePlainTextToClipboard(text)
-      setCopiedTranscriptState({
-        llmRunId: run.llmRunId,
-        mode,
-      })
-      clearCopyTranscriptResetTimeout()
-      copyTranscriptResetTimeoutRef.current = window.setTimeout(() => {
-        setCopiedTranscriptState(null)
-        copyTranscriptResetTimeoutRef.current = null
-      }, 1400)
-    } catch (error) {
-      console.error("Failed to copy LLM run text:", error)
-    } finally {
-      if (mode === "with_prompt") {
-        setCopyingTranscriptWithPromptRunId((currentRunId) =>
-          currentRunId === run.llmRunId ? null : currentRunId
-        )
-      }
-    }
   }
 
   const runs = [
@@ -4218,14 +4127,7 @@ function SimulationResultsPanel({
       run.outdated ? "outdated" : null,
     ].filter(Boolean)
     const shouldShowRunMetadata = !run.isActive && runMetadata.length > 0
-    const shouldShowRunActions = isAdmin || run.canEvaluate || run.canRerun
-    const runClipboardText = formatSimulationRunClipboardText(run)
-    const copiedTranscriptMode =
-      copiedTranscriptState?.llmRunId === run.llmRunId
-        ? copiedTranscriptState.mode
-        : null
-    const isCopyingTranscriptWithPrompt =
-      copyingTranscriptWithPromptRunId === run.llmRunId
+    const shouldShowRunActions = run.canEvaluate || run.canRerun
     const hasLiveReport =
       run.resultKind === "report" &&
       !run.hasFinalParsedOutputChunk &&
@@ -4326,56 +4228,6 @@ function SimulationResultsPanel({
               <div className="min-w-0" aria-hidden="true" />
             )}
             <div className="flex shrink-0 items-center justify-end gap-1">
-              {isAdmin ? (
-                <>
-                  <Button
-                    className={
-                      copiedTranscriptMode === "with_prompt"
-                        ? "text-emerald-300 hover:text-emerald-200"
-                        : "text-muted-foreground hover:text-foreground"
-                    }
-                    type="button"
-                    variant="outline"
-                    size="icon-sm"
-                    aria-label="Copy transcript with prompt"
-                    title="Copy transcript with prompt"
-                    disabled={isCopyingTranscriptWithPrompt}
-                    onClick={() =>
-                      void handleCopyRunTranscript(run, "with_prompt")
-                    }
-                  >
-                    {isCopyingTranscriptWithPrompt ? (
-                      <LoaderCircle className="animate-spin" />
-                    ) : copiedTranscriptMode === "with_prompt" ? (
-                      <ClipboardCheck />
-                    ) : (
-                      <BookCopy />
-                    )}
-                  </Button>
-                  <Button
-                    className={
-                      copiedTranscriptMode === "run_text"
-                        ? "text-emerald-300 hover:text-emerald-200"
-                        : "text-muted-foreground hover:text-foreground"
-                    }
-                    type="button"
-                    variant="outline"
-                    size="icon-sm"
-                    aria-label="Copy transcript"
-                    title="Copy transcript"
-                    disabled={runClipboardText.length === 0}
-                    onClick={() =>
-                      void handleCopyRunTranscript(run, "run_text")
-                    }
-                  >
-                    {copiedTranscriptMode === "run_text" ? (
-                      <ClipboardCheck />
-                    ) : (
-                      <ClipboardCopy />
-                    )}
-                  </Button>
-                </>
-              ) : null}
               {run.canEvaluate ? (
                 <Button
                   className={

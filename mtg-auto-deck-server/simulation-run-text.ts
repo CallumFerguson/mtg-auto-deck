@@ -9,7 +9,7 @@ type SimulationRunTextChunk = {
   payload: unknown | null
 }
 
-export function formatSimulationRunClipboardText(
+export function formatSimulationRunTranscriptText(
   run: { chunks: readonly SimulationRunTextChunk[] },
   {
     fullPrompt = null,
@@ -17,7 +17,7 @@ export function formatSimulationRunClipboardText(
     fullPrompt?: string | null
   } = {}
 ) {
-  const runText = formatSimulationRunChunksClipboardText(run.chunks)
+  const runText = formatSimulationRunChunksTranscriptText(run.chunks)
 
   if (fullPrompt === null || fullPrompt.length === 0) {
     return runText
@@ -30,7 +30,7 @@ export function formatSimulationRunClipboardText(
   return `${fullPrompt}\n\n${runText}`
 }
 
-export function formatSimulationRunChunksClipboardText(
+export function formatSimulationRunChunksTranscriptText(
   chunks: readonly SimulationRunTextChunk[]
 ) {
   const sortedChunks = [...chunks].sort(
@@ -125,7 +125,7 @@ export function formatSimulationRunChunksClipboardText(
     }
 
     if (chunk.kind === "mcp_call_start") {
-      appendBlock(formatToolCallClipboardText([chunk]))
+      appendBlock(formatToolCallTranscriptText([chunk]))
       continue
     }
 
@@ -134,11 +134,11 @@ export function formatSimulationRunChunksClipboardText(
       const toolCallChunks = startChunk ? [startChunk, chunk] : [chunk]
 
       if (!startChunk) {
-        appendBlock(formatToolCallClipboardText([chunk]))
+        appendBlock(formatToolCallTranscriptText([chunk]))
       }
 
       appendBlock(
-        `${formatToolResultClipboardText(toolCallChunks)}\n${formatMcpFunctionOutputJson(
+        `${formatToolResultTranscriptText(toolCallChunks)}\n${formatMcpFunctionOutputJson(
           chunk.mcpFunctionOutput
         )}`
       )
@@ -232,13 +232,13 @@ function getToolCallActivityName(chunks: readonly SimulationRunTextChunk[]) {
   return "Unknown tool"
 }
 
-function formatToolCallClipboardText(
+function formatToolCallTranscriptText(
   chunks: readonly SimulationRunTextChunk[]
 ) {
   return `[called ${getToolCallActivityName(chunks)}]`
 }
 
-function formatToolResultClipboardText(
+function formatToolResultTranscriptText(
   chunks: readonly SimulationRunTextChunk[]
 ) {
   return `[result of ${getToolCallActivityName(chunks)}]`

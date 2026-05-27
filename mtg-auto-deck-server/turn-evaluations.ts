@@ -1,5 +1,5 @@
 import { z } from "zod/v4"
-import { formatSimulationRunClipboardText } from "./simulation-run-text.js"
+import { formatSimulationRunTranscriptText } from "./simulation-run-text.js"
 import type {
   LlmChunkKind,
   LlmRunPhase,
@@ -44,7 +44,7 @@ export function buildOpeningHandEvaluationInputText({
   chunks: readonly SimulationDebugLlmRunChunk[]
   fullPrompt: string
 }) {
-  return formatSimulationRunClipboardText({ chunks }, { fullPrompt })
+  return formatSimulationRunTranscriptText({ chunks }, { fullPrompt })
 }
 
 export function buildOpeningHandEvaluationPrompt({
@@ -90,7 +90,7 @@ export function buildTurnEvaluationInputText({
   chunks: readonly SimulationDebugLlmRunChunk[]
   fullPrompt: string
 }) {
-  return formatSimulationRunClipboardText({ chunks }, { fullPrompt })
+  return formatSimulationRunTranscriptText({ chunks }, { fullPrompt })
 }
 
 export function buildTurnEvaluationPrompt({
