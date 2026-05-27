@@ -3250,6 +3250,7 @@ async function createOpenRouterResponsesApiResponse(
         headers: {
           Authorization: `Bearer ${config.apiKey}`,
           "Content-Type": "application/json",
+          "X-OpenRouter-Experimental-Metadata": "enabled",
         },
         body: JSON.stringify(body),
         signal: options.signal,
@@ -3259,8 +3260,10 @@ async function createOpenRouterResponsesApiResponse(
   const responseText = await response.text()
 
   if (!response.ok) {
+    const responseMetadata = formatProviderHttpResponseMetadata(response)
+
     throw new Error(
-      `OpenRouter Responses API request failed (${response.status}): ${formatProviderHttpErrorBody(responseText)}`
+      `OpenRouter Responses API request failed (${response.status}): ${formatProviderHttpErrorBody(responseText)}${responseMetadata ? ` (${responseMetadata})` : ""}`
     )
   }
 
@@ -3410,16 +3413,173 @@ function getProviderResponseFailureDetail(response: unknown) {
   const responseRecord = asRecord(response)
   const errorRecord = asRecord(responseRecord.error)
   const incompleteDetailsRecord = asRecord(responseRecord.incomplete_details)
-  const camelIncompleteDetailsRecord = asRecord(responseRecord.incompleteDetails)
+  const camelIncompleteDetailsRecord = asRecord(
+    responseRecord.incompleteDetails
+  )
+  const errorMessage = getStringProperty(errorRecord, "message")
+  const errorCode = getStringProperty(errorRecord, "code")
+  const metadataDetail = getProviderErrorMetadataDetail(errorRecord)
+  const routerMetadataDetail =
+    getOpenRouterMetadataFailureDetail(responseRecord)
+  const supplementalDetails = [metadataDetail, routerMetadataDetail].filter(
+    (detail) => detail !== null
+  )
+  const supplementalDetail =
+    supplementalDetails.length > 0 ? supplementalDetails.join(" / ") : null
+  const incompleteDetail =
+    getStringProperty(incompleteDetailsRecord, "reason") ??
+    getStringProperty(camelIncompleteDetailsRecord, "reason")
+
+  if (errorMessage && supplementalDetail) {
+    return `${errorMessage}: ${supplementalDetail}`
+  }
 
   return (
-    getStringProperty(errorRecord, "message") ??
-    getStringProperty(errorRecord, "code") ??
-    getStringProperty(incompleteDetailsRecord, "reason") ??
-    getStringProperty(camelIncompleteDetailsRecord, "reason") ??
+    errorMessage ??
+    supplementalDetail ??
+    errorCode ??
+    incompleteDetail ??
     JSON.stringify(response) ??
     "unknown provider response failure"
   )
+}
+
+function getProviderErrorMetadataDetail(errorRecord: Record<string, unknown>) {
+  const metadataRecord = asRecord(errorRecord.metadata)
+  const providerName =
+    getStringProperty(metadataRecord, "provider_name") ??
+    getStringProperty(metadataRecord, "providerName")
+  const rawError = formatProviderRawError(metadataRecord.raw)
+
+  if (providerName && rawError) {
+    return `${providerName} returned: ${rawError}`
+  }
+
+  if (providerName) {
+    return `provider=${providerName}`
+  }
+
+  return rawError
+}
+
+function getOpenRouterMetadataFailureDetail(
+  responseRecord: Record<string, unknown>
+) {
+  const metadataRecord = asRecord(
+    responseRecord.openrouter_metadata ?? responseRecord.openrouterMetadata
+  )
+
+  if (Object.keys(metadataRecord).length === 0) {
+    return null
+  }
+
+  const attemptsText = formatOpenRouterMetadataAttempts(metadataRecord.attempts)
+  const attempt = getNumberProperty(metadataRecord, "attempt")
+  const details = [
+    getStringProperty(metadataRecord, "summary"),
+    getStringProperty(metadataRecord, "requested")
+      ? `requested=${getStringProperty(metadataRecord, "requested")}`
+      : null,
+    getStringProperty(metadataRecord, "strategy")
+      ? `strategy=${getStringProperty(metadataRecord, "strategy")}`
+      : null,
+    attempt !== null ? `attempt=${attempt}` : null,
+    attemptsText ? `attempts=${attemptsText}` : null,
+  ].filter((detail) => detail !== null)
+
+  return details.length > 0 ? `router metadata: ${details.join(", ")}` : null
+}
+
+function formatOpenRouterMetadataAttempts(attempts: unknown) {
+  if (!Array.isArray(attempts)) {
+    return null
+  }
+
+  const attemptLabels = attempts.flatMap((attempt) => {
+    const attemptRecord = asRecord(attempt)
+    const provider =
+      getStringProperty(attemptRecord, "provider") ??
+      getStringProperty(attemptRecord, "provider_name") ??
+      getStringProperty(attemptRecord, "providerName")
+    const model = getStringProperty(attemptRecord, "model")
+    const statusValue = attemptRecord.status
+    const status =
+      typeof statusValue === "number" || typeof statusValue === "string"
+        ? String(statusValue)
+        : null
+
+    if (!provider && !model && !status) {
+      return []
+    }
+
+    const label = [provider, model].filter(Boolean).join("/")
+
+    return [`${label || "provider"}${status ? `:${status}` : ""}`]
+  })
+
+  return attemptLabels.length > 0 ? attemptLabels.join("; ") : null
+}
+
+function formatProviderRawError(rawError: unknown): string | null {
+  if (rawError === null || rawError === undefined) {
+    return null
+  }
+
+  const rawErrorMessage = getProviderRawErrorMessage(rawError)
+
+  if (rawErrorMessage !== null) {
+    return rawErrorMessage
+  }
+
+  if (typeof rawError === "string") {
+    const trimmedRawError = rawError.trim()
+
+    return trimmedRawError ? trimmedRawError : null
+  }
+
+  return JSON.stringify(rawError) ?? String(rawError)
+}
+
+function getProviderRawErrorMessage(
+  rawError: unknown,
+  depth = 0
+): string | null {
+  if (depth > 3 || rawError === null || rawError === undefined) {
+    return null
+  }
+
+  if (typeof rawError === "string") {
+    const trimmedRawError = rawError.trim()
+
+    if (!trimmedRawError) {
+      return null
+    }
+
+    try {
+      return getProviderRawErrorMessage(JSON.parse(trimmedRawError), depth + 1)
+    } catch {
+      return trimmedRawError
+    }
+  }
+
+  if (typeof rawError !== "object") {
+    return String(rawError)
+  }
+
+  const rawErrorRecord = asRecord(rawError)
+
+  for (const property of ["message", "detail", "error", "reason", "code"]) {
+    const propertyMessage = getProviderRawErrorMessage(
+      rawErrorRecord[property],
+      depth + 1
+    )
+
+    if (propertyMessage !== null) {
+      return propertyMessage
+    }
+  }
+
+  return null
 }
 
 function formatProviderHttpErrorBody(responseText: string) {
@@ -3437,6 +3597,17 @@ function formatProviderHttpErrorBody(responseText: string) {
   } catch {
     return responseText.slice(0, 1000)
   }
+}
+
+function formatProviderHttpResponseMetadata(response: globalThis.Response) {
+  const generationId = response.headers.get("X-Generation-Id")
+  const retryAfter = response.headers.get("Retry-After")
+  const details = [
+    generationId ? `generationId=${generationId}` : null,
+    retryAfter ? `retryAfter=${retryAfter}` : null,
+  ].filter((detail) => detail !== null)
+
+  return details.length > 0 ? details.join(", ") : null
 }
 
 async function collectLlamaCppLlmResponse({

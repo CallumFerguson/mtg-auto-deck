@@ -556,9 +556,11 @@ function mergeStartingHandLists(
 }
 
 function UsageLimitReachedNotice({
+  detail = "Try again after your available usage refreshes",
   onUpgradeUsage,
   shouldShowUsageUpgradeAction,
 }: {
+  detail?: string
   onUpgradeUsage: () => void
   shouldShowUsageUpgradeAction: boolean
 }) {
@@ -576,8 +578,8 @@ function UsageLimitReachedNotice({
         <Gauge className="mt-0.5 size-4 shrink-0 text-amber-200" aria-hidden />
         <div className="min-w-0">
           <p className="font-semibold text-foreground">Usage limit reached</p>
-          <p className="mt-1 text-xs text-amber-100/80">
-            Try again after your available usage refreshes
+          <p className="mt-1 text-xs whitespace-pre-wrap text-amber-100/80">
+            {detail}
           </p>
           <UsageLimitRows
             className="mt-3 max-w-xl"
@@ -2991,8 +2993,7 @@ function SimulationResultsPanel({
   useLayoutEffect(() => {
     const previousSelectedTimelineStepId =
       previousSelectedTimelineStepIdRef.current
-    const previousSelectedTimelineStep =
-      previousSelectedTimelineStepRef.current
+    const previousSelectedTimelineStep = previousSelectedTimelineStepRef.current
     const finishedTimelineStep = previousSelectedTimelineStep
       ? (timelineSteps.find(
           (step) => step.id === previousSelectedTimelineStep.id
@@ -3006,7 +3007,8 @@ function SimulationResultsPanel({
       )
 
     if (shouldLockFinishedTimelineStep && previousSelectedTimelineStep) {
-      previousSelectedTimelineStepIdRef.current = previousSelectedTimelineStep.id
+      previousSelectedTimelineStepIdRef.current =
+        previousSelectedTimelineStep.id
       previousSelectedTimelineStepRef.current = finishedTimelineStep
         ? getSimulationTimelineStepSelectionSnapshot(finishedTimelineStep)
         : previousSelectedTimelineStep
@@ -3039,6 +3041,7 @@ function SimulationResultsPanel({
     panelId: string | undefined,
     tabId: string | undefined
   ) {
+    const runStatusMessage = getSimulationRunStatusMessage(run)
     const finishedDurationText = getSimulationRunFinishedDurationText(run)
     const shouldShowFinishedThinkingStatus =
       !run.isActive && getSimulationRunFinishedTimeMs(run) !== null
@@ -3047,12 +3050,17 @@ function SimulationResultsPanel({
         canStopSimulation={false}
         finishedDurationText={finishedDurationText}
         isPending={false}
-        isFinishedSuccessfully={run.status === "completed"}
+        isFinishedSuccessfully={
+          run.status === "completed" && runStatusMessage === null
+        }
         isFinished={true}
         isStoppingSimulation={false}
+        onUpgradeUsage={onUpgradeUsage}
         onStopSimulation={onStopSimulation}
         runStartTimeMs={null}
+        shouldShowUsageUpgradeAction={shouldShowUsageUpgradeAction}
         stopSimulationError={null}
+        statusMessage={runStatusMessage}
       />
     ) : null
     const runMetadata = [
@@ -3064,17 +3072,10 @@ function SimulationResultsPanel({
     ].filter(Boolean)
     const shouldShowRunMetadata = !run.isActive && runMetadata.length > 0
     const shouldShowRunActions = run.canRerun
-    const emptyRunFailureMessage =
-      run.status === "failed" ? run.failureMessage?.trim() || null : null
-    const emptyRunCancellationMessage =
-      run.status === "cancelled"
-        ? run.failureMessage?.trim() || "Run was cancelled."
-        : null
-    const emptyRunMessage =
-      emptyRunFailureMessage ?? emptyRunCancellationMessage
-    const isUsageLimitFailure = isUsageLimitFailureMessage(
-      emptyRunFailureMessage
-    )
+    const emptyRunMessage = shouldShowFinishedThinkingStatus
+      ? null
+      : runStatusMessage
+    const isUsageLimitFailure = isUsageLimitFailureMessage(emptyRunMessage)
     const finalParsedOutput = getSimulationFinalParsedOutput(run)
     const directTurnActions =
       hasGameState(run.gameState) &&
@@ -3120,13 +3121,19 @@ function SimulationResultsPanel({
             isFinishedSuccessfully={false}
             isFinished={false}
             isStoppingSimulation={isStoppingSimulation}
+            onUpgradeUsage={onUpgradeUsage}
             onStopSimulation={onStopSimulation}
             runStartTimeMs={getSimulationRunStartTimeMs(run)}
+            shouldShowUsageUpgradeAction={shouldShowUsageUpgradeAction}
             stopSimulationError={stopSimulationError}
+            statusMessage={runStatusMessage}
           />
         ) : run.resultEntries.length === 0 &&
           directTurnActions === null &&
-          finalParsedOutput === null ? (
+          finalParsedOutput === null &&
+          (run.status === "completed" ||
+            emptyRunMessage !== null ||
+            !shouldShowFinishedThinkingStatus) ? (
           <div
             className={`rounded-md border px-3 py-2 text-sm ${
               isUsageLimitFailure
@@ -3145,6 +3152,7 @@ function SimulationResultsPanel({
           >
             {isUsageLimitFailure ? (
               <UsageLimitReachedNotice
+                detail={emptyRunMessage ?? undefined}
                 onUpgradeUsage={onUpgradeUsage}
                 shouldShowUsageUpgradeAction={shouldShowUsageUpgradeAction}
               />
@@ -3740,9 +3748,12 @@ function SimulationResultThinkingStatus({
   isFinished,
   isFinishedSuccessfully,
   isStoppingSimulation,
+  onUpgradeUsage = () => {},
   onStopSimulation,
   runStartTimeMs,
+  shouldShowUsageUpgradeAction = false,
   stopSimulationError,
+  statusMessage = null,
 }: {
   canStopSimulation: boolean
   finishedDurationText: string | null
@@ -3750,9 +3761,12 @@ function SimulationResultThinkingStatus({
   isFinished: boolean
   isFinishedSuccessfully: boolean
   isStoppingSimulation: boolean
+  onUpgradeUsage?: () => void
   onStopSimulation: () => void
   runStartTimeMs: number | null
+  shouldShowUsageUpgradeAction?: boolean
   stopSimulationError: string | null
+  statusMessage?: string | null
 }) {
   const [currentTimeMs, setCurrentTimeMs] = useState(() => Date.now())
 
@@ -3781,6 +3795,7 @@ function SimulationResultThinkingStatus({
     : isPending
       ? "Pending"
       : "Thinking"
+  const isUsageLimitStatusMessage = isUsageLimitFailureMessage(statusMessage)
 
   return (
     <div className="grid gap-2 py-1 select-none">
@@ -3821,6 +3836,26 @@ function SimulationResultThinkingStatus({
           </Button>
         ) : null}
       </div>
+      {statusMessage ? (
+        <div
+          className={`rounded-md border px-3 py-2 text-sm select-text ${
+            isUsageLimitStatusMessage
+              ? "border-amber-300/30 bg-amber-400/10 text-amber-100"
+              : "border-destructive/40 bg-destructive/10 text-destructive"
+          }`}
+          role={isUsageLimitStatusMessage ? "status" : "alert"}
+        >
+          {isUsageLimitStatusMessage ? (
+            <UsageLimitReachedNotice
+              detail={statusMessage}
+              onUpgradeUsage={onUpgradeUsage}
+              shouldShowUsageUpgradeAction={shouldShowUsageUpgradeAction}
+            />
+          ) : (
+            <p className="break-words whitespace-pre-wrap">{statusMessage}</p>
+          )}
+        </div>
+      ) : null}
       {stopSimulationError ? (
         <p
           className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
@@ -5691,6 +5726,37 @@ function getCommanderCardNames(commanders: readonly DeckCard[]) {
   return cardNames
 }
 
+function getSimulationRunStatusMessage(
+  run: Pick<
+    SimulationDebugLlmRun,
+    "failureMessage" | "mcpFunctionCalls" | "status"
+  >
+) {
+  const messages = new Set<string>()
+
+  if (run.status === "failed") {
+    messages.add(run.failureMessage?.trim() || "LLM run failed.")
+  } else if (run.status === "cancelled") {
+    messages.add(run.failureMessage?.trim() || "Run was cancelled.")
+  }
+
+  for (const call of run.mcpFunctionCalls) {
+    const errorMessage = getMcpFunctionCallErrorMessage(call)
+
+    if (errorMessage === null) {
+      if (isMcpFunctionCallFailure(call)) {
+        messages.add(getMcpFunctionCallCompleteTitle(call))
+      }
+
+      continue
+    }
+
+    messages.add(`${getMcpFunctionCallCompleteTitle(call)}: ${errorMessage}`)
+  }
+
+  return messages.size > 0 ? Array.from(messages).join("\n") : null
+}
+
 function getMcpFunctionCallCompleteTitle(call: SimulationMcpFunctionCall) {
   const toolName = call.mcpFunctionName
   const knownToolLabel = getKnownSimulationResultToolLabel({
@@ -5735,9 +5801,57 @@ function isMcpFunctionCallFailure(call: SimulationMcpFunctionCall) {
   )
 }
 
+function getMcpFunctionCallErrorMessage(call: SimulationMcpFunctionCall) {
+  const errorPayload = getMcpFunctionCallErrorPayload(call)
+
+  if (errorPayload === null) {
+    if (call.status === "failed") {
+      const directOutputMessage =
+        typeof call.outputPayload === "string"
+          ? call.outputPayload.trim() || null
+          : (getPayloadTrimmedString(call.outputPayload, "message") ??
+            getPayloadTrimmedString(call.outputPayload, "error") ??
+            getPayloadTrimmedString(call.outputPayload, "code"))
+
+      return directOutputMessage
+    }
+
+    return null
+  }
+
+  if (typeof errorPayload === "string") {
+    return errorPayload.trim() || null
+  }
+
+  const directMessage =
+    getPayloadTrimmedString(errorPayload, "message") ??
+    getPayloadTrimmedString(errorPayload, "error") ??
+    getPayloadTrimmedString(errorPayload, "code")
+
+  if (directMessage !== null) {
+    return directMessage
+  }
+
+  try {
+    const serializedPayload = JSON.stringify(errorPayload)
+
+    return serializedPayload === undefined || serializedPayload === "{}"
+      ? null
+      : serializedPayload
+  } catch {
+    return null
+  }
+}
+
 function getMcpFunctionCallErrorPayload(call: SimulationMcpFunctionCall) {
   const outputRecord = asPayloadRecord(call.outputPayload)
-  const errorRecord = asPayloadRecord(outputRecord.error)
+  const errorValue = outputRecord.error
+
+  if (typeof errorValue === "string") {
+    return errorValue.trim() || null
+  }
+
+  const errorRecord = asPayloadRecord(errorValue)
   const content = errorRecord.content
 
   if (!Array.isArray(content)) {
@@ -5767,6 +5881,12 @@ function getPayloadString(value: unknown, property: string) {
   const propertyValue = asPayloadRecord(value)[property]
 
   return typeof propertyValue === "string" ? propertyValue : null
+}
+
+function getPayloadTrimmedString(value: unknown, property: string) {
+  const propertyValue = getPayloadString(value, property)?.trim()
+
+  return propertyValue ? propertyValue : null
 }
 
 function EmptySimulationSelection() {
