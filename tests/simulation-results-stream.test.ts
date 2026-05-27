@@ -8,7 +8,6 @@ import {
 import { formatDebugChunkBlocks } from "../src/lib/simulation-debug-chunks.js"
 import {
   formatSimulationRunClipboardText,
-  getSimulationRunActivityBlocks,
   getSimulationRunActiveToolCallName,
   getSimulationResultEntries,
   getSimulationResultChunks,
@@ -333,7 +332,7 @@ test("updates queued pending runs when they start streaming", () => {
   assert.equal(results?.turnLlmRuns[0].startedAt, "2026-01-01T00:00:05.000Z")
 })
 
-test("uses started time, not created time, for run activity timing", () => {
+test("uses started time, not created time, for run elapsed timing", () => {
   assert.equal(
     getSimulationRunStartTimeMs(
       createRun({
@@ -1216,96 +1215,6 @@ test("returns null for empty thinking previews", () => {
   )
 })
 
-test("omits output lifecycle text from activity blocks", () => {
-  const blocks = getSimulationRunActivityBlocks([
-    createChunk({
-      id: 1,
-      kind: "reasoning_start",
-      sequence: 1,
-    }),
-    createChunk({
-      id: 2,
-      kind: "reasoning_delta",
-      reasoningDelta: "**Keep** ",
-      sequence: 2,
-    }),
-    createChunk({
-      id: 3,
-      kind: "reasoning_delta",
-      reasoningDelta: "a two-land hand.",
-      sequence: 3,
-    }),
-    createChunk({
-      id: 4,
-      kind: "reasoning_done",
-      sequence: 4,
-    }),
-    createChunk({
-      id: 5,
-      kind: "output_start",
-      sequence: 5,
-    }),
-    createChunk({
-      id: 6,
-      outputDelta: "Keeping this opener.",
-      sequence: 6,
-    }),
-    createChunk({
-      id: 7,
-      kind: "output_done",
-      sequence: 7,
-    }),
-  ])
-
-  assert.deepEqual(
-    blocks.map((block) => block.type),
-    ["reasoning"]
-  )
-  assert.equal(
-    blocks[0]?.type === "reasoning" ? blocks[0].text : "",
-    "**Keep** a two-land hand."
-  )
-})
-
-test("separates activity reasoning blocks by summary part index", () => {
-  const blocks = getSimulationRunActivityBlocks([
-    createChunk({
-      id: 1,
-      kind: "reasoning_delta",
-      reasoningDelta: "I am checking mana for the signet.",
-      payload: createReasoningSummaryDeltaPayload(0),
-      sequence: 1,
-    }),
-    createChunk({
-      id: 2,
-      kind: "reasoning_delta",
-      reasoningDelta: "Calculating available mana\n\nSol Ring can pay for it.",
-      payload: createReasoningSummaryDeltaPayload(1),
-      sequence: 2,
-    }),
-    createChunk({
-      id: 3,
-      kind: "reasoning_delta",
-      reasoningDelta: "Reviewing mana options\n\nThe signet can make red.",
-      payload: createReasoningSummaryDeltaPayload(2),
-      sequence: 3,
-    }),
-  ])
-
-  assert.deepEqual(
-    blocks.map((block) => block.type),
-    ["reasoning", "reasoning", "reasoning"]
-  )
-  assert.deepEqual(
-    blocks.map((block) => (block.type === "reasoning" ? block.text : "")),
-    [
-      "I am checking mana for the signet.",
-      "Calculating available mana\n\nSol Ring can pay for it.",
-      "Reviewing mana options\n\nThe signet can make red.",
-    ]
-  )
-})
-
 test("separates clipboard reasoning blocks by summary part index", () => {
   const text = formatSimulationRunClipboardText(
     createRun({
@@ -1343,114 +1252,6 @@ test("separates clipboard reasoning blocks by summary part index", () => {
       "I am checking mana for the signet.",
       "Calculating available mana after Sol Ring.",
     ].join("\n\n")
-  )
-})
-
-test("omits output deltas and keeps them as activity block boundaries", () => {
-  const blocks = getSimulationRunActivityBlocks([
-    createChunk({
-      id: 1,
-      kind: "reasoning_delta",
-      reasoningDelta: "First ",
-      sequence: 1,
-    }),
-    createChunk({
-      id: 2,
-      kind: "reasoning_delta",
-      reasoningDelta: "thought.",
-      sequence: 2,
-    }),
-    createChunk({
-      id: 3,
-      outputDelta: "Visible output.",
-      sequence: 3,
-    }),
-    createChunk({
-      id: 4,
-      kind: "reasoning_delta",
-      reasoningDelta: "Second thought.",
-      sequence: 4,
-    }),
-  ])
-
-  assert.deepEqual(
-    blocks.map((block) => block.type),
-    ["reasoning", "reasoning"]
-  )
-  assert.equal(
-    blocks[0]?.type === "reasoning" ? blocks[0].text : "",
-    "First thought."
-  )
-  assert.equal(
-    blocks[1]?.type === "reasoning" ? blocks[1].text : "",
-    "Second thought."
-  )
-})
-
-test("formats activity tool calls once with only tool names", () => {
-  const blocks = getSimulationRunActivityBlocks([
-    createChunk({
-      id: 1,
-      kind: "mcp_call_start",
-      mcpFunctionName: "draw_starting_hand",
-      payload: {
-        item: {
-          id: "call_1",
-        },
-      },
-      sequence: 1,
-    }),
-    createChunk({
-      id: 2,
-      kind: "reasoning_delta",
-      reasoningDelta: "Checking the hand.",
-      sequence: 2,
-    }),
-    createChunk({
-      id: 3,
-      kind: "mcp_call_complete",
-      mcpFunctionName: "draw_starting_hand",
-      payload: {
-        item: {
-          id: "call_1",
-        },
-      },
-      sequence: 3,
-    }),
-    createChunk({
-      id: 4,
-      kind: "mcp_call_start",
-      mcpFunctionName: "mulligan",
-      sequence: 4,
-    }),
-  ])
-
-  assert.deepEqual(
-    blocks.map((block) => block.type),
-    ["tool_call", "reasoning", "tool_call"]
-  )
-  assert.deepEqual(
-    blocks.flatMap((block) =>
-      block.type === "tool_call" ? [block.toolName] : []
-    ),
-    ["draw_starting_hand", "mulligan"]
-  )
-})
-
-test("formats unnamed activity tool calls as unknown tools", () => {
-  const blocks = getSimulationRunActivityBlocks([
-    createChunk({
-      id: 1,
-      kind: "mcp_call_complete",
-      mcpFunctionName: null,
-      sequence: 1,
-    }),
-  ])
-
-  assert.equal(blocks[0]?.type, "tool_call")
-  assert.equal(
-    blocks[0]?.type === "tool_call" ? blocks[0].toolName : "",
-    "Unknown tool"
   )
 })
 

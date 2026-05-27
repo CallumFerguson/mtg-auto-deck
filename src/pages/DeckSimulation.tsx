@@ -9,7 +9,6 @@ import {
   type FormEvent,
   type RefObject,
   type ReactNode,
-  type TransitionEvent,
   type UIEvent,
 } from "react"
 import ReactMarkdown from "react-markdown"
@@ -20,7 +19,6 @@ import {
   BookCopy,
   Bug,
   Check,
-  ChevronRight,
   ClipboardCheck,
   ClipboardCopy,
   Dices,
@@ -122,13 +120,11 @@ import {
 import {
   TURN_PHASE_CHANGES,
   formatSimulationRunClipboardText,
-  getSimulationRunActivityBlocks,
   getSimulationRunActiveToolCallName,
   getSimulationResultEntries,
   hasSimulationRunFinalParsedOutputChunk,
   isSimulationRunLatestChunkOutputDelta,
   type LoggedTurnAction,
-  type SimulationRunActivityBlock,
   type SimulationResultEntry,
   type TurnPhaseChange,
 } from "@/lib/simulation-result-chunks"
@@ -161,7 +157,7 @@ type SimulationResultsAction =
       turnNumber: number
     }
 
-type SimulationRunActivityCopyMode = "run_text" | "with_prompt"
+type SimulationRunTranscriptCopyMode = "run_text" | "with_prompt"
 
 type SimulationResultsNextTurnTimelineStep = {
   id: string
@@ -186,7 +182,6 @@ type SimulationResultsDisplayTimelineStep =
   | SimulationResultsReportTimelineStep
 
 const DEFAULT_TURNS_TO_SIMULATE = "1"
-const ACTIVITY_PANEL_EXIT_FALLBACK_MS = 350
 const USAGE_LIMIT_FAILURE_MESSAGE_PATTERN = /\bout of usage limits\b/i
 const CREATE_SIMULATION_USE_FLEX_STORAGE_KEY =
   "mtg-auto-deck:create-simulation-use-flex-service-tier"
@@ -2678,47 +2673,10 @@ function SimulationDetails({
   const isProgrammaticResultsScrollRef = useRef(false)
   const previousResultsScrollTopRef = useRef(0)
   const [resultsStreamRestartKey, setResultsStreamRestartKey] = useState(0)
-  const [selectedActivityRunId, setSelectedActivityRunId] = useState<
-    string | null
-  >(null)
-  const [activityPanelRunId, setActivityPanelRunId] = useState<string | null>(
-    null
-  )
-  const [isActivityPanelOpen, setIsActivityPanelOpen] = useState(false)
-  const openActivityPanelFrameRef = useRef<number | null>(null)
   const shouldSimulateOpeningHand = simulation.startingHandId === null
   const selectedModelPreset =
     modelPresets.find((preset) => preset.id === simulation.llmModelPresetId) ??
     null
-  const activityRuns = useMemo(() => {
-    if (!resultsInfo) {
-      return []
-    }
-
-    return [
-      ...resultsInfo.openingHandLlmRuns,
-      ...resultsInfo.turnLlmRuns,
-      ...resultsInfo.reportLlmRuns,
-    ]
-  }, [resultsInfo])
-  const selectedActivityRun = useMemo(() => {
-    if (selectedActivityRunId === null) {
-      return null
-    }
-
-    return (
-      activityRuns.find((run) => run.llmRunId === selectedActivityRunId) ?? null
-    )
-  }, [activityRuns, selectedActivityRunId])
-  const activityPanelRun = useMemo(() => {
-    if (activityPanelRunId === null) {
-      return null
-    }
-
-    return (
-      activityRuns.find((run) => run.llmRunId === activityPanelRunId) ?? null
-    )
-  }, [activityPanelRunId, activityRuns])
 
   useEffect(() => {
     simulationRef.current = simulation
@@ -2727,101 +2685,6 @@ function SimulationDetails({
   useEffect(() => {
     usageLimitRefreshRunIdsRef.current.clear()
   }, [simulation.id])
-
-  const clearOpenActivityPanelFrame = useCallback(() => {
-    if (openActivityPanelFrameRef.current === null) {
-      return
-    }
-
-    window.cancelAnimationFrame(openActivityPanelFrameRef.current)
-    openActivityPanelFrameRef.current = null
-  }, [])
-
-  const closeActivityPanel = useCallback(() => {
-    clearOpenActivityPanelFrame()
-    setSelectedActivityRunId(null)
-    setIsActivityPanelOpen(false)
-
-    if (!isActivityPanelOpen) {
-      setActivityPanelRunId(null)
-    }
-  }, [clearOpenActivityPanelFrame, isActivityPanelOpen])
-
-  const openActivityPanel = useCallback(
-    (llmRunId: string) => {
-      clearOpenActivityPanelFrame()
-      setSelectedActivityRunId(llmRunId)
-      setActivityPanelRunId(llmRunId)
-
-      if (isActivityPanelOpen || activityPanelRunId !== null) {
-        setIsActivityPanelOpen(true)
-        return
-      }
-
-      setIsActivityPanelOpen(false)
-      openActivityPanelFrameRef.current = window.requestAnimationFrame(() => {
-        openActivityPanelFrameRef.current = null
-        setIsActivityPanelOpen(true)
-      })
-    },
-    [activityPanelRunId, clearOpenActivityPanelFrame, isActivityPanelOpen]
-  )
-
-  const toggleActivityRun = useCallback(
-    (llmRunId: string) => {
-      if (selectedActivityRunId === llmRunId) {
-        closeActivityPanel()
-        return
-      }
-
-      openActivityPanel(llmRunId)
-    },
-    [closeActivityPanel, openActivityPanel, selectedActivityRunId]
-  )
-
-  const handleActivityPanelExited = useCallback(() => {
-    setActivityPanelRunId(null)
-  }, [])
-
-  useEffect(() => {
-    return () => {
-      clearOpenActivityPanelFrame()
-    }
-  }, [clearOpenActivityPanelFrame])
-
-  useEffect(() => {
-    if (resultsInfo === null) {
-      return
-    }
-
-    const isSelectedRunMissing =
-      selectedActivityRunId !== null && selectedActivityRun === null
-    const isPanelRunMissing =
-      activityPanelRunId !== null && activityPanelRun === null
-
-    if (!isSelectedRunMissing && !isPanelRunMissing) {
-      return
-    }
-
-    clearOpenActivityPanelFrame()
-
-    if (isSelectedRunMissing) {
-      setSelectedActivityRunId(null)
-    }
-
-    if (isPanelRunMissing) {
-      setActivityPanelRunId(null)
-    }
-
-    setIsActivityPanelOpen(false)
-  }, [
-    activityPanelRun,
-    activityPanelRunId,
-    clearOpenActivityPanelFrame,
-    resultsInfo,
-    selectedActivityRun,
-    selectedActivityRunId,
-  ])
 
   const scrollResultsToBottom = useCallback(() => {
     const resultsPanel = resultsPanelRef.current
@@ -2875,16 +2738,7 @@ function SimulationDetails({
     setResultsInfo(initialResultsInfo)
     resultsInfoRef.current = initialResultsInfo
     setResultsStreamRestartKey(0)
-    setSelectedActivityRunId(null)
-    setActivityPanelRunId(null)
-    setIsActivityPanelOpen(false)
-    clearOpenActivityPanelFrame()
-  }, [
-    clearOpenActivityPanelFrame,
-    initialResultsInfo,
-    scrollResultsToBottom,
-    simulation.id,
-  ])
+  }, [initialResultsInfo, scrollResultsToBottom, simulation.id])
 
   useLayoutEffect(() => {
     if (keepResultsScrolledDownRef.current) {
@@ -3308,18 +3162,8 @@ function SimulationDetails({
     simulation.id,
   ])
 
-  const activityPanel = activityPanelRun ? (
-    <SimulationRunActivityPanel
-      isOpen={isActivityPanelOpen}
-      run={activityPanelRun}
-      onClose={closeActivityPanel}
-      onExited={handleActivityPanelExited}
-    />
-  ) : null
-
   return resultsInfo ? (
     <SimulationResultsPanel
-      activityPanel={activityPanel}
       canUpgradeUsage={canUpgradeUsage}
       cards={cards}
       commanders={commanders}
@@ -3339,7 +3183,6 @@ function SimulationDetails({
       onModelPresetRequired={onOpenDetails}
       onResultsScroll={handleResultsScroll}
       onScrollResultsToBottomIfKept={scrollResultsToBottomIfKept}
-      onSelectActivityRun={toggleActivityRun}
       onStartTurnRun={(turnNumber) => void handleStartTurnRun(turnNumber)}
       onStopSimulation={() => void handleStopSimulation()}
       onOpeningHandEvaluationSaved={handleOpeningHandEvaluationSaved}
@@ -3351,7 +3194,6 @@ function SimulationDetails({
       resultsError={resultsError}
       resultsInfo={resultsInfo}
       resultsPanelRef={resultsPanelRef}
-      selectedActivityRunId={selectedActivityRunId}
       simulation={simulation}
       startingHand={startingHand}
       startingHandLoadError={startingHandLoadError}
@@ -3359,7 +3201,7 @@ function SimulationDetails({
       turnRunError={turnRunError}
     />
   ) : (
-    <SimulationResultsShell activityPanel={activityPanel} gameState={null}>
+    <SimulationResultsShell gameState={null}>
       <main
         ref={resultsPanelRef}
         className="simulation-scrollbar h-full min-h-0 min-w-0 flex-1 overflow-y-auto"
@@ -3391,13 +3233,11 @@ function SimulationDetails({
 }
 
 function SimulationResultsShell({
-  activityPanel,
   cardLookup = EMPTY_SIMULATION_CARD_LOOKUP,
   children,
   gameState,
   header = null,
 }: {
-  activityPanel: ReactNode
   cardLookup?: SimulationCardLookup
   children: ReactNode
   gameState: SimulationGameStateDisplay | null
@@ -3420,8 +3260,6 @@ function SimulationResultsShell({
           />
         </div>
       </div>
-
-      {activityPanel}
     </div>
   )
 }
@@ -3830,7 +3668,6 @@ function SimulationDebugModal({
 }
 
 function SimulationResultsPanel({
-  activityPanel,
   canUpgradeUsage,
   cards,
   commanders,
@@ -3849,7 +3686,6 @@ function SimulationResultsPanel({
   onModelPresetRequired,
   onResultsScroll,
   onScrollResultsToBottomIfKept,
-  onSelectActivityRun,
   onStartTurnRun,
   onStartReportRun,
   onStopSimulation,
@@ -3862,14 +3698,12 @@ function SimulationResultsPanel({
   resultsError,
   resultsInfo,
   resultsPanelRef,
-  selectedActivityRunId,
   simulation,
   startingHand,
   startingHandLoadError,
   stopSimulationError,
   turnRunError,
 }: {
-  activityPanel: ReactNode
   canUpgradeUsage: boolean
   cards: DeckCard[]
   commanders: DeckCard[]
@@ -3888,7 +3722,6 @@ function SimulationResultsPanel({
   onModelPresetRequired: () => void
   onResultsScroll: (event: UIEvent<HTMLElement>) => void
   onScrollResultsToBottomIfKept: () => void
-  onSelectActivityRun: (llmRunId: string) => void
   onStartTurnRun: (turnNumber: number) => void
   onStartReportRun: () => void
   onStopSimulation: () => void
@@ -3901,7 +3734,6 @@ function SimulationResultsPanel({
   resultsError: string | null
   resultsInfo: SimulationResultsInfo
   resultsPanelRef: RefObject<HTMLElement | null>
-  selectedActivityRunId: string | null
   simulation: Simulation
   startingHand: StartingHand | null
   startingHandLoadError: string | null
@@ -4046,12 +3878,12 @@ function SimulationResultsPanel({
     llmRunId: string
     resultKind: "opening_hand" | "turn"
   } | null>(null)
-  const copyActivityResetTimeoutRef = useRef<number | null>(null)
-  const [copiedActivityState, setCopiedActivityState] = useState<{
+  const copyTranscriptResetTimeoutRef = useRef<number | null>(null)
+  const [copiedTranscriptState, setCopiedTranscriptState] = useState<{
     llmRunId: string
-    mode: SimulationRunActivityCopyMode
+    mode: SimulationRunTranscriptCopyMode
   } | null>(null)
-  const [copyingActivityWithPromptRunId, setCopyingActivityWithPromptRunId] =
+  const [copyingTranscriptWithPromptRunId, setCopyingTranscriptWithPromptRunId] =
     useState<string | null>(null)
   const evaluationRun = useMemo(() => {
     if (evaluationRunSelection === null) {
@@ -4090,18 +3922,18 @@ function SimulationResultsPanel({
     resultsInfo.turnLlmRuns,
   ])
 
-  const clearCopyActivityResetTimeout = useCallback(() => {
-    if (copyActivityResetTimeoutRef.current === null) {
+  const clearCopyTranscriptResetTimeout = useCallback(() => {
+    if (copyTranscriptResetTimeoutRef.current === null) {
       return
     }
 
-    window.clearTimeout(copyActivityResetTimeoutRef.current)
-    copyActivityResetTimeoutRef.current = null
+    window.clearTimeout(copyTranscriptResetTimeoutRef.current)
+    copyTranscriptResetTimeoutRef.current = null
   }, [])
 
   useEffect(
-    () => clearCopyActivityResetTimeout,
-    [clearCopyActivityResetTimeout]
+    () => clearCopyTranscriptResetTimeout,
+    [clearCopyTranscriptResetTimeout]
   )
 
   useEffect(() => {
@@ -4144,9 +3976,9 @@ function SimulationResultsPanel({
     return false
   }
 
-  async function handleCopyActivityRunText(
+  async function handleCopyRunTranscript(
     run: SimulationDebugLlmRun,
-    mode: SimulationRunActivityCopyMode
+    mode: SimulationRunTranscriptCopyMode
   ) {
     if (!isAdmin) {
       return
@@ -4156,7 +3988,7 @@ function SimulationResultsPanel({
       let text = formatSimulationRunClipboardText(run)
 
       if (mode === "with_prompt") {
-        setCopyingActivityWithPromptRunId(run.llmRunId)
+        setCopyingTranscriptWithPromptRunId(run.llmRunId)
         const fullPrompt = await loadLlmRunFullPrompt({
           deckId,
           llmRunId: run.llmRunId,
@@ -4167,20 +3999,20 @@ function SimulationResultsPanel({
       }
 
       await writePlainTextToClipboard(text)
-      setCopiedActivityState({
+      setCopiedTranscriptState({
         llmRunId: run.llmRunId,
         mode,
       })
-      clearCopyActivityResetTimeout()
-      copyActivityResetTimeoutRef.current = window.setTimeout(() => {
-        setCopiedActivityState(null)
-        copyActivityResetTimeoutRef.current = null
+      clearCopyTranscriptResetTimeout()
+      copyTranscriptResetTimeoutRef.current = window.setTimeout(() => {
+        setCopiedTranscriptState(null)
+        copyTranscriptResetTimeoutRef.current = null
       }, 1400)
     } catch (error) {
       console.error("Failed to copy LLM run text:", error)
     } finally {
       if (mode === "with_prompt") {
-        setCopyingActivityWithPromptRunId((currentRunId) =>
+        setCopyingTranscriptWithPromptRunId((currentRunId) =>
           currentRunId === run.llmRunId ? null : currentRunId
         )
       }
@@ -4372,9 +4204,7 @@ function SimulationResultsPanel({
         isPending={false}
         isFinishedSuccessfully={run.status === "completed"}
         isFinished={true}
-        isActivitySelected={selectedActivityRunId === run.llmRunId}
         isStoppingSimulation={false}
-        onViewActivity={() => onSelectActivityRun(run.llmRunId)}
         onStopSimulation={onStopSimulation}
         runStartTimeMs={null}
         stopSimulationError={null}
@@ -4390,12 +4220,12 @@ function SimulationResultsPanel({
     const shouldShowRunMetadata = !run.isActive && runMetadata.length > 0
     const shouldShowRunActions = isAdmin || run.canEvaluate || run.canRerun
     const runClipboardText = formatSimulationRunClipboardText(run)
-    const copiedActivityMode =
-      copiedActivityState?.llmRunId === run.llmRunId
-        ? copiedActivityState.mode
+    const copiedTranscriptMode =
+      copiedTranscriptState?.llmRunId === run.llmRunId
+        ? copiedTranscriptState.mode
         : null
-    const isCopyingActivityWithPrompt =
-      copyingActivityWithPromptRunId === run.llmRunId
+    const isCopyingTranscriptWithPrompt =
+      copyingTranscriptWithPromptRunId === run.llmRunId
     const hasLiveReport =
       run.resultKind === "report" &&
       !run.hasFinalParsedOutputChunk &&
@@ -4448,9 +4278,7 @@ function SimulationResultsPanel({
             isPending={run.status === "pending"}
             isFinishedSuccessfully={false}
             isFinished={false}
-            isActivitySelected={selectedActivityRunId === run.llmRunId}
             isStoppingSimulation={isStoppingSimulation}
-            onViewActivity={() => onSelectActivityRun(run.llmRunId)}
             onStopSimulation={onStopSimulation}
             runStartTimeMs={getSimulationRunStartTimeMs(run)}
             stopSimulationError={stopSimulationError}
@@ -4502,23 +4330,23 @@ function SimulationResultsPanel({
                 <>
                   <Button
                     className={
-                      copiedActivityMode === "with_prompt"
+                      copiedTranscriptMode === "with_prompt"
                         ? "text-emerald-300 hover:text-emerald-200"
                         : "text-muted-foreground hover:text-foreground"
                     }
                     type="button"
                     variant="outline"
                     size="icon-sm"
-                    aria-label="Copy activity with prompt"
-                    title="Copy activity with prompt"
-                    disabled={isCopyingActivityWithPrompt}
+                    aria-label="Copy transcript with prompt"
+                    title="Copy transcript with prompt"
+                    disabled={isCopyingTranscriptWithPrompt}
                     onClick={() =>
-                      void handleCopyActivityRunText(run, "with_prompt")
+                      void handleCopyRunTranscript(run, "with_prompt")
                     }
                   >
-                    {isCopyingActivityWithPrompt ? (
+                    {isCopyingTranscriptWithPrompt ? (
                       <LoaderCircle className="animate-spin" />
-                    ) : copiedActivityMode === "with_prompt" ? (
+                    ) : copiedTranscriptMode === "with_prompt" ? (
                       <ClipboardCheck />
                     ) : (
                       <BookCopy />
@@ -4526,21 +4354,21 @@ function SimulationResultsPanel({
                   </Button>
                   <Button
                     className={
-                      copiedActivityMode === "run_text"
+                      copiedTranscriptMode === "run_text"
                         ? "text-emerald-300 hover:text-emerald-200"
                         : "text-muted-foreground hover:text-foreground"
                     }
                     type="button"
                     variant="outline"
                     size="icon-sm"
-                    aria-label="Copy activity text"
-                    title="Copy activity text"
+                    aria-label="Copy transcript"
+                    title="Copy transcript"
                     disabled={runClipboardText.length === 0}
                     onClick={() =>
-                      void handleCopyActivityRunText(run, "run_text")
+                      void handleCopyRunTranscript(run, "run_text")
                     }
                   >
-                    {copiedActivityMode === "run_text" ? (
+                    {copiedTranscriptMode === "run_text" ? (
                       <ClipboardCheck />
                     ) : (
                       <ClipboardCopy />
@@ -4771,7 +4599,6 @@ function SimulationResultsPanel({
   return (
     <>
       <SimulationResultsShell
-        activityPanel={activityPanel}
         cardLookup={cardLookup}
         gameState={selectedGameState}
         header={renderTimelineHeader()}
@@ -5819,9 +5646,7 @@ function SimulationResultThinkingStatus({
   isPending,
   isFinished,
   isFinishedSuccessfully,
-  isActivitySelected,
   isStoppingSimulation,
-  onViewActivity,
   onStopSimulation,
   runStartTimeMs,
   stopSimulationError,
@@ -5833,9 +5658,7 @@ function SimulationResultThinkingStatus({
   isPending: boolean
   isFinished: boolean
   isFinishedSuccessfully: boolean
-  isActivitySelected: boolean
   isStoppingSimulation: boolean
-  onViewActivity: () => void
   onStopSimulation: () => void
   runStartTimeMs: number | null
   stopSimulationError: string | null
@@ -5882,21 +5705,7 @@ function SimulationResultThinkingStatus({
   return (
     <div className="grid gap-2 py-1 select-none">
       <div className="flex min-w-0 items-center justify-between gap-2">
-        <button
-          className="group inline-flex max-w-full min-w-0 flex-1 items-center gap-2 rounded-sm px-0.5 py-1 text-left text-sm font-medium text-sky-200 transition-colors hover:text-sky-100 focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
-          type="button"
-          aria-pressed={isActivitySelected}
-          title={
-            isActivitySelected
-              ? isPending
-                ? "Close pending activity"
-                : "Close thinking activity"
-              : isPending
-                ? "View pending activity"
-                : "View thinking activity"
-          }
-          onClick={onViewActivity}
-        >
+        <div className="inline-flex max-w-full min-w-0 flex-1 items-center gap-2 rounded-sm px-0.5 py-1 text-left text-sm font-medium text-sky-200">
           {isFinished ? (
             isFinishedSuccessfully ? (
               <Check className="size-4 shrink-0 text-emerald-300" />
@@ -5912,11 +5721,7 @@ function SimulationResultThinkingStatus({
               {activeElapsedText}
             </span>
           ) : null}
-          <ChevronRight
-            className="size-4 shrink-0 text-sky-300/70 transition-transform group-hover:translate-x-0.5 group-hover:text-sky-100"
-            aria-hidden="true"
-          />
-        </button>
+        </div>
         {canStopSimulation ? (
           <Button
             className="size-8 rounded-full border border-border/80 bg-background/20 text-muted-foreground hover:border-sky-300/50 hover:text-foreground"
@@ -5948,459 +5753,7 @@ function SimulationResultThinkingStatus({
   )
 }
 
-function SimulationRunActivityPanel({
-  isOpen,
-  onClose,
-  onExited,
-  run,
-}: {
-  isOpen: boolean
-  onClose: () => void
-  onExited: () => void
-  run: SimulationDebugLlmRun
-}) {
-  const activityScrollRef = useRef<HTMLDivElement | null>(null)
-  const keepActivityScrolledDownRef = useRef(true)
-  const isProgrammaticActivityScrollRef = useRef(false)
-  const previousActivityScrollTopRef = useRef(0)
-  const exitTimeoutRef = useRef<number | null>(null)
-  const hasOpenedRef = useRef(false)
-  const [currentTimeMs, setCurrentTimeMs] = useState(() => Date.now())
-  const activityBlocks = useMemo(
-    () => getSimulationRunActivityBlocks(run.chunks),
-    [run.chunks]
-  )
-  const activityTimelineItems = useMemo(
-    () => getSimulationRunActivityTimelineItems(activityBlocks),
-    [activityBlocks]
-  )
-  const runStartTimeMs = getSimulationRunStartTimeMs(run)
-  const runFinishedTimeMs = getSimulationRunFinishedTimeMs(run)
-  const durationText =
-    runStartTimeMs === null
-      ? null
-      : formatMinutesSeconds(
-          (runFinishedTimeMs ?? currentTimeMs) - runStartTimeMs
-        )
-  const terminalActivityStatus = useMemo(
-    () =>
-      getSimulationRunTerminalActivityStatus({
-        durationText,
-        failureMessage: run.failureMessage,
-        runStatus: run.status,
-      }),
-    [durationText, run.failureMessage, run.status]
-  )
-
-  const clearExitTimeout = useCallback(() => {
-    if (exitTimeoutRef.current === null) {
-      return
-    }
-
-    window.clearTimeout(exitTimeoutRef.current)
-    exitTimeoutRef.current = null
-  }, [])
-
-  const finishExit = useCallback(() => {
-    if (isOpen) {
-      return
-    }
-
-    clearExitTimeout()
-    onExited()
-  }, [clearExitTimeout, isOpen, onExited])
-
-  const scrollActivityToBottom = useCallback(() => {
-    const activityScrollElement = activityScrollRef.current
-
-    if (!activityScrollElement) {
-      return
-    }
-
-    isProgrammaticActivityScrollRef.current = true
-    activityScrollElement.scrollTo({
-      top: activityScrollElement.scrollHeight,
-    })
-
-    window.requestAnimationFrame(() => {
-      previousActivityScrollTopRef.current = activityScrollElement.scrollTop
-      isProgrammaticActivityScrollRef.current = false
-    })
-  }, [])
-
-  useEffect(() => {
-    if (isOpen) {
-      hasOpenedRef.current = true
-      clearExitTimeout()
-      return
-    }
-
-    if (!hasOpenedRef.current) {
-      return
-    }
-
-    exitTimeoutRef.current = window.setTimeout(
-      finishExit,
-      ACTIVITY_PANEL_EXIT_FALLBACK_MS
-    )
-
-    return clearExitTimeout
-  }, [clearExitTimeout, finishExit, isOpen])
-
-  useEffect(() => {
-    keepActivityScrolledDownRef.current = true
-    previousActivityScrollTopRef.current = 0
-    scrollActivityToBottom()
-  }, [run.llmRunId, scrollActivityToBottom])
-
-  useEffect(() => {
-    if (runFinishedTimeMs !== null || runStartTimeMs === null) {
-      return
-    }
-
-    const intervalId = window.setInterval(() => {
-      setCurrentTimeMs(Date.now())
-    }, 1000)
-
-    return () => {
-      window.clearInterval(intervalId)
-    }
-  }, [run.llmRunId, runFinishedTimeMs, runStartTimeMs])
-
-  useLayoutEffect(() => {
-    if (keepActivityScrolledDownRef.current) {
-      scrollActivityToBottom()
-    }
-  }, [activityTimelineItems, scrollActivityToBottom, terminalActivityStatus])
-
-  useEffect(() => {
-    const activityScrollElement = activityScrollRef.current
-
-    if (!activityScrollElement) {
-      return
-    }
-
-    const resizeObserver = new ResizeObserver(() => {
-      if (keepActivityScrolledDownRef.current) {
-        scrollActivityToBottom()
-      }
-    })
-
-    resizeObserver.observe(activityScrollElement)
-
-    return () => {
-      resizeObserver.disconnect()
-    }
-  }, [scrollActivityToBottom])
-
-  function handleActivityScroll(event: UIEvent<HTMLDivElement>) {
-    const activityScrollElement = event.currentTarget
-    const distanceFromBottom =
-      activityScrollElement.scrollHeight -
-      activityScrollElement.clientHeight -
-      activityScrollElement.scrollTop
-
-    if (distanceFromBottom <= 4) {
-      keepActivityScrolledDownRef.current = true
-    } else if (
-      !isProgrammaticActivityScrollRef.current &&
-      activityScrollElement.scrollTop < previousActivityScrollTopRef.current
-    ) {
-      keepActivityScrolledDownRef.current = false
-    }
-
-    previousActivityScrollTopRef.current = activityScrollElement.scrollTop
-  }
-
-  function handlePanelTransitionEnd(event: TransitionEvent<HTMLDivElement>) {
-    if (
-      event.target !== event.currentTarget ||
-      event.propertyName !== "width"
-    ) {
-      return
-    }
-
-    finishExit()
-  }
-
-  return (
-    <div
-      className={`h-full min-h-0 shrink-0 overflow-hidden transition-[width] duration-300 ease-out motion-reduce:transition-none ${
-        isOpen ? "w-[clamp(18rem,30vw,24rem)]" : "w-0"
-      }`}
-      onTransitionEnd={handlePanelTransitionEnd}
-    >
-      <aside
-        className="flex h-full min-h-0 w-[clamp(18rem,30vw,24rem)] flex-col border-l border-border bg-background/80"
-        aria-label="Simulation activity"
-      >
-        <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-          <h3 className="min-w-0 truncate text-sm font-semibold text-foreground">
-            {durationText ? `Activity • ${durationText}` : "Activity"}
-          </h3>
-          <div className="flex shrink-0 items-center gap-1">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Close activity"
-              title="Close activity"
-              onClick={onClose}
-            >
-              <X />
-            </Button>
-          </div>
-        </header>
-
-        <div
-          ref={activityScrollRef}
-          className="simulation-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-5"
-          onScroll={handleActivityScroll}
-        >
-          <div className="grid gap-4">
-            {activityTimelineItems.length > 0 ? (
-              <>
-                <p className="text-base font-semibold text-sky-100">Thinking</p>
-                <div className="grid gap-5">
-                  {activityTimelineItems.map((item) => (
-                    <SimulationRunActivityTimelineItemView
-                      key={item.id}
-                      item={item}
-                    />
-                  ))}
-                  {terminalActivityStatus ? (
-                    <SimulationRunActivityTerminalStatus
-                      status={terminalActivityStatus}
-                    />
-                  ) : null}
-                </div>
-              </>
-            ) : (
-              <div className="grid gap-5">
-                <p className="text-sm text-muted-foreground">
-                  No activity recorded yet.
-                </p>
-                {terminalActivityStatus ? (
-                  <SimulationRunActivityTerminalStatus
-                    status={terminalActivityStatus}
-                  />
-                ) : null}
-              </div>
-            )}
-          </div>
-        </div>
-      </aside>
-    </div>
-  )
-}
-
-type SimulationRunTerminalActivityStatus = {
-  detail: string
-  title: string
-  tone: "error" | "muted" | "success"
-}
-
-function getSimulationRunTerminalActivityStatus({
-  durationText,
-  failureMessage,
-  runStatus,
-}: {
-  durationText: string | null
-  failureMessage: string | null
-  runStatus: string
-}): SimulationRunTerminalActivityStatus | null {
-  const title = durationText ? `Thought for ${durationText}` : "Thought"
-
-  if (runStatus === "completed") {
-    return {
-      detail: "Done",
-      title,
-      tone: "success",
-    }
-  }
-
-  if (runStatus === "failed") {
-    return {
-      detail: failureMessage?.trim() || "Error",
-      title,
-      tone: "error",
-    }
-  }
-
-  if (runStatus === "cancelled") {
-    return {
-      detail: "Canceled",
-      title,
-      tone: "muted",
-    }
-  }
-
-  return null
-}
-
-function SimulationRunActivityTerminalStatus({
-  status,
-}: {
-  status: SimulationRunTerminalActivityStatus
-}) {
-  return (
-    <SimulationRunActivityTimelineRow marker={status.tone}>
-      <div className="grid gap-0.5 text-sm leading-6">
-        <p className="font-medium text-foreground/95">{status.title}</p>
-        <p
-          className={
-            status.tone === "error"
-              ? "text-destructive"
-              : "text-muted-foreground"
-          }
-        >
-          {status.detail}
-        </p>
-      </div>
-    </SimulationRunActivityTimelineRow>
-  )
-}
-
-type SimulationRunActivityTimelineItem =
-  | {
-      id: string
-      type: "reasoning"
-      block: Extract<SimulationRunActivityBlock, { type: "reasoning" }>
-    }
-  | {
-      id: string
-      type: "tool_call_group"
-      blocks: Extract<SimulationRunActivityBlock, { type: "tool_call" }>[]
-    }
-
-function getSimulationRunActivityTimelineItems(
-  blocks: readonly SimulationRunActivityBlock[]
-): SimulationRunActivityTimelineItem[] {
-  const timelineItems: SimulationRunActivityTimelineItem[] = []
-  let pendingToolCallBlocks: Extract<
-    SimulationRunActivityBlock,
-    { type: "tool_call" }
-  >[] = []
-
-  function flushPendingToolCalls() {
-    if (pendingToolCallBlocks.length === 0) {
-      return
-    }
-
-    const firstBlock = pendingToolCallBlocks[0]
-    const lastBlock = pendingToolCallBlocks[pendingToolCallBlocks.length - 1]
-
-    timelineItems.push({
-      id:
-        firstBlock === lastBlock
-          ? `tool-group-${firstBlock.id}`
-          : `tool-group-${firstBlock.id}-${lastBlock.id}`,
-      type: "tool_call_group",
-      blocks: pendingToolCallBlocks,
-    })
-    pendingToolCallBlocks = []
-  }
-
-  for (const block of blocks) {
-    if (block.type === "tool_call") {
-      pendingToolCallBlocks.push(block)
-      continue
-    }
-
-    flushPendingToolCalls()
-    timelineItems.push({
-      id: block.id,
-      type: "reasoning",
-      block,
-    })
-  }
-
-  flushPendingToolCalls()
-
-  return timelineItems
-}
-
-function SimulationRunActivityTimelineItemView({
-  item,
-}: {
-  item: SimulationRunActivityTimelineItem
-}) {
-  if (item.type === "tool_call_group") {
-    return (
-      <SimulationRunActivityTimelineRow marker="tool">
-        <div className="flex min-w-0 flex-wrap gap-1.5 pt-0.5">
-          {item.blocks.map((block) => (
-            <span
-              key={block.id}
-              className="inline-flex max-w-full items-center gap-1 rounded-full bg-muted/55 px-2.5 py-1 text-xs leading-4 font-medium text-foreground/90"
-              title={block.toolName}
-            >
-              <span className="text-sky-300" aria-hidden="true">
-                •
-              </span>
-              <span className="truncate">{block.toolName}</span>
-            </span>
-          ))}
-        </div>
-      </SimulationRunActivityTimelineRow>
-    )
-  }
-
-  return (
-    <SimulationRunActivityTimelineRow marker="reasoning">
-      <div className={simulationActivityMarkdownClassName}>
-        <ReactMarkdown>{item.block.text}</ReactMarkdown>
-      </div>
-    </SimulationRunActivityTimelineRow>
-  )
-}
-
-function SimulationRunActivityTimelineRow({
-  children,
-  marker,
-}: {
-  children: ReactNode
-  marker: "error" | "muted" | "reasoning" | "success" | "tool"
-}) {
-  const markerClassName =
-    marker === "tool"
-      ? "bg-sky-300"
-      : marker === "success"
-        ? "border border-emerald-300 text-emerald-300"
-        : marker === "error"
-          ? "border border-destructive text-destructive"
-          : marker === "muted"
-            ? "border border-muted-foreground text-muted-foreground"
-            : "bg-muted-foreground"
-  const markerSizeClassName =
-    marker === "success" || marker === "error" || marker === "muted"
-      ? "size-3"
-      : "size-1.5"
-
-  return (
-    <div className="grid min-w-0 grid-cols-[1rem_minmax(0,1fr)] gap-2">
-      <div className="relative flex justify-center">
-        <span
-          className={`mt-2 flex items-center justify-center rounded-full ${markerSizeClassName} ${markerClassName}`}
-          aria-hidden="true"
-        >
-          {marker === "success" ? (
-            <Check className="size-2" strokeWidth={3} />
-          ) : marker === "error" ? (
-            <X className="size-2" strokeWidth={3} />
-          ) : null}
-        </span>
-        <span
-          className="absolute top-5 bottom-[-1.25rem] w-px bg-border"
-          aria-hidden="true"
-        />
-      </div>
-      <div className="min-w-0">{children}</div>
-    </div>
-  )
-}
-
-const simulationActivityMarkdownClassName =
+const simulationReportMarkdownClassName =
   "min-w-0 space-y-2 text-sm leading-6 break-words text-foreground/95 [&_a]:text-sky-300 [&_a]:underline [&_code]:rounded-sm [&_code]:bg-muted/45 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-sky-100 [&_ol]:list-decimal [&_ol]:pl-5 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-black/30 [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_strong]:text-foreground [&_ul]:list-disc [&_ul]:pl-5"
 const simulationResultSummaryMarkdownClassName =
   "min-w-0 space-y-2 text-sm leading-6 break-words text-muted-foreground [&_a]:text-sky-300 [&_a]:underline [&_code]:rounded-sm [&_code]:bg-muted/45 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-sky-100 [&_ol]:list-decimal [&_ol]:pl-5 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-black/30 [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_strong]:text-foreground/90 [&_ul]:list-disc [&_ul]:pl-5"
@@ -6504,7 +5857,7 @@ function SimulationResultSummaryMarkdown({ summary }: { summary: string }) {
 
 function SimulationReportMarkdown({ report }: { report: string }) {
   return (
-    <div className={simulationActivityMarkdownClassName}>
+    <div className={simulationReportMarkdownClassName}>
       <ReactMarkdown>{report}</ReactMarkdown>
     </div>
   )

@@ -2555,7 +2555,7 @@ test("rejects invalid opening-hand evaluation JSON", () => {
   )
 })
 
-test("builds opening-hand evaluation input like copy activity with prompt", () => {
+test("builds opening-hand evaluation input like copy transcript with prompt", () => {
   const inputText = buildOpeningHandEvaluationInputText({
     fullPrompt: "Full opening-hand prompt",
     chunks: [
@@ -2741,7 +2741,7 @@ test("rejects invalid turn evaluation JSON", () => {
   )
 })
 
-test("builds turn evaluation input like copy activity with prompt", () => {
+test("builds turn evaluation input like copy transcript with prompt", () => {
   const inputText = buildTurnEvaluationInputText({
     fullPrompt: "Full turn prompt",
     chunks: [
