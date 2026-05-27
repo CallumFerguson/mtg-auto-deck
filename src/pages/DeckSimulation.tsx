@@ -299,10 +299,9 @@ function getSimulationTurnCountFromResults(resultsInfo: SimulationResultsInfo) {
 }
 
 function getActiveLlmRunCountFromResults(resultsInfo: SimulationResultsInfo) {
-  return [
-    ...resultsInfo.openingHandLlmRuns,
-    ...resultsInfo.turnLlmRuns,
-  ].filter((run) => isActiveLlmRunStatus(run.status)).length
+  return [...resultsInfo.openingHandLlmRuns, ...resultsInfo.turnLlmRuns].filter(
+    (run) => isActiveLlmRunStatus(run.status)
+  ).length
 }
 
 function isActiveLlmRunStatus(status: string) {
@@ -336,10 +335,9 @@ function findSimulationResultsRun(
   }
 
   return (
-    [
-      ...resultsInfo.openingHandLlmRuns,
-      ...resultsInfo.turnLlmRuns,
-    ].find((run) => run.llmRunId === llmRunId) ?? null
+    [...resultsInfo.openingHandLlmRuns, ...resultsInfo.turnLlmRuns].find(
+      (run) => run.llmRunId === llmRunId
+    ) ?? null
   )
 }
 
@@ -374,10 +372,7 @@ function shouldRefreshUsageLimitsForFinishedStreamRun(
 }
 
 function getSimulationRunFinishedTimeMs(
-  run: Pick<
-    SimulationDebugLlmRun,
-    "completedAt" | "failedAt" | "cancelledAt"
-  >
+  run: Pick<SimulationDebugLlmRun, "completedAt" | "failedAt" | "cancelledAt">
 ) {
   return (
     parseTimestampMs(run.completedAt) ??
@@ -746,6 +741,8 @@ export function DeckSimulation({
     "simulate" | "provide"
   >("simulate")
   const [selectedOpeningHandId, setSelectedOpeningHandId] = useState("")
+  const [isChooseHandModalOpen, setIsChooseHandModalOpen] = useState(false)
+  const [isChooseSeedModalOpen, setIsChooseSeedModalOpen] = useState(false)
   const [isCreateHandModalOpen, setIsCreateHandModalOpen] = useState(false)
   const [isCreateSeedModalOpen, setIsCreateSeedModalOpen] = useState(false)
   const [createSimulationError, setCreateSimulationError] = useState<
@@ -1050,6 +1047,7 @@ export function DeckSimulation({
     setStartingHands((currentStartingHands) => [hand, ...currentStartingHands])
     setSelectedOpeningHandId(hand.id)
     setOpeningHandMode("provide")
+    setIsChooseHandModalOpen(false)
     setIsCreateHandModalOpen(false)
   }
 
@@ -1057,7 +1055,32 @@ export function DeckSimulation({
     setSavedSeeds((currentSavedSeeds) => [seed, ...currentSavedSeeds])
     setSelectedSavedSeedId(seed.id)
     setSeedMode("set")
+    setIsChooseSeedModalOpen(false)
     setIsCreateSeedModalOpen(false)
+  }
+
+  function applyChosenSavedSeed(seedId: string) {
+    setSelectedSavedSeedId(seedId)
+    setSeedMode("set")
+    setCreateSimulationError(null)
+    setIsChooseSeedModalOpen(false)
+  }
+
+  function applyChosenStartingHand(handId: string) {
+    setSelectedOpeningHandId(handId)
+    setOpeningHandMode("provide")
+    setCreateSimulationError(null)
+    setIsChooseHandModalOpen(false)
+  }
+
+  function openCreateSeedFromChooser() {
+    setIsChooseSeedModalOpen(false)
+    setIsCreateSeedModalOpen(true)
+  }
+
+  function openCreateHandFromChooser() {
+    setIsChooseHandModalOpen(false)
+    setIsCreateHandModalOpen(true)
   }
 
   function resetCreateSimulationForm() {
@@ -1426,90 +1449,133 @@ export function DeckSimulation({
                               type="radio"
                               name="seed-mode"
                               checked={seedMode === "set"}
-                              onChange={() => setSeedMode("set")}
+                              onChange={() => setIsChooseSeedModalOpen(true)}
                             />
                             Set seed
                           </label>
                         </div>
 
                         {seedMode === "set" ? (
-                          <div className="grid gap-3 rounded-md border border-border bg-background/35 p-3">
-                            {savedSeedLoadError ? (
-                              <div className="grid gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2">
-                                <p className="text-sm text-destructive">
-                                  {savedSeedLoadError}
-                                </p>
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  onClick={() => void loadSavedSeeds()}
-                                >
-                                  <RefreshCw data-icon="inline-start" />
-                                  Try again
-                                </Button>
-                              </div>
-                            ) : null}
-
-                            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-                              <label
-                                className="grid gap-2 text-sm font-medium"
-                                htmlFor="saved-seed"
-                              >
-                                <span>Saved seed</span>
-                                <select
-                                  id="saved-seed"
-                                  className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground transition-colors outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
-                                  value={selectedSavedSeedId}
-                                  disabled={
-                                    isLoadingSavedSeeds ||
-                                    savedSeeds.length === 0
-                                  }
-                                  onChange={(event) =>
-                                    setSelectedSavedSeedId(event.target.value)
-                                  }
-                                >
-                                  {isLoadingSavedSeeds ? (
-                                    <option value="">
-                                      Loading saved seeds...
-                                    </option>
-                                  ) : savedSeeds.length === 0 ? (
-                                    <option value="">No saved seeds yet</option>
-                                  ) : null}
-                                  {savedSeeds.map((seed) => (
-                                    <option key={seed.id} value={seed.id}>
-                                      {seed.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-
-                              <Button
-                                type="button"
-                                variant="outline"
-                                onClick={() => setIsCreateSeedModalOpen(true)}
-                              >
-                                <Plus data-icon="inline-start" />
-                                New seed
-                              </Button>
-                            </div>
-
-                            {selectedSavedSeed ? (
-                              <dl className="grid gap-1 text-sm">
-                                <dt className="text-muted-foreground">
-                                  Seed value
-                                </dt>
-                                <dd className="rounded-md bg-muted/30 px-3 py-2 font-medium break-all text-foreground">
-                                  {selectedSavedSeed.seed}
-                                </dd>
-                              </dl>
-                            ) : !isLoadingSavedSeeds ? (
-                              <p className="text-sm text-muted-foreground">
-                                Choose a saved seed, or make a new one.
+                          <div className="flex flex-col gap-3 rounded-md border border-border bg-background/35 p-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="min-w-0 space-y-1">
+                              <p className="text-sm font-medium text-foreground">
+                                {selectedSavedSeed
+                                  ? selectedSavedSeed.name
+                                  : "No saved seed selected"}
                               </p>
-                            ) : null}
+                              <p className="text-sm break-all text-muted-foreground">
+                                {selectedSavedSeed
+                                  ? selectedSavedSeed.seed
+                                  : savedSeedLoadError
+                                    ? "Saved seeds could not be loaded."
+                                    : isLoadingSavedSeeds
+                                      ? "Loading saved seeds..."
+                                      : "Choose a saved seed to continue."}
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => setIsChooseSeedModalOpen(true)}
+                            >
+                              <Shuffle data-icon="inline-start" />
+                              Change
+                            </Button>
                           </div>
                         ) : null}
                       </fieldset>
+
+                      <fieldset className="grid gap-3">
+                        <legend className="text-sm font-medium text-foreground">
+                          Opening hand
+                        </legend>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <label
+                            className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
+                              openingHandMode === "simulate"
+                                ? "border-ring bg-accent text-accent-foreground"
+                                : "border-border bg-background/35 text-muted-foreground"
+                            }`}
+                          >
+                            <input
+                              className="size-4 accent-sky-300"
+                              type="radio"
+                              name="opening-hand-mode"
+                              checked={openingHandMode === "simulate"}
+                              onChange={() => setOpeningHandMode("simulate")}
+                            />
+                            Simulate opening hand
+                          </label>
+                          <label
+                            className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
+                              openingHandMode === "provide"
+                                ? "border-ring bg-accent text-accent-foreground"
+                                : "border-border bg-background/35 text-muted-foreground"
+                            }`}
+                          >
+                            <input
+                              className="size-4 accent-sky-300"
+                              type="radio"
+                              name="opening-hand-mode"
+                              checked={openingHandMode === "provide"}
+                              onChange={() => setIsChooseHandModalOpen(true)}
+                            />
+                            Provide opening hand
+                          </label>
+                        </div>
+
+                        {openingHandMode === "provide" ? (
+                          <div className="flex flex-col gap-3 rounded-md border border-border bg-background/35 p-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="min-w-0 space-y-1">
+                              <p className="text-sm font-medium text-foreground">
+                                {selectedOpeningHand
+                                  ? selectedOpeningHand.name
+                                  : "No starting hand selected"}
+                              </p>
+                              <p className="text-sm text-muted-foreground">
+                                {selectedOpeningHand
+                                  ? "Saved starting hand"
+                                  : startingHandLoadError
+                                    ? "Starting hands could not be loaded."
+                                    : isLoadingStartingHands
+                                      ? "Loading starting hands..."
+                                      : "Choose a saved starting hand to continue."}
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => setIsChooseHandModalOpen(true)}
+                            >
+                              <Hand data-icon="inline-start" />
+                              Change
+                            </Button>
+                          </div>
+                        ) : null}
+                      </fieldset>
+
+                      <div className="grid gap-3">
+                        <label
+                          className="text-sm font-medium text-foreground"
+                          htmlFor="turns-to-simulate"
+                        >
+                          Turns to simulate
+                        </label>
+                        <select
+                          id="turns-to-simulate"
+                          className="no-number-spinner h-9 w-full rounded-md border border-input bg-background/60 px-3 text-sm text-foreground transition-colors outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/30 sm:max-w-36"
+                          value={turnsToSimulate}
+                          onChange={(event) =>
+                            setTurnsToSimulate(event.target.value)
+                          }
+                        >
+                          {Array.from({ length: 11 }, (_, turnCount) => (
+                            <option key={turnCount} value={turnCount}>
+                              {turnCount}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
 
                       <div className="grid gap-3">
                         <label
@@ -1564,173 +1630,17 @@ export function DeckSimulation({
                             creating simulations.
                           </p>
                         ) : null}
-                        <FlexServiceTierSwitch
-                          checked={
-                            selectedModelPresetSupportsFlex &&
-                            useFlexServiceTier
-                          }
-                          disabled={!selectedModelPresetSupportsFlex}
-                          label="Flex processing"
-                          activeWarning="Less usage, but simulation may be slower and has a higher chance of failing."
-                          onCheckedChange={handleCreateSimulationUseFlexChange}
-                        />
                       </div>
 
-                      <div className="grid gap-3">
-                        <label
-                          className="text-sm font-medium text-foreground"
-                          htmlFor="turns-to-simulate"
-                        >
-                          Turns to simulate
-                        </label>
-                        <select
-                          id="turns-to-simulate"
-                          className="no-number-spinner h-9 w-full rounded-md border border-input bg-background/60 px-3 text-sm text-foreground transition-colors outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/30 sm:max-w-36"
-                          value={turnsToSimulate}
-                          onChange={(event) =>
-                            setTurnsToSimulate(event.target.value)
-                          }
-                        >
-                          {Array.from({ length: 11 }, (_, turnCount) => (
-                            <option key={turnCount} value={turnCount}>
-                              {turnCount}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <fieldset className="grid gap-3">
-                        <legend className="text-sm font-medium text-foreground">
-                          Opening hand
-                        </legend>
-                        <div className="grid gap-2 sm:grid-cols-2">
-                          <label
-                            className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
-                              openingHandMode === "simulate"
-                                ? "border-ring bg-accent text-accent-foreground"
-                                : "border-border bg-background/35 text-muted-foreground"
-                            }`}
-                          >
-                            <input
-                              className="size-4 accent-sky-300"
-                              type="radio"
-                              name="opening-hand-mode"
-                              checked={openingHandMode === "simulate"}
-                              onChange={() => setOpeningHandMode("simulate")}
-                            />
-                            Simulate opening hand
-                          </label>
-                          <label
-                            className={`flex items-center gap-2 rounded-md border px-3 py-3 text-sm transition-colors ${
-                              openingHandMode === "provide"
-                                ? "border-ring bg-accent text-accent-foreground"
-                                : "border-border bg-background/35 text-muted-foreground"
-                            }`}
-                          >
-                            <input
-                              className="size-4 accent-sky-300"
-                              type="radio"
-                              name="opening-hand-mode"
-                              checked={openingHandMode === "provide"}
-                              onChange={() => setOpeningHandMode("provide")}
-                            />
-                            Provide opening hand
-                          </label>
-                        </div>
-
-                        {openingHandMode === "provide" ? (
-                          <div className="grid gap-3 rounded-md border border-border bg-background/35 p-3">
-                            {startingHandLoadError ? (
-                              <div className="grid gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2">
-                                <p className="text-sm text-destructive">
-                                  {startingHandLoadError}
-                                </p>
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  onClick={() => void loadStartingHands()}
-                                >
-                                  <RefreshCw data-icon="inline-start" />
-                                  Try again
-                                </Button>
-                              </div>
-                            ) : null}
-
-                            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-                              <label
-                                className="grid gap-2 text-sm font-medium"
-                                htmlFor="saved-opening-hand"
-                              >
-                                <span>Starting hand</span>
-                                <select
-                                  id="saved-opening-hand"
-                                  className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground transition-colors outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
-                                  value={selectedOpeningHandId}
-                                  disabled={
-                                    isLoadingStartingHands ||
-                                    startingHands.length === 0
-                                  }
-                                  onChange={(event) =>
-                                    setSelectedOpeningHandId(event.target.value)
-                                  }
-                                >
-                                  {isLoadingStartingHands ? (
-                                    <option value="">
-                                      Loading starting hands...
-                                    </option>
-                                  ) : startingHands.length === 0 ? (
-                                    <option value="">
-                                      No starting hands yet
-                                    </option>
-                                  ) : null}
-                                  {startingHands.map((hand) => (
-                                    <option key={hand.id} value={hand.id}>
-                                      {hand.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-
-                              <Button
-                                type="button"
-                                variant="outline"
-                                onClick={() => setIsCreateHandModalOpen(true)}
-                              >
-                                <Plus data-icon="inline-start" />
-                                New starting hand
-                              </Button>
-                            </div>
-
-                            {selectedOpeningHand ? (
-                              <div className="grid gap-2">
-                                <p className="text-sm text-sky-300">
-                                  {countStartingHandCards(selectedOpeningHand)}{" "}
-                                  cards selected
-                                </p>
-                                <ul className="grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
-                                  {selectedOpeningHand.cards.map((card) => (
-                                    <li
-                                      key={card.deckCardId}
-                                      className="rounded-md bg-muted/30 px-3 py-2"
-                                    >
-                                      {card.quantity > 1 ? (
-                                        <span className="mr-2 text-sky-300">
-                                          {card.quantity}x
-                                        </span>
-                                      ) : null}
-                                      {card.name}
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
-                            ) : !isLoadingStartingHands ? (
-                              <p className="text-sm text-muted-foreground">
-                                Choose a saved starting hand, or make a new one.
-                              </p>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </fieldset>
+                      <FlexServiceTierSwitch
+                        checked={
+                          selectedModelPresetSupportsFlex && useFlexServiceTier
+                        }
+                        disabled={!selectedModelPresetSupportsFlex}
+                        label="Flex processing"
+                        activeWarning="Less usage, but simulation may be slower and has a higher chance of failing."
+                        onCheckedChange={handleCreateSimulationUseFlexChange}
+                      />
                     </div>
 
                     <div>
@@ -1780,6 +1690,32 @@ export function DeckSimulation({
           )}
         </section>
       </div>
+
+      {isChooseSeedModalOpen ? (
+        <ChooseSavedSeedModal
+          isLoadingSavedSeeds={isLoadingSavedSeeds}
+          loadError={savedSeedLoadError}
+          onApply={applyChosenSavedSeed}
+          onClose={() => setIsChooseSeedModalOpen(false)}
+          onCreateSeed={openCreateSeedFromChooser}
+          onRetry={() => void loadSavedSeeds()}
+          savedSeeds={savedSeeds}
+          selectedSavedSeedId={selectedSavedSeedId}
+        />
+      ) : null}
+
+      {isChooseHandModalOpen ? (
+        <ChooseStartingHandModal
+          isLoadingStartingHands={isLoadingStartingHands}
+          loadError={startingHandLoadError}
+          onApply={applyChosenStartingHand}
+          onClose={() => setIsChooseHandModalOpen(false)}
+          onCreateHand={openCreateHandFromChooser}
+          onRetry={() => void loadStartingHands()}
+          selectedStartingHandId={selectedOpeningHandId}
+          startingHands={startingHands}
+        />
+      ) : null}
 
       {isCreateHandModalOpen ? (
         <CreateStartingHandModal
@@ -3306,9 +3242,7 @@ function SimulationResultsPanel({
       .map((run) => run.turnNumber as number)
   )
   const isStartingSimulationRun =
-    isStartingOpeningHandRun ||
-    isStartingTurnRun ||
-    isStoppingSimulation
+    isStartingOpeningHandRun || isStartingTurnRun || isStoppingSimulation
   const isSimulationActionBlocked =
     readOnly ||
     isStartingSimulationRun ||
@@ -6909,10 +6843,6 @@ function EmptySimulationSelection() {
   )
 }
 
-function countStartingHandCards(hand: StartingHand) {
-  return hand.cards.reduce((total, card) => total + card.quantity, 0)
-}
-
 function getSelectedStartingHandCards(
   selectedCardIds: readonly string[],
   cardOptions: readonly OpeningHandCardOption[]
@@ -6942,6 +6872,331 @@ function getSelectedStartingHandCards(
   }
 
   return Array.from(cardsByDeckCardId.values())
+}
+
+function ChooseSavedSeedModal({
+  isLoadingSavedSeeds,
+  loadError,
+  onApply,
+  onClose,
+  onCreateSeed,
+  onRetry,
+  savedSeeds,
+  selectedSavedSeedId,
+}: {
+  isLoadingSavedSeeds: boolean
+  loadError: string | null
+  onApply: (seedId: string) => void
+  onClose: () => void
+  onCreateSeed: () => void
+  onRetry: () => void
+  savedSeeds: SavedSeed[]
+  selectedSavedSeedId: string
+}) {
+  const [draftSeedId, setDraftSeedId] = useState(() =>
+    savedSeeds.some((seed) => seed.id === selectedSavedSeedId)
+      ? selectedSavedSeedId
+      : (savedSeeds[0]?.id ?? "")
+  )
+  const effectiveDraftSeedId = savedSeeds.some(
+    (seed) => seed.id === draftSeedId
+  )
+    ? draftSeedId
+    : savedSeeds.some((seed) => seed.id === selectedSavedSeedId)
+      ? selectedSavedSeedId
+      : (savedSeeds[0]?.id ?? "")
+  const selectedSeed = useMemo(
+    () => savedSeeds.find((seed) => seed.id === effectiveDraftSeedId) ?? null,
+    [effectiveDraftSeedId, savedSeeds]
+  )
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (selectedSeed) {
+      onApply(selectedSeed.id)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 py-6 backdrop-blur-sm"
+      role="presentation"
+      onMouseDown={onClose}
+    >
+      <section
+        aria-labelledby="choose-saved-seed-title"
+        className="flex max-h-[calc(100svh-3rem)] w-full max-w-lg flex-col rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
+        role="dialog"
+        aria-modal="true"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+          <div className="space-y-1">
+            <h2 id="choose-saved-seed-title" className="text-xl font-semibold">
+              Set simulation seed
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Choose a saved seed for this simulation.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Close"
+            title="Close"
+            onClick={onClose}
+          >
+            <X />
+          </Button>
+        </header>
+
+        <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSubmit}>
+          <div className="grid min-h-0 gap-4 overflow-y-auto px-5 py-5">
+            {loadError ? (
+              <div className="grid gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2">
+                <p className="text-sm text-destructive">{loadError}</p>
+                <Button type="button" variant="outline" onClick={onRetry}>
+                  <RefreshCw data-icon="inline-start" />
+                  Try again
+                </Button>
+              </div>
+            ) : null}
+
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+              <label
+                className="grid gap-2 text-sm font-medium"
+                htmlFor="choose-saved-seed"
+              >
+                <span>Saved seed</span>
+                <select
+                  id="choose-saved-seed"
+                  className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground transition-colors outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
+                  value={effectiveDraftSeedId}
+                  disabled={isLoadingSavedSeeds || savedSeeds.length === 0}
+                  onChange={(event) => setDraftSeedId(event.target.value)}
+                >
+                  {isLoadingSavedSeeds && savedSeeds.length === 0 ? (
+                    <option value="">Loading saved seeds...</option>
+                  ) : !isLoadingSavedSeeds && savedSeeds.length === 0 ? (
+                    <option value="">No saved seeds yet</option>
+                  ) : null}
+                  {savedSeeds.map((seed) => (
+                    <option key={seed.id} value={seed.id}>
+                      {seed.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <Button type="button" variant="outline" onClick={onCreateSeed}>
+                <Plus data-icon="inline-start" />
+                New seed
+              </Button>
+            </div>
+
+            {selectedSeed ? (
+              <dl className="grid gap-1 text-sm">
+                <dt className="text-muted-foreground">Seed value</dt>
+                <dd className="rounded-md bg-muted/30 px-3 py-2 font-medium break-all text-foreground">
+                  {selectedSeed.seed}
+                </dd>
+              </dl>
+            ) : !isLoadingSavedSeeds ? (
+              <p className="text-sm text-muted-foreground">
+                Create a seed before using set seed.
+              </p>
+            ) : null}
+          </div>
+
+          <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+            <Button type="button" variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!selectedSeed}>
+              <Check data-icon="inline-start" />
+              Use seed
+            </Button>
+          </div>
+        </form>
+      </section>
+    </div>
+  )
+}
+
+function ChooseStartingHandModal({
+  isLoadingStartingHands,
+  loadError,
+  onApply,
+  onClose,
+  onCreateHand,
+  onRetry,
+  selectedStartingHandId,
+  startingHands,
+}: {
+  isLoadingStartingHands: boolean
+  loadError: string | null
+  onApply: (handId: string) => void
+  onClose: () => void
+  onCreateHand: () => void
+  onRetry: () => void
+  selectedStartingHandId: string
+  startingHands: StartingHand[]
+}) {
+  const [draftStartingHandId, setDraftStartingHandId] = useState(() =>
+    startingHands.some((hand) => hand.id === selectedStartingHandId)
+      ? selectedStartingHandId
+      : (startingHands[0]?.id ?? "")
+  )
+  const effectiveDraftStartingHandId = startingHands.some(
+    (hand) => hand.id === draftStartingHandId
+  )
+    ? draftStartingHandId
+    : startingHands.some((hand) => hand.id === selectedStartingHandId)
+      ? selectedStartingHandId
+      : (startingHands[0]?.id ?? "")
+  const selectedHand = useMemo(
+    () =>
+      startingHands.find((hand) => hand.id === effectiveDraftStartingHandId) ??
+      null,
+    [effectiveDraftStartingHandId, startingHands]
+  )
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (selectedHand) {
+      onApply(selectedHand.id)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 py-6 backdrop-blur-sm"
+      role="presentation"
+      onMouseDown={onClose}
+    >
+      <section
+        aria-labelledby="choose-starting-hand-title"
+        className="flex max-h-[calc(100svh-3rem)] w-full max-w-2xl flex-col rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
+        role="dialog"
+        aria-modal="true"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+          <div className="space-y-1">
+            <h2
+              id="choose-starting-hand-title"
+              className="text-xl font-semibold"
+            >
+              Provide opening hand
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Choose a saved starting hand for this simulation.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Close"
+            title="Close"
+            onClick={onClose}
+          >
+            <X />
+          </Button>
+        </header>
+
+        <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSubmit}>
+          <div className="grid min-h-0 gap-4 overflow-y-auto px-5 py-5">
+            {loadError ? (
+              <div className="grid gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2">
+                <p className="text-sm text-destructive">{loadError}</p>
+                <Button type="button" variant="outline" onClick={onRetry}>
+                  <RefreshCw data-icon="inline-start" />
+                  Try again
+                </Button>
+              </div>
+            ) : null}
+
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+              <label
+                className="grid gap-2 text-sm font-medium"
+                htmlFor="choose-starting-hand"
+              >
+                <span>Starting hand</span>
+                <select
+                  id="choose-starting-hand"
+                  className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground transition-colors outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
+                  value={effectiveDraftStartingHandId}
+                  disabled={
+                    isLoadingStartingHands || startingHands.length === 0
+                  }
+                  onChange={(event) =>
+                    setDraftStartingHandId(event.target.value)
+                  }
+                >
+                  {isLoadingStartingHands && startingHands.length === 0 ? (
+                    <option value="">Loading starting hands...</option>
+                  ) : !isLoadingStartingHands && startingHands.length === 0 ? (
+                    <option value="">No starting hands yet</option>
+                  ) : null}
+                  {startingHands.map((hand) => (
+                    <option key={hand.id} value={hand.id}>
+                      {hand.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <Button type="button" variant="outline" onClick={onCreateHand}>
+                <Plus data-icon="inline-start" />
+                New starting hand
+              </Button>
+            </div>
+
+            {selectedHand ? (
+              <div className="grid gap-2">
+                <p className="text-sm text-sky-300">Cards</p>
+                <div className="max-h-56 overflow-y-auto rounded-md border border-border bg-background/35 p-2">
+                  <ul className="grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">
+                    {selectedHand.cards.map((card) => (
+                      <li
+                        key={card.deckCardId}
+                        className="rounded-md bg-muted/30 px-3 py-2"
+                      >
+                        {card.quantity > 1 ? (
+                          <span className="mr-2 text-sky-300">
+                            {card.quantity}x
+                          </span>
+                        ) : null}
+                        {card.name}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            ) : !isLoadingStartingHands ? (
+              <p className="text-sm text-muted-foreground">
+                Create a starting hand before providing an opening hand.
+              </p>
+            ) : null}
+          </div>
+
+          <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+            <Button type="button" variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!selectedHand}>
+              <Check data-icon="inline-start" />
+              Use hand
+            </Button>
+          </div>
+        </form>
+      </section>
+    </div>
+  )
 }
 
 function CreateSavedSeedModal({
