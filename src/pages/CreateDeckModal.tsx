@@ -81,6 +81,15 @@ const INPUT_CLASS_NAME =
   "h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground transition outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-60"
 const TEXTAREA_CLASS_NAME =
   "w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground transition outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-60"
+const DECK_LIST_PLACEHOLDER = [
+  "Supports most formats:",
+  "1 Sol Ring",
+  "1x Arcane Signet",
+  "1 x Command Tower",
+  "Counterspell x1",
+  "Island",
+  "1 Llanowar Elves (M12) 182",
+].join("\n")
 
 export function CreateDeckModal({
   onClose,
@@ -679,7 +688,7 @@ function CardEntryStep({
             TEXTAREA_CLASS_NAME,
             "h-full min-h-0 resize-none py-3 font-mono"
           )}
-          placeholder="1 Sol Ring&#10;1 Command Tower&#10;1 Arcane Signet"
+          placeholder={DECK_LIST_PLACEHOLDER}
           value={draft.deckList}
           onChange={(event) => onFieldChange("deckList", event.target.value)}
           disabled={disabled}
