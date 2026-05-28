@@ -129,8 +129,8 @@ export async function ensureDecksSchema() {
       ON deck_cards (deck_id, zone)
   `)
   await queryDatabase(`
-    CREATE INDEX IF NOT EXISTS decks_owner_user_id_updated_at_idx
-      ON decks (owner_user_id, updated_at DESC)
+    CREATE INDEX IF NOT EXISTS decks_owner_user_id_created_at_idx
+      ON decks (owner_user_id, created_at ASC, id)
       WHERE owner_user_id IS NOT NULL
   `)
   await queryDatabase(`
@@ -154,7 +154,7 @@ export async function listDecks(ownerUserId?: string): Promise<DeckSummary[]> {
         updated_at
       FROM decks
       WHERE ($1::text IS NULL OR owner_user_id = $1)
-      ORDER BY updated_at DESC, name ASC
+      ORDER BY created_at ASC, id ASC
     `,
     [ownerUserId ?? null]
   )
