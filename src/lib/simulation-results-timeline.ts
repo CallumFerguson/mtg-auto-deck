@@ -8,6 +8,8 @@ export type SimulationResultsTimelineStepKind =
 export type SimulationResultsTimelineStepStatus =
   | "preset"
   | "pending"
+  | "batch_pending"
+  | "batch_submitted"
   | "streaming"
   | "cancel_requested"
   | "completed"
@@ -174,6 +176,8 @@ function isActiveSimulationResultsTimelineStatus(
 ) {
   return (
     status === "pending" ||
+    status === "batch_pending" ||
+    status === "batch_submitted" ||
     status === "streaming" ||
     status === "cancel_requested"
   )
@@ -211,6 +215,8 @@ function getRunStepLabel(
 function getRunStepStatus(status: string): SimulationResultsTimelineStepStatus {
   if (
     status === "pending" ||
+    status === "batch_pending" ||
+    status === "batch_submitted" ||
     status === "streaming" ||
     status === "cancel_requested" ||
     status === "completed" ||

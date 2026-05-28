@@ -1034,6 +1034,7 @@ test("builds queued LLM run claim query with explicit claim timestamp", () => {
   )
   assert.match(normalizedSql, /ELSE NULL/)
   assert.match(normalizedSql, /updated_at = \$2::timestamptz/)
+  assert.match(normalizedSql, /llm_run\.processing_mode = 'realtime'/)
   assert.doesNotMatch(
     normalizedSql,
     /started_at = COALESCE\(started_at, now\(\)\)/
@@ -1094,6 +1095,7 @@ test("builds completed LLM run query with exact final output text", () => {
   ])
   assert.match(normalizedSql, /status = 'completed'/)
   assert.match(normalizedSql, /final_output_text = \$6/)
+  assert.match(normalizedSql, /'batch_submitted'/)
 })
 
 test("builds failed LLM run query with parse-failure final output text", () => {
@@ -1114,6 +1116,8 @@ test("builds failed LLM run query with parse-failure final output text", () => {
   ])
   assert.match(normalizedSql, /status = 'failed'/)
   assert.match(normalizedSql, /final_output_text = \$4/)
+  assert.match(normalizedSql, /'batch_pending'/)
+  assert.match(normalizedSql, /'batch_submitted'/)
 })
 
 test("builds cancelled LLM run query with optional final output text", () => {
@@ -1134,6 +1138,8 @@ test("builds cancelled LLM run query with optional final output text", () => {
   ])
   assert.match(normalizedSql, /status = 'cancelled'/)
   assert.match(normalizedSql, /final_output_text = \$4/)
+  assert.match(normalizedSql, /'batch_pending'/)
+  assert.doesNotMatch(normalizedSql, /'batch_submitted'/)
 })
 
 test("requires a positive integer OpenRouter stop step count", () => {
@@ -1597,6 +1603,8 @@ test("runtime abort call helper forwards the abort signal", async () => {
 
 test("late LLM terminal updates do not apply after cancellation starts", () => {
   assert.equal(canApplyLateLlmRunTerminalUpdate("pending"), true)
+  assert.equal(canApplyLateLlmRunTerminalUpdate("batch_pending"), false)
+  assert.equal(canApplyLateLlmRunTerminalUpdate("batch_submitted"), true)
   assert.equal(canApplyLateLlmRunTerminalUpdate("streaming"), true)
   assert.equal(canApplyLateLlmRunTerminalUpdate("cancel_requested"), false)
   assert.equal(canApplyLateLlmRunTerminalUpdate("cancelled"), false)

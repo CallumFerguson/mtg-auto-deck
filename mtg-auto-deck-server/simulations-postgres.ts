@@ -26,6 +26,8 @@ export type SimulationStatus =
 
 export type SimulationCreatedVia = "app" | "external_mcp"
 
+export type LlmProcessingMode = "realtime" | "openai_batch"
+
 export function getInitialSimulationStatus(
   createdVia: SimulationCreatedVia
 ): SimulationStatus {
@@ -34,6 +36,8 @@ export function getInitialSimulationStatus(
 
 export type LlmRunStatus =
   | "pending"
+  | "batch_pending"
+  | "batch_submitted"
   | "streaming"
   | "completed"
   | "failed"
@@ -43,12 +47,17 @@ export type LlmRunStatus =
 export type LlmRunPhase = "opening_hand" | "turn" | "other"
 
 export function canApplyLateLlmRunTerminalUpdate(status: LlmRunStatus) {
-  return status === "pending" || status === "streaming"
+  return (
+    status === "pending" ||
+    status === "batch_submitted" ||
+    status === "streaming"
+  )
 }
 
 export type CreateOpeningHandLlmRunInput = {
   simulationId: string
   llmModelPresetId: string
+  processingMode: LlmProcessingMode
   provider: string
   model: string
   openrouterModelProvider: string | null
@@ -63,6 +72,7 @@ export type CreateTurnLlmRunInput = {
   simulationId: string
   llmModelPresetId: string
   turnNumber: number
+  processingMode: LlmProcessingMode
   provider: string
   model: string
   openrouterModelProvider: string | null
@@ -122,6 +132,49 @@ type UsageLimitedQueuedLlmRun = {
 export type LlmRunQueueClaimResult =
   | ClaimedQueuedLlmRun
   | UsageLimitedQueuedLlmRun
+
+export type OpenAiBatchPendingRun = {
+  simulationId: string
+  deckId: string
+  llmRunId: string
+  llmModelPresetId: string
+  phase: Extract<LlmRunPhase, "opening_hand" | "turn">
+  provider: string
+  model: string
+  openrouterModelProvider: string | null
+  serviceTier: string | null
+  reasoningEffort: string | null
+  reasoningSummariesEnabled: boolean
+  runtimeStreamKey: string
+  attemptNumber: number
+  createdAt: string
+  fullPrompt: string
+  requestPayload: unknown
+  ownerUserId: string | null
+  turnNumber?: number
+}
+
+export type OpenAiBatchSubmittedItemInput = {
+  llmRunId: string
+  customId: string
+  requestPayloadRedacted: unknown
+}
+
+export type OpenAiBatchToPoll = {
+  id: string
+  llmModelPresetId: string
+  providerBatchId: string
+  providerStatus: string
+}
+
+export type OpenAiBatchItemForReconcile = {
+  llmRunId: string
+  customId: string
+  simulationId: string
+  deckId: string
+  phase: Extract<LlmRunPhase, "opening_hand" | "turn">
+  status: LlmRunStatus
+}
 
 export type UpdateLlmRunRequestDataInput = {
   llmRunId: string
@@ -295,8 +348,10 @@ export type SimulationSummary = {
   seed: string
   library: string[]
   turnsToSimulate: number
+  llmProcessingMode: LlmProcessingMode
   reasoningSummariesEnabled: boolean
   useFlexServiceTier: boolean
+  autoSimulateNextStep: boolean
   isPublic: boolean
   simulatedTurnCount: number
   completedLlmRunCount: number
@@ -370,6 +425,7 @@ type TurnPhaseChange = (typeof TURN_PHASE_CHANGES)[number]
 export type CreateSimulationInput = {
   seed: string
   llmModelPresetId: string | null
+  llmProcessingMode?: LlmProcessingMode
   turnsToSimulate: number
   reasoningSummariesEnabled?: boolean
   useFlexServiceTier?: boolean
@@ -561,8 +617,11 @@ export async function ensureSimulationsSchema() {
     "cancelled",
   ])
   await createEnumType("simulation_created_via", ["app", "external_mcp"])
+  await createEnumType("llm_processing_mode", ["realtime", "openai_batch"])
   await createEnumType("llm_run_status", [
     "pending",
+    "batch_pending",
+    "batch_submitted",
     "streaming",
     "completed",
     "failed",
@@ -592,6 +651,7 @@ export async function ensureSimulationsSchema() {
       seed text NOT NULL,
       random_state bigint NOT NULL,
       turns_to_simulate integer NOT NULL CHECK (turns_to_simulate >= 0),
+      llm_processing_mode llm_processing_mode NOT NULL DEFAULT 'realtime',
       starting_hand_id uuid REFERENCES starting_hands(id) ON DELETE SET NULL,
       library jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(library) = 'array'),
       mulligan_count integer NOT NULL DEFAULT 0 CHECK (mulligan_count >= 0),
@@ -611,6 +671,10 @@ export async function ensureSimulationsSchema() {
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now()
     )
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulations
+    ADD COLUMN IF NOT EXISTS llm_processing_mode llm_processing_mode NOT NULL DEFAULT 'realtime'
   `)
   await queryDatabase(`
     ALTER TABLE simulations
@@ -659,6 +723,7 @@ export async function ensureSimulationsSchema() {
       llm_model_preset_id uuid REFERENCES llm_model_presets(id) ON DELETE RESTRICT,
       owner_user_id text REFERENCES "user"(id) ON DELETE SET NULL,
 
+      processing_mode llm_processing_mode NOT NULL DEFAULT 'realtime',
       status llm_run_status NOT NULL DEFAULT 'pending',
       runtime_stream_key text UNIQUE,
       queued_at timestamptz,
@@ -681,6 +746,10 @@ export async function ensureSimulationsSchema() {
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now()
     )
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_runs
+    ADD COLUMN IF NOT EXISTS processing_mode llm_processing_mode NOT NULL DEFAULT 'realtime'
   `)
   await queryDatabase(`
     ALTER TABLE llm_runs
@@ -842,6 +911,50 @@ export async function ensureSimulationsSchema() {
     DROP TYPE IF EXISTS llm_chunk_kind
   `)
   await queryDatabase(`
+    CREATE TABLE IF NOT EXISTS openai_batches (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+
+      llm_model_preset_id uuid NOT NULL REFERENCES llm_model_presets(id) ON DELETE RESTRICT,
+      provider_batch_id text UNIQUE,
+      input_file_id text,
+      output_file_id text,
+      error_file_id text,
+      provider_status text NOT NULL DEFAULT 'submitted',
+      request_counts jsonb NOT NULL DEFAULT '{}'::jsonb,
+      raw_batch jsonb NOT NULL DEFAULT '{}'::jsonb,
+      failure_message text,
+
+      submitted_at timestamptz,
+      completed_at timestamptz,
+      failed_at timestamptz,
+      cancelled_at timestamptz,
+      expired_at timestamptz,
+
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )
+  `)
+  await queryDatabase(`
+    CREATE TABLE IF NOT EXISTS openai_batch_items (
+      id bigserial PRIMARY KEY,
+
+      openai_batch_id uuid NOT NULL REFERENCES openai_batches(id) ON DELETE CASCADE,
+      llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
+      custom_id text NOT NULL CHECK (btrim(custom_id) <> ''),
+      status text NOT NULL DEFAULT 'submitted',
+      request_payload_redacted jsonb NOT NULL DEFAULT '{}'::jsonb,
+      output_payload jsonb,
+      error_payload jsonb,
+      failure_message text,
+
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+
+      UNIQUE (openai_batch_id, custom_id),
+      UNIQUE (llm_run_id)
+    )
+  `)
+  await queryDatabase(`
     CREATE TABLE IF NOT EXISTS simulation_opening_hand_llm_runs (
       simulation_id uuid NOT NULL REFERENCES simulations(id) ON DELETE CASCADE,
       llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
@@ -995,7 +1108,12 @@ export async function ensureSimulationsSchema() {
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS llm_runs_queue_idx
       ON llm_runs (status, queued_at, id)
-      WHERE status = 'pending' AND queued_at IS NOT NULL
+      WHERE status = 'pending' AND processing_mode = 'realtime' AND queued_at IS NOT NULL
+  `)
+  await queryDatabase(`
+    CREATE INDEX IF NOT EXISTS llm_runs_openai_batch_pending_idx
+      ON llm_runs (llm_model_preset_id, created_at, id)
+      WHERE status = 'batch_pending' AND processing_mode = 'openai_batch'
   `)
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS llm_runs_streaming_owner_idx
@@ -1017,6 +1135,14 @@ export async function ensureSimulationsSchema() {
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS llm_run_mcp_function_calls_function_name_called_at_idx
       ON llm_run_mcp_function_calls (mcp_function_name, called_at)
+  `)
+  await queryDatabase(`
+    CREATE INDEX IF NOT EXISTS openai_batches_status_idx
+      ON openai_batches (provider_status, submitted_at, id)
+  `)
+  await queryDatabase(`
+    CREATE INDEX IF NOT EXISTS openai_batch_items_openai_batch_id_idx
+      ON openai_batch_items (openai_batch_id)
   `)
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS simulation_opening_hand_llm_runs_simulation_id_idx
@@ -1156,8 +1282,10 @@ type SimulationSummaryRow = {
   seed: string
   library: unknown
   turns_to_simulate: number
+  llm_processing_mode: LlmProcessingMode
   reasoning_summaries_enabled: boolean
   use_flex_service_tier: boolean
+  auto_simulate_next_step: boolean
   is_public: boolean
   simulated_turn_count: number
   completed_llm_run_count: number
@@ -1180,7 +1308,7 @@ const SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL = `
         WHERE latest_run.simulation_id = opening_run.simulation_id
       )
       AND (
-        llm_run.status IN ('pending', 'streaming', 'cancel_requested', 'failed', 'cancelled')
+        llm_run.status IN ('pending', 'batch_pending', 'batch_submitted', 'streaming', 'cancel_requested', 'failed', 'cancelled')
         OR (
           llm_run.status = 'completed'
           AND opening_run.opening_hand_is_valid = true
@@ -1194,7 +1322,7 @@ const SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL = `
     WHERE turn_run.simulation_id = simulations.id
       AND turn_run.outdated = false
       AND (
-        llm_run.status IN ('pending', 'streaming', 'cancel_requested', 'failed', 'cancelled')
+        llm_run.status IN ('pending', 'batch_pending', 'batch_submitted', 'streaming', 'cancel_requested', 'failed', 'cancelled')
         OR (
           llm_run.status = 'completed'
           AND turn_run.game_state IS NOT NULL
@@ -1213,14 +1341,14 @@ const SIMULATION_SUMMARY_ACTIVE_RUN_COUNT_SQL = `
       JOIN llm_runs llm_run
         ON llm_run.id = opening_run.llm_run_id
       WHERE opening_run.simulation_id = simulations.id
-        AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
+        AND llm_run.status IN ('pending', 'batch_pending', 'batch_submitted', 'streaming', 'cancel_requested')
       UNION ALL
       SELECT turn_run.llm_run_id
       FROM simulation_turn_llm_runs turn_run
       JOIN llm_runs llm_run
         ON llm_run.id = turn_run.llm_run_id
       WHERE turn_run.simulation_id = simulations.id
-        AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
+        AND llm_run.status IN ('pending', 'batch_pending', 'batch_submitted', 'streaming', 'cancel_requested')
     ) active_run
   )
 `
@@ -1246,8 +1374,10 @@ function mapSimulationSummaryRow(
     seed: simulation.seed,
     library: parseStringArray(simulation.library),
     turnsToSimulate: simulation.turns_to_simulate,
+    llmProcessingMode: simulation.llm_processing_mode,
     reasoningSummariesEnabled: simulation.reasoning_summaries_enabled,
     useFlexServiceTier: simulation.use_flex_service_tier,
+    autoSimulateNextStep: simulation.auto_simulate_next_step,
     isPublic: simulation.is_public,
     simulatedTurnCount: simulation.simulated_turn_count,
     completedLlmRunCount: simulation.completed_llm_run_count,
@@ -1272,8 +1402,10 @@ export async function listSimulationsForDeck(
         seed,
         library,
         turns_to_simulate,
+        llm_processing_mode,
         reasoning_summaries_enabled,
         use_flex_service_tier,
+        auto_simulate_next_step,
         is_public,
         ${SIMULATION_SUMMARY_SIMULATED_TURN_COUNT_SQL} AS simulated_turn_count,
         ${SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL} AS completed_llm_run_count,
@@ -1299,9 +1431,18 @@ export async function createSimulation(
   const seed = input.seed.trim()
   const createdVia = input.createdVia ?? "app"
   const llmModelPresetId = input.llmModelPresetId?.trim() || null
+  const llmProcessingMode = input.llmProcessingMode ?? "realtime"
+  const useFlexServiceTier = input.useFlexServiceTier ?? false
 
   if (!seed) {
     throw new SimulationValidationError("Simulation seed is required.")
+  }
+
+  if (
+    llmProcessingMode !== "realtime" &&
+    llmProcessingMode !== "openai_batch"
+  ) {
+    throw new SimulationValidationError("LLM processing mode is invalid.")
   }
 
   if (createdVia !== "app" && createdVia !== "external_mcp") {
@@ -1328,10 +1469,19 @@ export async function createSimulation(
     throw new SimulationValidationError("Deck not found.")
   }
 
+  if (llmProcessingMode === "openai_batch" && useFlexServiceTier) {
+    throw new SimulationValidationError(
+      "Batch processing cannot be combined with the flex service tier."
+    )
+  }
+
   if (llmModelPresetId !== null) {
-    const presetResult = await queryDatabase<{ supports_flex: boolean }>(
+    const presetResult = await queryDatabase<{
+      provider: string
+      supports_flex: boolean
+    }>(
       `
-        SELECT supports_flex
+        SELECT provider, supports_flex
         FROM llm_model_presets
         WHERE id = $1
           AND is_enabled = true
@@ -1343,14 +1493,27 @@ export async function createSimulation(
       throw new SimulationValidationError("Model preset not found or disabled.")
     }
 
-    if (input.useFlexServiceTier && !presetResult.rows[0].supports_flex) {
+    if (useFlexServiceTier && !presetResult.rows[0].supports_flex) {
       throw new SimulationValidationError(
         "Flex service tier can only be enabled for model presets that support flex."
       )
     }
-  } else if (input.useFlexServiceTier) {
+
+    if (
+      llmProcessingMode === "openai_batch" &&
+      presetResult.rows[0].provider !== "openai"
+    ) {
+      throw new SimulationValidationError(
+        "Batch processing can only be enabled for OpenAI model presets."
+      )
+    }
+  } else if (useFlexServiceTier) {
     throw new SimulationValidationError(
       "Flex service tier can only be enabled after selecting a model preset that supports flex."
+    )
+  } else if (llmProcessingMode === "openai_batch") {
+    throw new SimulationValidationError(
+      "Batch processing can only be enabled after selecting an OpenAI model preset."
     )
   }
 
@@ -1389,6 +1552,7 @@ export async function createSimulation(
         seed,
         random_state,
         turns_to_simulate,
+        llm_processing_mode,
         reasoning_summaries_enabled,
         use_flex_service_tier,
         starting_hand_id,
@@ -1396,7 +1560,7 @@ export async function createSimulation(
         has_drawn_starting_hand,
         status
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13)
       RETURNING
         id,
         deck_id,
@@ -1406,8 +1570,10 @@ export async function createSimulation(
         seed,
         library,
         turns_to_simulate,
+        llm_processing_mode,
         reasoning_summaries_enabled,
         use_flex_service_tier,
+        auto_simulate_next_step,
         false AS is_public,
         0::integer AS simulated_turn_count,
         0::integer AS completed_llm_run_count,
@@ -1423,8 +1589,9 @@ export async function createSimulation(
       seed,
       shuffledLibrary.randomState,
       input.turnsToSimulate,
+      llmProcessingMode,
       input.reasoningSummariesEnabled ?? false,
-      input.useFlexServiceTier ?? false,
+      useFlexServiceTier,
       input.startingHandId,
       JSON.stringify(shuffledLibrary.library),
       input.startingHandId !== null,
@@ -1450,8 +1617,10 @@ export async function getSimulationSummary(
         seed,
         library,
         turns_to_simulate,
+        llm_processing_mode,
         reasoning_summaries_enabled,
         use_flex_service_tier,
+        auto_simulate_next_step,
         is_public,
         ${SIMULATION_SUMMARY_SIMULATED_TURN_COUNT_SQL} AS simulated_turn_count,
         ${SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL} AS completed_llm_run_count,
@@ -1488,8 +1657,10 @@ export async function getPublicSimulationSummary(
         seed,
         library,
         turns_to_simulate,
+        llm_processing_mode,
         reasoning_summaries_enabled,
         use_flex_service_tier,
+        auto_simulate_next_step,
         is_public,
         ${SIMULATION_SUMMARY_SIMULATED_TURN_COUNT_SQL} AS simulated_turn_count,
         ${SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL} AS completed_llm_run_count,
@@ -1540,9 +1711,10 @@ export async function updateSimulation(
   let nextUseFlexServiceTier = input.useFlexServiceTier ?? null
   const currentSimulationResult = await queryDatabase<{
     llm_model_preset_id: string | null
+    llm_processing_mode: LlmProcessingMode
   }>(
     `
-      SELECT llm_model_preset_id
+      SELECT llm_model_preset_id, llm_processing_mode
       FROM simulations
       WHERE id = $1
         AND deck_id = $2
@@ -1558,6 +1730,15 @@ export async function updateSimulation(
   const targetPresetId =
     trimmedPresetId ?? currentSimulation.llm_model_preset_id
 
+  if (
+    currentSimulation.llm_processing_mode === "openai_batch" &&
+    input.useFlexServiceTier === true
+  ) {
+    throw new SimulationValidationError(
+      "Batch processing cannot be combined with the flex service tier."
+    )
+  }
+
   if (trimmedPresetId !== undefined || input.useFlexServiceTier === true) {
     if (!targetPresetId) {
       throw new SimulationValidationError(
@@ -1565,9 +1746,12 @@ export async function updateSimulation(
       )
     }
 
-    const presetResult = await queryDatabase<{ supports_flex: boolean }>(
+    const presetResult = await queryDatabase<{
+      provider: string
+      supports_flex: boolean
+    }>(
       `
-        SELECT supports_flex
+        SELECT provider, supports_flex
         FROM llm_model_presets
         WHERE id = $1
           AND is_enabled = true
@@ -1583,7 +1767,17 @@ export async function updateSimulation(
       )
     }
 
-    const supportsFlex = presetResult.rows[0].supports_flex
+    const targetPreset = presetResult.rows[0]
+    const supportsFlex = targetPreset.supports_flex
+
+    if (
+      currentSimulation.llm_processing_mode === "openai_batch" &&
+      targetPreset.provider !== "openai"
+    ) {
+      throw new SimulationValidationError(
+        "Batch simulations can only use OpenAI model presets."
+      )
+    }
 
     if (input.useFlexServiceTier === true && !supportsFlex) {
       throw new SimulationValidationError(
@@ -1614,8 +1808,10 @@ export async function updateSimulation(
         seed,
         library,
         turns_to_simulate,
+        llm_processing_mode,
         reasoning_summaries_enabled,
         use_flex_service_tier,
+        auto_simulate_next_step,
         is_public,
         ${SIMULATION_SUMMARY_SIMULATED_TURN_COUNT_SQL} AS simulated_turn_count,
         ${SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL} AS completed_llm_run_count,
@@ -1657,8 +1853,10 @@ export async function setSimulationPublic(
         seed,
         library,
         turns_to_simulate,
+        llm_processing_mode,
         reasoning_summaries_enabled,
         use_flex_service_tier,
+        auto_simulate_next_step,
         is_public,
         ${SIMULATION_SUMMARY_SIMULATED_TURN_COUNT_SQL} AS simulated_turn_count,
         ${SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL} AS completed_llm_run_count,
@@ -1668,6 +1866,49 @@ export async function setSimulationPublic(
         updated_at
     `,
     [simulationId, deckId, isPublic]
+  )
+  const simulation = result.rows[0]
+
+  if (!simulation) {
+    throw new SimulationValidationError("Simulation not found.")
+  }
+
+  return mapSimulationSummaryRow(simulation)
+}
+
+export async function disableSimulationAutoAdvance(
+  deckId: string,
+  simulationId: string
+): Promise<SimulationSummary> {
+  const result = await queryDatabase<SimulationSummaryRow>(
+    `
+      UPDATE simulations
+      SET auto_simulate_next_step = false,
+          updated_at = now()
+      WHERE id = $1
+        AND deck_id = $2
+      RETURNING
+        id,
+        deck_id,
+        created_via,
+        llm_model_preset_id,
+        starting_hand_id,
+        seed,
+        library,
+        turns_to_simulate,
+        llm_processing_mode,
+        reasoning_summaries_enabled,
+        use_flex_service_tier,
+        auto_simulate_next_step,
+        is_public,
+        ${SIMULATION_SUMMARY_SIMULATED_TURN_COUNT_SQL} AS simulated_turn_count,
+        ${SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL} AS completed_llm_run_count,
+        ${SIMULATION_SUMMARY_ACTIVE_RUN_COUNT_SQL} AS active_llm_run_count,
+        status,
+        created_at,
+        updated_at
+    `,
+    [simulationId, deckId]
   )
   const simulation = result.rows[0]
 
@@ -2123,6 +2364,8 @@ export async function createOpeningHandLlmRun(
     )
     const attemptNumber = Number(attemptResult.rows[0].attempt_number)
     const openrouterModelProvider = getPersistableOpenRouterModelProvider(input)
+    const initialRunStatus: LlmRunStatus =
+      input.processingMode === "openai_batch" ? "batch_pending" : "pending"
     const llmRunResult = await client.query<{
       id: string
       status: LlmRunStatus
@@ -2140,6 +2383,8 @@ export async function createOpeningHandLlmRun(
           reasoning_effort,
           reasoning_summaries_enabled,
           owner_user_id,
+          processing_mode,
+          status,
           runtime_stream_key,
           full_prompt,
           request_payload
@@ -2156,7 +2401,9 @@ export async function createOpeningHandLlmRun(
           $8,
           $9,
           $10,
-          $11::jsonb
+          $11,
+          $12,
+          $13::jsonb
         )
         RETURNING id, status, runtime_stream_key, created_at
       `,
@@ -2169,6 +2416,8 @@ export async function createOpeningHandLlmRun(
         input.reasoningEffort,
         simulationResult.rows[0].reasoning_summaries_enabled,
         simulationResult.rows[0].owner_user_id,
+        input.processingMode,
+        initialRunStatus,
         input.runtimeStreamKey,
         input.fullPrompt,
         JSON.stringify(input.requestPayload),
@@ -2362,6 +2611,8 @@ export async function createTurnLlmRun(
     )
     const attemptNumber = Number(attemptResult.rows[0].attempt_number)
     const openrouterModelProvider = getPersistableOpenRouterModelProvider(input)
+    const initialRunStatus: LlmRunStatus =
+      input.processingMode === "openai_batch" ? "batch_pending" : "pending"
     const llmRunResult = await client.query<{
       id: string
       status: LlmRunStatus
@@ -2379,6 +2630,8 @@ export async function createTurnLlmRun(
           reasoning_effort,
           reasoning_summaries_enabled,
           owner_user_id,
+          processing_mode,
+          status,
           runtime_stream_key
         )
         VALUES (
@@ -2391,7 +2644,9 @@ export async function createTurnLlmRun(
           $6,
           $7,
           $8,
-          $9
+          $9,
+          $10,
+          $11
         )
         RETURNING id, status, runtime_stream_key, created_at
       `,
@@ -2404,6 +2659,8 @@ export async function createTurnLlmRun(
         input.reasoningEffort,
         simulation.reasoning_summaries_enabled,
         simulation.owner_user_id,
+        input.processingMode,
+        initialRunStatus,
         input.runtimeStreamKey,
       ]
     )
@@ -2467,12 +2724,414 @@ export async function markLlmRunQueued(llmRunId: string) {
           updated_at = now()
       WHERE id = $1
         AND status = 'pending'
+        AND processing_mode = 'realtime'
       RETURNING id
     `,
     [llmRunId]
   )
 
   return (result.rowCount ?? 0) > 0
+}
+
+export async function listPendingOpenAiBatchRuns({
+  maxConcurrentRuns,
+}: {
+  maxConcurrentRuns: number
+}): Promise<OpenAiBatchPendingRun[]> {
+  const result = await queryDatabase<{
+    simulation_id: string
+    deck_id: string
+    llm_run_id: string
+    llm_model_preset_id: string
+    phase: Extract<LlmRunPhase, "opening_hand" | "turn">
+    provider: string
+    model: string
+    openrouter_model_provider: string | null
+    service_tier: string | null
+    reasoning_effort: string | null
+    reasoning_summaries_enabled: boolean
+    runtime_stream_key: string
+    attempt_number: number
+    created_at: Date
+    full_prompt: string
+    request_payload: unknown
+    owner_user_id: string | null
+    turn_number: number | null
+  }>(
+    `
+      WITH linked_run AS (
+        SELECT
+          opening_run.simulation_id,
+          simulation.deck_id,
+          opening_run.llm_run_id,
+          opening_run.attempt_number,
+          NULL::integer AS turn_number
+        FROM simulation_opening_hand_llm_runs opening_run
+        JOIN simulations simulation
+          ON simulation.id = opening_run.simulation_id
+        UNION ALL
+        SELECT
+          turn_run.simulation_id,
+          simulation.deck_id,
+          turn_run.llm_run_id,
+          turn_run.attempt_number,
+          turn_run.turn_number
+        FROM simulation_turn_llm_runs turn_run
+        JOIN simulations simulation
+          ON simulation.id = turn_run.simulation_id
+      )
+      SELECT
+        linked_run.simulation_id,
+        linked_run.deck_id,
+        llm_run.id AS llm_run_id,
+        llm_run.llm_model_preset_id,
+        llm_run.phase,
+        llm_run.provider,
+        llm_run.model,
+        llm_run.openrouter_model_provider,
+        llm_run.service_tier,
+        llm_run.reasoning_effort,
+        llm_run.reasoning_summaries_enabled,
+        llm_run.runtime_stream_key,
+        linked_run.attempt_number,
+        llm_run.created_at,
+        llm_run.full_prompt,
+        llm_run.request_payload,
+        llm_run.owner_user_id,
+        linked_run.turn_number
+      FROM llm_runs llm_run
+      JOIN linked_run
+        ON linked_run.llm_run_id = llm_run.id
+      WHERE llm_run.status = 'batch_pending'
+        AND llm_run.processing_mode = 'openai_batch'
+        AND llm_run.provider = 'openai'
+        AND llm_run.llm_model_preset_id IS NOT NULL
+        AND llm_run.runtime_stream_key IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM openai_batch_items item
+          WHERE item.llm_run_id = llm_run.id
+        )
+        AND (
+          SELECT COUNT(*)::integer
+          FROM llm_runs active_run
+          WHERE active_run.status IN ('streaming', 'batch_submitted')
+        ) < $1::integer
+        AND (
+          SELECT COUNT(*)::integer
+          FROM llm_runs active_run
+          WHERE active_run.status IN ('streaming', 'batch_submitted')
+            AND active_run.owner_user_id IS NOT DISTINCT FROM llm_run.owner_user_id
+        ) < ${getLlmRunOwnerConcurrencyLimitSql()}
+      ORDER BY llm_run.llm_model_preset_id ASC, llm_run.created_at ASC, llm_run.id ASC
+    `,
+    [
+      maxConcurrentRuns,
+      BILLING_TIER_LIMITS.free.maxConcurrentLlmRuns,
+      BILLING_TIER_LIMITS.plus.maxConcurrentLlmRuns,
+      BILLING_TIER_LIMITS.pro.maxConcurrentLlmRuns,
+      BILLING_TIER_LIMITS.super_max.maxConcurrentLlmRuns,
+    ]
+  )
+
+  return result.rows.map((row) => {
+    const run: OpenAiBatchPendingRun = {
+      simulationId: row.simulation_id,
+      deckId: row.deck_id,
+      llmRunId: row.llm_run_id,
+      llmModelPresetId: row.llm_model_preset_id,
+      phase: row.phase,
+      provider: row.provider,
+      model: row.model,
+      openrouterModelProvider: row.openrouter_model_provider,
+      serviceTier: row.service_tier,
+      reasoningEffort: row.reasoning_effort,
+      reasoningSummariesEnabled: row.reasoning_summaries_enabled,
+      runtimeStreamKey: row.runtime_stream_key,
+      attemptNumber: row.attempt_number,
+      createdAt: row.created_at.toISOString(),
+      fullPrompt: row.full_prompt,
+      requestPayload: row.request_payload,
+      ownerUserId: row.owner_user_id,
+    }
+
+    if (row.turn_number !== null) {
+      run.turnNumber = row.turn_number
+    }
+
+    return run
+  })
+}
+
+export async function recordOpenAiBatchSubmitted({
+  errorFileId,
+  inputFileId,
+  items,
+  llmModelPresetId,
+  outputFileId,
+  providerBatchId,
+  providerStatus,
+  rawBatch,
+  requestCounts,
+}: {
+  llmModelPresetId: string
+  providerBatchId: string
+  inputFileId: string | null
+  outputFileId: string | null
+  errorFileId: string | null
+  providerStatus: string
+  requestCounts: unknown
+  rawBatch: unknown
+  items: OpenAiBatchSubmittedItemInput[]
+}): Promise<string> {
+  return withDatabaseTransaction(async (client) => {
+    const batchResult = await client.query<{ id: string }>(
+      `
+        INSERT INTO openai_batches (
+          llm_model_preset_id,
+          provider_batch_id,
+          input_file_id,
+          output_file_id,
+          error_file_id,
+          provider_status,
+          request_counts,
+          raw_batch,
+          submitted_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, now())
+        RETURNING id
+      `,
+      [
+        llmModelPresetId,
+        providerBatchId,
+        inputFileId,
+        outputFileId,
+        errorFileId,
+        providerStatus,
+        getRequiredJsonbQueryValue(requestCounts),
+        getRequiredJsonbQueryValue(rawBatch),
+      ]
+    )
+    const openAiBatchId = batchResult.rows[0].id
+
+    for (const item of items) {
+      await client.query(
+        `
+          INSERT INTO openai_batch_items (
+            openai_batch_id,
+            llm_run_id,
+            custom_id,
+            request_payload_redacted
+          )
+          VALUES ($1, $2, $3, $4::jsonb)
+          ON CONFLICT (llm_run_id)
+          DO NOTHING
+        `,
+        [
+          openAiBatchId,
+          item.llmRunId,
+          item.customId,
+          getRequiredJsonbQueryValue(item.requestPayloadRedacted),
+        ]
+      )
+    }
+
+    await client.query(
+      `
+        UPDATE llm_runs
+        SET status = 'batch_submitted',
+            started_at = COALESCE(started_at, now()),
+            updated_at = now()
+        WHERE id = ANY($1::uuid[])
+          AND status = 'batch_pending'
+          AND processing_mode = 'openai_batch'
+      `,
+      [items.map((item) => item.llmRunId)]
+    )
+
+    return openAiBatchId
+  })
+}
+
+export async function listOpenAiBatchesToPoll(): Promise<OpenAiBatchToPoll[]> {
+  const result = await queryDatabase<{
+    id: string
+    llm_model_preset_id: string
+    provider_batch_id: string
+    provider_status: string
+  }>(
+    `
+      SELECT id, llm_model_preset_id, provider_batch_id, provider_status
+      FROM openai_batches
+      WHERE provider_batch_id IS NOT NULL
+        AND (
+          provider_status NOT IN ('completed', 'failed', 'expired', 'cancelled')
+          OR EXISTS (
+            SELECT 1
+            FROM openai_batch_items item
+            JOIN llm_runs run
+              ON run.id = item.llm_run_id
+            WHERE item.openai_batch_id = openai_batches.id
+              AND item.status = 'submitted'
+              AND run.status = 'batch_submitted'
+          )
+        )
+      ORDER BY submitted_at ASC NULLS LAST, created_at ASC
+    `
+  )
+
+  return result.rows.map((row) => ({
+    id: row.id,
+    llmModelPresetId: row.llm_model_preset_id,
+    providerBatchId: row.provider_batch_id,
+    providerStatus: row.provider_status,
+  }))
+}
+
+export async function updateOpenAiBatchProviderState({
+  errorFileId,
+  failureMessage,
+  inputFileId,
+  openAiBatchId,
+  outputFileId,
+  providerStatus,
+  rawBatch,
+  requestCounts,
+}: {
+  openAiBatchId: string
+  providerStatus: string
+  inputFileId: string | null
+  outputFileId: string | null
+  errorFileId: string | null
+  requestCounts: unknown
+  rawBatch: unknown
+  failureMessage?: string | null
+}) {
+  await queryDatabase(
+    `
+      UPDATE openai_batches
+      SET provider_status = $2,
+          input_file_id = COALESCE($3, input_file_id),
+          output_file_id = COALESCE($4, output_file_id),
+          error_file_id = COALESCE($5, error_file_id),
+          request_counts = $6::jsonb,
+          raw_batch = $7::jsonb,
+          failure_message = COALESCE($8, failure_message),
+          completed_at = CASE WHEN $2 = 'completed' THEN COALESCE(completed_at, now()) ELSE completed_at END,
+          failed_at = CASE WHEN $2 = 'failed' THEN COALESCE(failed_at, now()) ELSE failed_at END,
+          cancelled_at = CASE WHEN $2 = 'cancelled' THEN COALESCE(cancelled_at, now()) ELSE cancelled_at END,
+          expired_at = CASE WHEN $2 = 'expired' THEN COALESCE(expired_at, now()) ELSE expired_at END,
+          updated_at = now()
+      WHERE id = $1
+    `,
+    [
+      openAiBatchId,
+      providerStatus,
+      inputFileId,
+      outputFileId,
+      errorFileId,
+      getRequiredJsonbQueryValue(requestCounts),
+      getRequiredJsonbQueryValue(rawBatch),
+      failureMessage ?? null,
+    ]
+  )
+}
+
+export async function listOpenAiBatchItemsForReconcile(
+  openAiBatchId: string
+): Promise<OpenAiBatchItemForReconcile[]> {
+  const result = await queryDatabase<{
+    llm_run_id: string
+    custom_id: string
+    simulation_id: string
+    deck_id: string
+    phase: Extract<LlmRunPhase, "opening_hand" | "turn">
+    status: LlmRunStatus
+  }>(
+    `
+      SELECT
+        item.llm_run_id,
+        item.custom_id,
+        COALESCE(opening_run.simulation_id, turn_run.simulation_id) AS simulation_id,
+        simulation.deck_id,
+        llm_run.phase,
+        llm_run.status
+      FROM openai_batch_items item
+      JOIN llm_runs llm_run
+        ON llm_run.id = item.llm_run_id
+      LEFT JOIN simulation_opening_hand_llm_runs opening_run
+        ON opening_run.llm_run_id = item.llm_run_id
+      LEFT JOIN simulation_turn_llm_runs turn_run
+        ON turn_run.llm_run_id = item.llm_run_id
+      JOIN simulations simulation
+        ON simulation.id = COALESCE(opening_run.simulation_id, turn_run.simulation_id)
+      WHERE item.openai_batch_id = $1
+        AND llm_run.phase IN ('opening_hand', 'turn')
+      ORDER BY item.id ASC
+    `,
+    [openAiBatchId]
+  )
+
+  return result.rows.map((row) => ({
+    llmRunId: row.llm_run_id,
+    customId: row.custom_id,
+    simulationId: row.simulation_id,
+    deckId: row.deck_id,
+    phase: row.phase,
+    status: row.status,
+  }))
+}
+
+export async function recordOpenAiBatchItemOutput({
+  customId,
+  openAiBatchId,
+  outputPayload,
+}: {
+  openAiBatchId: string
+  customId: string
+  outputPayload: unknown
+}) {
+  await queryDatabase(
+    `
+      UPDATE openai_batch_items
+      SET status = 'completed',
+          output_payload = $3::jsonb,
+          updated_at = now()
+      WHERE openai_batch_id = $1
+        AND custom_id = $2
+    `,
+    [openAiBatchId, customId, getRequiredJsonbQueryValue(outputPayload)]
+  )
+}
+
+export async function recordOpenAiBatchItemError({
+  customId,
+  errorPayload,
+  failureMessage,
+  openAiBatchId,
+}: {
+  openAiBatchId: string
+  customId: string
+  errorPayload: unknown
+  failureMessage: string
+}) {
+  await queryDatabase(
+    `
+      UPDATE openai_batch_items
+      SET status = 'failed',
+          error_payload = $3::jsonb,
+          failure_message = $4,
+          updated_at = now()
+      WHERE openai_batch_id = $1
+        AND custom_id = $2
+    `,
+    [
+      openAiBatchId,
+      customId,
+      getRequiredJsonbQueryValue(errorPayload),
+      failureMessage,
+    ]
+  )
 }
 
 export async function createLlmRunMcpToken({
@@ -2535,7 +3194,7 @@ export async function getActiveLlmRunMcpTokenContext({
         AND token.phase = $2
         AND token.revoked_at IS NULL
         AND token.expires_at > now()
-        AND run.status IN ('pending', 'streaming')
+        AND run.status IN ('pending', 'batch_submitted', 'streaming')
     `,
     [tokenHash, phase]
   )
@@ -2722,6 +3381,7 @@ export async function claimNextQueuedLlmRun({
           JOIN linked_run
             ON linked_run.llm_run_id = llm_run.id
           WHERE llm_run.status = 'pending'
+            AND llm_run.processing_mode = 'realtime'
             AND llm_run.queued_at IS NOT NULL
             AND (
               SELECT COUNT(*)::integer
@@ -2876,6 +3536,7 @@ export function buildClaimQueuedLlmRunStartQuery(
           updated_at = $2::timestamptz
       WHERE llm_run.id = $1
         AND llm_run.status = 'pending'
+        AND llm_run.processing_mode = 'realtime'
       RETURNING started_at
     `,
     values: [llmRunId, startedAt],
@@ -2918,6 +3579,7 @@ export function buildFailQueuedLlmRunUsageLimitQuery(
           updated_at = now()
       WHERE id = $1
         AND status = 'pending'
+        AND processing_mode = 'realtime'
       RETURNING id
     `,
     values: [llmRunId, failureMessage],
@@ -2951,7 +3613,7 @@ export function buildCompleteLlmRunQuery({
           completed_at = now(),
           updated_at = now()
       WHERE id = $1
-        AND status IN ('pending', 'streaming')
+        AND status IN ('pending', 'batch_submitted', 'streaming')
     `,
     values: [
       llmRunId,
@@ -2980,7 +3642,7 @@ export function buildFailLlmRunQuery(
           failure_message = $2,
           updated_at = now()
       WHERE id = $1
-        AND status IN ('pending', 'streaming')
+        AND status IN ('pending', 'batch_pending', 'batch_submitted', 'streaming')
     `,
     values: [
       llmRunId,
@@ -3007,7 +3669,7 @@ export function buildCancelLlmRunQuery(
           failure_message = COALESCE($2, failure_message),
           updated_at = now()
       WHERE id = $1
-        AND status IN ('pending', 'streaming', 'cancel_requested')
+        AND status IN ('pending', 'batch_pending', 'streaming', 'cancel_requested')
     `,
     values: [
       llmRunId,
@@ -3596,7 +4258,7 @@ export async function cancelStaleInFlightLlmRuns(): Promise<StaleInFlightLlmRunC
             ) linked_run
             JOIN llm_runs llm_run
               ON llm_run.id = linked_run.llm_run_id
-            WHERE llm_run.status IN ('pending', 'streaming', 'cancel_requested')
+            WHERE llm_run.status IN ('pending', 'batch_pending', 'batch_submitted', 'streaming', 'cancel_requested')
           )
         RETURNING id
       `,
@@ -3633,17 +4295,6 @@ export async function requestCancelSimulationLlmRuns(
       throw new SimulationValidationError("Simulation not found.")
     }
 
-    await client.query(
-      `
-        UPDATE simulations
-        SET auto_simulate_next_step = false,
-            cancel_requested_at = COALESCE(cancel_requested_at, now()),
-            updated_at = now()
-        WHERE id = $1
-      `,
-      [simulationId]
-    )
-
     const activeRunsResult = await client.query<{
       simulation_id: string
       llm_run_id: string
@@ -3662,7 +4313,7 @@ export async function requestCancelSimulationLlmRuns(
         JOIN llm_runs llm_run
           ON llm_run.id = opening_run.llm_run_id
         WHERE opening_run.simulation_id = $1
-          AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
+          AND llm_run.status IN ('pending', 'batch_pending', 'batch_submitted', 'streaming', 'cancel_requested')
         UNION ALL
         SELECT
           turn_run.simulation_id,
@@ -3674,7 +4325,28 @@ export async function requestCancelSimulationLlmRuns(
         JOIN llm_runs llm_run
           ON llm_run.id = turn_run.llm_run_id
         WHERE turn_run.simulation_id = $1
-          AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
+          AND llm_run.status IN ('pending', 'batch_pending', 'batch_submitted', 'streaming', 'cancel_requested')
+      `,
+      [simulationId]
+    )
+
+    if (activeRunsResult.rows.some((run) => run.status === "batch_submitted")) {
+      return activeRunsResult.rows.map((run) => ({
+        simulationId: run.simulation_id,
+        llmRunId: run.llm_run_id,
+        phase: run.phase,
+        runtimeStreamKey: run.runtime_stream_key,
+        status: run.status,
+      }))
+    }
+
+    await client.query(
+      `
+        UPDATE simulations
+        SET auto_simulate_next_step = false,
+            cancel_requested_at = COALESCE(cancel_requested_at, now()),
+            updated_at = now()
+        WHERE id = $1
       `,
       [simulationId]
     )
@@ -3687,7 +4359,7 @@ export async function requestCancelSimulationLlmRuns(
               cancel_requested_at = COALESCE(cancel_requested_at, now()),
               updated_at = now()
           WHERE id = ANY($1::uuid[])
-            AND status IN ('pending', 'streaming', 'cancel_requested')
+            AND status IN ('pending', 'batch_pending', 'streaming', 'cancel_requested')
         `,
         [activeRunsResult.rows.map((run) => run.llm_run_id)]
       )
@@ -3739,7 +4411,7 @@ export async function listActiveSimulationLlmRuns(
       JOIN llm_runs llm_run
         ON llm_run.id = opening_run.llm_run_id
       WHERE opening_run.simulation_id = $1
-        AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
+        AND llm_run.status IN ('pending', 'batch_pending', 'batch_submitted', 'streaming', 'cancel_requested')
       UNION ALL
       SELECT
         turn_run.simulation_id,
@@ -3751,7 +4423,7 @@ export async function listActiveSimulationLlmRuns(
       JOIN llm_runs llm_run
         ON llm_run.id = turn_run.llm_run_id
       WHERE turn_run.simulation_id = $1
-        AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
+        AND llm_run.status IN ('pending', 'batch_pending', 'batch_submitted', 'streaming', 'cancel_requested')
     `,
     [simulationId]
   )
@@ -3779,8 +4451,10 @@ export async function getSimulationDebugInfo(
         starting_hand_id,
         seed,
         turns_to_simulate,
+        llm_processing_mode,
         reasoning_summaries_enabled,
         use_flex_service_tier,
+        auto_simulate_next_step,
         is_public,
         ${SIMULATION_SUMMARY_SIMULATED_TURN_COUNT_SQL} AS simulated_turn_count,
         ${SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL} AS completed_llm_run_count,
@@ -3822,8 +4496,10 @@ export async function getSimulationDebugInfo(
     startingHandId: simulation.starting_hand_id,
     seed: simulation.seed,
     turnsToSimulate: simulation.turns_to_simulate,
+    llmProcessingMode: simulation.llm_processing_mode,
     reasoningSummariesEnabled: simulation.reasoning_summaries_enabled,
     useFlexServiceTier: simulation.use_flex_service_tier,
+    autoSimulateNextStep: simulation.auto_simulate_next_step,
     isPublic: simulation.is_public,
     simulatedTurnCount: simulation.simulated_turn_count,
     completedLlmRunCount: simulation.completed_llm_run_count,
@@ -3971,7 +4647,11 @@ async function resolveSimulationIdForActiveLlmRun(llmRunId: string) {
     )
   }
 
-  if (!["pending", "streaming"].includes(run.status)) {
+  if (
+    !["pending", "batch_pending", "batch_submitted", "streaming"].includes(
+      run.status
+    )
+  ) {
     throw new SimulationValidationError(
       "LLM run is not an active simulation run."
     )
@@ -4187,8 +4867,10 @@ type SimulationDebugSimulationRow = {
   starting_hand_id: string | null
   seed: string
   turns_to_simulate: number
+  llm_processing_mode: LlmProcessingMode
   reasoning_summaries_enabled: boolean
   use_flex_service_tier: boolean
+  auto_simulate_next_step: boolean
   is_public: boolean
   simulated_turn_count: number
   completed_llm_run_count: number
@@ -4719,14 +5401,14 @@ async function assertNoActiveSimulationLlmRuns(
         JOIN llm_runs llm_run
           ON llm_run.id = opening_run.llm_run_id
         WHERE opening_run.simulation_id = $1
-          AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
+          AND llm_run.status IN ('pending', 'batch_pending', 'batch_submitted', 'streaming', 'cancel_requested')
         UNION ALL
         SELECT llm_run.id
         FROM simulation_turn_llm_runs turn_run
         JOIN llm_runs llm_run
           ON llm_run.id = turn_run.llm_run_id
         WHERE turn_run.simulation_id = $1
-          AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
+          AND llm_run.status IN ('pending', 'batch_pending', 'batch_submitted', 'streaming', 'cancel_requested')
       ) active_run
       LIMIT 1
     `,

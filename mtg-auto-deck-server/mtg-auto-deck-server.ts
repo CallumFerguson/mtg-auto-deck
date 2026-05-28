@@ -7,6 +7,10 @@ import { hostHeaderValidation } from "@modelcontextprotocol/sdk/server/middlewar
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js"
 import { createHash, randomBytes, randomInt, randomUUID } from "node:crypto"
+import { createReadStream } from "node:fs"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import OpenAI from "openai"
 import { z } from "zod/v4"
 import {
@@ -78,6 +82,7 @@ import {
   createSimulation,
   createTurnLlmRun,
   deleteSimulation,
+  disableSimulationAutoAdvance,
   drawCardsFromBottom,
   drawCardsFromTop,
   drawStartingHand,
@@ -91,6 +96,9 @@ import {
   getSimulationSummary,
   isLlmRunActive,
   listActiveSimulationLlmRuns,
+  listOpenAiBatchesToPoll,
+  listOpenAiBatchItemsForReconcile,
+  listPendingOpenAiBatchRuns,
   listSimulationsForDeck,
   markLlmRunQueued,
   markSimulationCancelled,
@@ -98,6 +106,9 @@ import {
   markSimulationFailed,
   mulliganSimulation,
   requestCancelSimulationLlmRuns,
+  recordOpenAiBatchItemError,
+  recordOpenAiBatchItemOutput,
+  recordOpenAiBatchSubmitted,
   resetSimulationForOpeningHandLlmRun,
   returnCardToSimulationLibrary,
   returnCardsToSimulationLibrary,
@@ -109,6 +120,7 @@ import {
   SimulationValidationError,
   takeCardsFromSimulationLibrary,
   updateLlmRunRequestData,
+  updateOpenAiBatchProviderState,
   updateSimulation,
 } from "./simulations-postgres.js"
 import type {
@@ -118,14 +130,17 @@ import type {
   LlmRunStatus,
   ClaimedQueuedLlmRun,
   LlmRunQueueClaimResult,
+  OpenAiBatchPendingRun,
   SimulationDebugLlmRun,
   SimulationLlmCompletionResult,
   SimulationResultsInfo,
   SimulationSummary,
 } from "./simulations-postgres.js"
 import {
+  ensureUserUsageLimitWindowsForRunStartWithClient,
   ensureUsageLimitsSchema,
   getUserUsageLimitStatus,
+  USAGE_LIMIT_OUT_OF_USAGE_MESSAGE,
 } from "./usage-limits-postgres.js"
 import {
   createStartingHand,
@@ -232,7 +247,15 @@ const TURN_SIMULATION_MCP_SERVER_LABEL = "turn_simulation"
 const SSE_KEEPALIVE_INTERVAL_MS = 15000
 const LLM_RUN_QUEUE_POLL_INTERVAL_MS = 1000
 const MCP_RUN_TOKEN_TTL_MS = 6 * 60 * 60 * 1000
+const OPENAI_BATCH_POLL_INTERVAL_MS = 60 * 1000
+const OPENAI_BATCH_MCP_RUN_TOKEN_TTL_MS = 26 * 60 * 60 * 1000
+const OPENAI_BATCH_COMPLETION_WINDOW = "24h"
+const OPENAI_BATCH_ENDPOINT = "/v1/responses"
+const OPENAI_BATCH_MAX_JSONL_BYTES = 90 * 1024 * 1024
+const OPENAI_BATCH_TMP_PREFIX = "mtg-auto-deck-openai-batch-"
 const QUEUED_MCP_RUN_TOKEN_PLACEHOLDER = "queued"
+const SUBMITTED_BATCH_RUN_STOP_MESSAGE =
+  "Submitted batch runs cannot be stopped. Stop future turns instead."
 const LOOPBACK_ALLOWED_ORIGINS = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
@@ -309,6 +332,7 @@ const createSimulationSchema = z.object({
   seed: z.string().trim().min(1),
   llmModelPresetId: z.uuid(),
   turnsToSimulate: z.number().int().nonnegative(),
+  llmProcessingMode: z.enum(["realtime", "openai_batch"]).default("realtime"),
   reasoningSummariesEnabled: z.boolean().default(false),
   useFlexServiceTier: z.boolean().default(false),
   startingHandId: z.uuid().nullable(),
@@ -418,6 +442,10 @@ const publicSimulationIds = new Set<string>()
 let llmRunQueueConfig: LlmRunQueueConfig | null = null
 let llmRunQueueDrainTimer: NodeJS.Timeout | null = null
 let llmRunQueueDrainPromise: Promise<void> | null = null
+let openAiBatchSubmitTimer: NodeJS.Timeout | null = null
+let openAiBatchSubmitPromise: Promise<void> | null = null
+let openAiBatchPollTimer: NodeJS.Timeout | null = null
+let openAiBatchPollPromise: Promise<void> | null = null
 
 function createRuntimeCompletion() {
   let resolveCompletion: () => void = () => { }
@@ -2032,13 +2060,13 @@ function getTurnSimulationMcpServerDescription() {
   return "Tools for resolving one Magic: The Gathering goldfish turn, including library operations and random coin/dice results."
 }
 
-function generateMcpRunToken(): GeneratedMcpRunToken {
+function generateMcpRunToken(ttlMs = MCP_RUN_TOKEN_TTL_MS): GeneratedMcpRunToken {
   const token = randomBytes(32).toString("base64url")
 
   return {
     token,
     tokenHash: hashMcpRunToken(token),
-    expiresAt: new Date(Date.now() + MCP_RUN_TOKEN_TTL_MS),
+    expiresAt: new Date(Date.now() + ttlMs),
   }
 }
 
@@ -2400,6 +2428,7 @@ async function getRequiredEnabledSimulationLlmModelPreset(
 
   return {
     preset,
+    llmProcessingMode: simulation.llmProcessingMode,
     useFlexServiceTier: simulation.useFlexServiceTier,
   }
 }
@@ -2466,6 +2495,7 @@ async function prepareAndStartOpeningHandLlmRun({
     const openingHandRun = await createOpeningHandLlmRun(deckId, {
       simulationId,
       llmModelPresetId: llmConfig.modelPresetId,
+      processingMode: modelPresetSelection.llmProcessingMode,
       provider: llmConfig.provider,
       model: llmConfig.model,
       openrouterModelProvider: getLlmRunOpenRouterModelProvider(llmConfig),
@@ -2494,15 +2524,19 @@ async function prepareAndStartOpeningHandLlmRun({
       requestPayload: getPersistableLlmRequestPayload(requestPayload),
     })
 
-    if (!(await markLlmRunQueued(openingHandRun.llmRunId))) {
-      throw new Error("Opening-hand LLM run could not be queued.")
+    if (modelPresetSelection.llmProcessingMode === "realtime") {
+      if (!(await markLlmRunQueued(openingHandRun.llmRunId))) {
+        throw new Error("Opening-hand LLM run could not be queued.")
+      }
     }
     await publishSimulationResultsState({
       deckId,
       llmRunId: openingHandRun.llmRunId,
       simulationId,
     })
-    nudgeLlmRunQueue()
+    if (modelPresetSelection.llmProcessingMode === "realtime") {
+      nudgeLlmRunQueue()
+    }
 
     return openingHandRun
   } catch (error) {
@@ -2550,6 +2584,7 @@ async function prepareAndStartTurnLlmRun({
       simulationId,
       llmModelPresetId: llmConfig.modelPresetId,
       turnNumber,
+      processingMode: modelPresetSelection.llmProcessingMode,
       provider: llmConfig.provider,
       model: llmConfig.model,
       openrouterModelProvider: getLlmRunOpenRouterModelProvider(llmConfig),
@@ -2582,15 +2617,19 @@ async function prepareAndStartTurnLlmRun({
       requestPayload: getPersistableLlmRequestPayload(requestPayload),
     })
 
-    if (!(await markLlmRunQueued(turnRun.llmRunId))) {
-      throw new Error("Turn LLM run could not be queued.")
+    if (modelPresetSelection.llmProcessingMode === "realtime") {
+      if (!(await markLlmRunQueued(turnRun.llmRunId))) {
+        throw new Error("Turn LLM run could not be queued.")
+      }
     }
     await publishSimulationResultsState({
       deckId,
       llmRunId: turnRun.llmRunId,
       simulationId,
     })
-    nudgeLlmRunQueue()
+    if (modelPresetSelection.llmProcessingMode === "realtime") {
+      nudgeLlmRunQueue()
+    }
 
     return turnRun
   } catch (error) {
@@ -2730,6 +2769,818 @@ async function drainLlmRunQueue(config: LlmRunQueueConfig) {
 
     await startClaimedQueuedLlmRun(claimedRun)
   }
+}
+
+function startOpenAiBatchWorkers(config: LlmRunQueueConfig) {
+  if (!openAiBatchSubmitTimer) {
+    openAiBatchSubmitTimer = setInterval(
+      () => nudgeOpenAiBatchSubmitter(config),
+      OPENAI_BATCH_POLL_INTERVAL_MS
+    )
+  }
+
+  if (!openAiBatchPollTimer) {
+    openAiBatchPollTimer = setInterval(
+      nudgeOpenAiBatchPoller,
+      OPENAI_BATCH_POLL_INTERVAL_MS
+    )
+  }
+
+  nudgeOpenAiBatchSubmitter(config)
+  nudgeOpenAiBatchPoller()
+}
+
+function stopOpenAiBatchWorkers() {
+  if (openAiBatchSubmitTimer) {
+    clearInterval(openAiBatchSubmitTimer)
+    openAiBatchSubmitTimer = null
+  }
+
+  if (openAiBatchPollTimer) {
+    clearInterval(openAiBatchPollTimer)
+    openAiBatchPollTimer = null
+  }
+}
+
+function nudgeOpenAiBatchSubmitter(config: LlmRunQueueConfig) {
+  if (openAiBatchSubmitPromise) {
+    return
+  }
+
+  openAiBatchSubmitPromise = submitPendingOpenAiBatches(config)
+    .catch((error: unknown) => {
+      console.error("Failed to submit OpenAI batches:", error)
+    })
+    .finally(() => {
+      openAiBatchSubmitPromise = null
+    })
+}
+
+function nudgeOpenAiBatchPoller() {
+  if (openAiBatchPollPromise) {
+    return
+  }
+
+  openAiBatchPollPromise = pollOpenAiBatches()
+    .catch((error: unknown) => {
+      console.error("Failed to poll OpenAI batches:", error)
+    })
+    .finally(() => {
+      openAiBatchPollPromise = null
+    })
+}
+
+type OpenAiBatchRequestLine = {
+  custom_id: string
+  method: "POST"
+  url: typeof OPENAI_BATCH_ENDPOINT
+  body: Record<string, unknown>
+}
+
+type PreparedOpenAiBatchLine = {
+  line: OpenAiBatchRequestLine
+  requestPayloadRedacted: unknown
+  run: OpenAiBatchPendingRun
+}
+
+async function submitPendingOpenAiBatches(config: LlmRunQueueConfig) {
+  const pendingRuns = await listPendingOpenAiBatchRuns({
+    maxConcurrentRuns: config.maxConcurrentRuns,
+  })
+
+  if (pendingRuns.length === 0) {
+    return
+  }
+
+  const runsByPresetId = new Map<string, OpenAiBatchPendingRun[]>()
+
+  for (const run of pendingRuns) {
+    const runs = runsByPresetId.get(run.llmModelPresetId) ?? []
+    runs.push(run)
+    runsByPresetId.set(run.llmModelPresetId, runs)
+  }
+
+  for (const runs of runsByPresetId.values()) {
+    await submitOpenAiBatchRunGroup(runs)
+  }
+}
+
+async function submitOpenAiBatchRunGroup(runs: OpenAiBatchPendingRun[]) {
+  const usageAllowedRuns = await filterUsageAllowedOpenAiBatchRuns(runs)
+
+  if (usageAllowedRuns.length === 0) {
+    return
+  }
+
+  const preparedLines: PreparedOpenAiBatchLine[] = []
+
+  try {
+    for (const run of usageAllowedRuns) {
+      preparedLines.push(await prepareOpenAiBatchLine(run))
+    }
+  } catch (error) {
+    await failPreparedOpenAiBatchRuns(usageAllowedRuns, preparedLines, error)
+    return
+  }
+
+  let chunks: PreparedOpenAiBatchLine[][]
+
+  try {
+    chunks = splitOpenAiBatchLines(preparedLines)
+  } catch (error) {
+    await failPreparedOpenAiBatchRuns(usageAllowedRuns, preparedLines, error)
+    return
+  }
+
+  for (const chunk of chunks) {
+    try {
+      await submitPreparedOpenAiBatchLineChunk(chunk)
+    } catch (error) {
+      await failPreparedOpenAiBatchRuns(
+        chunk.map((preparedLine) => preparedLine.run),
+        chunk,
+        error
+      )
+    }
+  }
+}
+
+async function failPreparedOpenAiBatchRuns(
+  runs: readonly OpenAiBatchPendingRun[],
+  preparedLines: readonly PreparedOpenAiBatchLine[],
+  error: unknown
+) {
+  const failureMessage = getErrorMessage(error)
+
+  for (const preparedLine of preparedLines) {
+    await revokeLlmRunMcpToken(preparedLine.run.llmRunId).catch(
+      (revokeError: unknown) => {
+        console.error("Failed to revoke failed batch MCP token:", revokeError)
+      }
+    )
+  }
+
+  for (const run of runs) {
+    await failLlmRun(run.llmRunId, failureMessage).catch(
+      (failError: unknown) => {
+        console.error("Failed to mark OpenAI batch run failed:", failError)
+      }
+    )
+    await publishSimulationResultsState({
+      deckId: run.deckId,
+      llmRunId: run.llmRunId,
+      simulationId: run.simulationId,
+    }).catch((publishError: unknown) => {
+      console.error(
+        "Failed to publish failed OpenAI batch run state:",
+        publishError
+      )
+    })
+  }
+}
+
+async function filterUsageAllowedOpenAiBatchRuns(
+  runs: OpenAiBatchPendingRun[]
+) {
+  const allowedRuns: OpenAiBatchPendingRun[] = []
+
+  for (const run of runs) {
+    const ownerUserId = run.ownerUserId
+
+    if (ownerUserId !== null) {
+      const usageDecision = await withDatabaseTransaction((client) =>
+        ensureUserUsageLimitWindowsForRunStartWithClient(
+          client,
+          ownerUserId,
+          new Date()
+        )
+      )
+
+      if (!usageDecision.allowed) {
+        await failLlmRun(run.llmRunId, USAGE_LIMIT_OUT_OF_USAGE_MESSAGE)
+        await publishSimulationResultsState({
+          deckId: run.deckId,
+          llmRunId: run.llmRunId,
+          simulationId: run.simulationId,
+        })
+        continue
+      }
+    }
+
+    allowedRuns.push(run)
+  }
+
+  return allowedRuns
+}
+
+async function prepareOpenAiBatchLine(
+  run: OpenAiBatchPendingRun
+): Promise<PreparedOpenAiBatchLine> {
+  const modelPreset = await getRequiredOpenAiBatchRunModelPreset(run)
+  const mcpRunToken = generateMcpRunToken(OPENAI_BATCH_MCP_RUN_TOKEN_TTL_MS)
+  await createLlmRunMcpToken({
+    deckId: run.deckId,
+    llmRunId: run.llmRunId,
+    simulationId: run.simulationId,
+    phase: run.phase,
+    tokenHash: mcpRunToken.tokenHash,
+    expiresAt: mcpRunToken.expiresAt,
+  })
+
+  const requestPayload =
+    run.phase === "opening_hand"
+      ? await buildOpenAiBatchOpeningHandRequestPayload({
+        modelPreset,
+        mcpRunToken: mcpRunToken.token,
+        run,
+      })
+      : await buildOpenAiBatchTurnRequestPayload({
+        modelPreset,
+        mcpRunToken: mcpRunToken.token,
+        run,
+      })
+  const requestPayloadRedacted = getPersistableLlmRequestPayload(requestPayload)
+
+  await updateLlmRunRequestData({
+    llmRunId: run.llmRunId,
+    fullPrompt: run.fullPrompt,
+    requestPayload: requestPayloadRedacted,
+  })
+
+  return {
+    line: {
+      custom_id: run.llmRunId,
+      method: "POST",
+      url: OPENAI_BATCH_ENDPOINT,
+      body: getOpenAiBatchRequestBody(requestPayload),
+    },
+    requestPayloadRedacted,
+    run,
+  }
+}
+
+async function getRequiredOpenAiBatchRunModelPreset(
+  run: OpenAiBatchPendingRun
+) {
+  const modelPreset = await getEnabledLlmModelPreset(run.llmModelPresetId)
+
+  if (!modelPreset || modelPreset.provider !== "openai") {
+    throw new Error("Batch LLM run model preset is disabled, missing, or not OpenAI.")
+  }
+
+  return modelPreset
+}
+
+async function buildOpenAiBatchOpeningHandRequestPayload({
+  mcpRunToken,
+  modelPreset,
+  run,
+}: {
+  modelPreset: LlmModelPreset
+  mcpRunToken: string
+  run: OpenAiBatchPendingRun
+}): Promise<OpenAiRequestPayload> {
+  const config = withCapturedLlmRunServiceTier(
+    await resolveLlmRunConfigModel(
+      getOpeningHandLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
+    ),
+    run.serviceTier
+  )
+
+  if (config.provider !== "openai") {
+    throw new Error("Batch opening-hand run resolved to a non-OpenAI config.")
+  }
+
+  assertOpenAiBatchRunMatchesConfig(run, config)
+
+  return requireOpenAiRequestPayload(
+    buildOpeningHandLlmRequestPayload(
+      config,
+      run.fullPrompt,
+      mcpRunToken,
+      run.simulationId,
+      run.reasoningSummariesEnabled
+    )
+  )
+}
+
+async function buildOpenAiBatchTurnRequestPayload({
+  mcpRunToken,
+  modelPreset,
+  run,
+}: {
+  modelPreset: LlmModelPreset
+  mcpRunToken: string
+  run: OpenAiBatchPendingRun
+}): Promise<OpenAiRequestPayload> {
+  if (typeof run.turnNumber !== "number") {
+    throw new Error("Batch turn LLM run is missing its turn number.")
+  }
+
+  const config = withCapturedLlmRunServiceTier(
+    await resolveLlmRunConfigModel(
+      getTurnSimulationLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
+    ),
+    run.serviceTier
+  )
+
+  if (config.provider !== "openai") {
+    throw new Error("Batch turn run resolved to a non-OpenAI config.")
+  }
+
+  assertOpenAiBatchRunMatchesConfig(run, config)
+
+  return requireOpenAiRequestPayload(
+    buildTurnSimulationLlmRequestPayload(
+      config,
+      run.fullPrompt,
+      mcpRunToken,
+      run.simulationId,
+      run.turnNumber,
+      run.reasoningSummariesEnabled
+    )
+  )
+}
+
+function assertOpenAiBatchRunMatchesConfig(
+  run: OpenAiBatchPendingRun,
+  config: OpenAiRunConfig
+) {
+  const expectedOpenRouterModelProvider = null
+  const expectedServiceTier = config.serviceTier
+
+  if (
+    run.provider !== config.provider ||
+    run.model !== config.model ||
+    run.openrouterModelProvider !== expectedOpenRouterModelProvider ||
+    run.reasoningEffort !== config.reasoningEffort ||
+    run.serviceTier !== expectedServiceTier
+  ) {
+    throw new Error(
+      `Batch LLM run config changed before submission: expected ${formatLlmRunConfigParts({
+        model: config.model,
+        openrouterModelProvider: expectedOpenRouterModelProvider,
+        provider: config.provider,
+        reasoningEffort: config.reasoningEffort,
+        serviceTier: expectedServiceTier,
+      })}, got ${formatLlmRunConfigParts({
+        model: run.model,
+        openrouterModelProvider: run.openrouterModelProvider,
+        provider: run.provider,
+        reasoningEffort: run.reasoningEffort,
+        serviceTier: run.serviceTier,
+      })}`
+    )
+  }
+}
+
+function getOpenAiBatchRequestBody(requestPayload: OpenAiRequestPayload) {
+  const body: Record<string, unknown> = {
+    ...requestPayload,
+  }
+  delete body.providerType
+
+  return body
+}
+
+function splitOpenAiBatchLines(preparedLines: PreparedOpenAiBatchLine[]) {
+  const chunks: PreparedOpenAiBatchLine[][] = []
+  let currentChunk: PreparedOpenAiBatchLine[] = []
+  let currentChunkBytes = 0
+
+  for (const preparedLine of preparedLines) {
+    const lineBytes = Buffer.byteLength(
+      `${JSON.stringify(preparedLine.line)}\n`,
+      "utf8"
+    )
+
+    if (lineBytes > OPENAI_BATCH_MAX_JSONL_BYTES) {
+      throw new Error(
+        `OpenAI batch request for LLM run ${preparedLine.run.llmRunId} exceeds the JSONL file size limit.`
+      )
+    }
+
+    if (
+      currentChunk.length > 0 &&
+      currentChunkBytes + lineBytes > OPENAI_BATCH_MAX_JSONL_BYTES
+    ) {
+      chunks.push(currentChunk)
+      currentChunk = []
+      currentChunkBytes = 0
+    }
+
+    currentChunk.push(preparedLine)
+    currentChunkBytes += lineBytes
+  }
+
+  if (currentChunk.length > 0) {
+    chunks.push(currentChunk)
+  }
+
+  return chunks
+}
+
+async function submitPreparedOpenAiBatchLineChunk(
+  preparedLines: PreparedOpenAiBatchLine[]
+) {
+  const modelPreset = await getRequiredOpenAiBatchRunModelPreset(
+    preparedLines[0].run
+  )
+  const config = await resolveLlmRunConfigModel(
+    getOpeningHandLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
+  )
+
+  if (config.provider !== "openai") {
+    throw new Error("OpenAI batch model preset resolved to a non-OpenAI config.")
+  }
+
+  const client = new OpenAI({
+    apiKey: config.apiKey,
+  })
+  const tempDirectory = await mkdtemp(
+    join(tmpdir(), OPENAI_BATCH_TMP_PREFIX)
+  )
+  const jsonlPath = join(tempDirectory, "requests.jsonl")
+
+  try {
+    const jsonl = preparedLines
+      .map((preparedLine) => JSON.stringify(preparedLine.line))
+      .join("\n")
+    await writeFile(jsonlPath, `${jsonl}\n`, "utf8")
+
+    const uploadedFile = await client.files.create({
+      file: createReadStream(jsonlPath),
+      purpose: "batch",
+    })
+    const providerBatch = await client.batches.create({
+      completion_window: OPENAI_BATCH_COMPLETION_WINDOW,
+      endpoint: OPENAI_BATCH_ENDPOINT,
+      input_file_id: uploadedFile.id,
+    })
+    const providerStatus = getOpenAiBatchProviderStatus(providerBatch)
+
+    await recordOpenAiBatchSubmitted({
+      errorFileId: getOpenAiBatchFileId(providerBatch, "error_file_id"),
+      inputFileId:
+        getOpenAiBatchFileId(providerBatch, "input_file_id") ?? uploadedFile.id,
+      items: preparedLines.map((preparedLine) => ({
+        customId: preparedLine.line.custom_id,
+        llmRunId: preparedLine.run.llmRunId,
+        requestPayloadRedacted: preparedLine.requestPayloadRedacted,
+      })),
+      llmModelPresetId: modelPreset.id,
+      outputFileId: getOpenAiBatchFileId(providerBatch, "output_file_id"),
+      providerBatchId: providerBatch.id,
+      providerStatus,
+      rawBatch: providerBatch,
+      requestCounts: getOpenAiBatchRequestCounts(providerBatch),
+    })
+
+    for (const preparedLine of preparedLines) {
+      await publishSimulationResultsState({
+        deckId: preparedLine.run.deckId,
+        llmRunId: preparedLine.run.llmRunId,
+        simulationId: preparedLine.run.simulationId,
+      })
+    }
+  } finally {
+    await rm(tempDirectory, { force: true, recursive: true }).catch(
+      (error: unknown) => {
+        console.error("Failed to remove OpenAI batch temp directory:", error)
+      }
+    )
+  }
+}
+
+async function pollOpenAiBatches() {
+  const batches = await listOpenAiBatchesToPoll()
+
+  for (const batch of batches) {
+    const modelPreset = await getEnabledLlmModelPreset(batch.llmModelPresetId)
+
+    if (!modelPreset || modelPreset.provider !== "openai") {
+      await updateOpenAiBatchProviderState({
+        errorFileId: null,
+        failureMessage:
+          "OpenAI batch model preset is disabled, missing, or no longer OpenAI.",
+        inputFileId: null,
+        openAiBatchId: batch.id,
+        outputFileId: null,
+        providerStatus: "failed",
+        rawBatch: {},
+        requestCounts: {},
+      })
+      continue
+    }
+
+    const config = await resolveLlmRunConfigModel(
+      getOpeningHandLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
+    )
+
+    if (config.provider !== "openai") {
+      continue
+    }
+
+    const client = new OpenAI({
+      apiKey: config.apiKey,
+    })
+    const providerBatch = await client.batches.retrieve(batch.providerBatchId)
+    const providerStatus = getOpenAiBatchProviderStatus(providerBatch)
+
+    await updateOpenAiBatchProviderState({
+      errorFileId: getOpenAiBatchFileId(providerBatch, "error_file_id"),
+      failureMessage: getOpenAiBatchFailureMessage(providerBatch),
+      inputFileId: getOpenAiBatchFileId(providerBatch, "input_file_id"),
+      openAiBatchId: batch.id,
+      outputFileId: getOpenAiBatchFileId(providerBatch, "output_file_id"),
+      providerStatus,
+      rawBatch: providerBatch,
+      requestCounts: getOpenAiBatchRequestCounts(providerBatch),
+    })
+
+    if (providerStatus === "completed") {
+      await reconcileCompletedOpenAiBatch({
+        client,
+        openAiBatchId: batch.id,
+        providerBatch,
+      })
+      continue
+    }
+
+    if (isTerminalFailedOpenAiBatchStatus(providerStatus)) {
+      await failSubmittedOpenAiBatchItems({
+        failureMessage:
+          getOpenAiBatchFailureMessage(providerBatch) ??
+          `OpenAI batch ended with status "${providerStatus}".`,
+        openAiBatchId: batch.id,
+      })
+    }
+  }
+}
+
+async function reconcileCompletedOpenAiBatch({
+  client,
+  openAiBatchId,
+  providerBatch,
+}: {
+  client: OpenAI
+  openAiBatchId: string
+  providerBatch: unknown
+}) {
+  const items = await listOpenAiBatchItemsForReconcile(openAiBatchId)
+  const outputFileId = getOpenAiBatchFileId(providerBatch, "output_file_id")
+  const errorFileId = getOpenAiBatchFileId(providerBatch, "error_file_id")
+  const outputLinesByCustomId = outputFileId
+    ? await downloadOpenAiBatchJsonlLinesByCustomId(client, outputFileId)
+    : new Map<string, unknown>()
+  const errorLinesByCustomId = errorFileId
+    ? await downloadOpenAiBatchJsonlLinesByCustomId(client, errorFileId)
+    : new Map<string, unknown>()
+
+  for (const item of items) {
+    if (item.status !== "batch_submitted") {
+      continue
+    }
+
+    const outputLine = outputLinesByCustomId.get(item.customId)
+    const errorLine = errorLinesByCustomId.get(item.customId)
+
+    if (outputLine) {
+      await reconcileOpenAiBatchOutputLine({ item, openAiBatchId, outputLine })
+      continue
+    }
+
+    if (errorLine) {
+      await reconcileOpenAiBatchErrorLine({
+        errorLine,
+        item,
+        openAiBatchId,
+      })
+      continue
+    }
+
+    await reconcileOpenAiBatchItemFailure({
+      errorPayload: {},
+      failureMessage: "OpenAI batch did not return an output or error line.",
+      item,
+      openAiBatchId,
+    })
+  }
+}
+
+async function reconcileOpenAiBatchOutputLine({
+  item,
+  openAiBatchId,
+  outputLine,
+}: {
+  item: Awaited<ReturnType<typeof listOpenAiBatchItemsForReconcile>>[number]
+  openAiBatchId: string
+  outputLine: unknown
+}) {
+  const lineRecord = asRecord(outputLine)
+  const responseRecord = asRecord(lineRecord.response)
+  const statusCode = Number(responseRecord.status_code)
+  const responseBody = responseRecord.body
+
+  if (!Number.isFinite(statusCode) || statusCode < 200 || statusCode >= 300) {
+    await reconcileOpenAiBatchItemFailure({
+      errorPayload: outputLine,
+      failureMessage: getOpenAiBatchLineFailureMessage(outputLine),
+      item,
+      openAiBatchId,
+    })
+    return
+  }
+
+  let completion: SimulationLlmCompletionResult
+
+  try {
+    assertCompletedProviderResponse(responseBody, item.phase, "OpenAI")
+    const outputText = getCompletedResponseOutputText(responseBody)
+    const responseBodyRecord = asRecord(responseBody)
+    const usage = responseBodyRecord.usage ?? {}
+
+    if (item.phase === "opening_hand") {
+      const parsedOpeningHand =
+        parseOpeningHandCompletionFromResponseText(outputText)
+      completion = await completeOpeningHandLlmRun({
+        finalOutputText: outputText,
+        llmRunId: item.llmRunId,
+        openingHand: parsedOpeningHand.keptHand,
+        rawResponse: responseBody,
+        summary: parsedOpeningHand.summary,
+        usage,
+      })
+    } else {
+      const parsedTurn = parseTurnSimulationCompletionFromResponseText(outputText)
+      completion = await completeTurnLlmRun({
+        finalOutputText: outputText,
+        gameState: parsedTurn.gameState,
+        llmRunId: item.llmRunId,
+        rawResponse: responseBody,
+        turnActions: parsedTurn.turnActions,
+        usage,
+      })
+    }
+  } catch (error) {
+    await reconcileOpenAiBatchItemFailure({
+      errorPayload: outputLine,
+      failureMessage: getErrorMessage(error),
+      item,
+      openAiBatchId,
+    })
+    return
+  }
+
+  await recordOpenAiBatchItemOutput({
+    customId: item.customId,
+    openAiBatchId,
+    outputPayload: outputLine,
+  })
+  await revokeLlmRunMcpToken(item.llmRunId).catch((error: unknown) => {
+    console.error("Failed to revoke completed batch MCP token:", error)
+  })
+  await publishSimulationResultsState({
+    deckId: item.deckId,
+    llmRunId: item.llmRunId,
+    simulationId: item.simulationId,
+  })
+  await handleSimulationCompletionNextStep(completion)
+}
+
+async function reconcileOpenAiBatchErrorLine({
+  errorLine,
+  item,
+  openAiBatchId,
+}: {
+  errorLine: unknown
+  item: Awaited<ReturnType<typeof listOpenAiBatchItemsForReconcile>>[number]
+  openAiBatchId: string
+}) {
+  await reconcileOpenAiBatchItemFailure({
+    errorPayload: errorLine,
+    failureMessage: getOpenAiBatchLineFailureMessage(errorLine),
+    item,
+    openAiBatchId,
+  })
+}
+
+async function reconcileOpenAiBatchItemFailure({
+  errorPayload,
+  failureMessage,
+  item,
+  openAiBatchId,
+}: {
+  errorPayload: unknown
+  failureMessage: string
+  item: Awaited<ReturnType<typeof listOpenAiBatchItemsForReconcile>>[number]
+  openAiBatchId: string
+}) {
+  await recordOpenAiBatchItemError({
+    customId: item.customId,
+    errorPayload,
+    failureMessage,
+    openAiBatchId,
+  })
+  await failLlmRun(item.llmRunId, failureMessage)
+  await revokeLlmRunMcpToken(item.llmRunId).catch((error: unknown) => {
+    console.error("Failed to revoke failed batch MCP token:", error)
+  })
+  await publishSimulationResultsState({
+    deckId: item.deckId,
+    llmRunId: item.llmRunId,
+    simulationId: item.simulationId,
+  })
+}
+
+async function failSubmittedOpenAiBatchItems({
+  failureMessage,
+  openAiBatchId,
+}: {
+  openAiBatchId: string
+  failureMessage: string
+}) {
+  const items = await listOpenAiBatchItemsForReconcile(openAiBatchId)
+
+  for (const item of items) {
+    if (item.status !== "batch_submitted") {
+      continue
+    }
+
+    await reconcileOpenAiBatchItemFailure({
+      errorPayload: {},
+      failureMessage,
+      item,
+      openAiBatchId,
+    })
+  }
+}
+
+async function downloadOpenAiBatchJsonlLinesByCustomId(
+  client: OpenAI,
+  fileId: string
+) {
+  const response = await client.files.content(fileId)
+  const text = await response.text()
+  const linesByCustomId = new Map<string, unknown>()
+
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) {
+      continue
+    }
+
+    const parsedLine = JSON.parse(line) as unknown
+    const customId = getStringProperty(asRecord(parsedLine), "custom_id")
+
+    if (customId) {
+      linesByCustomId.set(customId, parsedLine)
+    }
+  }
+
+  return linesByCustomId
+}
+
+function getOpenAiBatchProviderStatus(providerBatch: unknown) {
+  return getStringProperty(asRecord(providerBatch), "status") ?? "unknown"
+}
+
+function getOpenAiBatchFileId(providerBatch: unknown, key: string) {
+  return getStringProperty(asRecord(providerBatch), key)
+}
+
+function getOpenAiBatchRequestCounts(providerBatch: unknown) {
+  return asRecord(providerBatch).request_counts ?? {}
+}
+
+function getOpenAiBatchFailureMessage(providerBatch: unknown) {
+  const batchRecord = asRecord(providerBatch)
+  const errors = batchRecord.errors
+
+  if (errors) {
+    return JSON.stringify(errors)
+  }
+
+  return null
+}
+
+function isTerminalFailedOpenAiBatchStatus(status: string) {
+  return status === "failed" || status === "expired" || status === "cancelled"
+}
+
+function getOpenAiBatchLineFailureMessage(line: unknown) {
+  const lineRecord = asRecord(line)
+  const errorRecord = asRecord(lineRecord.error)
+  const responseRecord = asRecord(lineRecord.response)
+  const responseBodyRecord = asRecord(responseRecord.body)
+  const responseBodyErrorRecord = asRecord(responseBodyRecord.error)
+  const message =
+    getStringProperty(errorRecord, "message") ??
+    getStringProperty(responseBodyErrorRecord, "message") ??
+    getStringProperty(responseRecord, "status_code")
+
+  return message
+    ? `OpenAI batch item failed: ${message}`
+    : `OpenAI batch item failed: ${JSON.stringify(line)}`
 }
 
 function isUsageLimitedQueuedLlmRun(
@@ -4420,6 +5271,10 @@ async function stopActiveSimulationLlmRuns(
   simulationId: string
 ) {
   const activeRuns = await requestCancelSimulationLlmRuns(deckId, simulationId)
+  if (activeRuns.some((run) => run.status === "batch_submitted")) {
+    throw new SimulationValidationError(SUBMITTED_BATCH_RUN_STOP_MESSAGE)
+  }
+
   const stoppedRunIds: string[] = []
   const cancelRequestedRunIds: string[] = []
   const runtimeCompletionPromises: Promise<void>[] = []
@@ -5595,7 +6450,12 @@ async function main() {
         res.status(202).json(openingHandRun)
       } catch (error) {
         if (error instanceof SimulationValidationError) {
-          const status = error.message === "Simulation not found." ? 404 : 400
+          const status =
+            error.message === "Simulation not found."
+              ? 404
+              : error.message === SUBMITTED_BATCH_RUN_STOP_MESSAGE
+                ? 409
+                : 400
 
           res.status(status).json({
             error: error.message,
@@ -5704,6 +6564,40 @@ async function main() {
         console.error("Failed to stop simulation:", error)
         res.status(500).json({
           error: "Failed to stop simulation.",
+        })
+      }
+    }
+  )
+
+  app.post(
+    "/decks/:deckId/simulations/:simulationId/stop-auto-advance",
+    async (req: Request, res: Response) => {
+      const deckId = String(req.params.deckId)
+      const simulationId = String(req.params.simulationId)
+
+      try {
+        const simulation = await disableSimulationAutoAdvance(
+          deckId,
+          simulationId
+        )
+        await publishSimulationResultsState({
+          deckId,
+          simulationId,
+        })
+        res.status(200).json({ simulation })
+      } catch (error) {
+        if (error instanceof SimulationValidationError) {
+          const status = error.message === "Simulation not found." ? 404 : 400
+
+          res.status(status).json({
+            error: error.message,
+          })
+          return
+        }
+
+        console.error("Failed to stop simulation auto-advance:", error)
+        res.status(500).json({
+          error: "Failed to stop future simulation turns.",
         })
       }
     }
@@ -6426,6 +7320,7 @@ async function main() {
       `Turn-simulation MCP endpoint available at http://${host}:${port}${TURN_SIMULATION_MCP_PATH}`
     )
     startLlmRunQueue(queueConfig)
+    startOpenAiBatchWorkers(queueConfig)
   })
 }
 
@@ -6565,6 +7460,7 @@ function registerShutdownHandlers() {
   const shutdown = (signal: NodeJS.Signals) => {
     void (async () => {
       stopLlmRunQueue()
+      stopOpenAiBatchWorkers()
       console.error(`Received ${signal}. Closing database pool...`)
       await closeDatabasePool()
       process.exit(0)

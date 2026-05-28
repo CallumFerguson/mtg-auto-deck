@@ -300,7 +300,7 @@ export async function listActiveAdminUserSimulations(
       JOIN llm_runs llm_run
         ON llm_run.id = linked_run.llm_run_id
       WHERE deck.owner_user_id = $1
-        AND llm_run.status IN ('pending', 'streaming', 'cancel_requested')
+        AND llm_run.status IN ('pending', 'batch_pending', 'batch_submitted', 'streaming', 'cancel_requested')
       ORDER BY simulation.id ASC
     `,
     [userId]

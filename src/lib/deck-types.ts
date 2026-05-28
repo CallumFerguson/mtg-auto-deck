@@ -38,6 +38,7 @@ type SimulationStatus =
   | "cancelled"
 
 type SimulationCreatedVia = "app" | "external_mcp"
+export type LlmProcessingMode = "realtime" | "openai_batch"
 
 export type Simulation = {
   id: string
@@ -48,8 +49,10 @@ export type Simulation = {
   seed: string
   library: string[]
   turnsToSimulate: number
+  llmProcessingMode: LlmProcessingMode
   reasoningSummariesEnabled: boolean
   useFlexServiceTier: boolean
+  autoSimulateNextStep: boolean
   isPublic: boolean
   simulatedTurnCount: number
   completedLlmRunCount: number
@@ -155,8 +158,10 @@ export type SimulationDebugInfo = {
   startingHandId: string | null
   seed: string
   turnsToSimulate: number
+  llmProcessingMode: LlmProcessingMode
   reasoningSummariesEnabled: boolean
   useFlexServiceTier: boolean
+  autoSimulateNextStep: boolean
   isPublic: boolean
   simulatedTurnCount: number
   completedLlmRunCount: number

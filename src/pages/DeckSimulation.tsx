@@ -59,6 +59,7 @@ import type {
   StartingHand,
   StartingHandsResponse,
   StopSimulationResponse,
+  UpdateSimulationResponse,
 } from "@/lib/deck-types"
 import {
   getLlmModelPresetLabel,
@@ -765,6 +766,7 @@ export function DeckSimulation({
   const [useFlexServiceTier, setUseFlexServiceTier] = useState(
     getStoredCreateSimulationUseFlexServiceTier
   )
+  const [useBatchProcessing, setUseBatchProcessing] = useState(false)
   const [openingHandMode, setOpeningHandMode] = useState<
     "simulate" | "provide"
   >("simulate")
@@ -826,6 +828,8 @@ export function DeckSimulation({
   const selectedModelPresetSupportsFlex = Boolean(
     selectedModelPreset?.supportsFlex
   )
+  const selectedModelPresetSupportsBatch =
+    selectedModelPreset?.provider === "openai"
   const isModelPresetSelectionResolved =
     !isLoadingModelPresets &&
     (modelPresetLoadError !== null ||
@@ -903,6 +907,12 @@ export function DeckSimulation({
     Boolean(selectedModelPreset) &&
     turnsToSimulate.length > 0 &&
     (openingHandMode !== "provide" || Boolean(selectedOpeningHand))
+
+  useEffect(() => {
+    if (!selectedModelPresetSupportsBatch && useBatchProcessing) {
+      setUseBatchProcessing(false)
+    }
+  }, [selectedModelPresetSupportsBatch, useBatchProcessing])
   const loadSimulations = useCallback(
     async (options?: { silent?: boolean }) => {
       const isSilent = options?.silent ?? false
@@ -1345,6 +1355,19 @@ export function DeckSimulation({
     storeCreateSimulationUseFlexServiceTier(nextEnabled)
   }
 
+  function handleCreateSimulationBatchChange(nextEnabled: boolean) {
+    if (nextEnabled && !selectedModelPresetSupportsBatch) {
+      return
+    }
+
+    setUseBatchProcessing(nextEnabled)
+
+    if (nextEnabled) {
+      setUseFlexServiceTier(false)
+      storeCreateSimulationUseFlexServiceTier(false)
+    }
+  }
+
   async function handleStartSimulation() {
     if (!canStartSimulation || isCreatingSimulation) {
       return
@@ -1382,8 +1405,14 @@ export function DeckSimulation({
                 : selectedSavedSeed?.seed,
             llmModelPresetId: selectedModelPreset.id,
             turnsToSimulate: parsedTurnsToSimulate,
+            llmProcessingMode:
+              useBatchProcessing && selectedModelPreset.provider === "openai"
+                ? "openai_batch"
+                : "realtime",
             useFlexServiceTier:
-              selectedModelPreset.supportsFlex && useFlexServiceTier,
+              selectedModelPreset.supportsFlex &&
+              useFlexServiceTier &&
+              !useBatchProcessing,
             startingHandId:
               openingHandMode === "provide" && selectedOpeningHand
                 ? selectedOpeningHand.id
@@ -1872,16 +1901,36 @@ export function DeckSimulation({
                       </div>
 
                       {isModelPresetSelectionResolved ? (
-                        <FlexServiceTierSwitch
-                          checked={
-                            selectedModelPresetSupportsFlex &&
-                            useFlexServiceTier
-                          }
-                          disabled={!selectedModelPresetSupportsFlex}
-                          label="Flex processing"
-                          activeWarning="Less usage, but simulation may be slower and has a higher chance of failing."
-                          onCheckedChange={handleCreateSimulationUseFlexChange}
-                        />
+                        <div className="grid gap-3">
+                          <FlexServiceTierSwitch
+                            checked={
+                              selectedModelPresetSupportsBatch &&
+                              useBatchProcessing
+                            }
+                            disabled={!selectedModelPresetSupportsBatch}
+                            label="Batch processing"
+                            activeWarning="Runs through OpenAI Batch. Submitted runs cannot be stopped, but future turns can be stopped."
+                            onCheckedChange={
+                              handleCreateSimulationBatchChange
+                            }
+                          />
+                          <FlexServiceTierSwitch
+                            checked={
+                              selectedModelPresetSupportsFlex &&
+                              useFlexServiceTier &&
+                              !useBatchProcessing
+                            }
+                            disabled={
+                              !selectedModelPresetSupportsFlex ||
+                              useBatchProcessing
+                            }
+                            label="Flex processing"
+                            activeWarning="Less usage, but simulation may be slower and has a higher chance of failing."
+                            onCheckedChange={
+                              handleCreateSimulationUseFlexChange
+                            }
+                          />
+                        </div>
                       ) : null}
                     </div>
 
@@ -2170,6 +2219,10 @@ function SimulationDetails({
   const [stopSimulationError, setStopSimulationError] = useState<string | null>(
     null
   )
+  const [isStoppingFutureTurns, setIsStoppingFutureTurns] = useState(false)
+  const [stopFutureTurnsError, setStopFutureTurnsError] = useState<
+    string | null
+  >(null)
   const [isLoadingResults, setIsLoadingResults] = useState(false)
   const [resultsError, setResultsError] = useState<string | null>(null)
   const [resultsInfo, setResultsInfo] = useState<SimulationResultsInfo | null>(
@@ -2235,6 +2288,8 @@ function SimulationDetails({
     setTurnRunError(null)
     setIsStoppingSimulation(false)
     setStopSimulationError(null)
+    setIsStoppingFutureTurns(false)
+    setStopFutureTurnsError(null)
     resultsEventSourceRef.current?.close()
     resultsEventSourceRef.current = null
 
@@ -2436,6 +2491,40 @@ function SimulationDetails({
     await stopSimulation()
   }
 
+  async function handleStopFutureTurns() {
+    if (readOnly || isStoppingFutureTurns) {
+      return
+    }
+
+    setIsStoppingFutureTurns(true)
+    setStopFutureTurnsError(null)
+
+    try {
+      const response = await apiFetch(
+        `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/stop-auto-advance`,
+        {
+          method: "POST",
+        }
+      )
+
+      if (!response.ok) {
+        setStopFutureTurnsError(
+          await readApiError(response, "Future turns could not be stopped.")
+        )
+        return
+      }
+
+      const data = (await response.json()) as UpdateSimulationResponse
+      onSimulationUpdated(data.simulation)
+    } catch {
+      setStopFutureTurnsError(
+        "Stop future turns could not be sent to the server."
+      )
+    } finally {
+      setIsStoppingFutureTurns(false)
+    }
+  }
+
   useEffect(() => {
     if (!shouldStreamResults) {
       resultsEventSourceRef.current?.close()
@@ -2592,6 +2681,7 @@ function SimulationDetails({
       isStartingOpeningHandRun={isStartingOpeningHandRun}
       isStartingTurnRun={isStartingTurnRun}
       isLoadingStartingHand={isLoadingStartingHand}
+      isStoppingFutureTurns={isStoppingFutureTurns}
       isStoppingSimulation={isStoppingSimulation}
       onStartOpeningHandRun={() => void handleStartOpeningHandRun()}
       onKeepResultsScrolledToBottom={keepResultsScrolledToBottom}
@@ -2599,6 +2689,7 @@ function SimulationDetails({
       onResultsScroll={handleResultsScroll}
       onScrollResultsToBottomIfKept={scrollResultsToBottomIfKept}
       onStartTurnRun={(turnNumber) => void handleStartTurnRun(turnNumber)}
+      onStopFutureTurns={() => void handleStopFutureTurns()}
       onStopSimulation={() => void handleStopSimulation()}
       onUpgradeUsage={onUpgradeUsage}
       openingHandRunError={openingHandRunError}
@@ -2609,6 +2700,7 @@ function SimulationDetails({
       simulation={simulation}
       startingHand={startingHand}
       startingHandLoadError={startingHandLoadError}
+      stopFutureTurnsError={stopFutureTurnsError}
       stopSimulationError={stopSimulationError}
       turnRunError={turnRunError}
     />
@@ -2684,6 +2776,7 @@ function SimulationResultsPanel({
   isStartingOpeningHandRun,
   isStartingTurnRun,
   isLoadingStartingHand,
+  isStoppingFutureTurns,
   isStoppingSimulation,
   onStartOpeningHandRun,
   onKeepResultsScrolledToBottom,
@@ -2691,6 +2784,7 @@ function SimulationResultsPanel({
   onResultsScroll,
   onScrollResultsToBottomIfKept,
   onStartTurnRun,
+  onStopFutureTurns,
   onStopSimulation,
   onUpgradeUsage,
   openingHandRunError,
@@ -2701,6 +2795,7 @@ function SimulationResultsPanel({
   simulation,
   startingHand,
   startingHandLoadError,
+  stopFutureTurnsError,
   stopSimulationError,
   turnRunError,
 }: {
@@ -2711,6 +2806,7 @@ function SimulationResultsPanel({
   isStartingOpeningHandRun: boolean
   isStartingTurnRun: boolean
   isLoadingStartingHand: boolean
+  isStoppingFutureTurns: boolean
   isStoppingSimulation: boolean
   onStartOpeningHandRun: () => void
   onKeepResultsScrolledToBottom: () => void
@@ -2718,6 +2814,7 @@ function SimulationResultsPanel({
   onResultsScroll: (event: UIEvent<HTMLElement>) => void
   onScrollResultsToBottomIfKept: () => void
   onStartTurnRun: (turnNumber: number) => void
+  onStopFutureTurns: () => void
   onStopSimulation: () => void
   onUpgradeUsage: () => void
   openingHandRunError: string | null
@@ -2728,6 +2825,7 @@ function SimulationResultsPanel({
   simulation: Simulation
   startingHand: StartingHand | null
   startingHandLoadError: string | null
+  stopFutureTurnsError: string | null
   stopSimulationError: string | null
   turnRunError: string | null
 }) {
@@ -3047,6 +3145,8 @@ function SimulationResultsPanel({
       !run.isActive && getSimulationRunFinishedTimeMs(run) !== null
     const finishedThinkingStatus = shouldShowFinishedThinkingStatus ? (
       <SimulationResultThinkingStatus
+        activeLabel={null}
+        canStopFutureTurns={false}
         canStopSimulation={false}
         finishedDurationText={finishedDurationText}
         isPending={false}
@@ -3054,11 +3154,14 @@ function SimulationResultsPanel({
           run.status === "completed" && runStatusMessage === null
         }
         isFinished={true}
+        isStoppingFutureTurns={false}
         isStoppingSimulation={false}
+        onStopFutureTurns={onStopFutureTurns}
         onUpgradeUsage={onUpgradeUsage}
         onStopSimulation={onStopSimulation}
         runStartTimeMs={null}
         shouldShowUsageUpgradeAction={shouldShowUsageUpgradeAction}
+        stopFutureTurnsError={null}
         stopSimulationError={null}
         statusMessage={runStatusMessage}
       />
@@ -3115,16 +3218,31 @@ function SimulationResultsPanel({
 
         {run.isActive ? (
           <SimulationResultThinkingStatus
-            canStopSimulation={!readOnly && run.status !== "cancel_requested"}
+            activeLabel={getActiveSimulationRunStatusLabel(run.status)}
+            canStopFutureTurns={
+              !readOnly &&
+              run.status === "batch_submitted" &&
+              simulation.autoSimulateNextStep
+            }
+            canStopSimulation={
+              !readOnly &&
+              run.status !== "cancel_requested" &&
+              run.status !== "batch_submitted"
+            }
             finishedDurationText={null}
-            isPending={run.status === "pending"}
+            isPending={
+              run.status === "pending" || run.status === "batch_pending"
+            }
             isFinishedSuccessfully={false}
             isFinished={false}
+            isStoppingFutureTurns={isStoppingFutureTurns}
             isStoppingSimulation={isStoppingSimulation}
+            onStopFutureTurns={onStopFutureTurns}
             onUpgradeUsage={onUpgradeUsage}
             onStopSimulation={onStopSimulation}
             runStartTimeMs={getSimulationRunStartTimeMs(run)}
             shouldShowUsageUpgradeAction={shouldShowUsageUpgradeAction}
+            stopFutureTurnsError={stopFutureTurnsError}
             stopSimulationError={stopSimulationError}
             statusMessage={runStatusMessage}
           />
@@ -3496,6 +3614,14 @@ function getSimulationTimelineStepStatusLabel(
     return "Queued"
   }
 
+  if (step.status === "batch_pending") {
+    return "Batch wait"
+  }
+
+  if (step.status === "batch_submitted") {
+    return "Batched"
+  }
+
   if (step.status === "streaming") {
     return "Running"
   }
@@ -3532,6 +3658,8 @@ function getSimulationTimelineStepDescription(
 
   if (
     step.status === "pending" ||
+    step.status === "batch_pending" ||
+    step.status === "batch_submitted" ||
     step.status === "streaming" ||
     step.status === "cancel_requested" ||
     step.status === "failed" ||
@@ -3742,29 +3870,39 @@ function SimulationMcpFunctionCallCards({
 }
 
 function SimulationResultThinkingStatus({
+  activeLabel = null,
+  canStopFutureTurns,
   canStopSimulation,
   finishedDurationText,
   isPending,
   isFinished,
   isFinishedSuccessfully,
+  isStoppingFutureTurns,
   isStoppingSimulation,
+  onStopFutureTurns,
   onUpgradeUsage = () => {},
   onStopSimulation,
   runStartTimeMs,
   shouldShowUsageUpgradeAction = false,
+  stopFutureTurnsError,
   stopSimulationError,
   statusMessage = null,
 }: {
+  activeLabel?: string | null
+  canStopFutureTurns: boolean
   canStopSimulation: boolean
   finishedDurationText: string | null
   isPending: boolean
   isFinished: boolean
   isFinishedSuccessfully: boolean
+  isStoppingFutureTurns: boolean
   isStoppingSimulation: boolean
+  onStopFutureTurns: () => void
   onUpgradeUsage?: () => void
   onStopSimulation: () => void
   runStartTimeMs: number | null
   shouldShowUsageUpgradeAction?: boolean
+  stopFutureTurnsError: string | null
   stopSimulationError: string | null
   statusMessage?: string | null
 }) {
@@ -3792,6 +3930,8 @@ function SimulationResultThinkingStatus({
     ? finishedDurationText
       ? `Thought for ${finishedDurationText}`
       : "Thought"
+    : activeLabel
+      ? activeLabel
     : isPending
       ? "Pending"
       : "Thinking"
@@ -3835,6 +3975,22 @@ function SimulationResultThinkingStatus({
             )}
           </Button>
         ) : null}
+        {canStopFutureTurns ? (
+          <Button
+            className="h-8 rounded-full border border-amber-300/35 bg-amber-400/10 px-3 text-xs font-medium text-amber-100 hover:border-amber-200/60 hover:bg-amber-300/15 hover:text-amber-50"
+            type="button"
+            variant="ghost"
+            disabled={isStoppingFutureTurns}
+            onClick={onStopFutureTurns}
+          >
+            {isStoppingFutureTurns ? (
+              <LoaderCircle data-icon="inline-start" className="animate-spin" />
+            ) : (
+              <Square data-icon="inline-start" />
+            )}
+            Stop future turns
+          </Button>
+        ) : null}
       </div>
       {statusMessage ? (
         <div
@@ -3862,6 +4018,14 @@ function SimulationResultThinkingStatus({
           role="alert"
         >
           {stopSimulationError}
+        </p>
+      ) : null}
+      {stopFutureTurnsError ? (
+        <p
+          className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          role="alert"
+        >
+          {stopFutureTurnsError}
         </p>
       ) : null}
     </div>
@@ -5755,6 +5919,26 @@ function getSimulationRunStatusMessage(
   }
 
   return messages.size > 0 ? Array.from(messages).join("\n") : null
+}
+
+function getActiveSimulationRunStatusLabel(status: string) {
+  if (status === "batch_pending") {
+    return "Waiting for batch"
+  }
+
+  if (status === "batch_submitted") {
+    return "Submitted to batch"
+  }
+
+  if (status === "cancel_requested") {
+    return "Stopping"
+  }
+
+  if (status === "pending") {
+    return "Queued"
+  }
+
+  return "Thinking"
 }
 
 function getMcpFunctionCallCompleteTitle(call: SimulationMcpFunctionCall) {

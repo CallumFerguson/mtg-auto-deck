@@ -7,6 +7,8 @@ import {
 export function isActiveLlmRunStatus(status: string) {
   return (
     status === "pending" ||
+    status === "batch_pending" ||
+    status === "batch_submitted" ||
     status === "streaming" ||
     status === "cancel_requested"
   )

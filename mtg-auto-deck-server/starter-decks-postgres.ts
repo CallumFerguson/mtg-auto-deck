@@ -66,6 +66,7 @@ type SimulationRow = {
   seed: string
   random_state: string | number
   turns_to_simulate: number
+  llm_processing_mode: string
   starting_hand_id: string | null
   library: unknown
   mulligan_count: number
@@ -90,6 +91,7 @@ type LlmRunRow = {
   service_tier: string | null
   reasoning_effort: string | null
   llm_model_preset_id: string | null
+  processing_mode: string
   status: LlmRunStatus
   full_prompt: string
   request_payload: unknown
@@ -651,6 +653,7 @@ async function listCopyableSimulations({
         simulation.seed,
         simulation.random_state,
         simulation.turns_to_simulate,
+        simulation.llm_processing_mode,
         simulation.starting_hand_id,
         simulation.library,
         simulation.mulligan_count,
@@ -715,6 +718,7 @@ async function copySimulationShell({
         seed,
         random_state,
         turns_to_simulate,
+        llm_processing_mode,
         starting_hand_id,
         library,
         mulligan_count,
@@ -737,8 +741,8 @@ async function copySimulationShell({
         $5,
         $6,
         $7,
-        $8::jsonb,
-        $9,
+        $8,
+        $9::jsonb,
         $10,
         $11,
         $12,
@@ -748,7 +752,8 @@ async function copySimulationShell({
         $16,
         $17,
         $18,
-        $19
+        $19,
+        $20
       )
       RETURNING id
     `,
@@ -759,6 +764,7 @@ async function copySimulationShell({
       sourceSimulation.seed,
       sourceSimulation.random_state,
       sourceSimulation.turns_to_simulate,
+      sourceSimulation.llm_processing_mode,
       copiedStartingHandId,
       toJsonParameter(sourceSimulation.library),
       sourceSimulation.mulligan_count,
@@ -831,6 +837,7 @@ async function listLinkedLlmRuns({
         llm_run.service_tier,
         llm_run.reasoning_effort,
         llm_run.llm_model_preset_id,
+        llm_run.processing_mode,
         llm_run.status,
         llm_run.full_prompt,
         llm_run.request_payload,
@@ -885,6 +892,7 @@ async function copyLlmRun({
         reasoning_effort,
         llm_model_preset_id,
         owner_user_id,
+        processing_mode,
         status,
         runtime_stream_key,
         queued_at,
@@ -914,23 +922,24 @@ async function copyLlmRun({
         $7,
         $8,
         $9,
-        NULL,
-        NULL,
         $10,
-        $11::jsonb,
-        $12,
-        $13::jsonb,
+        NULL,
+        NULL,
+        $11,
+        $12::jsonb,
+        $13,
         $14::jsonb,
+        $15::jsonb,
         NULL,
         NULL,
-        $15,
         $16,
         $17,
         $18,
         $19,
         $20,
         $21,
-        $22
+        $22,
+        $23
       )
       RETURNING id
     `,
@@ -943,6 +952,7 @@ async function copyLlmRun({
       sourceRun.reasoning_effort,
       sourceRun.llm_model_preset_id,
       ownerUserId,
+      sourceRun.processing_mode,
       sourceRun.status,
       sourceRun.full_prompt,
       toJsonParameter(sourceRun.request_payload),

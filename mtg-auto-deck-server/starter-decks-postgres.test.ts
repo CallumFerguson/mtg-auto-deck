@@ -69,6 +69,7 @@ type FakeSimulation = {
   seed: string
   random_state: number
   turns_to_simulate: number
+  llm_processing_mode: string
   starting_hand_id: string | null
   library: string[]
   mulligan_count: number
@@ -93,6 +94,7 @@ type FakeLlmRun = {
   service_tier: string | null
   reasoning_effort: string | null
   llm_model_preset_id: string | null
+  processing_mode: string
   owner_user_id: string | null
   status: LlmRunStatus
   runtime_stream_key: string | null
@@ -425,26 +427,27 @@ class FakeStarterDeckCopyClient {
 
   copySimulationShell<T>(values: unknown[]) {
     const copiedSimulation: FakeSimulation = {
-      auto_simulate_next_step: getBoolean(values[10]),
-      cancel_requested_at: getDateOrNull(values[15]),
-      completed_at: getDateOrNull(values[13]),
-      created_at: getDate(values[17]),
+      auto_simulate_next_step: getBoolean(values[11]),
+      cancel_requested_at: getDateOrNull(values[16]),
+      completed_at: getDateOrNull(values[14]),
+      created_at: getDate(values[18]),
       created_via: getCreatedVia(values[1]),
       deck_id: getString(values[0]),
-      failed_at: getDateOrNull(values[14]),
-      failure_message: getStringOrNull(values[16]),
-      has_drawn_starting_hand: getBoolean(values[9]),
+      failed_at: getDateOrNull(values[15]),
+      failure_message: getStringOrNull(values[17]),
+      has_drawn_starting_hand: getBoolean(values[10]),
       id: `copied-simulation-${this.simulationIdSequence}`,
-      library: getJsonStringArray(values[7]),
+      library: getJsonStringArray(values[8]),
+      llm_processing_mode: getString(values[6]),
       llm_model_preset_id: getStringOrNull(values[2]),
-      mulligan_count: getNumber(values[8]),
+      mulligan_count: getNumber(values[9]),
       random_state: getNumber(values[4]),
       seed: getString(values[3]),
-      started_at: getDateOrNull(values[12]),
-      starting_hand_id: getStringOrNull(values[6]),
-      status: getSimulationStatus(values[11]),
+      started_at: getDateOrNull(values[13]),
+      starting_hand_id: getStringOrNull(values[7]),
+      status: getSimulationStatus(values[12]),
       turns_to_simulate: getNumber(values[5]),
-      updated_at: getDate(values[18]),
+      updated_at: getDate(values[19]),
     }
 
     this.simulationIdSequence += 1
@@ -464,15 +467,15 @@ class FakeStarterDeckCopyClient {
 
   copyLlmRun<T>(values: unknown[]) {
     const copiedRun: FakeLlmRun = {
-      cancel_requested_at: getDateOrNull(values[17]),
-      cancelled_at: getDateOrNull(values[18]),
-      completed_at: getDateOrNull(values[15]),
-      created_at: getDate(values[20]),
+      cancel_requested_at: getDateOrNull(values[18]),
+      cancelled_at: getDateOrNull(values[19]),
+      completed_at: getDateOrNull(values[16]),
+      created_at: getDate(values[21]),
       estimated_cost_usd: null,
-      failed_at: getDateOrNull(values[16]),
-      failure_message: getStringOrNull(values[19]),
-      final_output_text: getStringOrNull(values[11]),
-      full_prompt: getString(values[9]),
+      failed_at: getDateOrNull(values[17]),
+      failure_message: getStringOrNull(values[20]),
+      final_output_text: getStringOrNull(values[12]),
+      full_prompt: getString(values[10]),
       id: `copied-run-${this.llmRunIdSequence}`,
       llm_model_preset_id: getStringOrNull(values[6]),
       model: getString(values[2]),
@@ -480,17 +483,18 @@ class FakeStarterDeckCopyClient {
       openrouter_reported_cost_usd: null,
       owner_user_id: getString(values[7]),
       phase: getLlmRunPhase(values[0]),
+      processing_mode: getString(values[8]),
       provider: getString(values[1]),
       queued_at: null,
       reasoning_effort: getStringOrNull(values[5]),
-      request_payload: getJsonObject(values[10]),
-      raw_response: getJsonObject(values[12]),
+      request_payload: getJsonObject(values[11]),
+      raw_response: getJsonObject(values[13]),
       runtime_stream_key: null,
       service_tier: getStringOrNull(values[4]),
-      started_at: getDateOrNull(values[14]),
-      status: getLlmRunStatus(values[8]),
-      updated_at: getDate(values[21]),
-      usage: getJsonObject(values[13]),
+      started_at: getDateOrNull(values[15]),
+      status: getLlmRunStatus(values[9]),
+      updated_at: getDate(values[22]),
+      usage: getJsonObject(values[14]),
     }
 
     this.llmRunIdSequence += 1
@@ -972,6 +976,7 @@ function createSimulation({
     has_drawn_starting_hand: true,
     id,
     library: ["Forest"],
+    llm_processing_mode: "realtime",
     llm_model_preset_id: "55555555-5555-4555-8555-555555555555",
     mulligan_count: 0,
     random_state: 123,
@@ -1012,6 +1017,7 @@ function createLlmRun({
     openrouter_reported_cost_usd: 0.02,
     owner_user_id: "starter-owner",
     phase,
+    processing_mode: "realtime",
     provider: "openai",
     queued_at: new Date("2026-01-01T00:01:00.000Z"),
     reasoning_effort: "medium",
