@@ -3716,6 +3716,7 @@ export async function completeOpeningHandLlmRun({
       deck_id: string
       llm_run_status: LlmRunStatus
       provider: string
+      processing_mode: LlmProcessingMode
       service_tier: string | null
       input_token_cost_usd_per_million: string | number | null
       cached_input_token_cost_usd_per_million: string | number | null
@@ -3733,6 +3734,7 @@ export async function completeOpeningHandLlmRun({
           simulation.deck_id,
           llm_run.status AS llm_run_status,
           llm_run.provider,
+          llm_run.processing_mode,
           llm_run.service_tier,
           preset.input_token_cost_usd_per_million,
           preset.cached_input_token_cost_usd_per_million,
@@ -3853,6 +3855,7 @@ export async function completeTurnLlmRun({
       deck_id: string
       llm_run_status: LlmRunStatus
       provider: string
+      processing_mode: LlmProcessingMode
       service_tier: string | null
       input_token_cost_usd_per_million: string | number | null
       cached_input_token_cost_usd_per_million: string | number | null
@@ -3869,6 +3872,7 @@ export async function completeTurnLlmRun({
           simulation.deck_id,
           llm_run.status AS llm_run_status,
           llm_run.provider,
+          llm_run.processing_mode,
           llm_run.service_tier,
           preset.input_token_cost_usd_per_million,
           preset.cached_input_token_cost_usd_per_million,
@@ -3955,6 +3959,7 @@ export async function completeTurnLlmRun({
 function getCompletedLlmRunCostValues(
   run: {
     provider: string
+    processing_mode: LlmProcessingMode
     service_tier: string | null
     input_token_cost_usd_per_million: string | number | null
     cached_input_token_cost_usd_per_million: string | number | null
@@ -3980,6 +3985,7 @@ function getCompletedLlmRunCostValues(
   return {
     estimatedCostUsd: applyLlmRunEstimatedCostServiceTierDiscount({
       estimatedCostUsd,
+      processingMode: run.processing_mode,
       serviceTier: run.service_tier,
     }),
     openrouterReportedCostUsd:
@@ -3989,6 +3995,7 @@ function getCompletedLlmRunCostValues(
 
 type PartialLlmRunCostSnapshotRow = {
   full_prompt_character_count: string | number
+  processing_mode: LlmProcessingMode
   service_tier: string | null
   cached_input_token_cost_usd_per_million: string | number | null
 }
@@ -3998,6 +4005,7 @@ export function buildPartialLlmRunCostSnapshotQuery(llmRunId: string) {
     text: `
       SELECT
         length(llm_run.full_prompt) AS full_prompt_character_count,
+        llm_run.processing_mode,
         llm_run.service_tier,
         preset.cached_input_token_cost_usd_per_million
       FROM llm_runs llm_run
@@ -4006,6 +4014,7 @@ export function buildPartialLlmRunCostSnapshotQuery(llmRunId: string) {
       WHERE llm_run.id = $1
       GROUP BY
         llm_run.id,
+        llm_run.processing_mode,
         llm_run.service_tier,
         preset.cached_input_token_cost_usd_per_million
     `,
@@ -4040,6 +4049,7 @@ async function estimatePartialLlmRunCostUsdWithClient(
 
   return applyLlmRunEstimatedCostServiceTierDiscount({
     estimatedCostUsd,
+    processingMode: snapshot.processing_mode,
     serviceTier: snapshot.service_tier,
   })
 }

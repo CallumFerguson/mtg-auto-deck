@@ -117,16 +117,20 @@ export function getOpenRouterReportedCostUsd(usage: unknown) {
 
 export function applyLlmRunEstimatedCostServiceTierDiscount({
   estimatedCostUsd,
+  processingMode,
   serviceTier,
 }: {
   estimatedCostUsd: number | null
+  processingMode?: string | null | undefined
   serviceTier: string | null | undefined
 }) {
   if (estimatedCostUsd === null) {
     return null
   }
 
-  return serviceTier === "flex" ? estimatedCostUsd / 2 : estimatedCostUsd
+  return serviceTier === "flex" || processingMode === "openai_batch"
+    ? estimatedCostUsd / 2
+    : estimatedCostUsd
 }
 
 export function formatUsdCostAsCents(costUsd: number | null | undefined) {

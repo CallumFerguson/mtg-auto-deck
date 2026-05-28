@@ -422,6 +422,7 @@ test("builds partial LLM run cost snapshot query", () => {
 
   assert.deepEqual(query.values, [llmRunId])
   assert.match(normalizedSql, /length\(llm_run\.full_prompt\)/)
+  assert.match(normalizedSql, /llm_run\.processing_mode/)
   assert.match(normalizedSql, /llm_run\.service_tier/)
   assert.match(normalizedSql, /cached_input_token_cost_usd_per_million/)
   assert.doesNotMatch(normalizedSql, /output_token_cost_usd_per_million/)
@@ -571,7 +572,7 @@ test("extracts OpenRouter reported cost separately from preset estimates", () =>
   assert.equal(getOpenRouterReportedCostUsd(usage), 0.00125)
 })
 
-test("cuts estimated cost in half for flex service tier runs only", () => {
+test("cuts estimated cost in half for flex service tier and OpenAI batch runs", () => {
   assert.equal(
     applyLlmRunEstimatedCostServiceTierDiscount({
       estimatedCostUsd: 0.02064,
@@ -582,6 +583,15 @@ test("cuts estimated cost in half for flex service tier runs only", () => {
   assert.equal(
     applyLlmRunEstimatedCostServiceTierDiscount({
       estimatedCostUsd: 0.02064,
+      processingMode: "openai_batch",
+      serviceTier: null,
+    }),
+    0.01032
+  )
+  assert.equal(
+    applyLlmRunEstimatedCostServiceTierDiscount({
+      estimatedCostUsd: 0.02064,
+      processingMode: "realtime",
       serviceTier: "priority",
     }),
     0.02064
