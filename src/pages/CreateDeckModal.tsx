@@ -83,6 +83,7 @@ export function CreateDeckModal({
   const [validatedCardSignature, setValidatedCardSignature] = useState<
     string | null
   >(null)
+  const [deckNameWasEdited, setDeckNameWasEdited] = useState(false)
   const [isValidatingCards, setIsValidatingCards] = useState(false)
   const [isCreating, setIsCreating] = useState(false)
   const cardSignature = useMemo(() => createCardSignature(draft), [draft])
@@ -100,11 +101,38 @@ export function CreateDeckModal({
   const isBusy = isValidatingCards || isCreating
 
   function updateDraftField(field: keyof DeckDraft, value: string) {
+    if (field === "name") {
+      setDeckNameWasEdited(true)
+    }
+
     setDraft((currentDraft) => ({
       ...currentDraft,
       [field]: value,
     }))
     setErrors([])
+  }
+
+  function applyDefaultDeckName() {
+    if (deckNameWasEdited) {
+      return
+    }
+
+    const defaultDeckName = getCommanderDefaultDeckName(cardValidationResult)
+
+    if (!defaultDeckName) {
+      return
+    }
+
+    setDraft((currentDraft) => {
+      if (currentDraft.name === defaultDeckName) {
+        return currentDraft
+      }
+
+      return {
+        ...currentDraft,
+        name: defaultDeckName,
+      }
+    })
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -164,6 +192,7 @@ export function CreateDeckModal({
 
     if (cardsAreVerified) {
       setErrors([])
+      applyDefaultDeckName()
       setCurrentStep(DETAILS_STEP)
       return
     }
@@ -188,6 +217,7 @@ export function CreateDeckModal({
       }
 
       setValidatedCardSignature(cardSignature)
+      applyDefaultDeckName()
       setCurrentStep(DETAILS_STEP)
     } catch {
       setErrors(["Deck cards could not be validated with the server."])
@@ -755,6 +785,16 @@ function createCardSignature({
 
 function countCards(cards: readonly { quantity: number }[]) {
   return cards.reduce((total, card) => total + card.quantity, 0)
+}
+
+function getCommanderDefaultDeckName(
+  validationResult: DeckCardsInputValidationResult
+) {
+  if (!validationResult.ok) {
+    return ""
+  }
+
+  return validationResult.deckCards.commanders.join(" / ")
 }
 
 function summarizeText(value: string, emptyLabel: string) {
