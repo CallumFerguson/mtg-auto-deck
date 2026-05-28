@@ -2,6 +2,7 @@ import { useMemo, useState, type FormEvent, type ReactNode } from "react"
 import {
   ArrowLeft,
   ArrowRight,
+  Check,
   CheckCircle2,
   Loader2,
   X,
@@ -628,47 +629,50 @@ function StepProgress({ currentStep }: { currentStep: number }) {
   return (
     <ol
       aria-label="Create deck progress"
-      className="grid grid-cols-2 gap-2 sm:grid-cols-4"
+      className="grid grid-cols-4 px-1 pt-1"
     >
       {CREATE_DECK_STEPS.map((step, index) => {
         const isCurrent = currentStep === index
         const isComplete = currentStep > index
+        const isConnectorComplete = currentStep > index
 
         return (
           <li
             aria-current={isCurrent ? "step" : undefined}
-            className={cn(
-              "rounded-md border px-3 py-2 transition",
-              isCurrent
-                ? "border-primary/50 bg-primary/10 text-primary"
-                : isComplete
-                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-100"
-                  : "border-border bg-background/40 text-muted-foreground"
-            )}
+            className="relative flex min-w-0 flex-col items-center gap-2 text-center"
             key={step.title}
           >
-            <div className="flex min-w-0 items-center gap-2">
+            {index < CREATE_DECK_STEPS.length - 1 ? (
               <span
+                aria-hidden="true"
                 className={cn(
-                  "flex size-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold",
-                  isCurrent
-                    ? "border-primary/60 bg-primary/15"
-                    : isComplete
-                      ? "border-emerald-500/50 bg-emerald-500/15"
-                      : "border-border bg-background"
+                  "absolute top-4 left-[calc(50%+1.25rem)] h-px w-[calc(100%-2.5rem)] transition-colors",
+                  isConnectorComplete ? "bg-primary/70" : "bg-border"
                 )}
-              >
-                {isComplete ? <CheckCircle2 className="size-3.5" /> : index + 1}
-              </span>
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-medium">
-                  {step.title}
-                </span>
-                <span className="block truncate text-xs opacity-80">
-                  {step.description}
-                </span>
-              </span>
-            </div>
+              />
+            ) : null}
+
+            <span
+              className={cn(
+                "relative z-10 flex size-8 items-center justify-center rounded-full border text-sm font-semibold transition-colors",
+                isCurrent
+                  ? "border-primary bg-primary text-primary-foreground shadow-sm shadow-primary/30"
+                  : isComplete
+                    ? "border-primary bg-primary/20 text-primary"
+                    : "border-border bg-card text-muted-foreground"
+              )}
+            >
+              {isComplete ? <Check className="size-4 stroke-[3]" /> : index + 1}
+            </span>
+
+            <span
+              className={cn(
+                "block w-full truncate px-1 text-xs font-medium transition-colors sm:text-sm",
+                isCurrent || isComplete ? "text-foreground" : "text-muted-foreground"
+              )}
+            >
+              {step.title}
+            </span>
           </li>
         )
       })}
