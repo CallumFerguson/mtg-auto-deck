@@ -6445,34 +6445,6 @@ async function main() {
   )
 
   app.get(
-    "/decks/:deckId/simulations/:simulationId/results",
-    async (req: Request, res: Response) => {
-      const deckId = String(req.params.deckId)
-      const simulationId = String(req.params.simulationId)
-
-      try {
-        res.status(200).json({
-          results: await getSimulationResultsInfo(deckId, simulationId),
-        })
-      } catch (error) {
-        if (error instanceof SimulationValidationError) {
-          const status = error.message === "Simulation not found." ? 404 : 400
-
-          res.status(status).json({
-            error: error.message,
-          })
-          return
-        }
-
-        console.error("Failed to load simulation results:", error)
-        res.status(500).json({
-          error: "Failed to load simulation results.",
-        })
-      }
-    }
-  )
-
-  app.get(
     "/decks/:deckId/simulations/:simulationId/results/stream",
     async (req: Request, res: Response) => {
       const deckId = String(req.params.deckId)
