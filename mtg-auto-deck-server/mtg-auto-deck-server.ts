@@ -210,6 +210,10 @@ import {
   normalizeScryfallCardNameForExactMatch,
   resolveExactScryfallOracleCards,
 } from "./scryfall-postgres.js"
+import {
+  ArchidektImportError,
+  importArchidektDeck,
+} from "./archidekt-import.js"
 
 const DEFAULT_HOST = "127.0.0.1"
 const DEFAULT_PORT = 3001
@@ -266,6 +270,9 @@ const createDeckSchema = createDeckCardsSchema.extend({
   desc: z.string(),
   mulliganGuidelines: createDeckGuidelinesSchema(),
   strategyGuidelines: createDeckGuidelinesSchema(),
+})
+const archidektImportSchema = z.object({
+  input: z.string().trim().min(1),
 })
 const appSignUpSchema = z.object({
   email: z.email(),
@@ -5392,6 +5399,37 @@ async function main() {
       console.error("Failed to validate deck cards:", error)
       res.status(500).json({
         error: "Deck cards could not be validated.",
+      })
+    }
+  })
+
+  app.post("/decks/import/archidekt", async (req: Request, res: Response) => {
+    const parsedImport = archidektImportSchema.safeParse(req.body)
+
+    if (!parsedImport.success) {
+      res.status(400).json({
+        error: "Archidekt import payload is not in the expected format.",
+      })
+      return
+    }
+
+    try {
+      const deck = await importArchidektDeck(parsedImport.data.input)
+
+      res.status(200).json({
+        deck,
+      })
+    } catch (error) {
+      if (error instanceof ArchidektImportError) {
+        res.status(error.status).json({
+          error: error.message,
+        })
+        return
+      }
+
+      console.error("Failed to import Archidekt deck:", error)
+      res.status(500).json({
+        error: "Archidekt deck could not be imported.",
       })
     }
   })

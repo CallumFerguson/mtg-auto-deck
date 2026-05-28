@@ -4,6 +4,7 @@ import {
   ArrowRight,
   Check,
   CheckCircle2,
+  Download,
   Loader2,
   X,
 } from "lucide-react"
@@ -29,6 +30,17 @@ type DeckDraft = {
   commanderOne: string
   commanderTwo: string
   deckList: string
+}
+
+type ArchidektImportedDeck = {
+  deckId: string
+  name: string
+  description: string
+  commanders: string[]
+  cards: {
+    name: string
+    quantity: number
+  }[]
 }
 
 const CARD_ENTRY_STEP = 0
@@ -86,6 +98,7 @@ export function CreateDeckModal({
   const [deckNameWasEdited, setDeckNameWasEdited] = useState(false)
   const [isValidatingCards, setIsValidatingCards] = useState(false)
   const [isCreating, setIsCreating] = useState(false)
+  const [isArchidektImportOpen, setIsArchidektImportOpen] = useState(false)
   const cardSignature = useMemo(() => createCardSignature(draft), [draft])
   const cardValidationResult = useMemo(
     () =>
@@ -98,7 +111,7 @@ export function CreateDeckModal({
   )
   const cardsAreVerified =
     cardValidationResult.ok && validatedCardSignature === cardSignature
-  const isBusy = isValidatingCards || isCreating
+  const isBusy = isValidatingCards || isCreating || isArchidektImportOpen
 
   function updateDraftField(field: keyof DeckDraft, value: string) {
     if (field === "name") {
@@ -110,6 +123,29 @@ export function CreateDeckModal({
       [field]: value,
     }))
     setErrors([])
+  }
+
+  function handleArchidektDeckImported(importedDeck: ArchidektImportedDeck) {
+    const importedName = importedDeck.name.trim()
+    const importedDescription = importedDeck.description.trim()
+
+    setDraft((currentDraft) => ({
+      ...currentDraft,
+      name: importedName || currentDraft.name,
+      description: importedDescription || currentDraft.description,
+      commanderOne: importedDeck.commanders[0] ?? "",
+      commanderTwo: importedDeck.commanders[1] ?? "",
+      deckList: formatImportedDeckList(importedDeck.cards),
+    }))
+
+    if (importedName) {
+      setDeckNameWasEdited(true)
+    }
+
+    setValidatedCardSignature(null)
+    setErrors([])
+    setCurrentStep(CARD_ENTRY_STEP)
+    setIsArchidektImportOpen(false)
   }
 
   function applyDefaultDeckName() {
@@ -326,6 +362,7 @@ export function CreateDeckModal({
                 disabled={isBusy}
                 draft={draft}
                 onFieldChange={updateDraftField}
+                onOpenArchidektImport={() => setIsArchidektImportOpen(true)}
                 validationResult={cardValidationResult}
                 validatedCardSignature={validatedCardSignature}
               />
@@ -401,6 +438,164 @@ export function CreateDeckModal({
           </div>
         </form>
       </section>
+
+      {isArchidektImportOpen ? (
+        <ArchidektImportModal
+          onClose={() => setIsArchidektImportOpen(false)}
+          onImported={handleArchidektDeckImported}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+function ArchidektImportModal({
+  onClose,
+  onImported,
+}: {
+  onClose: () => void
+  onImported: (deck: ArchidektImportedDeck) => void
+}) {
+  const [archidektInput, setArchidektInput] = useState("")
+  const [error, setError] = useState<string | null>(null)
+  const [isImporting, setIsImporting] = useState(false)
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    const input = archidektInput.trim()
+
+    if (!input) {
+      setError("Paste an Archidekt deck ID or link.")
+      return
+    }
+
+    setError(null)
+    setIsImporting(true)
+
+    try {
+      const response = await apiFetch(
+        `${API_BASE_URL}/decks/import/archidekt`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ input }),
+        }
+      )
+
+      if (!response.ok) {
+        setError(
+          await readApiError(response, "Archidekt deck could not be imported.")
+        )
+        return
+      }
+
+      const data = (await response.json()) as {
+        deck?: ArchidektImportedDeck
+      }
+
+      if (!data.deck) {
+        setError("Archidekt import response was not in the expected format.")
+        return
+      }
+
+      onImported(data.deck)
+    } catch {
+      setError("Archidekt import could not be sent to the server.")
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-background/80 px-4 py-6 backdrop-blur-sm"
+      role="presentation"
+      onMouseDown={(event) => {
+        event.stopPropagation()
+
+        if (!isImporting) {
+          onClose()
+        }
+      }}
+    >
+      <section
+        aria-labelledby="archidekt-import-title"
+        className="max-h-full w-full max-w-lg overflow-y-auto rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
+        role="dialog"
+        aria-modal="true"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+          <div className="space-y-1">
+            <h2 id="archidekt-import-title" className="text-xl font-semibold">
+              Import from Archidekt
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Paste a deck ID or deck link.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Close"
+            title="Close"
+            onClick={onClose}
+            disabled={isImporting}
+          >
+            <X />
+          </Button>
+        </header>
+
+        <form className="grid gap-4 px-5 py-5" onSubmit={handleSubmit}>
+          <Field label="Archidekt deck" htmlFor="archidekt-deck-input">
+            <input
+              id="archidekt-deck-input"
+              name="archidektDeck"
+              className={INPUT_CLASS_NAME}
+              type="text"
+              value={archidektInput}
+              onChange={(event) => {
+                setArchidektInput(event.target.value)
+                setError(null)
+              }}
+              disabled={isImporting}
+              autoFocus
+            />
+          </Field>
+
+          {error ? (
+            <p
+              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              role="alert"
+            >
+              {error}
+            </p>
+          ) : null}
+
+          <div className="flex justify-end gap-2 border-t border-border pt-4">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onClose}
+              disabled={isImporting}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isImporting}>
+              {isImporting ? (
+                <Loader2 className="animate-spin" data-icon="inline-start" />
+              ) : (
+                <Download data-icon="inline-start" />
+              )}
+              {isImporting ? "Importing..." : "Import"}
+            </Button>
+          </div>
+        </form>
+      </section>
     </div>
   )
 }
@@ -410,6 +605,7 @@ function CardEntryStep({
   disabled,
   draft,
   onFieldChange,
+  onOpenArchidektImport,
   validatedCardSignature,
   validationResult,
 }: {
@@ -417,6 +613,7 @@ function CardEntryStep({
   disabled: boolean
   draft: DeckDraft
   onFieldChange: (field: keyof DeckDraft, value: string) => void
+  onOpenArchidektImport: () => void
   validatedCardSignature: string | null
   validationResult: DeckCardsInputValidationResult
 }) {
@@ -426,6 +623,18 @@ function CardEntryStep({
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
+      <div className="flex justify-start">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onOpenArchidektImport}
+          disabled={disabled}
+        >
+          <Download data-icon="inline-start" />
+          Import from Archidekt
+        </Button>
+      </div>
+
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Commander 1" htmlFor="main-commander">
           <input
@@ -522,9 +731,7 @@ function DetailsStep({
           className={cn(TEXTAREA_CLASS_NAME, "min-h-40")}
           placeholder="Optional description"
           value={draft.description}
-          onChange={(event) =>
-            onFieldChange("description", event.target.value)
-          }
+          onChange={(event) => onFieldChange("description", event.target.value)}
           disabled={disabled}
         />
       </Field>
@@ -640,9 +847,9 @@ function ConfirmStep({
             </dt>
             <dd
               className={cn(
-                "break-words text-sm",
+                "text-sm break-words",
                 row.isPlaceholder
-                  ? "italic text-muted-foreground"
+                  ? "text-muted-foreground italic"
                   : "text-foreground"
               )}
             >
@@ -698,7 +905,9 @@ function StepProgress({ currentStep }: { currentStep: number }) {
             <span
               className={cn(
                 "block w-full truncate px-1 text-xs font-medium transition-colors sm:text-sm",
-                isCurrent || isComplete ? "text-foreground" : "text-muted-foreground"
+                isCurrent || isComplete
+                  ? "text-foreground"
+                  : "text-muted-foreground"
               )}
             >
               {step.title}
@@ -795,6 +1004,12 @@ function getCommanderDefaultDeckName(
   }
 
   return validationResult.deckCards.commanders.join(" / ")
+}
+
+function formatImportedDeckList(
+  cards: readonly ArchidektImportedDeck["cards"][number][]
+) {
+  return cards.map((card) => `${card.quantity} ${card.name}`).join("\n")
 }
 
 function summarizeText(value: string, emptyLabel: string) {
