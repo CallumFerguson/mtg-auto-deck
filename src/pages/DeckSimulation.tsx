@@ -3149,6 +3149,7 @@ function SimulationResultsPanel({
         canStopFutureTurns={false}
         canStopSimulation={false}
         finishedDurationText={finishedDurationText}
+        isBatchRun={simulation.llmProcessingMode === "openai_batch"}
         isPending={false}
         isFinishedSuccessfully={
           run.status === "completed" && runStatusMessage === null
@@ -3230,6 +3231,7 @@ function SimulationResultsPanel({
               run.status !== "batch_submitted"
             }
             finishedDurationText={null}
+            isBatchRun={simulation.llmProcessingMode === "openai_batch"}
             isPending={
               run.status === "pending" || run.status === "batch_pending"
             }
@@ -3874,6 +3876,7 @@ function SimulationResultThinkingStatus({
   canStopFutureTurns,
   canStopSimulation,
   finishedDurationText,
+  isBatchRun,
   isPending,
   isFinished,
   isFinishedSuccessfully,
@@ -3892,6 +3895,7 @@ function SimulationResultThinkingStatus({
   canStopFutureTurns: boolean
   canStopSimulation: boolean
   finishedDurationText: string | null
+  isBatchRun: boolean
   isPending: boolean
   isFinished: boolean
   isFinishedSuccessfully: boolean
@@ -3927,9 +3931,10 @@ function SimulationResultThinkingStatus({
       ? null
       : formatMinutesSeconds(currentTimeMs - runStartTimeMs)
   const statusLabel = isFinished
-    ? finishedDurationText
-      ? `Thought for ${finishedDurationText}`
-      : "Thought"
+    ? getFinishedSimulationRunStatusLabel({
+        finishedDurationText,
+        isBatchRun,
+      })
     : activeLabel
       ? activeLabel
     : isPending
@@ -4030,6 +4035,22 @@ function SimulationResultThinkingStatus({
       ) : null}
     </div>
   )
+}
+
+function getFinishedSimulationRunStatusLabel({
+  finishedDurationText,
+  isBatchRun,
+}: {
+  finishedDurationText: string | null
+  isBatchRun: boolean
+}) {
+  if (isBatchRun) {
+    return finishedDurationText
+      ? `Batch run completed after ${finishedDurationText}`
+      : "Batch run completed"
+  }
+
+  return finishedDurationText ? `Thought for ${finishedDurationText}` : "Thought"
 }
 
 const simulationResultSummaryMarkdownClassName =
