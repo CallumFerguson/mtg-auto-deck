@@ -1913,7 +1913,7 @@ export function DeckSimulation({
                             }
                             disabled={!selectedModelPresetSupportsBatch}
                             label="Batch processing"
-                            activeWarning="Runs through OpenAI Batch. Submitted runs cannot be stopped, but future turns can be stopped."
+                            activeWarning="Less usage, but simulations can take hours to finish. Uses OpenAI batch api"
                             onCheckedChange={
                               handleCreateSimulationBatchChange
                             }
