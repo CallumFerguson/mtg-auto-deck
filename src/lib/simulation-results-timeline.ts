@@ -41,6 +41,10 @@ export type SimulationResultsTimelineSelectionSnapshot = {
   status: SimulationResultsTimelineStepStatus
 }
 
+export type SimulationResultsTimelineDefaultSelection =
+  | "latest"
+  | "opening_hand"
+
 export function buildSimulationResultsTimelineSteps({
   hasPresetStartingHand,
   resultsInfo,
@@ -75,15 +79,20 @@ export function buildSimulationResultsTimelineSteps({
 }
 
 function getFallbackSimulationResultsTimelineStepId(
-  steps: readonly SimulationResultsTimelineStep[]
+  steps: readonly SimulationResultsTimelineStep[],
+  defaultSelection: SimulationResultsTimelineDefaultSelection
 ) {
-  return getPreferredSimulationResultsTimelineStep(steps)?.id ?? null
+  return (
+    getPreferredSimulationResultsTimelineStep(steps, defaultSelection)?.id ??
+    null
+  )
 }
 
 export function resolveSimulationResultsTimelineSelection(
   steps: readonly SimulationResultsTimelineStep[],
   selectedStepId: string | null,
-  previousSelection: SimulationResultsTimelineSelectionSnapshot | null = null
+  previousSelection: SimulationResultsTimelineSelectionSnapshot | null = null,
+  defaultSelection: SimulationResultsTimelineDefaultSelection = "latest"
 ) {
   if (selectedStepId && steps.some((step) => step.id === selectedStepId)) {
     return selectedStepId
@@ -98,7 +107,7 @@ export function resolveSimulationResultsTimelineSelection(
     return preservedStepId
   }
 
-  return getFallbackSimulationResultsTimelineStepId(steps)
+  return getFallbackSimulationResultsTimelineStepId(steps, defaultSelection)
 }
 
 export function shouldPreserveFinishedSimulationResultsTimelineSelection(
@@ -123,12 +132,22 @@ export function isActiveSimulationResultsTimelineStep(
 }
 
 function getPreferredSimulationResultsTimelineStep(
-  steps: readonly SimulationResultsTimelineStep[]
+  steps: readonly SimulationResultsTimelineStep[],
+  defaultSelection: SimulationResultsTimelineDefaultSelection
 ) {
   const activeStep = steps.find(isActiveSimulationResultsTimelineStep)
 
   if (activeStep) {
     return activeStep
+  }
+
+  if (defaultSelection === "opening_hand") {
+    return (
+      findLastStepByKind(steps, "opening_hand") ??
+      findLastStepByKind(steps, "preset_opening_hand") ??
+      findLastStepByKind(steps, "turn") ??
+      null
+    )
   }
 
   return (

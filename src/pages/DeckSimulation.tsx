@@ -81,6 +81,7 @@ import {
   isActiveSimulationResultsTimelineStep,
   resolveSimulationResultsTimelineSelection,
   shouldPreserveFinishedSimulationResultsTimelineSelection,
+  type SimulationResultsTimelineDefaultSelection,
   type SimulationResultsTimelineSelectionSnapshot,
   type SimulationResultsTimelineStep,
 } from "@/lib/simulation-results-timeline"
@@ -703,6 +704,7 @@ export function PublicSimulationPage({
             canUpgradeUsage={false}
             cards={publicSimulation.deck.cards}
             commanders={publicSimulation.deck.commanders}
+            defaultTimelineSelection="opening_hand"
             deckId={publicSimulation.deck.id}
             initialResultsInfo={publicSimulation.results}
             isLoadingStartingHand={false}
@@ -2200,6 +2202,7 @@ function SimulationDetails({
   canUpgradeUsage,
   cards,
   commanders,
+  defaultTimelineSelection = "latest",
   deckId,
   initialResultsInfo = null,
   isLoadingStartingHand,
@@ -2218,6 +2221,7 @@ function SimulationDetails({
   canUpgradeUsage: boolean
   cards: DeckCard[]
   commanders: DeckCard[]
+  defaultTimelineSelection?: SimulationResultsTimelineDefaultSelection
   deckId: string
   initialResultsInfo?: SimulationResultsInfo | null
   isLoadingStartingHand: boolean
@@ -2736,6 +2740,7 @@ function SimulationDetails({
       canUpgradeUsage={canUpgradeUsage}
       cards={cards}
       commanders={commanders}
+      defaultTimelineSelection={defaultTimelineSelection}
       hasUsableModelPreset={selectedModelPreset !== null}
       isStartingOpeningHandRun={isStartingOpeningHandRun}
       isStartingTurnRun={isStartingTurnRun}
@@ -2831,6 +2836,7 @@ function SimulationResultsPanel({
   canUpgradeUsage,
   cards,
   commanders,
+  defaultTimelineSelection,
   hasUsableModelPreset,
   isStartingOpeningHandRun,
   isStartingTurnRun,
@@ -2861,6 +2867,7 @@ function SimulationResultsPanel({
   canUpgradeUsage: boolean
   cards: DeckCard[]
   commanders: DeckCard[]
+  defaultTimelineSelection: SimulationResultsTimelineDefaultSelection
   hasUsableModelPreset: boolean
   isStartingOpeningHandRun: boolean
   isStartingTurnRun: boolean
@@ -3106,6 +3113,7 @@ function SimulationResultsPanel({
   const previousSelectedTimelineStepIdRef = useRef<string | null>(null)
   const previousSelectedTimelineStepRef =
     useRef<SimulationResultsTimelineSelectionSnapshot | null>(null)
+  const timelineScrollerRef = useRef<HTMLDivElement | null>(null)
   const timelineStepButtonRefs = useRef<Map<string, HTMLButtonElement>>(
     new Map()
   )
@@ -3114,7 +3122,9 @@ function SimulationResultsPanel({
   )
   const selectedTimelineStepId = resolveSimulationResultsTimelineSelection(
     timelineSteps,
-    selectedTimelineStepIdPreference
+    selectedTimelineStepIdPreference,
+    null,
+    defaultTimelineSelection
   )
   const selectedTimelineStep =
     timelineSteps.find((step) => step.id === selectedTimelineStepId) ?? null
@@ -3144,9 +3154,32 @@ function SimulationResultsPanel({
       return
     }
 
-    timelineStepButtonRefs.current.get(selectedTimelineStepId)?.scrollIntoView({
-      block: "nearest",
-      inline: "center",
+    const timelineScroller = timelineScrollerRef.current
+    const selectedTimelineButton =
+      timelineStepButtonRefs.current.get(selectedTimelineStepId) ?? null
+
+    if (!timelineScroller || !selectedTimelineButton) {
+      return
+    }
+
+    const scrollerRect = timelineScroller.getBoundingClientRect()
+    const buttonRect = selectedTimelineButton.getBoundingClientRect()
+    const targetScrollLeft =
+      timelineScroller.scrollLeft +
+      buttonRect.left -
+      scrollerRect.left +
+      buttonRect.width / 2 -
+      scrollerRect.width / 2
+    const maxScrollLeft =
+      timelineScroller.scrollWidth - timelineScroller.clientWidth
+    const clampedScrollLeft = Math.max(
+      0,
+      Math.min(targetScrollLeft, maxScrollLeft)
+    )
+
+    timelineScroller.scrollTo({
+      left: clampedScrollLeft,
+      top: timelineScroller.scrollTop,
     })
   }, [displayedTimelineSteps, selectedTimelineStepId])
 
@@ -3413,6 +3446,7 @@ function SimulationResultsPanel({
       <header className="relative w-full shrink-0 bg-background px-5 py-3">
         <div className="w-full">
           <div
+            ref={timelineScrollerRef}
             aria-label="Simulation timeline"
             className="simulation-scrollbar simulation-scrollbar-no-gutter overflow-x-auto"
             role="group"

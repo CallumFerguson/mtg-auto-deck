@@ -345,8 +345,18 @@ at the deployed React app URL. The current links are based on `appBaseUrl` in
 From a local checkout:
 
 ```sh
+cp landing/.env.example landing/.env
 cd landing
 npm ci
+```
+
+Then update `landing/.env` before deploying so
+`PUBLIC_DEMO_SIMULATION_URL` points at the public simulation URL for the
+deployed React app.
+
+Deploy the landing page:
+
+```sh
 npm run deploy
 ```
 

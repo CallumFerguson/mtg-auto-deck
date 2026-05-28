@@ -2,23 +2,13 @@
 const appBaseUrl = "https://app.mtgautodeck.com"
 const signUpUrl = `${appBaseUrl}/sign-up`
 const signInUrl = `${appBaseUrl}/sign-in`
+const demoSimulationUrl = import.meta.env.PUBLIC_DEMO_SIMULATION_URL?.trim()
 
-const features = [
-  {
-    label: "Automated goldfishing",
-    description:
-      "Let an AI play through your deck and surface the real problems with your deck.",
-  },
-  {
-    label: "Faster deck iteration",
-    description:
-      "Run dozens of simulations in the time it would take you to goldfish your deck a few times.",
-  },
-  {
-    label: "Simulation depth",
-    description: "Uncover problems you didn't know your deck has.",
-  },
-]
+if (!demoSimulationUrl) {
+  throw new Error(
+    "PUBLIC_DEMO_SIMULATION_URL is required for the landing page."
+  )
+}
 
 const plans = [
   {
@@ -101,26 +91,17 @@ const plans = [
         </div>
       </section>
 
-      <section class="section feature-section" aria-labelledby="features-title">
+      <section class="section demo-section" aria-labelledby="demo-title">
         <div class="section-header">
-          <p class="eyebrow">Not just basic analysis</p>
-          <h2 id="features-title">See how the deck actually plays.</h2>
-          <p>
-            MTG Auto Deck runs through the turns for you, logging the important
-            actions so you can see where your deck works, and where it doesn't.
-          </p>
+          <p class="eyebrow">Demo</p>
         </div>
 
-        <div class="feature-grid">
-          {
-            features.map((feature) => (
-              <article class="feature">
-                <span class="feature-marker" aria-hidden="true" />
-                <h3>{feature.label}</h3>
-                <p>{feature.description}</p>
-              </article>
-            ))
-          }
+        <div class="demo-frame-shell">
+          <iframe
+            class="demo-frame"
+            src={demoSimulationUrl}
+            title="MTG Auto Deck public simulation demo"
+            loading="lazy"></iframe>
         </div>
       </section>
 
@@ -333,10 +314,10 @@ const plans = [
     position: relative;
     isolation: isolate;
     display: flex;
-    min-height: 78svh;
+    min-height: 64svh;
     align-items: center;
     overflow: hidden;
-    padding: 7rem 1rem 5.5rem;
+    padding: 5.75rem 1rem 3.75rem;
     border-bottom: 1px solid var(--border);
   }
 
@@ -379,7 +360,7 @@ const plans = [
   }
 
   .hero-content {
-    padding-top: 2rem;
+    padding-top: 1rem;
   }
 
   .eyebrow {
@@ -447,54 +428,37 @@ const plans = [
     font-size: 1.08rem;
   }
 
-  .feature-section {
-    background: var(--bg-deep);
-  }
-
-  .feature-grid,
   .pricing-grid {
     display: grid;
     gap: 1rem;
     margin-top: 2.2rem;
   }
 
-  .feature-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .demo-section {
+    background: var(--bg-deep);
   }
 
-  .feature {
-    min-height: 16rem;
+  .demo-frame-shell {
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    margin-top: 2.2rem;
     border: 1px solid var(--border);
     border-radius: 0.5rem;
     background: var(--surface);
-    padding: 1.25rem;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.2);
   }
 
-  .feature-marker {
+  .demo-frame {
     display: block;
-    width: 2.35rem;
-    height: 0.28rem;
-    margin-bottom: 2.7rem;
-    border-radius: 999px;
-    background: var(--accent);
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: var(--bg-deep);
   }
 
-  .feature:nth-child(2) .feature-marker {
-    background: var(--green);
-  }
-
-  .feature:nth-child(3) .feature-marker {
-    background: var(--amber);
-  }
-
-  .feature p,
   .plan-description,
   .plan li {
     color: var(--muted);
-  }
-
-  .feature p {
-    margin: 0.85rem 0 0;
   }
 
   .pricing-section {
@@ -572,12 +536,10 @@ const plans = [
   }
 
   @media (max-width: 860px) {
-    .feature-grid,
     .pricing-grid {
       grid-template-columns: 1fr;
     }
 
-    .feature,
     .plan {
       min-height: auto;
     }
@@ -613,9 +575,9 @@ const plans = [
     }
 
     .hero {
-      min-height: 82svh;
-      padding-top: 8rem;
-      padding-bottom: 4rem;
+      min-height: 72svh;
+      padding-top: 6.5rem;
+      padding-bottom: 3rem;
     }
 
     .hero-content,
