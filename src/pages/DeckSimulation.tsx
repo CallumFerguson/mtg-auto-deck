@@ -1351,6 +1351,10 @@ export function DeckSimulation({
   }
 
   function handleCreateSimulationUseFlexChange(nextEnabled: boolean) {
+    if (nextEnabled) {
+      setUseBatchProcessing(false)
+    }
+
     setUseFlexServiceTier(nextEnabled)
     storeCreateSimulationUseFlexServiceTier(nextEnabled)
   }
@@ -1917,13 +1921,9 @@ export function DeckSimulation({
                           <FlexServiceTierSwitch
                             checked={
                               selectedModelPresetSupportsFlex &&
-                              useFlexServiceTier &&
-                              !useBatchProcessing
+                              useFlexServiceTier
                             }
-                            disabled={
-                              !selectedModelPresetSupportsFlex ||
-                              useBatchProcessing
-                            }
+                            disabled={!selectedModelPresetSupportsFlex}
                             label="Flex processing"
                             activeWarning="Less usage, but simulation may be slower and has a higher chance of failing."
                             onCheckedChange={
