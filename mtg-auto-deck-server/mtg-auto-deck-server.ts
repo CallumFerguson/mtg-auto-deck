@@ -340,12 +340,14 @@ const createSimulationSchema = z.object({
 const updateSimulationSchema = z
   .object({
     llmModelPresetId: z.uuid().optional(),
+    llmProcessingMode: z.enum(["realtime", "openai_batch"]).optional(),
     reasoningSummariesEnabled: z.boolean().optional(),
     useFlexServiceTier: z.boolean().optional(),
   })
   .refine(
     (update) =>
       update.llmModelPresetId !== undefined ||
+      update.llmProcessingMode !== undefined ||
       update.reasoningSummariesEnabled !== undefined ||
       update.useFlexServiceTier !== undefined
   )

@@ -1685,6 +1685,7 @@ export async function getPublicSimulationSummary(
 
 export type UpdateSimulationInput = {
   llmModelPresetId?: string
+  llmProcessingMode?: LlmProcessingMode
   reasoningSummariesEnabled?: boolean
   useFlexServiceTier?: boolean
 }
@@ -1698,6 +1699,7 @@ export async function updateSimulation(
 
   if (
     trimmedPresetId === undefined &&
+    input.llmProcessingMode === undefined &&
     input.reasoningSummariesEnabled === undefined &&
     input.useFlexServiceTier === undefined
   ) {
@@ -1708,30 +1710,8 @@ export async function updateSimulation(
     throw new SimulationValidationError("Model preset is required.")
   }
 
-  let nextUseFlexServiceTier = input.useFlexServiceTier ?? null
-  const currentSimulationResult = await queryDatabase<{
-    llm_model_preset_id: string | null
-    llm_processing_mode: LlmProcessingMode
-  }>(
-    `
-      SELECT llm_model_preset_id, llm_processing_mode
-      FROM simulations
-      WHERE id = $1
-        AND deck_id = $2
-    `,
-    [simulationId, deckId]
-  )
-  const currentSimulation = currentSimulationResult.rows[0]
-
-  if (!currentSimulation) {
-    throw new SimulationValidationError("Simulation not found.")
-  }
-
-  const targetPresetId =
-    trimmedPresetId ?? currentSimulation.llm_model_preset_id
-
   if (
-    currentSimulation.llm_processing_mode === "openai_batch" &&
+    input.llmProcessingMode === "openai_batch" &&
     input.useFlexServiceTier === true
   ) {
     throw new SimulationValidationError(
@@ -1739,97 +1719,178 @@ export async function updateSimulation(
     )
   }
 
-  if (trimmedPresetId !== undefined || input.useFlexServiceTier === true) {
-    if (!targetPresetId) {
-      throw new SimulationValidationError(
-        "Flex service tier can only be enabled after selecting a model preset that supports flex."
-      )
-    }
-
-    const presetResult = await queryDatabase<{
-      provider: string
-      supports_flex: boolean
+  return withDatabaseTransaction(async (client) => {
+    const currentSimulationResult = await client.query<{
+      llm_model_preset_id: string | null
+      llm_processing_mode: LlmProcessingMode
+      status: SimulationStatus
+      use_flex_service_tier: boolean
     }>(
       `
-        SELECT provider, supports_flex
-        FROM llm_model_presets
+        SELECT
+          llm_model_preset_id,
+          llm_processing_mode,
+          status,
+          use_flex_service_tier
+        FROM simulations
         WHERE id = $1
-          AND is_enabled = true
+          AND deck_id = $2
+        FOR UPDATE
       `,
-      [targetPresetId]
+      [simulationId, deckId]
     )
+    const currentSimulation = currentSimulationResult.rows[0]
 
-    if (presetResult.rowCount === 0) {
-      throw new SimulationValidationError(
-        trimmedPresetId !== undefined
-          ? "Model preset not found or disabled."
-          : "Flex service tier can only be enabled for an enabled model preset that supports flex."
-      )
+    if (!currentSimulation) {
+      throw new SimulationValidationError("Simulation not found.")
     }
 
-    const targetPreset = presetResult.rows[0]
-    const supportsFlex = targetPreset.supports_flex
+    let nextProcessingMode =
+      input.llmProcessingMode ?? currentSimulation.llm_processing_mode
+    let nextUseFlexServiceTier =
+      input.useFlexServiceTier ?? currentSimulation.use_flex_service_tier
 
-    if (
-      currentSimulation.llm_processing_mode === "openai_batch" &&
-      targetPreset.provider !== "openai"
-    ) {
-      throw new SimulationValidationError(
-        "Batch simulations can only use OpenAI model presets."
-      )
+    if (input.useFlexServiceTier === true) {
+      nextProcessingMode = "realtime"
     }
 
-    if (input.useFlexServiceTier === true && !supportsFlex) {
-      throw new SimulationValidationError(
-        "Flex service tier can only be enabled for model presets that support flex."
-      )
-    }
-
-    if (trimmedPresetId !== undefined && !supportsFlex) {
+    if (nextProcessingMode === "openai_batch") {
       nextUseFlexServiceTier = false
     }
-  }
 
-  const result = await queryDatabase<SimulationSummaryRow>(
-    `
-      UPDATE simulations
-      SET llm_model_preset_id = COALESCE($3, llm_model_preset_id),
-          reasoning_summaries_enabled = COALESCE($4, reasoning_summaries_enabled),
-          use_flex_service_tier = COALESCE($5, use_flex_service_tier),
-          updated_at = now()
-      WHERE id = $1
-        AND deck_id = $2
-      RETURNING
-        id,
-        deck_id,
-        created_via,
-        llm_model_preset_id,
-        starting_hand_id,
-        seed,
-        library,
-        turns_to_simulate,
-        llm_processing_mode,
-        reasoning_summaries_enabled,
-        use_flex_service_tier,
-        auto_simulate_next_step,
-        is_public,
-        ${SIMULATION_SUMMARY_SIMULATED_TURN_COUNT_SQL} AS simulated_turn_count,
-        ${SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL} AS completed_llm_run_count,
-        ${SIMULATION_SUMMARY_ACTIVE_RUN_COUNT_SQL} AS active_llm_run_count,
-        status,
-        created_at,
-        updated_at
-    `,
-    [
-      simulationId,
-      deckId,
-      trimmedPresetId ?? null,
-      input.reasoningSummariesEnabled ?? null,
-      nextUseFlexServiceTier,
-    ]
-  )
+    const targetPresetId =
+      trimmedPresetId ?? currentSimulation.llm_model_preset_id
 
-  return mapSimulationSummaryRow(result.rows[0])
+    if (nextUseFlexServiceTier || nextProcessingMode === "openai_batch") {
+      if (!targetPresetId) {
+        throw new SimulationValidationError(
+          nextProcessingMode === "openai_batch"
+            ? "Batch processing can only be enabled after selecting an OpenAI model preset."
+            : "Flex service tier can only be enabled after selecting a model preset that supports flex."
+        )
+      }
+    }
+
+    if (
+      trimmedPresetId !== undefined ||
+      nextUseFlexServiceTier ||
+      nextProcessingMode === "openai_batch"
+    ) {
+      if (!targetPresetId) {
+        throw new SimulationValidationError("Model preset is required.")
+      }
+
+      const presetResult = await client.query<{
+        provider: string
+        supports_flex: boolean
+      }>(
+        `
+          SELECT provider, supports_flex
+          FROM llm_model_presets
+          WHERE id = $1
+            AND is_enabled = true
+        `,
+        [targetPresetId]
+      )
+
+      if (presetResult.rowCount === 0) {
+        throw new SimulationValidationError(
+          trimmedPresetId !== undefined
+            ? "Model preset not found or disabled."
+            : nextProcessingMode === "openai_batch"
+              ? "Batch processing can only be enabled for an enabled OpenAI model preset."
+              : "Flex service tier can only be enabled for an enabled model preset that supports flex."
+        )
+      }
+
+      const targetPreset = presetResult.rows[0]
+      const supportsFlex = targetPreset.supports_flex
+
+      if (
+        nextProcessingMode === "openai_batch" &&
+        targetPreset.provider !== "openai"
+      ) {
+        throw new SimulationValidationError(
+          "Batch simulations can only use OpenAI model presets."
+        )
+      }
+
+      if (
+        trimmedPresetId !== undefined &&
+        !supportsFlex &&
+        input.useFlexServiceTier !== true
+      ) {
+        nextUseFlexServiceTier = false
+      }
+
+      if (nextUseFlexServiceTier && !supportsFlex) {
+        throw new SimulationValidationError(
+          "Flex service tier can only be enabled for model presets that support flex."
+        )
+      }
+    }
+
+    if (
+      nextProcessingMode !== currentSimulation.llm_processing_mode ||
+      nextUseFlexServiceTier !== currentSimulation.use_flex_service_tier
+    ) {
+      if (currentSimulation.status === "running") {
+        throw new SimulationValidationError(
+          "Processing options cannot be changed while the simulation is running."
+        )
+      }
+
+      await assertNoActiveSimulationLlmRuns(client, simulationId)
+    }
+
+    const result = await client.query<SimulationSummaryRow>(
+      `
+        UPDATE simulations
+        SET llm_model_preset_id = COALESCE($3, llm_model_preset_id),
+            reasoning_summaries_enabled = COALESCE($4, reasoning_summaries_enabled),
+            use_flex_service_tier = $5,
+            llm_processing_mode = $6,
+            updated_at = now()
+        WHERE id = $1
+          AND deck_id = $2
+        RETURNING
+          id,
+          deck_id,
+          created_via,
+          llm_model_preset_id,
+          starting_hand_id,
+          seed,
+          library,
+          turns_to_simulate,
+          llm_processing_mode,
+          reasoning_summaries_enabled,
+          use_flex_service_tier,
+          auto_simulate_next_step,
+          is_public,
+          ${SIMULATION_SUMMARY_SIMULATED_TURN_COUNT_SQL} AS simulated_turn_count,
+          ${SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL} AS completed_llm_run_count,
+          ${SIMULATION_SUMMARY_ACTIVE_RUN_COUNT_SQL} AS active_llm_run_count,
+          status,
+          created_at,
+          updated_at
+      `,
+      [
+        simulationId,
+        deckId,
+        trimmedPresetId ?? null,
+        input.reasoningSummariesEnabled ?? null,
+        nextUseFlexServiceTier,
+        nextProcessingMode,
+      ]
+    )
+    const simulation = result.rows[0]
+
+    if (!simulation) {
+      throw new SimulationValidationError("Simulation not found.")
+    }
+
+    return mapSimulationSummaryRow(simulation)
+  })
 }
 
 export async function setSimulationPublic(

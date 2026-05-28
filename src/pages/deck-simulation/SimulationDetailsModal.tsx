@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { API_BASE_URL, apiFetch } from "@/lib/api"
 import { readApiError } from "@/lib/api-error"
 import type {
+  LlmProcessingMode,
   Simulation,
   SimulationDebugInfo,
   SimulationDebugResponse,
@@ -277,7 +278,7 @@ export function SimulationDetailsModal({
                 <div className="rounded-md border border-border bg-background/35 p-3 sm:col-span-2">
                   <dt className="text-muted-foreground">LLM options</dt>
                   <dd className="mt-2 grid gap-3">
-                    <SimulationFlexServiceTierSetting
+                    <SimulationLlmOptionsSetting
                       deckId={deckId}
                       onSimulationUpdated={onSimulationUpdated}
                       selectedModelPreset={selectedModelPreset}
@@ -424,7 +425,7 @@ export function SimulationDetailsModal({
   )
 }
 
-function SimulationFlexServiceTierSetting({
+function SimulationLlmOptionsSetting({
   deckId,
   onSimulationUpdated,
   selectedModelPreset,
@@ -435,29 +436,48 @@ function SimulationFlexServiceTierSetting({
   selectedModelPreset: LlmModelPreset | null
   simulation: Simulation
 }) {
-  const [selectedEnabled, setSelectedEnabled] = useState(
+  const [selectedProcessingMode, setSelectedProcessingMode] =
+    useState<LlmProcessingMode>(simulation.llmProcessingMode)
+  const [selectedUseFlexServiceTier, setSelectedUseFlexServiceTier] = useState(
     simulation.useFlexServiceTier
   )
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const supportsFlex = Boolean(selectedModelPreset?.supportsFlex)
-  const checked = supportsFlex && selectedEnabled
+  const supportsBatch = selectedModelPreset?.provider === "openai"
+  const isLocked =
+    simulation.status === "running" || simulation.activeLlmRunCount > 0
+  const batchChecked = selectedProcessingMode === "openai_batch"
+  const flexChecked =
+    selectedProcessingMode === "realtime" && selectedUseFlexServiceTier
 
   useEffect(() => {
-    setSelectedEnabled(simulation.useFlexServiceTier)
+    setSelectedProcessingMode(simulation.llmProcessingMode)
+    setSelectedUseFlexServiceTier(simulation.useFlexServiceTier)
     setError(null)
-  }, [simulation.id, simulation.useFlexServiceTier])
+  }, [
+    simulation.id,
+    simulation.llmProcessingMode,
+    simulation.useFlexServiceTier,
+  ])
 
-  async function handleFlexServiceTierChange(nextEnabled: boolean) {
+  async function handleLlmOptionsChange(
+    nextProcessingMode: LlmProcessingMode,
+    nextUseFlexServiceTier: boolean
+  ) {
     if (
       isSaving ||
-      !supportsFlex ||
-      nextEnabled === simulation.useFlexServiceTier
+      isLocked ||
+      (nextProcessingMode === "openai_batch" && !supportsBatch) ||
+      (nextUseFlexServiceTier && !supportsFlex) ||
+      (nextProcessingMode === simulation.llmProcessingMode &&
+        nextUseFlexServiceTier === simulation.useFlexServiceTier)
     ) {
       return
     }
 
-    setSelectedEnabled(nextEnabled)
+    setSelectedProcessingMode(nextProcessingMode)
+    setSelectedUseFlexServiceTier(nextUseFlexServiceTier)
     setIsSaving(true)
     setError(null)
 
@@ -470,17 +490,19 @@ function SimulationFlexServiceTierSetting({
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            useFlexServiceTier: nextEnabled,
+            llmProcessingMode: nextProcessingMode,
+            useFlexServiceTier: nextUseFlexServiceTier,
           }),
         }
       )
 
       if (!response.ok) {
-        setSelectedEnabled(simulation.useFlexServiceTier)
+        setSelectedProcessingMode(simulation.llmProcessingMode)
+        setSelectedUseFlexServiceTier(simulation.useFlexServiceTier)
         setError(
           await readApiError(
             response,
-            "Flex service tier could not be updated."
+            "LLM processing options could not be updated."
           )
         )
         return
@@ -489,8 +511,9 @@ function SimulationFlexServiceTierSetting({
       const data = (await response.json()) as UpdateSimulationResponse
       onSimulationUpdated(data.simulation)
     } catch {
-      setSelectedEnabled(simulation.useFlexServiceTier)
-      setError("Flex service tier could not be updated.")
+      setSelectedProcessingMode(simulation.llmProcessingMode)
+      setSelectedUseFlexServiceTier(simulation.useFlexServiceTier)
+      setError("LLM processing options could not be updated.")
     } finally {
       setIsSaving(false)
     }
@@ -499,12 +522,31 @@ function SimulationFlexServiceTierSetting({
   return (
     <div className="grid gap-2">
       <FlexServiceTierSwitch
-        checked={checked}
-        disabled={isSaving || !supportsFlex}
+        checked={batchChecked}
+        disabled={isSaving || isLocked || !supportsBatch}
+        label="Batch processing"
+        activeWarning="Runs through OpenAI Batch. Submitted runs cannot be stopped, but future turns can be stopped."
         onCheckedChange={(nextEnabled) =>
-          void handleFlexServiceTierChange(nextEnabled)
+          void handleLlmOptionsChange(
+            nextEnabled ? "openai_batch" : "realtime",
+            false
+          )
         }
       />
+      <FlexServiceTierSwitch
+        checked={flexChecked}
+        disabled={isSaving || isLocked || !supportsFlex}
+        label="Flex processing"
+        activeWarning="Less usage, but simulation may be slower and has a higher chance of failing."
+        onCheckedChange={(nextEnabled) =>
+          void handleLlmOptionsChange("realtime", nextEnabled)
+        }
+      />
+      {isLocked ? (
+        <p className="text-sm text-muted-foreground">
+          Processing options are locked while this simulation is running.
+        </p>
+      ) : null}
       {isSaving ? (
         <p className="text-sm text-muted-foreground">Saving...</p>
       ) : null}
@@ -554,6 +596,18 @@ function SimulationModelPresetSelector({
       return
     }
 
+    const nextPreset =
+      modelPresets.find((preset) => preset.id === nextPresetId) ?? null
+    const nextLlmProcessingMode =
+      simulation.llmProcessingMode === "openai_batch" &&
+      nextPreset?.provider !== "openai"
+        ? "realtime"
+        : undefined
+    const nextUseFlexServiceTier =
+      simulation.useFlexServiceTier && !nextPreset?.supportsFlex
+        ? false
+        : undefined
+
     setIsSaving(true)
 
     try {
@@ -566,6 +620,12 @@ function SimulationModelPresetSelector({
           },
           body: JSON.stringify({
             llmModelPresetId: nextPresetId,
+            ...(nextLlmProcessingMode
+              ? { llmProcessingMode: nextLlmProcessingMode }
+              : {}),
+            ...(nextUseFlexServiceTier !== undefined
+              ? { useFlexServiceTier: nextUseFlexServiceTier }
+              : {}),
           }),
         }
       )
@@ -787,6 +847,10 @@ function SimulationDebugPanel({
             value={formatDebugBoolean(debugInfo.reasoningSummariesEnabled)}
           />
           <DebugMetadataItem
+            label="Processing mode"
+            value={formatDebugProcessingMode(debugInfo.llmProcessingMode)}
+          />
+          <DebugMetadataItem
             label="Flex service tier"
             value={formatDebugBoolean(debugInfo.useFlexServiceTier)}
           />
@@ -994,6 +1058,10 @@ function getDebugModelPresetLabel(
 
 function formatDebugBoolean(value: boolean) {
   return value ? "Yes" : "No"
+}
+
+function formatDebugProcessingMode(value: LlmProcessingMode) {
+  return value === "openai_batch" ? "OpenAI Batch" : "Realtime"
 }
 
 function formatDebugDateTime(value: string | null) {
