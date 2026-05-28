@@ -610,8 +610,10 @@ function UsageLimitReachedNotice({
 }
 
 export function PublicSimulationPage({
+  hideHeader = false,
   simulationId,
 }: {
+  hideHeader?: boolean
   simulationId: string
 }) {
   const [publicSimulation, setPublicSimulation] =
@@ -661,21 +663,23 @@ export function PublicSimulationPage({
 
   return (
     <main className="flex h-svh flex-col overflow-hidden bg-background text-foreground">
-      <header className="shrink-0 border-b border-border px-4 py-4 sm:px-6 lg:px-8">
-        <div className="mx-auto flex w-full max-w-7xl flex-col gap-2">
-          <p className="text-sm font-medium tracking-[0.18em] text-sky-300 uppercase">
-            Public simulation
-          </p>
-          <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-semibold text-foreground sm:text-3xl">
-              {publicSimulation?.deck.name ?? "Simulation"}
-            </h1>
-            <p className="text-sm break-all text-muted-foreground">
-              {simulationId}
+      {hideHeader ? null : (
+        <header className="shrink-0 border-b border-border px-4 py-4 sm:px-6 lg:px-8">
+          <div className="mx-auto flex w-full max-w-7xl flex-col gap-2">
+            <p className="text-sm font-medium tracking-[0.18em] text-sky-300 uppercase">
+              Public simulation
             </p>
+            <div className="flex flex-col gap-1">
+              <h1 className="text-2xl font-semibold text-foreground sm:text-3xl">
+                {publicSimulation?.deck.name ?? "Simulation"}
+              </h1>
+              <p className="text-sm break-all text-muted-foreground">
+                {simulationId}
+              </p>
+            </div>
           </div>
-        </div>
-      </header>
+        </header>
+      )}
 
       <section className="min-h-0 flex-1 overflow-hidden">
         {isLoading ? (

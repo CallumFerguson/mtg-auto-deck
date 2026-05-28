@@ -6,6 +6,7 @@ export function PublicSimulationApp() {
   const simulationId = getPublicSimulationIdFromPathname(
     window.location.pathname
   )
+  const hideHeader = shouldHidePublicSimulationHeader(window.location.search)
 
   if (!simulationId) {
     return (
@@ -15,7 +16,12 @@ export function PublicSimulationApp() {
     )
   }
 
-  return <PublicSimulationPage simulationId={simulationId} />
+  return (
+    <PublicSimulationPage
+      hideHeader={hideHeader}
+      simulationId={simulationId}
+    />
+  )
 }
 
 function getPublicSimulationIdFromPathname(pathname: string) {
@@ -36,4 +42,11 @@ function getPublicSimulationIdFromPathname(pathname: string) {
   } catch {
     return null
   }
+}
+
+function shouldHidePublicSimulationHeader(search: string) {
+  const searchParams = new URLSearchParams(search)
+  const hideHeaderValue = searchParams.get("hideHeader")
+
+  return hideHeaderValue === "1" || hideHeaderValue === "true"
 }
