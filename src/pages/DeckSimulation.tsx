@@ -3149,6 +3149,8 @@ function SimulationResultsPanel({
       ? getStartingHandGameStateDisplay(startingHand, cards, commanders)
       : getSimulationRunGameStateDisplay(selectedTimelineRun, commanders)
 
+  useSimulationResultReveal(resultsPanelRef, selectedTimelineRun)
+
   useEffect(() => {
     if (!selectedTimelineStepId) {
       return
@@ -3910,6 +3912,148 @@ function getSimulationTimelineStepLabelClassName(isSelected: boolean) {
 const simulationResultSurfaceClassName =
   "rounded-md border border-border bg-black/20"
 const showSimulationResultCardImageToggle = false
+const SIMULATION_RESULT_REVEAL_CLASS_NAME = "simulation-result-reveal"
+const SIMULATION_RESULT_REVEAL_VISIBLE_CLASS_NAME =
+  "simulation-result-reveal-visible"
+const SIMULATION_RESULT_REVEAL_DELAY_PROPERTY =
+  "--simulation-result-reveal-delay"
+const SHOULD_ANIMATE_SIMULATION_RESULT_REVEAL = true
+const SIMULATION_RESULT_REVEAL_STAGGER_MS = 20
+const SIMULATION_RESULT_REVEAL_MAX_DELAY_MS = 200
+
+function useSimulationResultReveal(
+  resultsPanelRef: RefObject<HTMLElement | null>,
+  revealTrigger: unknown
+) {
+  useLayoutEffect(() => {
+    const resultsPanel = resultsPanelRef.current
+
+    if (!resultsPanel) {
+      return
+    }
+
+    const revealElements = getSimulationResultRevealElements(resultsPanel)
+
+    if (revealElements.length === 0) {
+      return
+    }
+
+    if (!SHOULD_ANIMATE_SIMULATION_RESULT_REVEAL) {
+      showSimulationResultRevealElementsWithoutAnimation(revealElements)
+      return
+    }
+
+    let animationFrameId: number | null = null
+    const scheduleVisibleReveal = () => {
+      if (animationFrameId !== null) {
+        return
+      }
+
+      animationFrameId = window.requestAnimationFrame(() => {
+        animationFrameId = null
+        revealVisibleSimulationResultElements(resultsPanel)
+      })
+    }
+
+    const intersectionObserver =
+      typeof IntersectionObserver === "undefined"
+        ? null
+        : new IntersectionObserver(scheduleVisibleReveal, {
+            root: resultsPanel,
+          })
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(scheduleVisibleReveal)
+
+    for (const element of revealElements) {
+      intersectionObserver?.observe(element)
+    }
+
+    resizeObserver?.observe(resultsPanel)
+    resultsPanel.addEventListener("scroll", scheduleVisibleReveal, {
+      passive: true,
+    })
+    scheduleVisibleReveal()
+
+    return () => {
+      if (animationFrameId !== null) {
+        window.cancelAnimationFrame(animationFrameId)
+      }
+
+      intersectionObserver?.disconnect()
+      resizeObserver?.disconnect()
+      resultsPanel.removeEventListener("scroll", scheduleVisibleReveal)
+    }
+  }, [resultsPanelRef, revealTrigger])
+}
+
+function getSimulationResultRevealElements(resultsPanel: HTMLElement) {
+  return Array.from(
+    resultsPanel.querySelectorAll<HTMLElement>(
+      `.${SIMULATION_RESULT_REVEAL_CLASS_NAME}`
+    )
+  )
+}
+
+function showSimulationResultRevealElementsWithoutAnimation(
+  revealElements: HTMLElement[]
+) {
+  for (const element of revealElements) {
+    element.style.opacity = "1"
+    element.style.transform = "none"
+    element.style.willChange = "auto"
+  }
+}
+
+function revealVisibleSimulationResultElements(resultsPanel: HTMLElement) {
+  const visibleElements = getSimulationResultRevealElements(resultsPanel)
+    .filter(
+      (element) =>
+        !element.classList.contains(
+          SIMULATION_RESULT_REVEAL_VISIBLE_CLASS_NAME
+        ) && isSimulationResultRevealElementVisible(element, resultsPanel)
+    )
+    .sort(compareSimulationResultRevealElements)
+
+  visibleElements.forEach((element, index) => {
+    element.style.setProperty(
+      SIMULATION_RESULT_REVEAL_DELAY_PROPERTY,
+      `${getSimulationResultRevealDelayMs(index)}ms`
+    )
+    element.classList.add(SIMULATION_RESULT_REVEAL_VISIBLE_CLASS_NAME)
+  })
+}
+
+function isSimulationResultRevealElementVisible(
+  element: HTMLElement,
+  resultsPanel: HTMLElement
+) {
+  const elementRect = element.getBoundingClientRect()
+  const resultsPanelRect = resultsPanel.getBoundingClientRect()
+
+  return (
+    elementRect.bottom > resultsPanelRect.top &&
+    elementRect.top < resultsPanelRect.bottom
+  )
+}
+
+function compareSimulationResultRevealElements(
+  firstElement: HTMLElement,
+  secondElement: HTMLElement
+) {
+  const firstRect = firstElement.getBoundingClientRect()
+  const secondRect = secondElement.getBoundingClientRect()
+
+  return firstRect.top - secondRect.top || firstRect.left - secondRect.left
+}
+
+function getSimulationResultRevealDelayMs(visibleIndex: number) {
+  return Math.min(
+    Math.max(0, visibleIndex) * SIMULATION_RESULT_REVEAL_STAGGER_MS,
+    SIMULATION_RESULT_REVEAL_MAX_DELAY_MS
+  )
+}
 
 function getSimulationResultEntries(
   mcpFunctionCalls: readonly SimulationMcpFunctionCall[]
@@ -3962,7 +4106,9 @@ function SimulationMcpFunctionCallCards({
   return (
     <div className="grid gap-2">
       {entries.map((entry) => (
-        <Fragment key={entry.id}>{renderEntry(entry)}</Fragment>
+        <div key={entry.id} className="simulation-result-reveal">
+          {renderEntry(entry)}
+        </div>
       ))}
     </div>
   )
@@ -4267,7 +4413,9 @@ function SimulationFinalOutputBlock({
   }
 
   return (
-    <div className={`grid gap-3 p-3 ${simulationResultSurfaceClassName}`}>
+    <div
+      className={`simulation-result-reveal grid gap-3 p-3 ${simulationResultSurfaceClassName}`}
+    >
       <SimulationResultSummaryMarkdown summary={finalOutput.summary} />
     </div>
   )
@@ -5495,11 +5643,16 @@ function SimulationResultLoggedTurnActionEvent({
   }
 
   return (
-    <div className={`grid gap-2 p-2 ${simulationResultSurfaceClassName}`}>
+    <div
+      className={`simulation-result-reveal grid gap-2 p-2 ${simulationResultSurfaceClassName}`}
+    >
       {actions.length > 0 ? (
         <ul className="list-disc space-y-1 pl-4 text-sm leading-6 text-foreground/90">
           {actions.map((action, index) => (
-            <li key={`${action.action}-${index}`}>
+            <li
+              key={`${action.action}-${index}`}
+              className="simulation-result-reveal"
+            >
               <SimulationLoggedActionText
                 cardLookup={cardLookup}
                 text={action.action}
@@ -5764,7 +5917,7 @@ function SimulationResultTurnPhaseActionEvent({
 }) {
   return (
     <div
-      className={`grid gap-2 px-2 py-1.5 ${simulationResultSurfaceClassName}`}
+      className={`simulation-result-reveal grid gap-2 px-2 py-1.5 ${simulationResultSurfaceClassName}`}
     >
       <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-sky-100">
         <span
@@ -5780,7 +5933,10 @@ function SimulationResultTurnPhaseActionEvent({
       {actions.length > 0 ? (
         <ul className="list-disc space-y-1 pl-6 text-sm leading-6 text-foreground/90">
           {actions.map((action, index) => (
-            <li key={`${action.action}-${index}`}>
+            <li
+              key={`${action.action}-${index}`}
+              className="simulation-result-reveal"
+            >
               <SimulationLoggedActionText
                 cardLookup={cardLookup}
                 text={action.action}
