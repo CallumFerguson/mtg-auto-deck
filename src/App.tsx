@@ -26,7 +26,6 @@ import { UsageLimitsProvider } from "@/lib/usage-limits-provider"
 import { AuthPage, type AuthMode } from "@/pages/AuthPage"
 import { DeckListPage } from "@/pages/DeckListPage"
 import { DeckPage } from "@/pages/DeckPage"
-import { PublicSimulationPage } from "@/pages/DeckSimulation"
 import { SettingsPage } from "@/pages/SettingsPage"
 
 const ADMIN_OPTIONS_ENABLED_STORAGE_KEY = "mtg-auto-deck.admin-options-enabled"
@@ -59,7 +58,6 @@ type VerifiedPageProps = {
 
 function App() {
   const session = authClient.useSession()
-  const location = useLocation()
   const navigate = useNavigate()
   const [adminOptionsEnabled, setAdminOptionsEnabled] = useState(
     getStoredAdminOptionsEnabled
@@ -107,11 +105,7 @@ function App() {
       }
     : null
 
-  const isPublicSimulationRoute = location.pathname.startsWith(
-    "/public/simulations/"
-  )
-
-  if (session.isPending && !isPublicSimulationRoute) {
+  if (session.isPending) {
     return (
       <main className="flex min-h-svh items-center justify-center bg-background px-4 text-sm text-muted-foreground">
         Loading account...
@@ -182,10 +176,6 @@ function App() {
                 onStopImpersonating={handleStopImpersonating}
               />
             }
-          />
-          <Route
-            path="/public/simulations/:simulationId"
-            element={<PublicSimulationRoute />}
           />
           <Route
             path="/"
@@ -273,16 +263,6 @@ function App() {
       </UsageLimitsProvider>
     </BillingTierProvider>
   )
-}
-
-function PublicSimulationRoute() {
-  const { simulationId } = useParams()
-
-  if (!simulationId) {
-    return <Navigate to="/" replace />
-  }
-
-  return <PublicSimulationPage simulationId={simulationId} />
 }
 
 function AuthRoute({

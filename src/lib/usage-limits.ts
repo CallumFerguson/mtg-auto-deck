@@ -23,6 +23,10 @@ export function useUsageLimits() {
   return contextValue
 }
 
+export function useOptionalUsageLimits() {
+  return useContext(UsageLimitsContext)
+}
+
 export function useUsageLimitsPolling(isActive: boolean) {
   const { beginUsageLimitsPolling } = useUsageLimits()
 

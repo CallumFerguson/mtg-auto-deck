@@ -1,17 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import {
   Bug,
-  ClipboardCheck,
-  Globe2,
-  Link2,
+  Download,
   LoaderCircle,
   RefreshCw,
   X,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { API_BASE_URL, apiFetch } from "@/lib/api"
-import { readApiError } from "@/lib/api-error"
+import { loadApiHelpers } from "@/lib/api-lazy"
 import type {
   LlmProcessingMode,
   Simulation,
@@ -24,47 +21,11 @@ import {
   getLlmModelPresetLabel,
   type LlmModelPreset,
 } from "@/lib/llm-model-preset-types"
-import { getPublicSimulationPath } from "@/lib/navigation"
 import {
   getLlmRunEstimatedPriceText,
   getSimulationRunFinishedDurationText,
 } from "./simulationRunFormatting"
 import { FlexServiceTierSwitch } from "./SimulationSetupControls"
-
-async function writePlainTextToClipboard(text: string) {
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text)
-      return
-    } catch {
-      // Fall through to the textarea path for browsers that block Clipboard API.
-    }
-  }
-
-  const textarea = document.createElement("textarea")
-  textarea.value = text
-  textarea.setAttribute("readonly", "")
-  textarea.style.left = "0"
-  textarea.style.opacity = "0"
-  textarea.style.position = "fixed"
-  textarea.style.top = "0"
-
-  document.body.append(textarea)
-  textarea.focus()
-  textarea.select()
-
-  try {
-    if (!document.execCommand("copy")) {
-      throw new Error("Clipboard copy failed.")
-    }
-  } finally {
-    textarea.remove()
-  }
-}
-
-function getPublicSimulationUrl(simulationId: string) {
-  return window.location.origin + getPublicSimulationPath(simulationId)
-}
 
 export function SimulationDetailsModal({
   deckId,
@@ -87,15 +48,13 @@ export function SimulationDetailsModal({
   const [debugInfoError, setDebugInfoError] = useState<string | null>(null)
   const [debugInfo, setDebugInfo] = useState<SimulationDebugInfo | null>(null)
   const [isDebugModalOpen, setIsDebugModalOpen] = useState(false)
-  const [isSavingPublicState, setIsSavingPublicState] = useState(false)
-  const [publicStateError, setPublicStateError] = useState<string | null>(null)
-  const [hasCopiedPublicLink, setHasCopiedPublicLink] = useState(false)
+  const [isExportingSimulation, setIsExportingSimulation] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
   const isLoadingDebugInfoRef = useRef(false)
   const shouldSimulateOpeningHand = simulation.startingHandId === null
   const selectedModelPreset =
     modelPresets.find((preset) => preset.id === simulation.llmModelPresetId) ??
     null
-  const publicSimulationUrl = getPublicSimulationUrl(simulation.id)
 
   const handleRefreshDebugInfo = useCallback(async () => {
     if (isLoadingDebugInfoRef.current) {
@@ -107,6 +66,7 @@ export function SimulationDetailsModal({
     setDebugInfoError(null)
 
     try {
+      const { API_BASE_URL, apiFetch, readApiError } = await loadApiHelpers()
       const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/debug`
       )
@@ -136,13 +96,8 @@ export function SimulationDetailsModal({
     setDebugInfoError(null)
     setIsLoadingDebugInfo(false)
     isLoadingDebugInfoRef.current = false
-    setPublicStateError(null)
-    setHasCopiedPublicLink(false)
+    setExportError(null)
   }, [simulation.id])
-
-  useEffect(() => {
-    setHasCopiedPublicLink(false)
-  }, [simulation.isPublic])
 
   useEffect(() => {
     if (!isDebugModalOpen) {
@@ -152,54 +107,43 @@ export function SimulationDetailsModal({
     void handleRefreshDebugInfo()
   }, [handleRefreshDebugInfo, isDebugModalOpen])
 
-  async function handlePublicStateChange(nextIsPublic: boolean) {
-    if (isSavingPublicState || nextIsPublic === simulation.isPublic) {
+  async function handleExportSimulation() {
+    if (isExportingSimulation) {
       return
     }
 
-    setIsSavingPublicState(true)
-    setPublicStateError(null)
-    setHasCopiedPublicLink(false)
+    setIsExportingSimulation(true)
+    setExportError(null)
 
     try {
+      const { API_BASE_URL, apiFetch, readApiError } = await loadApiHelpers()
       const response = await apiFetch(
-        `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/public`,
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            isPublic: nextIsPublic,
-          }),
-        }
+        `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/export`
       )
 
       if (!response.ok) {
-        setPublicStateError(
+        setExportError(
           await readApiError(
             response,
-            "Simulation public access could not be updated."
+            "Simulation JSON could not be exported."
           )
         )
         return
       }
 
-      const data = (await response.json()) as UpdateSimulationResponse
-      onSimulationUpdated(data.simulation)
+      const blob = await response.blob()
+      const downloadUrl = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = downloadUrl
+      link.download = `${simulation.id}.json`
+      document.body.append(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(downloadUrl)
     } catch {
-      setPublicStateError("Simulation public access could not be updated.")
+      setExportError("Simulation JSON could not be exported.")
     } finally {
-      setIsSavingPublicState(false)
-    }
-  }
-
-  async function handleCopyPublicLink() {
-    try {
-      await writePlainTextToClipboard(publicSimulationUrl)
-      setHasCopiedPublicLink(true)
-    } catch {
-      setPublicStateError("Public link could not be copied.")
+      setIsExportingSimulation(false)
     }
   }
 
@@ -229,11 +173,6 @@ export function SimulationDetailsModal({
                 <span className="shrink-0 rounded-md border border-border bg-background/45 px-3 py-1 text-sm text-muted-foreground">
                   {simulation.status}
                 </span>
-                {simulation.isPublic ? (
-                  <span className="shrink-0 rounded-md border border-sky-300/35 bg-sky-400/10 px-3 py-1 text-sm text-sky-100">
-                    public
-                  </span>
-                ) : null}
               </div>
               <p className="text-sm font-medium break-all text-foreground">
                 {simulation.id}
@@ -343,56 +282,26 @@ export function SimulationDetailsModal({
                   <Button
                     className="w-fit"
                     type="button"
-                    variant={simulation.isPublic ? "outline" : "default"}
-                    disabled={isSavingPublicState}
-                    onClick={() =>
-                      void handlePublicStateChange(!simulation.isPublic)
-                    }
+                    disabled={isExportingSimulation}
+                    onClick={() => void handleExportSimulation()}
                   >
-                    {isSavingPublicState ? (
+                    {isExportingSimulation ? (
                       <LoaderCircle
                         className="animate-spin"
                         data-icon="inline-start"
                       />
                     ) : (
-                      <Globe2 data-icon="inline-start" />
+                      <Download data-icon="inline-start" />
                     )}
-                    {isSavingPublicState
-                      ? "Saving..."
-                      : simulation.isPublic
-                        ? "Make private"
-                        : "Make public"}
+                    {isExportingSimulation ? "Exporting..." : "Export JSON"}
                   </Button>
-                  {simulation.isPublic ? (
-                    <Button
-                      className={
-                        hasCopiedPublicLink
-                          ? "w-fit text-emerald-300 hover:text-emerald-200"
-                          : "w-fit"
-                      }
-                      type="button"
-                      variant="outline"
-                      onClick={() => void handleCopyPublicLink()}
-                    >
-                      {hasCopiedPublicLink ? (
-                        <ClipboardCheck data-icon="inline-start" />
-                      ) : (
-                        <Link2 data-icon="inline-start" />
-                      )}
-                      {hasCopiedPublicLink ? "Copied" : "Copy public link"}
-                    </Button>
-                  ) : null}
                 </div>
-                {publicStateError ? (
+                {exportError ? (
                   <p
                     className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
                     role="alert"
                   >
-                    {publicStateError}
-                  </p>
-                ) : simulation.isPublic ? (
-                  <p className="max-w-xl text-xs break-all text-muted-foreground">
-                    {publicSimulationUrl}
+                    {exportError}
                   </p>
                 ) : null}
               </div>
@@ -482,6 +391,7 @@ function SimulationLlmOptionsSetting({
     setError(null)
 
     try {
+      const { API_BASE_URL, apiFetch, readApiError } = await loadApiHelpers()
       const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}`,
         {
@@ -611,6 +521,7 @@ function SimulationModelPresetSelector({
     setIsSaving(true)
 
     try {
+      const { API_BASE_URL, apiFetch, readApiError } = await loadApiHelpers()
       const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}`,
         {
@@ -853,10 +764,6 @@ function SimulationDebugPanel({
           <DebugMetadataItem
             label="Flex service tier"
             value={formatDebugBoolean(debugInfo.useFlexServiceTier)}
-          />
-          <DebugMetadataItem
-            label="Public"
-            value={formatDebugBoolean(debugInfo.isPublic)}
           />
           <DebugMetadataItem
             label="Simulated turns"

@@ -40,14 +40,13 @@ import {
 
 import { Button } from "@/components/ui/button"
 import { UsageLimitRows } from "@/components/UsageLimitRows"
-import { API_BASE_URL, apiFetch } from "@/lib/api"
-import { readApiError } from "@/lib/api-error"
-import { useBillingTier } from "@/lib/billing-tier-state"
+import { loadApiHelpers } from "@/lib/api-lazy"
+import { useOptionalBillingTier } from "@/lib/billing-tier-state"
 import type {
   CreateSimulationResponse,
   CreateStartingHandResponse,
   DeckCard,
-  PublicSimulationResponse,
+  PublicSimulationExportV1,
   SavedSeed,
   SavedSeedsResponse,
   Simulation,
@@ -102,7 +101,7 @@ import {
   getKnownSimulationResultToolLabel,
   getSimulationResultToolReason,
 } from "@/lib/simulation-result-tool-labels"
-import { useUsageLimits } from "@/lib/usage-limits"
+import { useOptionalUsageLimits } from "@/lib/usage-limits"
 import {
   formatMinutesSeconds,
   getLlmRunEstimatedPriceText,
@@ -128,6 +127,10 @@ type SimulationResultEntry = {
   id: string
   type: "mcp_function_call"
   call: SimulationMcpFunctionCall
+}
+
+async function refreshNoUsageLimits() {
+  return []
 }
 
 type SimulationResultsAction =
@@ -565,12 +568,14 @@ function UsageLimitReachedNotice({
   onUpgradeUsage: () => void
   shouldShowUsageUpgradeAction: boolean
 }) {
-  const { refreshBillingTier } = useBillingTier()
-  const { refreshUsageLimits } = useUsageLimits()
+  const billingTierContext = useOptionalBillingTier()
+  const usageLimitsContext = useOptionalUsageLimits()
+  const refreshBillingTier = billingTierContext?.refreshBillingTier
+  const refreshUsageLimits = usageLimitsContext?.refreshUsageLimits
 
   useEffect(() => {
-    void refreshBillingTier()
-    void refreshUsageLimits()
+    void refreshBillingTier?.()
+    void refreshUsageLimits?.()
   }, [refreshBillingTier, refreshUsageLimits])
 
   return (
@@ -582,10 +587,12 @@ function UsageLimitReachedNotice({
           <p className="mt-1 text-xs whitespace-pre-wrap text-amber-100/80">
             {detail}
           </p>
-          <UsageLimitRows
-            className="mt-3 max-w-xl"
-            rowClassName="text-amber-100/80"
-          />
+          {usageLimitsContext ? (
+            <UsageLimitRows
+              className="mt-3 max-w-xl"
+              rowClassName="text-amber-100/80"
+            />
+          ) : null}
         </div>
       </div>
       {shouldShowUsageUpgradeAction ? (
@@ -608,7 +615,7 @@ export function PublicSimulationPage({
   simulationId: string
 }) {
   const [publicSimulation, setPublicSimulation] =
-    useState<PublicSimulationResponse | null>(null)
+    useState<PublicSimulationExportV1 | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -617,23 +624,29 @@ export function PublicSimulationPage({
     setLoadError(null)
 
     try {
-      const response = await apiFetch(
-        `${API_BASE_URL}/public/simulations/${encodeURIComponent(simulationId)}`
+      const response = await fetch(
+        `/simulations/${encodeURIComponent(simulationId)}.json`,
+        {
+          credentials: "omit",
+        }
       )
 
       if (!response.ok) {
         setLoadError(
           response.status === 404
             ? "Public simulation could not be found."
-            : await readApiError(
-                response,
-                "Public simulation could not be loaded."
-              )
+            : "Public simulation could not be loaded."
         )
         return
       }
 
-      const data = (await response.json()) as PublicSimulationResponse
+      const data = await response.json()
+
+      if (!isPublicSimulationExportV1(data)) {
+        setLoadError("Public simulation file is not in the expected format.")
+        return
+      }
+
       setPublicSimulation(data)
     } catch {
       setLoadError("Public simulation could not be loaded.")
@@ -923,6 +936,8 @@ export function DeckSimulation({
       }
 
       try {
+        const { API_BASE_URL, apiFetch, readApiError } =
+          await loadApiHelpers()
         const response = await apiFetch(
           `${API_BASE_URL}/decks/${deckId}/simulations`
         )
@@ -970,6 +985,7 @@ export function DeckSimulation({
     setStartingHandLoadError(null)
 
     try {
+      const { API_BASE_URL, apiFetch, readApiError } = await loadApiHelpers()
       const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/starting-hands`
       )
@@ -1005,6 +1021,8 @@ export function DeckSimulation({
   const loadStartingHandById = useCallback(
     async (startingHandId: string) => {
       try {
+        const { API_BASE_URL, apiFetch, readApiError } =
+          await loadApiHelpers()
         const response = await apiFetch(
           `${API_BASE_URL}/decks/${deckId}/starting-hands/${encodeURIComponent(
             startingHandId
@@ -1034,6 +1052,7 @@ export function DeckSimulation({
     setSavedSeedLoadError(null)
 
     try {
+      const { API_BASE_URL, apiFetch, readApiError } = await loadApiHelpers()
       const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/saved-seeds`
       )
@@ -1066,6 +1085,7 @@ export function DeckSimulation({
     setModelPresetLoadError(null)
 
     try {
+      const { API_BASE_URL, apiFetch, readApiError } = await loadApiHelpers()
       const response = await apiFetch(`${API_BASE_URL}/llm-model-presets`)
 
       if (!response.ok) {
@@ -1395,6 +1415,7 @@ export function DeckSimulation({
     setIsCreatingSimulation(true)
 
     try {
+      const { API_BASE_URL, apiFetch, readApiError } = await loadApiHelpers()
       const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/simulations`,
         {
@@ -1469,6 +1490,7 @@ export function DeckSimulation({
     setDeleteSimulationError(null)
 
     try {
+      const { API_BASE_URL, apiFetch, readApiError } = await loadApiHelpers()
       const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/simulations/${simulationId}`,
         {
@@ -2207,7 +2229,9 @@ function SimulationDetails({
   startingHand: StartingHand | null
   startingHandLoadError: string | null
 }) {
-  const { refreshUsageLimits } = useUsageLimits()
+  const usageLimitsContext = useOptionalUsageLimits()
+  const refreshUsageLimits =
+    usageLimitsContext?.refreshUsageLimits ?? refreshNoUsageLimits
   const [isStartingOpeningHandRun, setIsStartingOpeningHandRun] =
     useState(false)
   const [openingHandRunError, setOpeningHandRunError] = useState<string | null>(
@@ -2366,6 +2390,7 @@ function SimulationDetails({
     setTurnRunError(null)
 
     try {
+      const { API_BASE_URL, apiFetch, readApiError } = await loadApiHelpers()
       const stopResult = await stopSimulation()
 
       if (!stopResult) {
@@ -2416,6 +2441,7 @@ function SimulationDetails({
     setOpeningHandRunError(null)
 
     try {
+      const { API_BASE_URL, apiFetch, readApiError } = await loadApiHelpers()
       const stopResult = await stopSimulation()
 
       if (!stopResult) {
@@ -2459,6 +2485,7 @@ function SimulationDetails({
     setStopSimulationError(null)
 
     try {
+      const { API_BASE_URL, apiFetch, readApiError } = await loadApiHelpers()
       const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/stop`,
         {
@@ -2500,6 +2527,7 @@ function SimulationDetails({
     setStopFutureTurnsError(null)
 
     try {
+      const { API_BASE_URL, apiFetch, readApiError } = await loadApiHelpers()
       const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/stop-auto-advance`,
         {
@@ -2533,16 +2561,12 @@ function SimulationDetails({
       return
     }
 
-    const streamUrl =
-      resultsStreamUrl ??
-      `${API_BASE_URL}/decks/${deckId}/simulations/${simulation.id}/results/stream`
-    const eventSource = new EventSource(streamUrl, {
-      withCredentials: resultsStreamWithCredentials,
-    })
+    let eventSource: EventSource | null = null
     let isStreamClosed = false
+    let isEffectCancelled = false
 
     resultsEventSourceRef.current?.close()
-    resultsEventSourceRef.current = eventSource
+    resultsEventSourceRef.current = null
     setIsLoadingResults(true)
     setResultsError(null)
 
@@ -2566,99 +2590,130 @@ function SimulationDetails({
 
       isStreamClosed = true
       clearStreamErrorTimeout()
-      eventSource.close()
+      eventSource?.close()
 
-      if (resultsEventSourceRef.current === eventSource) {
+      if (eventSource && resultsEventSourceRef.current === eventSource) {
         resultsEventSourceRef.current = null
       }
 
       markStreamLoaded()
     }
 
-    eventSource.onmessage = (messageEvent) => {
-      clearStreamErrorTimeout()
-
+    async function openStream() {
       try {
-        const streamEvent = JSON.parse(
-          messageEvent.data
-        ) as SimulationResultsStreamEvent
+        const streamUrl =
+          resultsStreamUrl ??
+          `${
+            (await loadApiHelpers()).API_BASE_URL
+          }/decks/${deckId}/simulations/${simulation.id}/results/stream`
 
-        if (streamEvent.type === "error") {
-          setResultsError(streamEvent.message)
-          markStreamLoaded()
-          closeStream()
+        if (isEffectCancelled) {
           return
         }
 
-        const previousResultsInfo = resultsInfoRef.current
-        const updatedResultsInfo = applySimulationResultsStreamEvent(
-          previousResultsInfo,
-          streamEvent
-        )
-        resultsInfoRef.current = updatedResultsInfo
-        setResultsInfo(updatedResultsInfo)
-
-        if (
-          shouldRefreshUsageLimitsForFinishedStreamRun(
-            streamEvent,
-            previousResultsInfo,
-            usageLimitRefreshRunIdsRef.current
-          )
-        ) {
-          void refreshUsageLimits()
-        }
-
-        if (
-          streamEvent.type === "snapshot" ||
-          streamEvent.type === "simulation_updated" ||
-          streamEvent.type === "done"
-        ) {
-          onSimulationUpdated(streamEvent.simulation)
-        } else if (updatedResultsInfo) {
-          onSimulationUpdated({
-            ...simulationRef.current,
-            activeLlmRunCount:
-              getActiveLlmRunCountFromResults(updatedResultsInfo),
-            completedLlmRunCount:
-              getSimulationRunCountFromResults(updatedResultsInfo),
-            simulatedTurnCount:
-              getSimulationTurnCountFromResults(updatedResultsInfo),
-          })
-        }
-
-        markStreamLoaded()
-
-        if (streamEvent.type === "done") {
-          closeStream()
-        }
+        eventSource = new EventSource(streamUrl, {
+          withCredentials: resultsStreamWithCredentials,
+        })
+        resultsEventSourceRef.current?.close()
+        resultsEventSourceRef.current = eventSource
       } catch {
-        setResultsError("Simulation results stream sent an invalid event.")
-        markStreamLoaded()
-      }
-    }
-
-    eventSource.onerror = () => {
-      if (eventSource.readyState === EventSource.CLOSED) {
-        setResultsError("Simulation results stream disconnected.")
-        closeStream()
+        if (!isEffectCancelled) {
+          setResultsError("Simulation results stream could not be opened.")
+          markStreamLoaded()
+        }
         return
       }
 
-      if (resultsStreamErrorTimeoutRef.current !== null) {
-        return
+      const openedEventSource = eventSource
+
+      openedEventSource.onmessage = (messageEvent) => {
+        clearStreamErrorTimeout()
+
+        try {
+          const streamEvent = JSON.parse(
+            messageEvent.data
+          ) as SimulationResultsStreamEvent
+
+          if (streamEvent.type === "error") {
+            setResultsError(streamEvent.message)
+            markStreamLoaded()
+            closeStream()
+            return
+          }
+
+          const previousResultsInfo = resultsInfoRef.current
+          const updatedResultsInfo = applySimulationResultsStreamEvent(
+            previousResultsInfo,
+            streamEvent
+          )
+          resultsInfoRef.current = updatedResultsInfo
+          setResultsInfo(updatedResultsInfo)
+
+          if (
+            shouldRefreshUsageLimitsForFinishedStreamRun(
+              streamEvent,
+              previousResultsInfo,
+              usageLimitRefreshRunIdsRef.current
+            )
+          ) {
+            void refreshUsageLimits()
+          }
+
+          if (
+            streamEvent.type === "snapshot" ||
+            streamEvent.type === "simulation_updated" ||
+            streamEvent.type === "done"
+          ) {
+            onSimulationUpdated(streamEvent.simulation)
+          } else if (updatedResultsInfo) {
+            onSimulationUpdated({
+              ...simulationRef.current,
+              activeLlmRunCount:
+                getActiveLlmRunCountFromResults(updatedResultsInfo),
+              completedLlmRunCount:
+                getSimulationRunCountFromResults(updatedResultsInfo),
+              simulatedTurnCount:
+                getSimulationTurnCountFromResults(updatedResultsInfo),
+            })
+          }
+
+          markStreamLoaded()
+
+          if (streamEvent.type === "done") {
+            closeStream()
+          }
+        } catch {
+          setResultsError("Simulation results stream sent an invalid event.")
+          markStreamLoaded()
+        }
       }
 
-      resultsStreamErrorTimeoutRef.current = window.setTimeout(() => {
-        if (isStreamClosed) {
+      openedEventSource.onerror = () => {
+        if (openedEventSource.readyState === EventSource.CLOSED) {
+          setResultsError("Simulation results stream disconnected.")
+          closeStream()
           return
         }
 
-        setResultsError("Simulation results stream is reconnecting.")
-        markStreamLoaded()
-      }, 10000)
+        if (resultsStreamErrorTimeoutRef.current !== null) {
+          return
+        }
+
+        resultsStreamErrorTimeoutRef.current = window.setTimeout(() => {
+          if (isStreamClosed) {
+            return
+          }
+
+          setResultsError("Simulation results stream is reconnecting.")
+          markStreamLoaded()
+        }, 10000)
+      }
     }
+
+    void openStream()
 
     return () => {
+      isEffectCancelled = true
       closeStream()
     }
   }, [
@@ -2829,7 +2884,10 @@ function SimulationResultsPanel({
   stopSimulationError: string | null
   turnRunError: string | null
 }) {
-  const { billingTier, hasLoadedBillingTier } = useBillingTier()
+  const billingTierContext = useOptionalBillingTier()
+  const billingTier = billingTierContext?.billingTier ?? "free"
+  const hasLoadedBillingTier =
+    billingTierContext?.hasLoadedBillingTier ?? false
   const cardLookup = useMemo(
     () => createSimulationCardLookup({ cards, commanders }),
     [cards, commanders]
@@ -4033,6 +4091,30 @@ function SimulationResultThinkingStatus({
       ) : null}
     </div>
   )
+}
+
+function isPublicSimulationExportV1(
+  value: unknown
+): value is PublicSimulationExportV1 {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false
+  }
+
+  const record = value as Record<string, unknown>
+
+  return (
+    record.schemaVersion === 1 &&
+    typeof record.exportedAt === "string" &&
+    isPublicSimulationRecord(record.deck) &&
+    isPublicSimulationRecord(record.simulation) &&
+    isPublicSimulationRecord(record.results) &&
+    (record.startingHand === null ||
+      isPublicSimulationRecord(record.startingHand))
+  )
+}
+
+function isPublicSimulationRecord(value: unknown) {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 function getSimulationRunThinkingStatusLabel({

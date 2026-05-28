@@ -228,7 +228,6 @@ function createSimulation(overrides: Partial<Simulation> = {}): Simulation {
     reasoningSummariesEnabled: false,
     useFlexServiceTier: false,
     autoSimulateNextStep: true,
-    isPublic: false,
     simulatedTurnCount: 0,
     completedLlmRunCount: 0,
     activeLlmRunCount: 1,

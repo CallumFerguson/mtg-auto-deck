@@ -29,6 +29,10 @@ export function useBillingTier() {
   return contextValue
 }
 
+export function useOptionalBillingTier() {
+  return useContext(BillingTierContext)
+}
+
 export function useBillingTierPolling(isActive: boolean) {
   const { beginBillingTierPolling } = useBillingTier()
 

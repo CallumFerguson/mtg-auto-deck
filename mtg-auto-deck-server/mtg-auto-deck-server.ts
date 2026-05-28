@@ -89,7 +89,6 @@ import {
   ensureSimulationsSchema,
   failLlmRun,
   getActiveLlmRunMcpTokenContext,
-  getPublicSimulationSummary,
   getSimulationCreationDecision,
   getSimulationDebugInfo,
   getSimulationResultsInfo,
@@ -113,7 +112,6 @@ import {
   returnCardToSimulationLibrary,
   returnCardsToSimulationLibrary,
   revokeLlmRunMcpToken,
-  setSimulationPublic,
   shuffleSimulationLibrary,
   SIMULATION_AUTO_ADVANCE_DISABLED_MESSAGE,
   SIMULATION_AUTO_ADVANCE_NOT_RUNNING_MESSAGE,
@@ -245,6 +243,7 @@ const APP_PASSWORD_RESET_TOKEN_PATH =
   "/api/app-auth/password-reset-token/:token"
 const OPENING_HAND_MCP_SERVER_LABEL = "opening_hand"
 const TURN_SIMULATION_MCP_SERVER_LABEL = "turn_simulation"
+const PUBLIC_SIMULATION_EXPORT_SCHEMA_VERSION = 1
 const SSE_KEEPALIVE_INTERVAL_MS = 15000
 const LLM_RUN_QUEUE_POLL_INTERVAL_MS = 1000
 const MCP_RUN_TOKEN_TTL_MS = 6 * 60 * 60 * 1000
@@ -352,9 +351,6 @@ const updateSimulationSchema = z
       update.reasoningSummariesEnabled !== undefined ||
       update.useFlexServiceTier !== undefined
   )
-const updateSimulationPublicSchema = z.object({
-  isPublic: z.boolean(),
-})
 const optionalTokenCostSchema = z
   .number()
   .finite()
@@ -440,9 +436,7 @@ type GeneratedMcpRunToken = {
 
 const activeLlmRunRuntimes = new Map<string, ActiveLlmRunRuntime>()
 const simulationResultsBroadcaster = new SimulationResultsBroadcaster()
-const publicSimulationResultsBroadcaster = new SimulationResultsBroadcaster()
 const authenticatedUsersByRequest = new WeakMap<Request, AuthenticatedUser>()
-const publicSimulationIds = new Set<string>()
 let llmRunQueueConfig: LlmRunQueueConfig | null = null
 let llmRunQueueDrainTimer: NodeJS.Timeout | null = null
 let llmRunQueueDrainPromise: Promise<void> | null = null
@@ -713,26 +707,38 @@ async function getSimulationResultsStreamSnapshot(
   }
 }
 
-async function getPublicSimulationResultsStreamSnapshot(simulationId: string) {
-  const simulation = await getPublicSimulationSummary(simulationId)
+async function getPublicSimulationExport(deckId: string, simulationId: string) {
+  const simulation = await getSimulationSummary(deckId, simulationId)
 
   if (!simulation) {
     throw new SimulationValidationError("Simulation not found.")
   }
 
-  publicSimulationIds.add(simulationId)
+  if (simulation.activeLlmRunCount > 0) {
+    throw new SimulationValidationError(
+      "Simulation cannot be exported while LLM runs are active."
+    )
+  }
 
-  const results = mergeActiveRuntimesIntoResults(
-    createStreamResultsInfo(
-      await getSimulationResultsInfo(simulation.deckId, simulationId)
-    ),
-    simulationId
-  )
+  const deck = await getDeck(deckId)
+
+  if (!deck) {
+    throw new SimulationValidationError("Simulation not found.")
+  }
+
+  const startingHand =
+    simulation.startingHandId === null
+      ? null
+      : await getStartingHandForDeck(deckId, simulation.startingHandId)
 
   return {
+    schemaVersion: PUBLIC_SIMULATION_EXPORT_SCHEMA_VERSION,
+    exportedAt: new Date().toISOString(),
+    deck,
     simulation,
-    results,
-  }
+    startingHand,
+    results: await getSimulationResultsInfo(deckId, simulationId),
+  } as const
 }
 
 async function publishSimulationResultsState({
@@ -760,7 +766,6 @@ async function publishSimulationResultsState({
         }
 
         simulationResultsBroadcaster.publish(simulationId, event)
-        publishPublicSimulationResultsEvent(simulationId, event)
       }
     }
 
@@ -769,14 +774,7 @@ async function publishSimulationResultsState({
       simulation: snapshot.simulation,
     }
 
-    if (snapshot.simulation.isPublic) {
-      publicSimulationIds.add(simulationId)
-    } else {
-      closePublicSimulationSubscribers(simulationId)
-    }
-
     simulationResultsBroadcaster.publish(simulationId, simulationUpdatedEvent)
-    publishPublicSimulationResultsEvent(simulationId, simulationUpdatedEvent)
 
     if (
       isTerminalSimulationStatus(snapshot.simulation.status) &&
@@ -789,39 +787,11 @@ async function publishSimulationResultsState({
       }
 
       simulationResultsBroadcaster.publish(simulationId, doneEvent)
-      publishPublicSimulationResultsEvent(simulationId, doneEvent)
       simulationResultsBroadcaster.closeSimulation(simulationId)
-      publicSimulationResultsBroadcaster.closeSimulation(simulationId)
     }
   } catch (error) {
     console.error("Failed to publish simulation results stream state:", error)
   }
-}
-
-function publishPublicSimulationResultsEvent(
-  simulationId: string,
-  event: SimulationResultsStreamEvent
-) {
-  if (!publicSimulationIds.has(simulationId)) {
-    return
-  }
-
-  publicSimulationResultsBroadcaster.publish(simulationId, event)
-}
-
-function closePublicSimulationSubscribers(
-  simulationId: string,
-  message?: string
-) {
-  if (message) {
-    publicSimulationResultsBroadcaster.publish(simulationId, {
-      type: "error",
-      message,
-    })
-  }
-
-  publicSimulationResultsBroadcaster.closeSimulation(simulationId)
-  publicSimulationIds.delete(simulationId)
 }
 
 function logLlmApiCallStarted({
@@ -5497,216 +5467,6 @@ async function main() {
     })
   })
 
-  app.get(
-    "/public/simulations/:simulationId",
-    async (req: Request, res: Response) => {
-      const simulationId = String(req.params.simulationId)
-
-      try {
-        const simulation = await getPublicSimulationSummary(simulationId)
-
-        if (!simulation) {
-          res.status(404).json({
-            error: "Simulation not found.",
-          })
-          return
-        }
-
-        const deck = await getDeck(simulation.deckId)
-
-        if (!deck) {
-          res.status(404).json({
-            error: "Simulation not found.",
-          })
-          return
-        }
-
-        const startingHand =
-          simulation.startingHandId === null
-            ? null
-            : await getStartingHandForDeck(
-                simulation.deckId,
-                simulation.startingHandId
-              )
-        const snapshot = await getPublicSimulationResultsStreamSnapshot(
-          simulation.id
-        )
-
-        res.status(200).json({
-          deck,
-          simulation: snapshot.simulation,
-          startingHand,
-          results: snapshot.results,
-        })
-      } catch (error) {
-        if (error instanceof SimulationValidationError) {
-          res.status(404).json({
-            error: "Simulation not found.",
-          })
-          return
-        }
-
-        console.error("Failed to load public simulation:", error)
-        res.status(500).json({
-          error: "Failed to load public simulation.",
-        })
-      }
-    }
-  )
-
-  app.get(
-    "/public/simulations/:simulationId/results/stream",
-    async (req: Request, res: Response) => {
-      const simulationId = String(req.params.simulationId)
-      let streamCleanup: (() => void) | null = null
-
-      try {
-        const initialSimulation =
-          await getPublicSimulationSummary(simulationId)
-
-        if (!initialSimulation) {
-          res.status(404).json({
-            error: "Simulation not found.",
-          })
-          return
-        }
-
-        publicSimulationIds.add(simulationId)
-        res.status(200)
-        res.setHeader("Content-Type", "text/event-stream")
-        res.setHeader("Cache-Control", "no-cache, no-transform")
-        res.setHeader("Connection", "keep-alive")
-        res.flushHeaders()
-        res.write(formatSseComment("connected"))
-
-        const queuedWrites: string[] = []
-        let hasSentSnapshot = false
-        let shouldEndAfterSnapshot = false
-        let isStreamOpen = true
-        let unsubscribe = () => { }
-        const keepaliveIntervalId = setInterval(() => {
-          if (isStreamOpen) {
-            res.write(formatSseComment("keepalive"))
-          }
-        }, SSE_KEEPALIVE_INTERVAL_MS)
-        const cleanup = () => {
-          if (!isStreamOpen) {
-            return
-          }
-
-          isStreamOpen = false
-          clearInterval(keepaliveIntervalId)
-          unsubscribe()
-        }
-        streamCleanup = cleanup
-        const streamWriter = {
-          write(data: string) {
-            if (!isStreamOpen) {
-              return
-            }
-
-            if (hasSentSnapshot) {
-              res.write(data)
-              return
-            }
-
-            queuedWrites.push(data)
-          },
-          end() {
-            if (!isStreamOpen) {
-              return
-            }
-
-            if (hasSentSnapshot) {
-              cleanup()
-              res.end()
-              return
-            }
-
-            shouldEndAfterSnapshot = true
-          },
-        }
-
-        req.on("close", cleanup)
-
-        if (
-          !isTerminalSimulationStatus(initialSimulation.status) ||
-          initialSimulation.activeLlmRunCount > 0
-        ) {
-          unsubscribe = publicSimulationResultsBroadcaster.subscribe(
-            simulationId,
-            streamWriter
-          )
-        }
-
-        const snapshot =
-          await getPublicSimulationResultsStreamSnapshot(simulationId)
-        const snapshotEvent: SimulationResultsStreamEvent = {
-          type: "snapshot",
-          simulation: snapshot.simulation,
-          results: snapshot.results,
-        }
-
-        res.write(formatSseEvent(snapshotEvent))
-        hasSentSnapshot = true
-
-        for (const queuedWrite of queuedWrites) {
-          res.write(queuedWrite)
-        }
-
-        queuedWrites.length = 0
-
-        if (shouldEndAfterSnapshot) {
-          cleanup()
-          res.end()
-          return
-        }
-
-        if (
-          isTerminalSimulationStatus(snapshot.simulation.status) &&
-          snapshot.simulation.activeLlmRunCount === 0
-        ) {
-          const doneEvent: SimulationResultsStreamEvent = {
-            type: "done",
-            simulation: snapshot.simulation,
-            results: snapshot.results,
-          }
-
-          res.write(formatSseEvent(doneEvent))
-          cleanup()
-          res.end()
-        }
-      } catch (error) {
-        if (res.headersSent) {
-          streamCleanup?.()
-          const errorEvent: SimulationResultsStreamEvent = {
-            type: "error",
-            message:
-              error instanceof SimulationValidationError
-                ? "Simulation is no longer public."
-                : "Simulation results stream could not be opened.",
-          }
-
-          res.write(formatSseEvent(errorEvent))
-          res.end()
-          return
-        }
-
-        if (error instanceof SimulationValidationError) {
-          res.status(404).json({
-            error: "Simulation not found.",
-          })
-          return
-        }
-
-        console.error("Failed to open public simulation results stream:", error)
-        res.status(500).json({
-          error: "Failed to open public simulation results stream.",
-        })
-      }
-    }
-  )
-
   app.use(async (req: Request, res: Response, next) => {
     if (
       req.path === "/health" ||
@@ -5956,7 +5716,6 @@ async function main() {
 
       for (const simulationId of deletion.deletedSimulationIds) {
         simulationResultsBroadcaster.closeSimulation(simulationId)
-        closePublicSimulationSubscribers(simulationId)
       }
 
       nudgeLlmRunQueue()
@@ -6643,6 +6402,49 @@ async function main() {
   )
 
   app.get(
+    "/decks/:deckId/simulations/:simulationId/export",
+    async (req: Request, res: Response) => {
+      if (!requireAdminUser(req, res)) {
+        return
+      }
+
+      const deckId = String(req.params.deckId)
+      const simulationId = String(req.params.simulationId)
+
+      try {
+        const exportData = await getPublicSimulationExport(deckId, simulationId)
+
+        res.setHeader("Content-Type", "application/json")
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${simulationId}.json"`
+        )
+        res.status(200).json(exportData)
+      } catch (error) {
+        if (error instanceof SimulationValidationError) {
+          const status =
+            error.message === "Simulation not found."
+              ? 404
+              : error.message ===
+                  "Simulation cannot be exported while LLM runs are active."
+                ? 409
+                : 400
+
+          res.status(status).json({
+            error: error.message,
+          })
+          return
+        }
+
+        console.error("Failed to export simulation JSON:", error)
+        res.status(500).json({
+          error: "Failed to export simulation JSON.",
+        })
+      }
+    }
+  )
+
+  app.get(
     "/decks/:deckId/simulations/:simulationId/results",
     async (req: Request, res: Response) => {
       const deckId = String(req.params.deckId)
@@ -6827,66 +6629,6 @@ async function main() {
   )
 
   app.patch(
-    "/decks/:deckId/simulations/:simulationId/public",
-    async (req: Request, res: Response) => {
-      if (!requireAdminUser(req, res)) {
-        return
-      }
-
-      const deckId = String(req.params.deckId)
-      const simulationId = String(req.params.simulationId)
-      const parsedUpdate = updateSimulationPublicSchema.safeParse(req.body)
-
-      if (!parsedUpdate.success) {
-        res.status(400).json({
-          error: "Simulation public update payload is not in the expected format.",
-        })
-        return
-      }
-
-      try {
-        const simulation = await setSimulationPublic(
-          deckId,
-          simulationId,
-          parsedUpdate.data.isPublic
-        )
-
-        if (simulation.isPublic) {
-          publicSimulationIds.add(simulationId)
-        } else {
-          closePublicSimulationSubscribers(
-            simulationId,
-            "Simulation is no longer public."
-          )
-        }
-
-        await publishSimulationResultsState({
-          deckId,
-          simulationId,
-        })
-
-        res.status(200).json({
-          simulation,
-        })
-      } catch (error) {
-        if (error instanceof SimulationValidationError) {
-          const status = error.message === "Simulation not found." ? 404 : 400
-
-          res.status(status).json({
-            error: error.message,
-          })
-          return
-        }
-
-        console.error("Failed to update simulation public state:", error)
-        res.status(500).json({
-          error: "Failed to update simulation public state.",
-        })
-      }
-    }
-  )
-
-  app.patch(
     "/decks/:deckId/simulations/:simulationId",
     async (req: Request, res: Response) => {
       const deckId = String(req.params.deckId)
@@ -6952,7 +6694,6 @@ async function main() {
         }
 
         simulationResultsBroadcaster.closeSimulation(simulationId)
-        closePublicSimulationSubscribers(simulationId)
         res.status(204).send()
       } catch (error) {
         if (error instanceof SimulationStopTimeoutError) {

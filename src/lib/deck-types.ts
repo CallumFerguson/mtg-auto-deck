@@ -53,7 +53,6 @@ export type Simulation = {
   reasoningSummariesEnabled: boolean
   useFlexServiceTier: boolean
   autoSimulateNextStep: boolean
-  isPublic: boolean
   simulatedTurnCount: number
   completedLlmRunCount: number
   activeLlmRunCount: number
@@ -164,7 +163,6 @@ export type SimulationDebugInfo = {
   reasoningSummariesEnabled: boolean
   useFlexServiceTier: boolean
   autoSimulateNextStep: boolean
-  isPublic: boolean
   simulatedTurnCount: number
   completedLlmRunCount: number
   activeLlmRunCount: number
@@ -189,7 +187,9 @@ export type SimulationResultsInfo = {
   turnLlmRuns: SimulationDebugLlmRun[]
 }
 
-export type PublicSimulationResponse = {
+export type PublicSimulationExportV1 = {
+  schemaVersion: 1
+  exportedAt: string
   deck: DeckDetails
   simulation: Simulation
   startingHand: StartingHand | null

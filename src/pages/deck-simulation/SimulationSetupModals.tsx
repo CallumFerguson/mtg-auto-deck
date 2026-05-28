@@ -2,8 +2,7 @@ import { useMemo, useState, type FormEvent, type MouseEvent } from "react"
 import { Check, Plus, RefreshCw, Save, Trash2, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { API_BASE_URL, apiFetch } from "@/lib/api"
-import { readApiError } from "@/lib/api-error"
+import { loadApiHelpers } from "@/lib/api-lazy"
 import type {
   CreateSavedSeedResponse,
   CreateStartingHandResponse,
@@ -267,6 +266,7 @@ export function ChooseSavedSeedModal({
     setDeleteError(null)
 
     try {
+      const { API_BASE_URL, apiFetch, readApiError } = await loadApiHelpers()
       const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/saved-seeds/${encodeURIComponent(
           seed.id
@@ -509,6 +509,7 @@ export function ChooseStartingHandModal({
     setDeleteError(null)
 
     try {
+      const { API_BASE_URL, apiFetch, readApiError } = await loadApiHelpers()
       const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/starting-hands/${encodeURIComponent(
           hand.id
@@ -729,6 +730,7 @@ export function CreateSavedSeedModal({
     setIsSaving(true)
 
     try {
+      const { API_BASE_URL, apiFetch, readApiError } = await loadApiHelpers()
       const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/saved-seeds`,
         {
@@ -939,6 +941,7 @@ export function CreateStartingHandModal({
     setIsSaving(true)
 
     try {
+      const { API_BASE_URL, apiFetch, readApiError } = await loadApiHelpers()
       const response = await apiFetch(
         `${API_BASE_URL}/decks/${deckId}/starting-hands`,
         {
