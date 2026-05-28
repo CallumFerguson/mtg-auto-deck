@@ -3149,6 +3149,7 @@ function SimulationResultsPanel({
         canStopFutureTurns={false}
         canStopSimulation={false}
         finishedDurationText={finishedDurationText}
+        isBatchRun={run.processingMode === "openai_batch"}
         isPending={false}
         isFinishedSuccessfully={
           run.status === "completed" && runStatusMessage === null
@@ -3171,6 +3172,7 @@ function SimulationResultsPanel({
       run.model,
       getLlmRunEstimatedPriceText(run),
       finishedDurationText ? `took ${finishedDurationText}` : null,
+      run.processingMode === "openai_batch" ? "batch" : null,
       run.outdated ? "outdated" : null,
     ].filter(Boolean)
     const shouldShowRunMetadata = !run.isActive && runMetadata.length > 0
@@ -3230,6 +3232,7 @@ function SimulationResultsPanel({
               run.status !== "batch_submitted"
             }
             finishedDurationText={null}
+            isBatchRun={run.processingMode === "openai_batch"}
             isPending={
               run.status === "pending" || run.status === "batch_pending"
             }
@@ -3874,6 +3877,7 @@ function SimulationResultThinkingStatus({
   canStopFutureTurns,
   canStopSimulation,
   finishedDurationText,
+  isBatchRun = false,
   isPending,
   isFinished,
   isFinishedSuccessfully,
@@ -3892,6 +3896,7 @@ function SimulationResultThinkingStatus({
   canStopFutureTurns: boolean
   canStopSimulation: boolean
   finishedDurationText: string | null
+  isBatchRun?: boolean
   isPending: boolean
   isFinished: boolean
   isFinishedSuccessfully: boolean
@@ -3929,6 +3934,7 @@ function SimulationResultThinkingStatus({
   const statusLabel = getSimulationRunThinkingStatusLabel({
     activeLabel,
     finishedDurationText,
+    isBatchRun,
     isFinished,
     isPending,
   })
@@ -4032,16 +4038,21 @@ function SimulationResultThinkingStatus({
 function getSimulationRunThinkingStatusLabel({
   activeLabel,
   finishedDurationText,
+  isBatchRun,
   isFinished,
   isPending,
 }: {
   activeLabel: string | null
   finishedDurationText: string | null
+  isBatchRun: boolean
   isFinished: boolean
   isPending: boolean
 }) {
   if (isFinished) {
-    return getFinishedSimulationRunStatusLabel(finishedDurationText)
+    return getFinishedSimulationRunStatusLabel({
+      finishedDurationText,
+      isBatchRun,
+    })
   }
 
   if (activeLabel) {
@@ -4051,9 +4062,19 @@ function getSimulationRunThinkingStatusLabel({
   return isPending ? "Pending" : "Thinking"
 }
 
-function getFinishedSimulationRunStatusLabel(
+function getFinishedSimulationRunStatusLabel({
+  finishedDurationText,
+  isBatchRun,
+}: {
   finishedDurationText: string | null
-) {
+  isBatchRun: boolean
+}) {
+  if (isBatchRun) {
+    return finishedDurationText
+      ? `Batch run complete after ${finishedDurationText}`
+      : "Batch run complete"
+  }
+
   return finishedDurationText ? `Thought for ${finishedDurationText}` : "Thought"
 }
 

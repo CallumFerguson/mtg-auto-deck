@@ -230,6 +230,7 @@ export type RecordLlmRunMcpFunctionCallInput = {
 export type SimulationDebugLlmRun = {
   llmRunId: string
   llmModelPresetId: string | null
+  processingMode: LlmProcessingMode
   phase: LlmRunPhase
   provider: string
   model: string
@@ -260,6 +261,7 @@ export type SimulationDebugLlmRun = {
 type SimulationDebugLlmRunMetadata = {
   llmRunId: string
   llmModelPresetId: string | null
+  processingMode: LlmProcessingMode
   phase: LlmRunPhase
   provider: string
   model: string
@@ -4904,6 +4906,7 @@ export async function getTurnSimulationPromptData(
 type SimulationDebugLlmRunRow = {
   llm_run_id: string
   llm_model_preset_id: string | null
+  processing_mode: LlmProcessingMode
   phase: LlmRunPhase
   provider: string
   model: string
@@ -4954,6 +4957,7 @@ type SimulationDebugSimulationRow = {
 type SimulationDebugLlmRunMetadataRow = {
   llm_run_id: string
   llm_model_preset_id: string | null
+  processing_mode: LlmProcessingMode
   phase: LlmRunPhase
   provider: string
   model: string
@@ -5011,6 +5015,7 @@ async function getSimulationDebugLlmRunMetadata({
       SELECT
         llm_run.id AS llm_run_id,
         llm_run.llm_model_preset_id,
+        llm_run.processing_mode,
         llm_run.phase,
         COALESCE(preset.provider, llm_run.provider) AS provider,
         COALESCE(preset.model, llm_run.model) AS model,
@@ -5059,6 +5064,7 @@ function mapSimulationDebugLlmRunMetadataRow(
   const run: SimulationDebugLlmRunMetadata = {
     llmRunId: row.llm_run_id,
     llmModelPresetId: row.llm_model_preset_id,
+    processingMode: row.processing_mode,
     phase: row.phase,
     provider: row.provider,
     model: row.model,
@@ -5117,6 +5123,7 @@ async function getSimulationDebugLlmRuns({
       SELECT
         llm_run.id AS llm_run_id,
         llm_run.llm_model_preset_id,
+        llm_run.processing_mode,
         llm_run.phase,
         COALESCE(preset.provider, llm_run.provider) AS provider,
         COALESCE(preset.model, llm_run.model) AS model,
@@ -5153,6 +5160,7 @@ async function getSimulationDebugLlmRuns({
       run = {
         llmRunId: row.llm_run_id,
         llmModelPresetId: row.llm_model_preset_id,
+        processingMode: row.processing_mode,
         phase: row.phase,
         provider: row.provider,
         model: row.model,

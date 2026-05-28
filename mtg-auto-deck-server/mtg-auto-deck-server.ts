@@ -127,6 +127,7 @@ import type {
   LlmRunMcpTokenContext,
   LlmRunMcpTokenPhase,
   LlmRunPhase,
+  LlmProcessingMode,
   LlmRunStatus,
   ClaimedQueuedLlmRun,
   LlmRunQueueClaimResult,
@@ -408,6 +409,7 @@ type ActiveLlmRunRuntime = {
   deckId: string
   llmRunId: string
   llmModelPresetId: string
+  processingMode: LlmProcessingMode
   model: string
   fullPrompt: string
   phase: LlmRunPhase
@@ -476,6 +478,7 @@ function createStreamRunFromRuntime(
   return {
     llmRunId: runtime.llmRunId,
     llmModelPresetId: runtime.llmModelPresetId,
+    processingMode: runtime.processingMode,
     phase: runtime.phase,
     provider: runtime.provider,
     model: runtime.model,
@@ -4869,6 +4872,7 @@ async function runOpeningHandLlmRun({
     deckId,
     llmRunId,
     llmModelPresetId: config.modelPresetId,
+    processingMode: "realtime",
     model: config.model,
     fullPrompt,
     phase: "opening_hand",
@@ -5099,6 +5103,7 @@ async function runTurnLlmRun({
     deckId,
     llmRunId,
     llmModelPresetId: config.modelPresetId,
+    processingMode: "realtime",
     model: config.model,
     fullPrompt,
     phase: "turn",

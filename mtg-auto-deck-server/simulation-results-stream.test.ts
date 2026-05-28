@@ -24,6 +24,7 @@ test("formats run library snapshots in stream events", () => {
     run: {
       llmRunId: "turn-run",
       llmModelPresetId: "preset-test",
+      processingMode: "realtime",
       phase: "turn",
       provider: "openai",
       model: "gpt-test",
