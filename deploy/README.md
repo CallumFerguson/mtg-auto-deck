@@ -342,22 +342,46 @@ Before deploying a custom domain, make sure the landing page's app links point
 at the deployed React app URL. The current links are based on `appBaseUrl` in
 `landing/src/pages/index.astro`.
 
-From a local checkout:
+From a local checkout, install dependencies:
 
 ```sh
-cp landing/.env.example landing/.env
-cd landing
-npm ci
+cd landing && npm ci
 ```
 
-Then update `landing/.env` before deploying so
+### Running the Landing Page Locally
+
+Before running the local Astro dev server, copy and update the landing page
+development environment file:
+
+```sh
+cp landing/.env.example landing/.env.development
+```
+
+Then update `landing/.env.development` so `PUBLIC_DEMO_SIMULATION_URL` points
+at the public simulation URL you want embedded during local development.
+
+Run the local landing page:
+
+```sh
+cd landing && npm run dev
+```
+
+### Deploying the Landing Page
+
+Before deploying, copy and update the landing page production environment file:
+
+```sh
+cp landing/.env.example landing/.env.production
+```
+
+Then update `landing/.env.production` before deploying so
 `PUBLIC_DEMO_SIMULATION_URL` points at the public simulation URL for the
 deployed React app.
 
 Deploy the landing page:
 
 ```sh
-npm run deploy
+cd landing && npm run deploy
 ```
 
 After the Worker deploys, add the production landing domain, such as
