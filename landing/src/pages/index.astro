@@ -76,6 +76,7 @@ const plans = [
 
           <div class="demo-frame-shell">
             <iframe
+              id="demo-frame"
               class="demo-frame"
               src={demoSimulationUrl}
               title="MTG Auto Deck public simulation demo"
@@ -121,6 +122,64 @@ const plans = [
     </main>
   </body>
 </html>
+
+<script>
+  const demoStartedMessageType = "mtg-auto-deck:demo-started"
+  const demoScrollPaddingPx = 24
+  const demoFrame = document.querySelector<HTMLIFrameElement>("#demo-frame")
+  const demoFrameShell = demoFrame?.closest<HTMLElement>(".demo-frame-shell")
+  const demoOrigin = demoFrame?.src
+    ? new URL(demoFrame.src, window.location.href).origin
+    : null
+
+  window.addEventListener("message", (event) => {
+    if (
+      event.data?.type !== demoStartedMessageType ||
+      event.source !== demoFrame?.contentWindow ||
+      event.origin !== demoOrigin
+    ) {
+      return
+    }
+
+    scrollDemoFrameIntoView()
+  })
+
+  function scrollDemoFrameIntoView() {
+    if (!demoFrameShell) {
+      return
+    }
+
+    const frameRect = demoFrameShell.getBoundingClientRect()
+    const viewportTop = window.visualViewport?.offsetTop ?? 0
+    const viewportHeight = window.visualViewport?.height ?? window.innerHeight
+    const paddedViewportTop = viewportTop + demoScrollPaddingPx
+    const paddedViewportBottom =
+      viewportTop + viewportHeight - demoScrollPaddingPx
+    const paddedViewportHeight = Math.max(
+      0,
+      paddedViewportBottom - paddedViewportTop
+    )
+    const canFitFrame = frameRect.height <= paddedViewportHeight
+    let scrollDelta = 0
+
+    if (!canFitFrame) {
+      scrollDelta = frameRect.top - paddedViewportTop
+    } else if (frameRect.top < paddedViewportTop) {
+      scrollDelta = frameRect.top - paddedViewportTop
+    } else if (frameRect.bottom > paddedViewportBottom) {
+      scrollDelta = frameRect.bottom - paddedViewportBottom
+    }
+
+    if (Math.abs(scrollDelta) < 1) {
+      return
+    }
+
+    window.scrollBy({
+      behavior: "smooth",
+      top: scrollDelta,
+    })
+  }
+</script>
 
 <style>
   :root {

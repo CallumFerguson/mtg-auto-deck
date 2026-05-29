@@ -183,6 +183,7 @@ const CREATE_SIMULATION_LAST_SAVED_SEED_STORAGE_KEY_PREFIX =
 const CREATE_SIMULATION_LAST_STARTING_HAND_STORAGE_KEY_PREFIX =
   "mtg-auto-deck:create-simulation-last-starting-hand:"
 const MANA_SYMBOL_TEXT_PATTERN = /(\{[^{}\s]+\})/g
+const DEMO_STARTED_PARENT_MESSAGE_TYPE = "mtg-auto-deck:demo-started"
 const MANA_SYMBOL_CLASS_NAMES = new Set([
   "0",
   "1",
@@ -3722,6 +3723,8 @@ function SimulationResultsPanel({
   }
 
   function handleStartDemo() {
+    notifyParentDemoStarted()
+
     const startRect =
       getElementRectWithinRoot({
         element: demoStartButtonRef.current,
@@ -4035,6 +4038,19 @@ function SimulationResultsPanel({
       ) : null}
       {renderDemoCoachMark()}
     </div>
+  )
+}
+
+function notifyParentDemoStarted() {
+  if (window.parent === window) {
+    return
+  }
+
+  window.parent.postMessage(
+    {
+      type: DEMO_STARTED_PARENT_MESSAGE_TYPE,
+    },
+    "*"
   )
 }
 
