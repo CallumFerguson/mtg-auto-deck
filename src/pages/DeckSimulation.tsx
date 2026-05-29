@@ -2822,11 +2822,13 @@ function SimulationResultsShell({
   children,
   gameState,
   header = null,
+  skipGameStateAnimationKey = 0,
 }: {
   cardLookup?: SimulationCardLookup
   children: ReactNode
   gameState: SimulationGameStateDisplay | null
   header?: ReactNode
+  skipGameStateAnimationKey?: number
 }) {
   return (
     <div className="flex h-full min-h-0 min-w-0 overflow-hidden">
@@ -2842,6 +2844,7 @@ function SimulationResultsShell({
           <SimulationGameStatePane
             cardLookup={cardLookup}
             gameState={gameState}
+            skipAnimationKey={skipGameStateAnimationKey}
           />
         </div>
       </div>
@@ -3120,9 +3123,15 @@ function SimulationResultsPanel({
   const demoRootRef = useRef<HTMLDivElement | null>(null)
   const demoStartButtonRef = useRef<HTMLButtonElement | null>(null)
   const [demoHasStarted, setDemoHasStarted] = useState(false)
+  const [demoIsReleasingIntroBlur, setDemoIsReleasingIntroBlur] =
+    useState(false)
   const [demoHasRevealedOpeningHand, setDemoHasRevealedOpeningHand] =
     useState(false)
   const [demoRevealedTurnCount, setDemoRevealedTurnCount] = useState(0)
+  const [
+    demoSkipGameStateAnimationKey,
+    setDemoSkipGameStateAnimationKey,
+  ] = useState(0)
   const [demoCoachMarkVisual, setDemoCoachMarkVisual] =
     useState<DemoCoachMarkVisualState | null>(null)
   const [
@@ -3134,8 +3143,10 @@ function SimulationResultsPanel({
   useEffect(() => {
     demoAnimatedStepIdsRef.current.clear()
     setDemoHasStarted(false)
+    setDemoIsReleasingIntroBlur(false)
     setDemoHasRevealedOpeningHand(false)
     setDemoRevealedTurnCount(0)
+    setDemoSkipGameStateAnimationKey(0)
     setDemoCoachMarkVisual(null)
     setDemoRevealAnimationStepId(null)
   }, [demoMode, simulation.id])
@@ -3155,6 +3166,20 @@ function SimulationResultsPanel({
       window.clearTimeout(clearAnimationStepId)
     }
   }, [demoRevealAnimationStepId])
+
+  useEffect(() => {
+    if (!demoIsReleasingIntroBlur) {
+      return
+    }
+
+    const animationFrameId = window.requestAnimationFrame(() => {
+      setDemoIsReleasingIntroBlur(false)
+    })
+
+    return () => {
+      window.cancelAnimationFrame(animationFrameId)
+    }
+  }, [demoIsReleasingIntroBlur])
 
   const demoNextTurnStep =
     demoMode && demoRevealedTurnCount < demoTurnSteps.length
@@ -3250,9 +3275,6 @@ function SimulationResultsPanel({
         step.kind === "demo_reveal"
     ) ?? null
   const demoFirstTurnStep = demoTurnSteps[0] ?? null
-  const shouldShowDemoOpeningHandCoachMark =
-    demoRevealTimelineStep !== null &&
-    demoRevealTimelineStep.targetStepId === demoOpeningHandStep?.id
   const shouldShowDemoFirstTurnCoachMark =
     demoRevealTimelineStep !== null &&
     demoFirstTurnStep !== null &&
@@ -3260,15 +3282,11 @@ function SimulationResultsPanel({
     demoRevealedTurnCount === 0 &&
     demoRevealTimelineStep.targetStepId === demoFirstTurnStep.id
   const demoCoachMarkTargetStep =
-    demoMode &&
-    demoHasStarted &&
-    (shouldShowDemoOpeningHandCoachMark || shouldShowDemoFirstTurnCoachMark)
+    demoMode && demoHasStarted && shouldShowDemoFirstTurnCoachMark
       ? demoRevealTimelineStep
       : null
   const demoCoachMarkText = demoCoachMarkTargetStep
-    ? shouldShowDemoOpeningHandCoachMark
-      ? "Start the simulation"
-      : "Simulate next turn"
+    ? "Simulate next turn"
     : "Start demo"
   const [
     selectedTimelineStepIdPreference,
@@ -3709,21 +3727,28 @@ function SimulationResultsPanel({
         element: demoStartButtonRef.current,
         root: demoRootRef.current,
       }) ?? getFallbackDemoCoachMarkRect(demoRootRef.current)
+    const openingHandStepId = demoOpeningHandStep?.id ?? null
 
     demoAnimatedStepIdsRef.current.clear()
+    if (openingHandStepId) {
+      demoAnimatedStepIdsRef.current.add(openingHandStepId)
+    }
+
     setDemoCoachMarkVisual(
       startRect
         ? {
             phase: "button",
             rect: startRect,
-          }
+        }
         : null
     )
     setDemoHasStarted(true)
-    setDemoHasRevealedOpeningHand(false)
+    setDemoIsReleasingIntroBlur(true)
+    setDemoHasRevealedOpeningHand(true)
     setDemoRevealedTurnCount(0)
-    setDemoRevealAnimationStepId(null)
-    setSelectedTimelineStepIdPreference(null)
+    setDemoSkipGameStateAnimationKey((currentKey) => currentKey + 1)
+    setDemoRevealAnimationStepId(openingHandStepId)
+    setSelectedTimelineStepIdPreference(openingHandStepId)
     onKeepResultsScrolledToBottom()
   }
 
@@ -3864,6 +3889,7 @@ function SimulationResultsPanel({
       cardLookup={cardLookup}
       gameState={selectedGameState}
       header={renderTimelineHeader()}
+      skipGameStateAnimationKey={demoSkipGameStateAnimationKey}
     >
       <main
         ref={resultsPanelRef}
@@ -3939,7 +3965,7 @@ function SimulationResultsPanel({
 
     return (
       <div
-        className={`pointer-events-none absolute z-40 flex items-center justify-center overflow-visible rounded-lg border text-center font-extrabold whitespace-nowrap transition-[top,left,width,height,background-color,border-color,color,box-shadow] duration-500 ease-out ${
+        className={`pointer-events-none absolute z-40 flex items-center justify-center overflow-visible rounded-lg border text-center font-extrabold whitespace-nowrap transition-[top,left,width,height,background-color,border-color,color,box-shadow] duration-750 ease-out ${
           isCoachMark
             ? "border-sky-300/35 bg-slate-950/95 text-sky-50 shadow-2xl shadow-sky-950/40"
             : "border-transparent bg-sky-300 text-slate-950 shadow-[0_14px_34px_rgba(56,189,248,0.22)]"
@@ -3985,9 +4011,9 @@ function SimulationResultsPanel({
       <div
         aria-hidden={isDemoIntroOverlayVisible ? "true" : undefined}
         className={
-          isDemoIntroOverlayVisible
-            ? "pointer-events-none h-full min-h-0 blur-sm transition-[filter]"
-            : "h-full min-h-0"
+          isDemoIntroOverlayVisible || demoIsReleasingIntroBlur
+            ? "pointer-events-none h-full min-h-0 blur-sm transition-[filter] duration-750 ease-out"
+            : "h-full min-h-0 blur-0 transition-[filter] duration-750 ease-out"
         }
       >
         {resultsShell}
@@ -5035,9 +5061,11 @@ function SimulationTurnActionsSurface({
 function SimulationGameStatePane({
   cardLookup,
   gameState,
+  skipAnimationKey,
 }: {
   cardLookup: SimulationCardLookup
   gameState: SimulationGameStateDisplay | null
+  skipAnimationKey: number
 }) {
   const hasRenderableGameState =
     gameState !== null &&
@@ -5055,6 +5083,7 @@ function SimulationGameStatePane({
             cardLookup={cardLookup}
             gameState={gameState.gameState}
             libraryCardCount={gameState.libraryCardCount}
+            skipAnimationKey={skipAnimationKey}
           />
         ) : (
           <div className="grid min-h-40 place-items-center rounded-md border border-border bg-black/20 px-4 py-8 text-center text-sm text-muted-foreground">
@@ -5070,14 +5099,17 @@ function SimulationGameStateZonesBlock({
   cardLookup,
   gameState,
   libraryCardCount,
+  skipAnimationKey,
 }: {
   cardLookup: SimulationCardLookup
   gameState: unknown
   libraryCardCount: number | null
+  skipAnimationKey: number
 }) {
   const zones = getSimulationGameStateZones(gameState)
   const syncSignature = getSimulationGameStateZonesCardsSignature(zones)
   const lastSettledSyncSignatureRef = useRef(syncSignature)
+  const lastHandledSkipAnimationKeyRef = useRef(skipAnimationKey)
   const latestAnimationTargetRef = useRef({ zones })
   const gameStateElementRef = useRef<HTMLElement | null>(null)
   const cardLayoutElementsRef = useRef(new Map<string, HTMLDivElement>())
@@ -5121,6 +5153,24 @@ function SimulationGameStateZonesBlock({
   useEffect(() => {
     latestAnimationTargetRef.current = { zones }
   }, [zones])
+
+  useLayoutEffect(() => {
+    if (skipAnimationKey === lastHandledSkipAnimationKeyRef.current) {
+      return
+    }
+
+    lastHandledSkipAnimationKeyRef.current = skipAnimationKey
+    const nextItems = getSimulationGameStateZoneCardPresenceItems({
+      isExiting: false,
+      zones,
+    })
+
+    lastSettledSyncSignatureRef.current = syncSignature
+    visibleCardsRef.current = nextItems
+    shouldSkipNextPositionAnimationRef.current = true
+    previousCardLayoutRectsRef.current = new Map()
+    setVisibleCards(nextItems)
+  }, [skipAnimationKey, syncSignature, zones])
 
   useEffect(() => {
     const gameStateElement = gameStateElementRef.current
