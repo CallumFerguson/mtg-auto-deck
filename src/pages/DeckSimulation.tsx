@@ -152,8 +152,18 @@ type SimulationResultsNextTurnTimelineStep = {
   turnNumber: number
 }
 
+type SimulationResultsDemoRevealTimelineStep = {
+  id: string
+  kind: "demo_reveal"
+  label: string
+  detailLabel: string
+  status: "next_turn"
+  targetStepId: string
+}
+
 type SimulationResultsDisplayTimelineStep =
   | SimulationResultsTimelineStep
+  | SimulationResultsDemoRevealTimelineStep
   | SimulationResultsNextTurnTimelineStep
 
 const MIN_TURNS_TO_SIMULATE = 0
@@ -3103,15 +3113,21 @@ function SimulationResultsPanel({
     () => allTimelineSteps.filter(isSimulationTimelineTurnStep),
     [allTimelineSteps]
   )
+  const demoOpeningHandStep =
+    allTimelineSteps.find(isSimulationTimelineOpeningHandStep) ?? null
+  const hasDemoOpeningHandStep = demoOpeningHandStep !== null
+  const [demoHasRevealedOpeningHand, setDemoHasRevealedOpeningHand] =
+    useState(false)
   const [demoRevealedTurnCount, setDemoRevealedTurnCount] = useState(0)
   const [
     demoRevealAnimationStepId,
     setDemoRevealAnimationStepId,
   ] = useState<string | null>(null)
-  const demoAnimatedTurnStepIdsRef = useRef<Set<string>>(new Set())
+  const demoAnimatedStepIdsRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
-    demoAnimatedTurnStepIdsRef.current.clear()
+    demoAnimatedStepIdsRef.current.clear()
+    setDemoHasRevealedOpeningHand(false)
     setDemoRevealedTurnCount(0)
     setDemoRevealAnimationStepId(null)
   }, [demoMode, simulation.id])
@@ -3144,6 +3160,10 @@ function SimulationResultsPanel({
     let remainingRevealedTurns = demoRevealedTurnCount
 
     return allTimelineSteps.filter((step) => {
+      if (step.kind !== "turn" && hasDemoOpeningHandStep) {
+        return demoHasRevealedOpeningHand
+      }
+
       if (step.kind !== "turn") {
         return true
       }
@@ -3155,17 +3175,41 @@ function SimulationResultsPanel({
       remainingRevealedTurns -= 1
       return true
     })
-  }, [allTimelineSteps, demoMode, demoRevealedTurnCount])
+  }, [
+    allTimelineSteps,
+    demoHasRevealedOpeningHand,
+    demoMode,
+    demoRevealedTurnCount,
+    hasDemoOpeningHandStep,
+  ])
   const displayedTimelineSteps = useMemo<
     SimulationResultsDisplayTimelineStep[]
   >(() => {
     const steps: SimulationResultsDisplayTimelineStep[] = [...timelineSteps]
 
     if (demoMode) {
-      const turnNumber = demoNextTurnStep?.run?.turnNumber
+      if (demoOpeningHandStep && !demoHasRevealedOpeningHand) {
+        steps.push(
+          createDemoRevealTimelineStep({
+            detailLabel: "Add opening hand",
+            label: "Opening hand",
+            targetStepId: demoOpeningHandStep.id,
+          })
+        )
+        return steps
+      }
 
-      if (typeof turnNumber === "number") {
-        steps.push(createNextTurnTimelineStep(turnNumber, false, "Add turn"))
+      const nextTurnStep = demoNextTurnStep
+      const turnNumber = nextTurnStep?.run?.turnNumber
+
+      if (nextTurnStep && typeof turnNumber === "number") {
+        steps.push(
+          createDemoRevealTimelineStep({
+            detailLabel: "Add turn",
+            label: `Turn ${turnNumber}`,
+            targetStepId: nextTurnStep.id,
+          })
+        )
       }
 
       return steps
@@ -3181,8 +3225,10 @@ function SimulationResultsPanel({
 
     return steps
   }, [
+    demoHasRevealedOpeningHand,
     demoMode,
     demoNextTurnStep,
+    demoOpeningHandStep,
     isStartingTurnRun,
     renderedSimulationAction,
     timelineSteps,
@@ -3232,7 +3278,7 @@ function SimulationResultsPanel({
 
   const shouldAnimateDemoReveal =
     demoMode &&
-    selectedTimelineStep?.kind === "turn" &&
+    selectedTimelineStep !== null &&
     selectedTimelineStep.id === demoRevealAnimationStepId
 
   useSimulationResultReveal(resultsPanelRef, selectedTimelineRun, {
@@ -3527,20 +3573,41 @@ function SimulationResultsPanel({
     )
   }
 
-  function revealNextDemoTurn() {
-    if (!demoNextTurnStep) {
+  function revealDemoStep(step: SimulationResultsDemoRevealTimelineStep) {
+    const targetStep =
+      allTimelineSteps.find(
+        (timelineStep) => timelineStep.id === step.targetStepId
+      ) ?? null
+
+    if (!targetStep) {
       return
     }
 
-    if (!demoAnimatedTurnStepIdsRef.current.has(demoNextTurnStep.id)) {
-      demoAnimatedTurnStepIdsRef.current.add(demoNextTurnStep.id)
-      setDemoRevealAnimationStepId(demoNextTurnStep.id)
+    if (targetStep.kind !== "turn") {
+      if (!demoAnimatedStepIdsRef.current.has(targetStep.id)) {
+        demoAnimatedStepIdsRef.current.add(targetStep.id)
+        setDemoRevealAnimationStepId(targetStep.id)
+      }
+
+      setDemoHasRevealedOpeningHand(true)
+      setSelectedTimelineStepIdPreference(targetStep.id)
+      onKeepResultsScrolledToBottom()
+      return
+    }
+
+    if (!demoNextTurnStep || demoNextTurnStep.id !== targetStep.id) {
+      return
+    }
+
+    if (!demoAnimatedStepIdsRef.current.has(targetStep.id)) {
+      demoAnimatedStepIdsRef.current.add(targetStep.id)
+      setDemoRevealAnimationStepId(targetStep.id)
     }
 
     setDemoRevealedTurnCount((currentCount) =>
       Math.min(currentCount + 1, demoTurnSteps.length)
     )
-    setSelectedTimelineStepIdPreference(demoNextTurnStep.id)
+    setSelectedTimelineStepIdPreference(targetStep.id)
     onKeepResultsScrolledToBottom()
   }
 
@@ -3600,13 +3667,13 @@ function SimulationResultsPanel({
                     }
                     type="button"
                     onClick={() => {
+                      if (step.kind === "demo_reveal") {
+                        revealDemoStep(step)
+                        return
+                      }
+
                       if (step.kind === "simulate_turn") {
                         if (step.status === "starting_turn") {
-                          return
-                        }
-
-                        if (demoMode) {
-                          revealNextDemoTurn()
                           return
                         }
 
@@ -3698,7 +3765,7 @@ function SimulationResultsPanel({
               </p>
             ) : null}
 
-            {timelineSteps.length === 0 ? (
+            {displayedTimelineSteps.length === 0 ? (
               <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
                 No opening hand or turn runs have been saved for this simulation
                 yet.
@@ -3771,6 +3838,31 @@ function createNextTurnTimelineStep(
     status: isStartingTurnRun ? "starting_turn" : "next_turn",
     turnNumber,
   }
+}
+
+function createDemoRevealTimelineStep({
+  detailLabel,
+  label,
+  targetStepId,
+}: {
+  detailLabel: string
+  label: string
+  targetStepId: string
+}): SimulationResultsDemoRevealTimelineStep {
+  return {
+    id: `action:demo-reveal:${targetStepId}`,
+    kind: "demo_reveal",
+    label,
+    detailLabel,
+    status: "next_turn",
+    targetStepId,
+  }
+}
+
+function isSimulationTimelineOpeningHandStep(
+  step: SimulationResultsTimelineStep
+) {
+  return step.kind === "preset_opening_hand" || step.kind === "opening_hand"
 }
 
 function isSimulationTimelineTurnStep(step: SimulationResultsTimelineStep) {
@@ -3864,6 +3956,10 @@ function getSimulationTimelineStepStatusLabel(
 function getSimulationTimelineStepDescription(
   step: SimulationResultsDisplayTimelineStep
 ) {
+  if (step.kind === "demo_reveal") {
+    return step.detailLabel
+  }
+
   if (step.kind === "simulate_turn") {
     return step.detailLabel
   }
@@ -3924,7 +4020,7 @@ function getSimulationTimelineStepNodeClassName(
     return `${baseClassName} border-primary text-primary`
   }
 
-  if (step.kind === "simulate_turn") {
+  if (step.kind === "demo_reveal" || step.kind === "simulate_turn") {
     return `${baseClassName} border-border text-muted-foreground group-hover:border-primary/60 group-hover:text-primary`
   }
 
@@ -3960,7 +4056,7 @@ function getSimulationTimelineStepNodeContent({
     return <LoaderCircle className="size-4 animate-spin" />
   }
 
-  if (step.kind === "simulate_turn") {
+  if (step.kind === "demo_reveal" || step.kind === "simulate_turn") {
     return <Plus className="size-4" />
   }
 
