@@ -664,7 +664,7 @@ export function PublicSimulationPage({
         return
       }
 
-      setPublicSimulation(data)
+      setPublicSimulation(redactPublicSimulationRunCosts(data))
     } catch {
       setLoadError("Public simulation could not be loaded.")
     } finally {
@@ -4872,6 +4872,27 @@ function isPublicSimulationExportV1(
 
 function isPublicSimulationRecord(value: unknown) {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function redactPublicSimulationRunCosts(
+  publicSimulation: PublicSimulationExportV1
+): PublicSimulationExportV1 {
+  return {
+    ...publicSimulation,
+    results: {
+      ...publicSimulation.results,
+      openingHandLlmRuns:
+        publicSimulation.results.openingHandLlmRuns.map(redactLlmRunCost),
+      turnLlmRuns: publicSimulation.results.turnLlmRuns.map(redactLlmRunCost),
+    },
+  }
+}
+
+function redactLlmRunCost(run: SimulationDebugLlmRun): SimulationDebugLlmRun {
+  return {
+    ...run,
+    estimatedPriceCents: null,
+  }
 }
 
 function getSimulationRunThinkingStatusLabel({
