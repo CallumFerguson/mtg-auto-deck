@@ -348,10 +348,9 @@ function SimulationLlmOptionsSetting({
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const supportsFlex = Boolean(selectedModelPreset?.supportsFlex)
-  const supportsBatch = selectedModelPreset?.provider === "openai"
   const isLocked =
     simulation.status === "running" || simulation.activeLlmRunCount > 0
-  const batchChecked = selectedProcessingMode === "openai_batch"
+  const isBatchEnabled = selectedProcessingMode === "openai_batch"
   const flexChecked =
     selectedProcessingMode === "realtime" && selectedUseFlexServiceTier
 
@@ -365,14 +364,12 @@ function SimulationLlmOptionsSetting({
     simulation.useFlexServiceTier,
   ])
 
-  async function handleLlmOptionsChange(
-    nextProcessingMode: LlmProcessingMode,
-    nextUseFlexServiceTier: boolean
-  ) {
+  async function handleFlexServiceTierChange(nextUseFlexServiceTier: boolean) {
+    const nextProcessingMode: LlmProcessingMode = "realtime"
+
     if (
       isSaving ||
       isLocked ||
-      (nextProcessingMode === "openai_batch" && !supportsBatch) ||
       (nextUseFlexServiceTier && !supportsFlex) ||
       (nextProcessingMode === simulation.llmProcessingMode &&
         nextUseFlexServiceTier === simulation.useFlexServiceTier)
@@ -426,25 +423,18 @@ function SimulationLlmOptionsSetting({
 
   return (
     <div className="grid gap-2">
-      <FlexServiceTierSwitch
-        checked={batchChecked}
-        disabled={isSaving || isLocked || !supportsBatch}
-        label="Batch processing"
-        activeWarning="Less usage, but simulations can take hours to finish. Uses OpenAI batch api"
-        onCheckedChange={(nextEnabled) =>
-          void handleLlmOptionsChange(
-            nextEnabled ? "openai_batch" : "realtime",
-            false
-          )
-        }
-      />
+      {isBatchEnabled ? (
+        <p className="rounded-md border border-sky-300/35 bg-sky-400/10 px-3 py-2 text-sm font-medium text-sky-100">
+          Batch processing enabled
+        </p>
+      ) : null}
       <FlexServiceTierSwitch
         checked={flexChecked}
         disabled={isSaving || isLocked || !supportsFlex}
         label="Flex processing"
         activeWarning="Less usage, but simulation may be slower and has a higher chance of failing."
         onCheckedChange={(nextEnabled) =>
-          void handleLlmOptionsChange("realtime", nextEnabled)
+          void handleFlexServiceTierChange(nextEnabled)
         }
       />
       {isLocked ? (

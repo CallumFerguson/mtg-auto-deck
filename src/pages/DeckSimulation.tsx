@@ -801,7 +801,6 @@ export function DeckSimulation({
   const [useFlexServiceTier, setUseFlexServiceTier] = useState(
     getStoredCreateSimulationUseFlexServiceTier
   )
-  const [useBatchProcessing, setUseBatchProcessing] = useState(false)
   const [openingHandMode, setOpeningHandMode] = useState<
     "simulate" | "provide"
   >("simulate")
@@ -863,8 +862,6 @@ export function DeckSimulation({
   const selectedModelPresetSupportsFlex = Boolean(
     selectedModelPreset?.supportsFlex
   )
-  const selectedModelPresetSupportsBatch =
-    selectedModelPreset?.provider === "openai"
   const isModelPresetSelectionResolved =
     !isLoadingModelPresets &&
     (modelPresetLoadError !== null ||
@@ -943,11 +940,6 @@ export function DeckSimulation({
     turnsToSimulate.length > 0 &&
     (openingHandMode !== "provide" || Boolean(selectedOpeningHand))
 
-  useEffect(() => {
-    if (!selectedModelPresetSupportsBatch && useBatchProcessing) {
-      setUseBatchProcessing(false)
-    }
-  }, [selectedModelPresetSupportsBatch, useBatchProcessing])
   const loadSimulations = useCallback(
     async (options?: { silent?: boolean }) => {
       const isSilent = options?.silent ?? false
@@ -1393,25 +1385,8 @@ export function DeckSimulation({
   }
 
   function handleCreateSimulationUseFlexChange(nextEnabled: boolean) {
-    if (nextEnabled) {
-      setUseBatchProcessing(false)
-    }
-
     setUseFlexServiceTier(nextEnabled)
     storeCreateSimulationUseFlexServiceTier(nextEnabled)
-  }
-
-  function handleCreateSimulationBatchChange(nextEnabled: boolean) {
-    if (nextEnabled && !selectedModelPresetSupportsBatch) {
-      return
-    }
-
-    setUseBatchProcessing(nextEnabled)
-
-    if (nextEnabled) {
-      setUseFlexServiceTier(false)
-      storeCreateSimulationUseFlexServiceTier(false)
-    }
   }
 
   async function handleStartSimulation() {
@@ -1452,14 +1427,9 @@ export function DeckSimulation({
                 : selectedSavedSeed?.seed,
             llmModelPresetId: selectedModelPreset.id,
             turnsToSimulate: parsedTurnsToSimulate,
-            llmProcessingMode:
-              useBatchProcessing && selectedModelPreset.provider === "openai"
-                ? "openai_batch"
-                : "realtime",
+            llmProcessingMode: "realtime",
             useFlexServiceTier:
-              selectedModelPreset.supportsFlex &&
-              useFlexServiceTier &&
-              !useBatchProcessing,
+              selectedModelPreset.supportsFlex && useFlexServiceTier,
             startingHandId:
               openingHandMode === "provide" && selectedOpeningHand
                 ? selectedOpeningHand.id
@@ -1949,18 +1919,6 @@ export function DeckSimulation({
 
                       {isModelPresetSelectionResolved ? (
                         <div className="grid gap-3">
-                          <FlexServiceTierSwitch
-                            checked={
-                              selectedModelPresetSupportsBatch &&
-                              useBatchProcessing
-                            }
-                            disabled={!selectedModelPresetSupportsBatch}
-                            label="Batch processing"
-                            activeWarning="Less usage, but simulations can take hours to finish. Uses OpenAI batch api"
-                            onCheckedChange={
-                              handleCreateSimulationBatchChange
-                            }
-                          />
                           <FlexServiceTierSwitch
                             checked={
                               selectedModelPresetSupportsFlex &&
