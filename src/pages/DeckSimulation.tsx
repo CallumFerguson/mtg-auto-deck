@@ -3104,10 +3104,33 @@ function SimulationResultsPanel({
     [allTimelineSteps]
   )
   const [demoRevealedTurnCount, setDemoRevealedTurnCount] = useState(0)
+  const [
+    demoRevealAnimationStepId,
+    setDemoRevealAnimationStepId,
+  ] = useState<string | null>(null)
+  const demoAnimatedTurnStepIdsRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
+    demoAnimatedTurnStepIdsRef.current.clear()
     setDemoRevealedTurnCount(0)
+    setDemoRevealAnimationStepId(null)
   }, [demoMode, simulation.id])
+
+  useEffect(() => {
+    if (!demoRevealAnimationStepId) {
+      return
+    }
+
+    const clearAnimationStepId = window.setTimeout(() => {
+      setDemoRevealAnimationStepId((currentStepId) =>
+        currentStepId === demoRevealAnimationStepId ? null : currentStepId
+      )
+    }, SIMULATION_RESULT_REVEAL_ANIMATION_WINDOW_MS)
+
+    return () => {
+      window.clearTimeout(clearAnimationStepId)
+    }
+  }, [demoRevealAnimationStepId])
 
   const demoNextTurnStep =
     demoMode && demoRevealedTurnCount < demoTurnSteps.length
@@ -3207,7 +3230,14 @@ function SimulationResultsPanel({
       ? getStartingHandGameStateDisplay(startingHand, cards, commanders)
       : getSimulationRunGameStateDisplay(selectedTimelineRun, commanders)
 
-  useSimulationResultReveal(resultsPanelRef, selectedTimelineRun)
+  const shouldAnimateDemoReveal =
+    demoMode &&
+    selectedTimelineStep?.kind === "turn" &&
+    selectedTimelineStep.id === demoRevealAnimationStepId
+
+  useSimulationResultReveal(resultsPanelRef, selectedTimelineRun, {
+    forceAnimate: shouldAnimateDemoReveal,
+  })
 
   useEffect(() => {
     if (!selectedTimelineStepId) {
@@ -3500,6 +3530,11 @@ function SimulationResultsPanel({
   function revealNextDemoTurn() {
     if (!demoNextTurnStep) {
       return
+    }
+
+    if (!demoAnimatedTurnStepIdsRef.current.has(demoNextTurnStep.id)) {
+      demoAnimatedTurnStepIdsRef.current.add(demoNextTurnStep.id)
+      setDemoRevealAnimationStepId(demoNextTurnStep.id)
     }
 
     setDemoRevealedTurnCount((currentCount) =>
@@ -3997,13 +4032,20 @@ const SIMULATION_RESULT_REVEAL_VISIBLE_CLASS_NAME =
   "simulation-result-reveal-visible"
 const SIMULATION_RESULT_REVEAL_DELAY_PROPERTY =
   "--simulation-result-reveal-delay"
-const SHOULD_ANIMATE_SIMULATION_RESULT_REVEAL = true
-const SIMULATION_RESULT_REVEAL_STAGGER_MS = 20
-const SIMULATION_RESULT_REVEAL_MAX_DELAY_MS = 200
+const SHOULD_ANIMATE_SIMULATION_RESULT_REVEAL = false
+const SIMULATION_RESULT_REVEAL_STAGGER_MS = 40
+const SIMULATION_RESULT_REVEAL_MAX_DELAY_MS = 600
+const SIMULATION_RESULT_REVEAL_ANIMATION_WINDOW_MS =
+  SIMULATION_RESULT_REVEAL_MAX_DELAY_MS + 250
 
 function useSimulationResultReveal(
   resultsPanelRef: RefObject<HTMLElement | null>,
-  revealTrigger: unknown
+  revealTrigger: unknown,
+  {
+    forceAnimate = false,
+  }: {
+    forceAnimate?: boolean
+  } = {}
 ) {
   useLayoutEffect(() => {
     const resultsPanel = resultsPanelRef.current
@@ -4018,7 +4060,10 @@ function useSimulationResultReveal(
       return
     }
 
-    if (!SHOULD_ANIMATE_SIMULATION_RESULT_REVEAL) {
+    const shouldAnimateReveal =
+      forceAnimate || SHOULD_ANIMATE_SIMULATION_RESULT_REVEAL
+
+    if (!shouldAnimateReveal) {
       showSimulationResultRevealElementsWithoutAnimation(revealElements)
       return
     }
@@ -4065,7 +4110,7 @@ function useSimulationResultReveal(
       resizeObserver?.disconnect()
       resultsPanel.removeEventListener("scroll", scheduleVisibleReveal)
     }
-  }, [resultsPanelRef, revealTrigger])
+  }, [forceAnimate, resultsPanelRef, revealTrigger])
 }
 
 function getSimulationResultRevealElements(resultsPanel: HTMLElement) {
