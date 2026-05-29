@@ -650,7 +650,6 @@ function CardEntryStep({
             id="main-commander"
             name="commanderOne"
             className={INPUT_CLASS_NAME}
-            placeholder="The Ur-Dragon"
             type="text"
             value={draft.commanderOne}
             onChange={(event) =>
