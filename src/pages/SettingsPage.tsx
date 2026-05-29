@@ -378,11 +378,11 @@ export function SettingsPage({
                   className="mt-1 size-6 shrink-0 text-foreground"
                   aria-hidden
                 />
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold text-foreground">
                     Usage remaining
                   </p>
-                  <UsageLimitRows />
+                  <UsageLimitRows variant="settings" />
                 </div>
               </div>
             </div>
