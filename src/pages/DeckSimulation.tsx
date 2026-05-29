@@ -25,6 +25,7 @@ import {
   LoaderCircle,
   MoreVertical,
   Moon,
+  Play,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -3116,9 +3117,14 @@ function SimulationResultsPanel({
   const demoOpeningHandStep =
     allTimelineSteps.find(isSimulationTimelineOpeningHandStep) ?? null
   const hasDemoOpeningHandStep = demoOpeningHandStep !== null
+  const demoRootRef = useRef<HTMLDivElement | null>(null)
+  const demoStartButtonRef = useRef<HTMLButtonElement | null>(null)
+  const [demoHasStarted, setDemoHasStarted] = useState(false)
   const [demoHasRevealedOpeningHand, setDemoHasRevealedOpeningHand] =
     useState(false)
   const [demoRevealedTurnCount, setDemoRevealedTurnCount] = useState(0)
+  const [demoCoachMarkVisual, setDemoCoachMarkVisual] =
+    useState<DemoCoachMarkVisualState | null>(null)
   const [
     demoRevealAnimationStepId,
     setDemoRevealAnimationStepId,
@@ -3127,8 +3133,10 @@ function SimulationResultsPanel({
 
   useEffect(() => {
     demoAnimatedStepIdsRef.current.clear()
+    setDemoHasStarted(false)
     setDemoHasRevealedOpeningHand(false)
     setDemoRevealedTurnCount(0)
+    setDemoCoachMarkVisual(null)
     setDemoRevealAnimationStepId(null)
   }, [demoMode, simulation.id])
 
@@ -3152,8 +3160,9 @@ function SimulationResultsPanel({
     demoMode && demoRevealedTurnCount < demoTurnSteps.length
       ? demoTurnSteps[demoRevealedTurnCount]
       : null
+  const isDemoIntroOverlayVisible = demoMode && !demoHasStarted
   const timelineSteps = useMemo(() => {
-    if (!demoMode) {
+    if (!demoMode || isDemoIntroOverlayVisible) {
       return allTimelineSteps
     }
 
@@ -3181,13 +3190,14 @@ function SimulationResultsPanel({
     demoMode,
     demoRevealedTurnCount,
     hasDemoOpeningHandStep,
+    isDemoIntroOverlayVisible,
   ])
   const displayedTimelineSteps = useMemo<
     SimulationResultsDisplayTimelineStep[]
   >(() => {
     const steps: SimulationResultsDisplayTimelineStep[] = [...timelineSteps]
 
-    if (demoMode) {
+    if (demoMode && !isDemoIntroOverlayVisible) {
       if (demoOpeningHandStep && !demoHasRevealedOpeningHand) {
         steps.push(
           createDemoRevealTimelineStep({
@@ -3230,9 +3240,36 @@ function SimulationResultsPanel({
     demoNextTurnStep,
     demoOpeningHandStep,
     isStartingTurnRun,
+    isDemoIntroOverlayVisible,
     renderedSimulationAction,
     timelineSteps,
   ])
+  const demoRevealTimelineStep =
+    displayedTimelineSteps.find(
+      (step): step is SimulationResultsDemoRevealTimelineStep =>
+        step.kind === "demo_reveal"
+    ) ?? null
+  const demoFirstTurnStep = demoTurnSteps[0] ?? null
+  const shouldShowDemoOpeningHandCoachMark =
+    demoRevealTimelineStep !== null &&
+    demoRevealTimelineStep.targetStepId === demoOpeningHandStep?.id
+  const shouldShowDemoFirstTurnCoachMark =
+    demoRevealTimelineStep !== null &&
+    demoFirstTurnStep !== null &&
+    demoFirstTurnStep.run?.turnNumber === 1 &&
+    demoRevealedTurnCount === 0 &&
+    demoRevealTimelineStep.targetStepId === demoFirstTurnStep.id
+  const demoCoachMarkTargetStep =
+    demoMode &&
+    demoHasStarted &&
+    (shouldShowDemoOpeningHandCoachMark || shouldShowDemoFirstTurnCoachMark)
+      ? demoRevealTimelineStep
+      : null
+  const demoCoachMarkText = demoCoachMarkTargetStep
+    ? shouldShowDemoOpeningHandCoachMark
+      ? "Start the simulation"
+      : "Simulate next turn"
+    : "Start demo"
   const [
     selectedTimelineStepIdPreference,
     setSelectedTimelineStepIdPreference,
@@ -3244,14 +3281,69 @@ function SimulationResultsPanel({
   const timelineStepButtonRefs = useRef<Map<string, HTMLButtonElement>>(
     new Map()
   )
+  useEffect(() => {
+    if (demoMode && demoHasStarted && demoCoachMarkTargetStep) {
+      return
+    }
+
+    setDemoCoachMarkVisual(null)
+  }, [demoCoachMarkTargetStep, demoHasStarted, demoMode])
+
+  useEffect(() => {
+    if (
+      !demoMode ||
+      !demoHasStarted ||
+      !demoCoachMarkVisual ||
+      !demoCoachMarkTargetStep
+    ) {
+      return
+    }
+
+    const animationFrame = window.requestAnimationFrame(() => {
+      const targetButton = timelineStepButtonRefs.current.get(
+        demoCoachMarkTargetStep.id
+      )
+      const targetRect = getDemoCoachMarkTargetRect({
+        root: demoRootRef.current,
+        target: targetButton ?? null,
+      })
+
+      if (!targetRect) {
+        return
+      }
+
+      setDemoCoachMarkVisual((currentVisual) =>
+        currentVisual
+          ? {
+              phase: "coach",
+              rect: targetRect,
+            }
+          : currentVisual
+      )
+    })
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame)
+    }
+  }, [
+    demoCoachMarkTargetStep,
+    demoCoachMarkVisual?.phase,
+    demoHasStarted,
+    demoMode,
+    displayedTimelineSteps,
+  ])
+
   const runsByTimelineStepId = new Map(
     runs.map((run) => [getSimulationTimelineRunStepId(run.llmRunId), run])
   )
+  const timelineDefaultSelection = isDemoIntroOverlayVisible
+    ? "latest"
+    : defaultTimelineSelection
   const selectedTimelineStepId = resolveSimulationResultsTimelineSelection(
     timelineSteps,
     selectedTimelineStepIdPreference,
     null,
-    defaultTimelineSelection
+    timelineDefaultSelection
   )
   const selectedTimelineStep =
     timelineSteps.find((step) => step.id === selectedTimelineStepId) ?? null
@@ -3611,6 +3703,30 @@ function SimulationResultsPanel({
     onKeepResultsScrolledToBottom()
   }
 
+  function handleStartDemo() {
+    const startRect =
+      getElementRectWithinRoot({
+        element: demoStartButtonRef.current,
+        root: demoRootRef.current,
+      }) ?? getFallbackDemoCoachMarkRect(demoRootRef.current)
+
+    demoAnimatedStepIdsRef.current.clear()
+    setDemoCoachMarkVisual(
+      startRect
+        ? {
+            phase: "button",
+            rect: startRect,
+          }
+        : null
+    )
+    setDemoHasStarted(true)
+    setDemoHasRevealedOpeningHand(false)
+    setDemoRevealedTurnCount(0)
+    setDemoRevealAnimationStepId(null)
+    setSelectedTimelineStepIdPreference(null)
+    onKeepResultsScrolledToBottom()
+  }
+
   function renderTimelineHeader() {
     if (displayedTimelineSteps.length === 0) {
       return null
@@ -3743,71 +3859,156 @@ function SimulationResultsPanel({
     )
   }
 
-  return (
-    <>
-      <SimulationResultsShell
-        cardLookup={cardLookup}
-        gameState={selectedGameState}
-        header={renderTimelineHeader()}
+  const resultsShell = (
+    <SimulationResultsShell
+      cardLookup={cardLookup}
+      gameState={selectedGameState}
+      header={renderTimelineHeader()}
+    >
+      <main
+        ref={resultsPanelRef}
+        className="simulation-scrollbar h-full min-h-0 min-w-0 flex-1 overflow-y-auto"
+        onScroll={onResultsScroll}
       >
-        <main
-          ref={resultsPanelRef}
-          className="simulation-scrollbar h-full min-h-0 min-w-0 flex-1 overflow-y-auto"
-          onScroll={onResultsScroll}
+        <section className="grid w-full gap-3 p-3">
+          {resultsError ? (
+            <p
+              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              role="alert"
+            >
+              {resultsError}
+            </p>
+          ) : null}
+
+          {displayedTimelineSteps.length === 0 ? (
+            <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+              No opening hand or turn runs have been saved for this simulation
+              yet.
+            </p>
+          ) : null}
+
+          {selectedTimelineStep?.kind === "preset_opening_hand" ? (
+            <div
+              id={selectedTimelinePanelId}
+              aria-labelledby={getSimulationTimelineStepTabId(
+                selectedTimelineStep.id
+              )}
+              role="region"
+            >
+              <SimulationPresetStartingHandBlock
+                isLoadingStartingHand={isLoadingStartingHand}
+                startingHand={startingHand}
+                startingHandLoadError={startingHandLoadError}
+              />
+            </div>
+          ) : selectedTimelineRun ? (
+            renderSimulationRunDetail(
+              selectedTimelineRun,
+              selectedTimelinePanelId,
+              selectedTimelineStep
+                ? getSimulationTimelineStepTabId(selectedTimelineStep.id)
+                : undefined
+            )
+          ) : null}
+
+          {actionError ? (
+            <p
+              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              role="alert"
+            >
+              {actionError}
+            </p>
+          ) : null}
+        </section>
+      </main>
+    </SimulationResultsShell>
+  )
+
+  function renderDemoCoachMark() {
+    if (!demoMode || !demoCoachMarkVisual) {
+      return null
+    }
+
+    const isCoachMark = demoCoachMarkVisual.phase === "coach"
+    const coachMarkStyle: CSSProperties = {
+      height: demoCoachMarkVisual.rect.height,
+      left: demoCoachMarkVisual.rect.left,
+      top: demoCoachMarkVisual.rect.top,
+      width: demoCoachMarkVisual.rect.width,
+    }
+
+    return (
+      <div
+        className={`pointer-events-none absolute z-40 flex items-center justify-center overflow-visible rounded-lg border text-center font-extrabold whitespace-nowrap transition-[top,left,width,height,background-color,border-color,color,box-shadow] duration-500 ease-out ${
+          isCoachMark
+            ? "border-sky-300/35 bg-slate-950/95 text-sky-50 shadow-2xl shadow-sky-950/40"
+            : "border-transparent bg-sky-300 text-slate-950 shadow-[0_14px_34px_rgba(56,189,248,0.22)]"
+        }`}
+        aria-label={isCoachMark ? demoCoachMarkText : "Start demo"}
+        role="note"
+        style={coachMarkStyle}
+      >
+        <span
+          className={`absolute top-1/2 left-0 size-3 border-b border-l border-sky-300/35 bg-slate-950/95 transition-[opacity,transform] duration-300 ${
+            isCoachMark
+              ? "-translate-x-1/2 -translate-y-1/2 rotate-45 scale-100 opacity-100 delay-300"
+              : "translate-x-1 -translate-y-1/2 rotate-45 scale-50 opacity-0"
+          }`}
+          aria-hidden="true"
+        />
+        <span
+          className="relative grid min-w-0 place-items-center px-3"
+          aria-hidden="true"
         >
-          <section className="grid w-full gap-3 p-3">
-            {resultsError ? (
-              <p
-                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-                role="alert"
-              >
-                {resultsError}
-              </p>
-            ) : null}
+          <span
+            className={`col-start-1 row-start-1 flex items-center justify-center gap-2 text-base transition-opacity duration-200 ${
+              isCoachMark ? "opacity-0" : "opacity-100 delay-75"
+            }`}
+          >
+            <Play className="size-5" aria-hidden="true" />
+            <span>Start demo</span>
+          </span>
+          <span
+            className={`col-start-1 row-start-1 text-sm transition-opacity duration-200 ${
+              isCoachMark ? "opacity-100 delay-200" : "opacity-0"
+            }`}
+          >
+            {demoCoachMarkText}
+          </span>
+        </span>
+      </div>
+    )
+  }
 
-            {displayedTimelineSteps.length === 0 ? (
-              <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
-                No opening hand or turn runs have been saved for this simulation
-                yet.
-              </p>
-            ) : null}
+  return (
+    <div ref={demoRootRef} className="relative h-full min-h-0 overflow-hidden">
+      <div
+        aria-hidden={isDemoIntroOverlayVisible ? "true" : undefined}
+        className={
+          isDemoIntroOverlayVisible
+            ? "pointer-events-none h-full min-h-0 blur-sm transition-[filter]"
+            : "h-full min-h-0"
+        }
+      >
+        {resultsShell}
+      </div>
 
-            {selectedTimelineStep?.kind === "preset_opening_hand" ? (
-              <div
-                id={selectedTimelinePanelId}
-                aria-labelledby={getSimulationTimelineStepTabId(
-                  selectedTimelineStep.id
-                )}
-                role="region"
-              >
-                <SimulationPresetStartingHandBlock
-                  isLoadingStartingHand={isLoadingStartingHand}
-                  startingHand={startingHand}
-                  startingHandLoadError={startingHandLoadError}
-                />
-              </div>
-            ) : selectedTimelineRun ? (
-              renderSimulationRunDetail(
-                selectedTimelineRun,
-                selectedTimelinePanelId,
-                selectedTimelineStep
-                  ? getSimulationTimelineStepTabId(selectedTimelineStep.id)
-                  : undefined
-              )
-            ) : null}
-
-            {actionError ? (
-              <p
-                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-                role="alert"
-              >
-                {actionError}
-              </p>
-            ) : null}
-          </section>
-        </main>
-      </SimulationResultsShell>
-    </>
+      {isDemoIntroOverlayVisible ? (
+        <div className="absolute inset-0 z-20 grid place-items-center bg-background/70 px-4 backdrop-blur-sm">
+          <Button
+            ref={demoStartButtonRef}
+            type="button"
+            size="lg"
+            className="min-h-14 !bg-sky-300 !px-8 text-base font-extrabold !text-slate-950 shadow-[0_14px_34px_rgba(56,189,248,0.22)] transition-transform hover:-translate-y-px hover:!bg-sky-200 focus-visible:ring-sky-300/50 [&_svg]:size-5"
+            onClick={handleStartDemo}
+          >
+            <Play data-icon="inline-start" />
+            Start demo
+          </Button>
+        </div>
+      ) : null}
+      {renderDemoCoachMark()}
+    </div>
   )
 }
 
@@ -3850,12 +4051,98 @@ function createDemoRevealTimelineStep({
   targetStepId: string
 }): SimulationResultsDemoRevealTimelineStep {
   return {
-    id: `action:demo-reveal:${targetStepId}`,
+    id: getDemoRevealTimelineStepId(targetStepId),
     kind: "demo_reveal",
     label,
     detailLabel,
     status: "next_turn",
     targetStepId,
+  }
+}
+
+function getDemoRevealTimelineStepId(targetStepId: string) {
+  return `action:demo-reveal:${targetStepId}`
+}
+
+function getElementRectWithinRoot({
+  element,
+  root,
+}: {
+  element: HTMLElement | null
+  root: HTMLElement | null
+}): DemoCoachMarkVisualState["rect"] | null {
+  if (!element || !root) {
+    return null
+  }
+
+  const elementRect = element.getBoundingClientRect()
+  const rootRect = root.getBoundingClientRect()
+
+  return {
+    height: elementRect.height,
+    left: elementRect.left - rootRect.left,
+    top: elementRect.top - rootRect.top,
+    width: elementRect.width,
+  }
+}
+
+function getFallbackDemoCoachMarkRect(
+  root: HTMLElement | null
+): DemoCoachMarkVisualState["rect"] | null {
+  if (!root) {
+    return null
+  }
+
+  const rootRect = root.getBoundingClientRect()
+
+  return {
+    height: 56,
+    left: Math.max(0, rootRect.width / 2 - DEMO_COACH_MARK_WIDTH_PX / 2),
+    top: Math.max(0, rootRect.height / 2 - 28),
+    width: DEMO_COACH_MARK_WIDTH_PX,
+  }
+}
+
+function getDemoCoachMarkTargetRect({
+  root,
+  target,
+}: {
+  root: HTMLElement | null
+  target: HTMLElement | null
+}): DemoCoachMarkVisualState["rect"] | null {
+  if (!root || !target) {
+    return null
+  }
+
+  const rootRect = root.getBoundingClientRect()
+  const targetRect = target.getBoundingClientRect()
+  const width = Math.min(
+    DEMO_COACH_MARK_WIDTH_PX,
+    Math.max(0, rootRect.width - DEMO_COACH_MARK_EDGE_PADDING_PX * 2)
+  )
+  const minLeft = DEMO_COACH_MARK_EDGE_PADDING_PX
+  const maxLeft = Math.max(
+    minLeft,
+    rootRect.width - width - DEMO_COACH_MARK_EDGE_PADDING_PX
+  )
+  const minTop = DEMO_COACH_MARK_EDGE_PADDING_PX
+  const maxTop = Math.max(
+    minTop,
+    rootRect.height - DEMO_COACH_MARK_HEIGHT_PX - DEMO_COACH_MARK_EDGE_PADDING_PX
+  )
+  const rightSideLeft =
+    targetRect.right - rootRect.left + DEMO_COACH_MARK_OFFSET_PX
+  const centeredTop =
+    targetRect.top -
+    rootRect.top +
+    targetRect.height / 2 -
+    DEMO_COACH_MARK_HEIGHT_PX / 2
+
+  return {
+    height: DEMO_COACH_MARK_HEIGHT_PX,
+    left: Math.min(Math.max(rightSideLeft, minLeft), maxLeft),
+    top: Math.min(Math.max(centeredTop, minTop), maxTop),
+    width,
   }
 }
 
@@ -4129,10 +4416,26 @@ const SIMULATION_RESULT_REVEAL_VISIBLE_CLASS_NAME =
 const SIMULATION_RESULT_REVEAL_DELAY_PROPERTY =
   "--simulation-result-reveal-delay"
 const SHOULD_ANIMATE_SIMULATION_RESULT_REVEAL = false
-const SIMULATION_RESULT_REVEAL_STAGGER_MS = 50
-const SIMULATION_RESULT_REVEAL_MAX_DELAY_MS = 1000
+const SIMULATION_RESULT_REVEAL_STAGGER_MS = 40
+const SIMULATION_RESULT_REVEAL_MAX_DELAY_MS = 600
 const SIMULATION_RESULT_REVEAL_ANIMATION_WINDOW_MS =
   SIMULATION_RESULT_REVEAL_MAX_DELAY_MS + 250
+const DEMO_COACH_MARK_WIDTH_PX = 192
+const DEMO_COACH_MARK_HEIGHT_PX = 44
+const DEMO_COACH_MARK_OFFSET_PX = 10
+const DEMO_COACH_MARK_EDGE_PADDING_PX = 12
+
+type DemoCoachMarkPhase = "button" | "coach"
+
+type DemoCoachMarkVisualState = {
+  phase: DemoCoachMarkPhase
+  rect: {
+    height: number
+    left: number
+    top: number
+    width: number
+  }
+}
 
 function useSimulationResultReveal(
   resultsPanelRef: RefObject<HTMLElement | null>,
