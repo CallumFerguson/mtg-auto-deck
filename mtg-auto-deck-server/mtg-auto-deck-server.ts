@@ -207,6 +207,7 @@ import {
   SimulationResultsBroadcaster,
   formatSseComment,
   formatSseEvent,
+  redactSimulationResultsStreamEventCosts,
   type SimulationResultsStreamEvent,
   type SimulationResultsStreamInfo,
   type SimulationResultsStreamRun,
@@ -6449,6 +6450,7 @@ async function main() {
     async (req: Request, res: Response) => {
       const deckId = String(req.params.deckId)
       const simulationId = String(req.params.simulationId)
+      const includeRunCosts = getAuthenticatedUser(req).role === "admin"
       let streamCleanup: (() => void) | null = null
 
       try {
@@ -6527,7 +6529,8 @@ async function main() {
         ) {
           unsubscribe = simulationResultsBroadcaster.subscribe(
             simulationId,
-            streamWriter
+            streamWriter,
+            { includeRunCosts }
           )
         }
 
@@ -6541,7 +6544,14 @@ async function main() {
           results: snapshot.results,
         }
 
-        res.write(formatSseEvent(snapshotEvent))
+        res.write(
+          formatSseEvent(
+            redactSimulationResultsStreamEventCosts(
+              snapshotEvent,
+              includeRunCosts
+            )
+          )
+        )
         hasSentSnapshot = true
 
         for (const queuedWrite of queuedWrites) {
@@ -6566,7 +6576,11 @@ async function main() {
             results: snapshot.results,
           }
 
-          res.write(formatSseEvent(doneEvent))
+          res.write(
+            formatSseEvent(
+              redactSimulationResultsStreamEventCosts(doneEvent, includeRunCosts)
+            )
+          )
           cleanup()
           res.end()
         }

@@ -737,6 +737,7 @@ export function PublicSimulationPage({
             }
             onUpgradeUsage={() => {}}
             readOnly={true}
+            showRunCost={false}
             shouldStreamResults={false}
             simulation={publicSimulation.simulation}
             startingHand={publicSimulation.startingHand}
@@ -2015,6 +2016,7 @@ export function DeckSimulation({
               }
               onSimulationUpdated={updateSimulation}
               onUpgradeUsage={onUpgradeUsage}
+              showRunCost={isAdmin}
               simulation={selectedSimulation}
               startingHand={selectedSimulationStartingHand}
               startingHandLoadError={startingHandLoadError}
@@ -2229,6 +2231,7 @@ function SimulationDetails({
   readOnly = false,
   resultsStreamUrl,
   resultsStreamWithCredentials = true,
+  showRunCost,
   shouldStreamResults = true,
   simulation,
   startingHand,
@@ -2249,6 +2252,7 @@ function SimulationDetails({
   readOnly?: boolean
   resultsStreamUrl?: string
   resultsStreamWithCredentials?: boolean
+  showRunCost: boolean
   shouldStreamResults?: boolean
   simulation: Simulation
   startingHand: StartingHand | null
@@ -2779,6 +2783,7 @@ function SimulationDetails({
       resultsError={resultsError}
       resultsInfo={resultsInfo}
       resultsPanelRef={resultsPanelRef}
+      showRunCost={showRunCost}
       simulation={simulation}
       startingHand={startingHand}
       startingHandLoadError={startingHandLoadError}
@@ -2879,6 +2884,7 @@ function SimulationResultsPanel({
   resultsError,
   resultsInfo,
   resultsPanelRef,
+  showRunCost,
   simulation,
   startingHand,
   startingHandLoadError,
@@ -2911,6 +2917,7 @@ function SimulationResultsPanel({
   resultsError: string | null
   resultsInfo: SimulationResultsInfo
   resultsPanelRef: RefObject<HTMLElement | null>
+  showRunCost: boolean
   simulation: Simulation
   startingHand: StartingHand | null
   startingHandLoadError: string | null
@@ -3512,7 +3519,7 @@ function SimulationResultsPanel({
     const runMetadata = [
       run.status,
       run.model,
-      getLlmRunEstimatedPriceText(run),
+      showRunCost ? getLlmRunEstimatedPriceText(run) : null,
       finishedDurationText ? `took ${finishedDurationText}` : null,
       run.processingMode === "openai_batch" ? "batch" : null,
       run.outdated ? "outdated" : null,

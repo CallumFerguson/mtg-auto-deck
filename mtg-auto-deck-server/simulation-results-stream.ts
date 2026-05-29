@@ -47,8 +47,13 @@ export type SimulationResultsStreamWriter = {
   end: () => unknown
 }
 
+type SimulationResultsSubscriptionOptions = {
+  includeRunCosts: boolean
+}
+
 type SimulationResultsSubscriber = {
   id: symbol
+  options: SimulationResultsSubscriptionOptions
   writer: SimulationResultsStreamWriter
 }
 
@@ -58,9 +63,16 @@ export class SimulationResultsBroadcaster {
     Set<SimulationResultsSubscriber>
   >()
 
-  subscribe(simulationId: string, writer: SimulationResultsStreamWriter) {
+  subscribe(
+    simulationId: string,
+    writer: SimulationResultsStreamWriter,
+    options: SimulationResultsSubscriptionOptions = {
+      includeRunCosts: true,
+    }
+  ) {
     const subscriber = {
       id: Symbol(simulationId),
+      options,
       writer,
     }
     let subscribers = this.subscribersBySimulationId.get(simulationId)
@@ -86,7 +98,14 @@ export class SimulationResultsBroadcaster {
 
     for (const subscriber of [...subscribers]) {
       try {
-        subscriber.writer.write(formatSseEvent(event))
+        subscriber.writer.write(
+          formatSseEvent(
+            redactSimulationResultsStreamEventCosts(
+              event,
+              subscriber.options.includeRunCosts
+            )
+          )
+        )
       } catch {
         this.unsubscribe(simulationId, subscriber)
       }
@@ -135,4 +154,50 @@ export function formatSseEvent(event: SimulationResultsStreamEvent) {
 
 export function formatSseComment(comment: string) {
   return `: ${comment}\n\n`
+}
+
+export function redactSimulationResultsStreamEventCosts(
+  event: SimulationResultsStreamEvent,
+  includeRunCosts: boolean
+): SimulationResultsStreamEvent {
+  if (includeRunCosts) {
+    return event
+  }
+
+  if (event.type === "snapshot" || event.type === "done") {
+    return {
+      ...event,
+      results: redactSimulationResultsInfoCosts(event.results),
+    }
+  }
+
+  if (event.type === "llm_run_started" || event.type === "llm_run_updated") {
+    return {
+      ...event,
+      run: redactSimulationResultsRunCost(event.run),
+    }
+  }
+
+  return event
+}
+
+function redactSimulationResultsInfoCosts(
+  results: SimulationResultsStreamInfo
+): SimulationResultsStreamInfo {
+  return {
+    ...results,
+    openingHandLlmRuns: results.openingHandLlmRuns.map(
+      redactSimulationResultsRunCost
+    ),
+    turnLlmRuns: results.turnLlmRuns.map(redactSimulationResultsRunCost),
+  }
+}
+
+function redactSimulationResultsRunCost(
+  run: SimulationResultsStreamRun
+): SimulationResultsStreamRun {
+  return {
+    ...run,
+    estimatedPriceCents: null,
+  }
 }
