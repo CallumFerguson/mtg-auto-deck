@@ -3287,7 +3287,7 @@ function SimulationResultsPanel({
       : null
   const demoCoachMarkText = demoCoachMarkTargetStep
     ? "Simulate next turn"
-    : "Start demo"
+    : "Try demo"
   const [
     selectedTimelineStepIdPreference,
     setSelectedTimelineStepIdPreference,
@@ -3967,15 +3967,15 @@ function SimulationResultsPanel({
       <div
         className={`pointer-events-none absolute z-40 flex items-center justify-center overflow-visible rounded-lg border text-center font-extrabold whitespace-nowrap transition-[top,left,width,height,background-color,border-color,color,box-shadow] duration-750 ease-out ${
           isCoachMark
-            ? "border-sky-300/35 bg-slate-950/95 text-sky-50 shadow-2xl shadow-sky-950/40"
+            ? "border-sky-200 bg-sky-50 text-slate-950 shadow-2xl shadow-black/25"
             : "border-transparent bg-sky-300 text-slate-950 shadow-[0_14px_34px_rgba(56,189,248,0.22)]"
         }`}
-        aria-label={isCoachMark ? demoCoachMarkText : "Start demo"}
+        aria-label={isCoachMark ? demoCoachMarkText : "Try demo"}
         role="note"
         style={coachMarkStyle}
       >
         <span
-          className={`absolute top-1/2 left-0 size-3 border-b border-l border-sky-300/35 bg-slate-950/95 transition-[opacity,transform] duration-300 ${
+          className={`absolute top-1/2 left-0 size-3 border-b border-l border-sky-200 bg-sky-50 transition-[opacity,transform] duration-300 ${
             isCoachMark
               ? "-translate-x-1/2 -translate-y-1/2 rotate-45 scale-100 opacity-100 delay-300"
               : "translate-x-1 -translate-y-1/2 rotate-45 scale-50 opacity-0"
@@ -3987,16 +3987,16 @@ function SimulationResultsPanel({
           aria-hidden="true"
         >
           <span
-            className={`col-start-1 row-start-1 flex items-center justify-center gap-2 text-base transition-opacity duration-200 ${
-              isCoachMark ? "opacity-0" : "opacity-100 delay-75"
+            className={`col-start-1 row-start-1 flex items-center justify-center gap-2 text-base ${
+              isCoachMark ? "opacity-0" : "opacity-100"
             }`}
           >
             <Play className="size-5" aria-hidden="true" />
-            <span>Start demo</span>
+            <span>Try demo</span>
           </span>
           <span
-            className={`col-start-1 row-start-1 text-sm transition-opacity duration-200 ${
-              isCoachMark ? "opacity-100 delay-200" : "opacity-0"
+            className={`col-start-1 row-start-1 text-sm transition-opacity duration-[375ms] ease-out ${
+              isCoachMark ? "opacity-100" : "opacity-0"
             }`}
           >
             {demoCoachMarkText}
@@ -4029,7 +4029,7 @@ function SimulationResultsPanel({
             onClick={handleStartDemo}
           >
             <Play data-icon="inline-start" />
-            Start demo
+            Try demo
           </Button>
         </div>
       ) : null}
