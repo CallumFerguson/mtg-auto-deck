@@ -1293,6 +1293,7 @@ test("validates provider-specific LLM config requirements with presets", () => {
 
 test("builds model preset insert with a supports-flex placeholder", () => {
   const query = buildCreateLlmModelPresetInsertQuery({
+    name: " Fast budget ",
     provider: "openrouter",
     model: "openai/gpt-5-nano",
     reasoningEffort: "high",
@@ -1309,17 +1310,19 @@ test("builds model preset insert with a supports-flex placeholder", () => {
   assert.match(normalizedSql, /supports_flex/)
   assert.match(
     normalizedSql,
-    /VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10\)/
+    /VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11\)/
   )
-  assert.equal(query.values.length, 10)
-  assert.equal(query.values[4], true)
+  assert.equal(query.values.length, 11)
+  assert.equal(query.values[1], "Fast budget")
+  assert.equal(query.values[5], true)
 })
 
-test("builds model preset update with trimmed model and editable costs", () => {
+test("builds model preset update with trimmed name, model, and editable costs", () => {
   const query = buildUpdateLlmModelPresetUpdateQuery(
     "preset-openrouter",
     "openrouter",
     {
+      name: " OpenRouter tools ",
       model: " openai/gpt-5-nano ",
       reasoningEffort: "high",
       openrouterModelProvider: " openai ",
@@ -1332,24 +1335,46 @@ test("builds model preset update with trimmed model and editable costs", () => {
   const normalizedSql = query.text.replace(/\s+/g, " ")
 
   assert.match(normalizedSql, /UPDATE llm_model_presets/)
-  assert.match(normalizedSql, /model = \$2/)
-  assert.match(normalizedSql, /reasoning_effort = \$3/)
-  assert.match(normalizedSql, /openrouter_model_provider = \$4/)
-  assert.match(normalizedSql, /supports_flex = \$5/)
+  assert.match(normalizedSql, /name = \$2/)
+  assert.match(normalizedSql, /model = \$3/)
+  assert.match(normalizedSql, /reasoning_effort = \$4/)
+  assert.match(normalizedSql, /openrouter_model_provider = \$5/)
+  assert.match(normalizedSql, /supports_flex = \$6/)
   assert.equal(query.values[0], "preset-openrouter")
-  assert.equal(query.values[1], "openai/gpt-5-nano")
-  assert.equal(query.values[2], "high")
-  assert.equal(query.values[3], "openai")
-  assert.equal(query.values[4], true)
-  assert.equal(query.values[5], 1)
-  assert.equal(query.values[6], 0.1)
-  assert.equal(query.values[7], 10)
+  assert.equal(query.values[1], "OpenRouter tools")
+  assert.equal(query.values[2], "openai/gpt-5-nano")
+  assert.equal(query.values[3], "high")
+  assert.equal(query.values[4], "openai")
+  assert.equal(query.values[5], true)
+  assert.equal(query.values[6], 1)
+  assert.equal(query.values[7], 0.1)
+  assert.equal(query.values[8], 10)
+})
+
+test("normalizes blank model preset names to null", () => {
+  const query = buildUpdateLlmModelPresetUpdateQuery(
+    "preset-openai",
+    "openai",
+    {
+      name: "   ",
+      model: "gpt-5-nano",
+      reasoningEffort: "medium",
+      openrouterModelProvider: null,
+      supportsFlex: false,
+      inputTokenCostUsdPerMillion: null,
+      cachedInputTokenCostUsdPerMillion: null,
+      outputTokenCostUsdPerMillion: null,
+    }
+  )
+
+  assert.equal(query.values[1], null)
 })
 
 test("rejects blank model preset updates", () => {
   assert.throws(
     () =>
       buildUpdateLlmModelPresetUpdateQuery("preset-openai", "openai", {
+        name: null,
         model: "   ",
         reasoningEffort: "medium",
         openrouterModelProvider: null,
@@ -1367,6 +1392,7 @@ test("normalizes OpenRouter provider override by existing preset provider", () =
     "preset-openrouter",
     "openrouter",
     {
+      name: null,
       model: "openai/gpt-5-nano",
       reasoningEffort: "medium",
       openrouterModelProvider: " openai ",
@@ -1380,6 +1406,7 @@ test("normalizes OpenRouter provider override by existing preset provider", () =
     "preset-openai",
     "openai",
     {
+      name: null,
       model: "gpt-5-nano",
       reasoningEffort: "medium",
       openrouterModelProvider: "openai",
@@ -1390,8 +1417,8 @@ test("normalizes OpenRouter provider override by existing preset provider", () =
     }
   )
 
-  assert.equal(openRouterQuery.values[3], "openai")
-  assert.equal(openAiQuery.values[3], null)
+  assert.equal(openRouterQuery.values[4], "openai")
+  assert.equal(openAiQuery.values[4], null)
 })
 
 test("keeps llama.cpp model preset updates from supporting flex", () => {
@@ -1399,6 +1426,7 @@ test("keeps llama.cpp model preset updates from supporting flex", () => {
     "preset-llamacpp",
     "llamacpp",
     {
+      name: null,
       model: "local-model",
       reasoningEffort: "none",
       openrouterModelProvider: null,
@@ -1409,13 +1437,14 @@ test("keeps llama.cpp model preset updates from supporting flex", () => {
     }
   )
 
-  assert.equal(query.values[4], false)
+  assert.equal(query.values[5], false)
 })
 
 test("rejects immutable model preset fields in update payloads", () => {
   assert.throws(
     () =>
       buildUpdateLlmModelPresetUpdateQuery("preset-openai", "openai", {
+        name: null,
         model: "gpt-5-nano",
         reasoningEffort: "medium",
         openrouterModelProvider: null,
@@ -1514,6 +1543,7 @@ test("reads optional llama.cpp API key config", () => {
 function createOpenAiPreset() {
   return {
     id: "preset-openai",
+    name: null,
     provider: "openai" as const,
     model: "gpt-5.4-mini",
     reasoningEffort: "medium" as const,
@@ -1528,6 +1558,7 @@ function createOpenAiPreset() {
 function createOpenRouterPreset() {
   return {
     id: "preset-openrouter",
+    name: null,
     provider: "openrouter" as const,
     model: "openai/gpt-5-nano",
     reasoningEffort: "high" as const,
@@ -1542,6 +1573,7 @@ function createOpenRouterPreset() {
 function createLlamaCppPreset() {
   return {
     id: "preset-llamacpp",
+    name: null,
     provider: "llamacpp" as const,
     model: "qwen3-8b-q4_k_m.gguf",
     reasoningEffort: "none" as const,

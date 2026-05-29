@@ -98,6 +98,7 @@ export type SimulationMcpFunctionCall = {
 export type SimulationDebugLlmRun = {
   llmRunId: string
   llmModelPresetId: string | null
+  llmModelPresetName: string | null
   processingMode: LlmProcessingMode
   phase: string
   provider: string
@@ -129,6 +130,7 @@ export type SimulationDebugLlmRun = {
 type SimulationDebugLlmRunMetadata = {
   llmRunId: string
   llmModelPresetId: string | null
+  llmModelPresetName: string | null
   processingMode: LlmProcessingMode
   phase: string
   provider: string

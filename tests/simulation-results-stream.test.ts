@@ -244,6 +244,7 @@ function createRun(
   return {
     llmRunId: "run-id",
     llmModelPresetId: "preset-id",
+    llmModelPresetName: null,
     processingMode: "realtime",
     phase: "opening_hand",
     provider: "openai",

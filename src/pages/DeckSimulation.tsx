@@ -1898,7 +1898,7 @@ export function DeckSimulation({
                           className="text-sm font-medium text-foreground"
                           htmlFor="model-preset"
                         >
-                          Model preset
+                          Intellegence level
                         </label>
                         {modelPresetLoadError ? (
                           <div className="grid gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2">
@@ -1936,7 +1936,6 @@ export function DeckSimulation({
                           {modelPresets.map((preset) => (
                             <option key={preset.id} value={preset.id}>
                               {getLlmModelPresetLabel(preset)}
-                              {preset.isDefault ? " (default)" : ""}
                             </option>
                           ))}
                         </select>
@@ -3518,7 +3517,7 @@ function SimulationResultsPanel({
     ) : null
     const runMetadata = [
       run.status,
-      run.model,
+      run.llmModelPresetName ?? run.model,
       showRunCost ? getLlmRunEstimatedPriceText(run) : null,
       finishedDurationText ? `took ${finishedDurationText}` : null,
       run.processingMode === "openai_batch" ? "batch" : null,

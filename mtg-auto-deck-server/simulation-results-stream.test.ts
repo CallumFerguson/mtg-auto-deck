@@ -29,6 +29,7 @@ test("formats run library snapshots in stream events", () => {
     run: {
       llmRunId: "turn-run",
       llmModelPresetId: "preset-test",
+      llmModelPresetName: null,
       processingMode: "realtime",
       phase: "turn",
       provider: "openai",
@@ -332,6 +333,7 @@ function createRun(
   return {
     llmRunId: "run-id",
     llmModelPresetId: "preset-test",
+    llmModelPresetName: null,
     processingMode: "realtime",
     phase: "opening_hand",
     provider: "openai",

@@ -8,6 +8,7 @@ import {
 
 export type LlmModelPreset = {
   id: string
+  name: string | null
   provider: LlmProvider
   model: string
   reasoningEffort: ReasoningEffort
@@ -29,6 +30,7 @@ type AdminLlmModelPreset = LlmModelPreset & {
 }
 
 export type CreateLlmModelPresetInput = {
+  name: string | null
   provider: LlmProvider
   model: string
   reasoningEffort: ReasoningEffort
@@ -42,6 +44,7 @@ export type CreateLlmModelPresetInput = {
 }
 
 export type UpdateLlmModelPresetInput = {
+  name: string | null
   model: string
   reasoningEffort: ReasoningEffort
   openrouterModelProvider: string | null
@@ -55,6 +58,7 @@ export type CreateLlmModelPresetInsertQuery = {
   text: string
   values: [
     LlmProvider,
+    string | null,
     string,
     ReasoningEffort,
     string | null,
@@ -71,6 +75,7 @@ export type UpdateLlmModelPresetUpdateQuery = {
   text: string
   values: [
     string,
+    string | null,
     string,
     ReasoningEffort,
     string | null,
@@ -83,6 +88,7 @@ export type UpdateLlmModelPresetUpdateQuery = {
 
 type LlmModelPresetRow = {
   id: string
+  name: string | null
   provider: LlmProvider
   model: string
   reasoning_effort: ReasoningEffort
@@ -112,6 +118,7 @@ export class LlmModelPresetValidationError extends Error {
 const PROVIDER_VALUES = llmProviderSchema.options
 const REASONING_EFFORT_VALUES = reasoningEffortSchema.options
 const UPDATE_LLM_MODEL_PRESET_INPUT_KEYS = new Set([
+  "name",
   "model",
   "reasoningEffort",
   "openrouterModelProvider",
@@ -126,6 +133,7 @@ export async function ensureLlmModelPresetsSchema() {
     CREATE TABLE IF NOT EXISTS llm_model_presets (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 
+      name text,
       provider text NOT NULL,
       model text NOT NULL,
       reasoning_effort text NOT NULL,
@@ -142,6 +150,10 @@ export async function ensureLlmModelPresetsSchema() {
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now()
     )
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_model_presets
+    ADD COLUMN IF NOT EXISTS name text
   `)
   await queryDatabase(`
     ALTER TABLE llm_model_presets
@@ -221,6 +233,7 @@ export async function listAdminLlmModelPresets() {
   const result = await queryDatabase<AdminLlmModelPresetRow>(`
     SELECT
       preset.id,
+      preset.name,
       preset.provider,
       preset.model,
       preset.reasoning_effort,
@@ -326,6 +339,7 @@ function buildValidatedCreateLlmModelPresetInsertQuery(
     text: `
       INSERT INTO llm_model_presets (
         provider,
+        name,
         model,
         reasoning_effort,
         openrouter_model_provider,
@@ -336,9 +350,10 @@ function buildValidatedCreateLlmModelPresetInsertQuery(
         is_enabled,
         is_default
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       RETURNING
         id,
+        name,
         provider,
         model,
         reasoning_effort,
@@ -354,6 +369,7 @@ function buildValidatedCreateLlmModelPresetInsertQuery(
     `,
     values: [
       normalizedInput.provider,
+      normalizedInput.name,
       normalizedInput.model,
       normalizedInput.reasoningEffort,
       normalizedInput.openrouterModelProvider,
@@ -418,17 +434,19 @@ function buildValidatedUpdateLlmModelPresetUpdateQuery(
   return {
     text: `
       UPDATE llm_model_presets
-      SET model = $2,
-          reasoning_effort = $3,
-          openrouter_model_provider = $4,
-          supports_flex = $5,
-          input_token_cost_usd_per_million = $6,
-          cached_input_token_cost_usd_per_million = $7,
-          output_token_cost_usd_per_million = $8,
+      SET name = $2,
+          model = $3,
+          reasoning_effort = $4,
+          openrouter_model_provider = $5,
+          supports_flex = $6,
+          input_token_cost_usd_per_million = $7,
+          cached_input_token_cost_usd_per_million = $8,
+          output_token_cost_usd_per_million = $9,
           updated_at = now()
       WHERE id = $1
       RETURNING
         id,
+        name,
         provider,
         model,
         reasoning_effort,
@@ -444,6 +462,7 @@ function buildValidatedUpdateLlmModelPresetUpdateQuery(
     `,
     values: [
       presetId,
+      normalizedInput.name,
       normalizedInput.model,
       normalizedInput.reasoningEffort,
       normalizedInput.openrouterModelProvider,
@@ -468,6 +487,7 @@ export async function setLlmModelPresetEnabled(
       WHERE id = $1
       RETURNING
         id,
+        name,
         provider,
         model,
         reasoning_effort,
@@ -536,6 +556,7 @@ export async function setDefaultLlmModelPreset(presetId: string | null) {
         WHERE id = $1
         RETURNING
           id,
+          name,
           provider,
           model,
           reasoning_effort,
@@ -602,6 +623,7 @@ export async function deleteUnusedLlmModelPreset(presetId: string) {
 const LLM_MODEL_PRESET_SELECT_SQL = `
   SELECT
     id,
+    name,
     provider,
     model,
     reasoning_effort,
@@ -725,6 +747,7 @@ function validateCreateLlmModelPresetInput(
   }
 
   const model = input.model.trim()
+  const name = input.name?.trim() || null
 
   if (!model) {
     throw new LlmModelPresetValidationError("Model is required.")
@@ -746,6 +769,7 @@ function validateCreateLlmModelPresetInput(
 
   return {
     ...input,
+    name,
     provider: parsedProvider.data,
     model,
     reasoningEffort: parsedReasoningEffort.data,
@@ -804,6 +828,7 @@ function validateUpdateLlmModelPresetInput(
   }
 
   const model = input.model.trim()
+  const name = input.name?.trim() || null
 
   if (!model) {
     throw new LlmModelPresetValidationError("Model is required.")
@@ -813,6 +838,7 @@ function validateUpdateLlmModelPresetInput(
 
   return {
     ...input,
+    name,
     model,
     reasoningEffort: parsedReasoningEffort.data,
     openrouterModelProvider:
@@ -849,6 +875,7 @@ function validateOptionalCost(value: number | null, label: string) {
 function mapLlmModelPresetRow(row: LlmModelPresetRow): LlmModelPreset {
   return {
     id: row.id,
+    name: row.name,
     provider: row.provider,
     model: row.model,
     reasoningEffort: row.reasoning_effort,

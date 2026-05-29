@@ -230,6 +230,7 @@ export type RecordLlmRunMcpFunctionCallInput = {
 export type SimulationDebugLlmRun = {
   llmRunId: string
   llmModelPresetId: string | null
+  llmModelPresetName: string | null
   processingMode: LlmProcessingMode
   phase: LlmRunPhase
   provider: string
@@ -261,6 +262,7 @@ export type SimulationDebugLlmRun = {
 type SimulationDebugLlmRunMetadata = {
   llmRunId: string
   llmModelPresetId: string | null
+  llmModelPresetName: string | null
   processingMode: LlmProcessingMode
   phase: LlmRunPhase
   provider: string
@@ -4809,6 +4811,7 @@ export async function getTurnSimulationPromptData(
 type SimulationDebugLlmRunRow = {
   llm_run_id: string
   llm_model_preset_id: string | null
+  llm_model_preset_name: string | null
   processing_mode: LlmProcessingMode
   phase: LlmRunPhase
   provider: string
@@ -4859,6 +4862,7 @@ type SimulationDebugSimulationRow = {
 type SimulationDebugLlmRunMetadataRow = {
   llm_run_id: string
   llm_model_preset_id: string | null
+  llm_model_preset_name: string | null
   processing_mode: LlmProcessingMode
   phase: LlmRunPhase
   provider: string
@@ -4917,6 +4921,7 @@ async function getSimulationDebugLlmRunMetadata({
       SELECT
         llm_run.id AS llm_run_id,
         llm_run.llm_model_preset_id,
+        preset.name AS llm_model_preset_name,
         llm_run.processing_mode,
         llm_run.phase,
         COALESCE(preset.provider, llm_run.provider) AS provider,
@@ -4966,6 +4971,7 @@ function mapSimulationDebugLlmRunMetadataRow(
   const run: SimulationDebugLlmRunMetadata = {
     llmRunId: row.llm_run_id,
     llmModelPresetId: row.llm_model_preset_id,
+    llmModelPresetName: row.llm_model_preset_name,
     processingMode: row.processing_mode,
     phase: row.phase,
     provider: row.provider,
@@ -5025,6 +5031,7 @@ async function getSimulationDebugLlmRuns({
       SELECT
         llm_run.id AS llm_run_id,
         llm_run.llm_model_preset_id,
+        preset.name AS llm_model_preset_name,
         llm_run.processing_mode,
         llm_run.phase,
         COALESCE(preset.provider, llm_run.provider) AS provider,
@@ -5062,6 +5069,7 @@ async function getSimulationDebugLlmRuns({
       run = {
         llmRunId: row.llm_run_id,
         llmModelPresetId: row.llm_model_preset_id,
+        llmModelPresetName: row.llm_model_preset_name,
         processingMode: row.processing_mode,
         phase: row.phase,
         provider: row.provider,

@@ -50,6 +50,7 @@ import {
 import {
   formatProviderLabel,
   getLlmModelPresetLabel,
+  getLlmModelPresetTechnicalLabel,
   type AdminLlmModelPreset,
   type AdminLlmModelPresetsResponse,
   type LlmProvider,
@@ -107,6 +108,7 @@ type FloatingMenuPosition = {
 }
 
 type UpdateLlmModelPresetPayload = {
+  name: string | null
   model: string
   reasoningEffort: ReasoningEffort
   openrouterModelProvider: string | null
@@ -998,6 +1000,7 @@ function AdminModelPresetsSection() {
     null
   )
   const [form, setForm] = useState({
+    name: "",
     provider: "openai" as LlmProvider,
     model: "",
     reasoningEffort: "medium" as ReasoningEffort,
@@ -1058,6 +1061,7 @@ function AdminModelPresetsSection() {
           },
           body: JSON.stringify({
             provider: form.provider,
+            name: form.name.trim() || null,
             model,
             reasoningEffort: form.reasoningEffort,
             openrouterModelProvider:
@@ -1091,6 +1095,7 @@ function AdminModelPresetsSection() {
       await response.json()
       setForm((currentForm) => ({
         ...currentForm,
+        name: "",
         model: "",
         openrouterModelProvider: "",
         supportsFlex: false,
@@ -1245,6 +1250,19 @@ function AdminModelPresetsSection() {
             <h3 className="text-sm font-semibold">Add preset</h3>
           </div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <AdminFormField label="Name">
+              <input
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/30"
+                value={form.name}
+                placeholder="optional"
+                onChange={(event) =>
+                  setForm((currentForm) => ({
+                    ...currentForm,
+                    name: event.target.value,
+                  }))
+                }
+              />
+            </AdminFormField>
             <AdminFormField label="Provider">
               <select
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-3 focus:ring-ring/30"
@@ -1462,10 +1480,7 @@ function AdminModelPresetsSection() {
                         {getLlmModelPresetLabel(preset)}
                       </p>
                       <p className="text-xs break-words text-muted-foreground">
-                        {formatProviderLabel(preset.provider)}
-                        {preset.openrouterModelProvider
-                          ? ` via ${preset.openrouterModelProvider}`
-                          : ""}
+                        {getLlmModelPresetTechnicalLabel(preset)}
                         {preset.supportsFlex ? " / supports flex" : ""}
                       </p>
                     </div>
@@ -1908,6 +1923,7 @@ function EditLlmModelPresetModal({
   onSave: (payload: UpdateLlmModelPresetPayload) => void
   preset: AdminLlmModelPreset
 }) {
+  const [name, setName] = useState(preset.name ?? "")
   const [model, setModel] = useState(preset.model)
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(
     preset.reasoningEffort
@@ -1945,6 +1961,7 @@ function EditLlmModelPresetModal({
 
     setLocalError(null)
     onSave({
+      name: name.trim() || null,
       model: trimmedModel,
       reasoningEffort,
       openrouterModelProvider: isOpenRouterPreset
@@ -2010,6 +2027,15 @@ function EditLlmModelPresetModal({
 
         <form className="grid gap-4 px-5 py-5" onSubmit={handleSubmit}>
           <div className="grid gap-3 md:grid-cols-2">
+            <AdminFormField label="Name">
+              <input
+                className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:opacity-50"
+                value={name}
+                placeholder="optional"
+                disabled={isSaving}
+                onChange={(event) => setName(event.target.value)}
+              />
+            </AdminFormField>
             <AdminFormField label="Model">
               <input
                 className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:opacity-50"

@@ -10,6 +10,7 @@ export type ReasoningEffort =
 
 export type LlmModelPreset = {
   id: string
+  name: string | null
   provider: LlmProvider
   model: string
   reasoningEffort: ReasoningEffort
@@ -41,6 +42,21 @@ export type AdminLlmModelPresetsResponse = {
 }
 
 export function getLlmModelPresetLabel(
+  preset: Pick<
+    LlmModelPreset,
+    "model" | "name" | "openrouterModelProvider" | "provider" | "reasoningEffort"
+  >
+) {
+  const name = preset.name?.trim()
+
+  if (name) {
+    return name
+  }
+
+  return getLlmModelPresetTechnicalLabel(preset)
+}
+
+export function getLlmModelPresetTechnicalLabel(
   preset: Pick<
     LlmModelPreset,
     "model" | "openrouterModelProvider" | "provider" | "reasoningEffort"

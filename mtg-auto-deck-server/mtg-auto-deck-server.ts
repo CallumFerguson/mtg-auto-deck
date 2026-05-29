@@ -360,6 +360,7 @@ const optionalTokenCostSchema = z
   .nullable()
   .default(null)
 const createLlmModelPresetSchema = z.object({
+  name: z.string().trim().nullable().default(null),
   provider: llmProviderSchema,
   model: z.string().trim().min(1),
   reasoningEffort: reasoningEffortSchema,
@@ -373,6 +374,7 @@ const createLlmModelPresetSchema = z.object({
 })
 const updateLlmModelPresetSchema = z
   .object({
+    name: z.string().trim().nullable().default(null),
     model: z.string().trim().min(1),
     reasoningEffort: reasoningEffortSchema,
     openrouterModelProvider: z.string().trim().nullable().default(null),
@@ -407,6 +409,7 @@ type ActiveLlmRunRuntime = {
   deckId: string
   llmRunId: string
   llmModelPresetId: string
+  llmModelPresetName: string | null
   processingMode: LlmProcessingMode
   model: string
   fullPrompt: string
@@ -474,6 +477,7 @@ function createStreamRunFromRuntime(
   return {
     llmRunId: runtime.llmRunId,
     llmModelPresetId: runtime.llmModelPresetId,
+    llmModelPresetName: runtime.llmModelPresetName,
     processingMode: runtime.processingMode,
     phase: runtime.phase,
     provider: runtime.provider,
@@ -3606,6 +3610,7 @@ async function startClaimedQueuedLlmRun(run: ClaimedQueuedLlmRun) {
         deckId: run.deckId,
         fullPrompt: run.fullPrompt,
         llmRunId: run.llmRunId,
+        llmModelPresetName: modelPreset.name,
         reasoningSummariesEnabled: run.reasoningSummariesEnabled,
         runtimeStreamKey: run.runtimeStreamKey,
         simulationId: run.simulationId,
@@ -3639,6 +3644,7 @@ async function startClaimedQueuedLlmRun(run: ClaimedQueuedLlmRun) {
         deckId: run.deckId,
         fullPrompt: run.fullPrompt,
         llmRunId: run.llmRunId,
+        llmModelPresetName: modelPreset.name,
         reasoningSummariesEnabled: run.reasoningSummariesEnabled,
         runtimeStreamKey: run.runtimeStreamKey,
         simulationId: run.simulationId,
@@ -4784,6 +4790,7 @@ function startOpeningHandLlmRun({
   deckId,
   fullPrompt,
   llmRunId,
+  llmModelPresetName,
   reasoningSummariesEnabled,
   runtimeStreamKey,
   simulationId,
@@ -4795,6 +4802,7 @@ function startOpeningHandLlmRun({
   deckId: string
   fullPrompt: string
   llmRunId: string
+  llmModelPresetName: string | null
   reasoningSummariesEnabled: boolean
   runtimeStreamKey: string
   simulationId: string
@@ -4807,6 +4815,7 @@ function startOpeningHandLlmRun({
     deckId,
     fullPrompt,
     llmRunId,
+    llmModelPresetName,
     reasoningSummariesEnabled,
     runtimeStreamKey,
     simulationId,
@@ -4821,6 +4830,7 @@ async function runOpeningHandLlmRun({
   deckId,
   fullPrompt,
   llmRunId,
+  llmModelPresetName,
   reasoningSummariesEnabled,
   runtimeStreamKey,
   simulationId,
@@ -4832,6 +4842,7 @@ async function runOpeningHandLlmRun({
   deckId: string
   fullPrompt: string
   llmRunId: string
+  llmModelPresetName: string | null
   reasoningSummariesEnabled: boolean
   runtimeStreamKey: string
   simulationId: string
@@ -4846,6 +4857,7 @@ async function runOpeningHandLlmRun({
     deckId,
     llmRunId,
     llmModelPresetId: config.modelPresetId,
+    llmModelPresetName,
     processingMode: "realtime",
     model: config.model,
     fullPrompt,
@@ -5010,6 +5022,7 @@ function startTurnLlmRun({
   deckId,
   fullPrompt,
   llmRunId,
+  llmModelPresetName,
   reasoningSummariesEnabled,
   runtimeStreamKey,
   simulationId,
@@ -5022,6 +5035,7 @@ function startTurnLlmRun({
   deckId: string
   fullPrompt: string
   llmRunId: string
+  llmModelPresetName: string | null
   reasoningSummariesEnabled: boolean
   runtimeStreamKey: string
   simulationId: string
@@ -5035,6 +5049,7 @@ function startTurnLlmRun({
     deckId,
     fullPrompt,
     llmRunId,
+    llmModelPresetName,
     reasoningSummariesEnabled,
     runtimeStreamKey,
     simulationId,
@@ -5050,6 +5065,7 @@ async function runTurnLlmRun({
   deckId,
   fullPrompt,
   llmRunId,
+  llmModelPresetName,
   reasoningSummariesEnabled,
   runtimeStreamKey,
   simulationId,
@@ -5062,6 +5078,7 @@ async function runTurnLlmRun({
   deckId: string
   fullPrompt: string
   llmRunId: string
+  llmModelPresetName: string | null
   reasoningSummariesEnabled: boolean
   runtimeStreamKey: string
   simulationId: string
@@ -5077,6 +5094,7 @@ async function runTurnLlmRun({
     deckId,
     llmRunId,
     llmModelPresetId: config.modelPresetId,
+    llmModelPresetName,
     processingMode: "realtime",
     model: config.model,
     fullPrompt,

@@ -217,20 +217,15 @@ export function SimulationDetailsModal({
                 <div className="rounded-md border border-border bg-background/35 p-3 sm:col-span-2">
                   <dt className="text-muted-foreground">LLM options</dt>
                   <dd className="mt-2 grid gap-3">
-                    <SimulationLlmOptionsSetting
+                    <SimulationModelPresetSelector
                       deckId={deckId}
+                      modelPresets={modelPresets}
                       onSimulationUpdated={onSimulationUpdated}
                       selectedModelPreset={selectedModelPreset}
                       simulation={simulation}
                     />
-                  </dd>
-                </div>
-                <div className="rounded-md border border-border bg-background/35 p-3 sm:col-span-2">
-                  <dt className="text-muted-foreground">Model preset</dt>
-                  <dd className="mt-2">
-                    <SimulationModelPresetSelector
+                    <SimulationLlmOptionsSetting
                       deckId={deckId}
-                      modelPresets={modelPresets}
                       onSimulationUpdated={onSimulationUpdated}
                       selectedModelPreset={selectedModelPreset}
                       simulation={simulation}
@@ -566,7 +561,7 @@ function SimulationModelPresetSelector({
           className="text-sm font-medium text-foreground"
           htmlFor={`simulation-model-preset-${simulation.id}`}
         >
-          Model preset
+          Intellegence level
         </label>
         <select
           id={`simulation-model-preset-${simulation.id}`}
@@ -585,25 +580,20 @@ function SimulationModelPresetSelector({
           {modelPresets.map((preset) => (
             <option key={preset.id} value={preset.id}>
               {getLlmModelPresetLabel(preset)}
-              {preset.isDefault ? " (default)" : ""}
             </option>
           ))}
         </select>
       </div>
-      {selectedModelPreset ? (
-        <p className="text-sm text-muted-foreground">
-          {getLlmModelPresetLabel(selectedModelPreset)}
-        </p>
-      ) : simulation.llmModelPresetId ? (
+      {!selectedModelPreset && simulation.llmModelPresetId ? (
         <p className="rounded-md border border-amber-300/35 bg-amber-400/10 px-3 py-2 text-sm text-amber-100">
           The selected preset is disabled or unavailable. Future LLM calls are
           blocked until an enabled preset is selected.
         </p>
-      ) : (
+      ) : !selectedModelPreset ? (
         <p className="rounded-md border border-amber-300/35 bg-amber-400/10 px-3 py-2 text-sm text-amber-100">
           Select a model preset before starting future LLM calls.
         </p>
-      )}
+      ) : null}
       {error ? (
         <p
           className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
@@ -734,9 +724,10 @@ function SimulationDebugPanel({
           <DebugMetadataItem label="Status" value={debugInfo.status} />
           <DebugMetadataItem label="Created via" value={debugInfo.createdVia} />
           <DebugMetadataItem
-            label="Model preset"
+            label="Intellegence level"
             value={getDebugModelPresetLabel(
               debugInfo.llmModelPresetId,
+              null,
               modelPresets
             )}
           />
@@ -857,9 +848,10 @@ function SimulationDebugRunGroup({
               <DebugMetadataItem label="Provider" value={run.provider} />
               <DebugMetadataItem label="Model" value={run.model} />
               <DebugMetadataItem
-                label="Model preset"
+                label="Intellegence level"
                 value={getDebugModelPresetLabel(
                   run.llmModelPresetId,
+                  run.llmModelPresetName,
                   modelPresets
                 )}
               />
@@ -952,8 +944,13 @@ function DebugMetadataItem({
 
 function getDebugModelPresetLabel(
   presetId: string | null,
+  presetName: string | null,
   modelPresets: readonly LlmModelPreset[]
 ) {
+  if (presetName) {
+    return presetName
+  }
+
   if (!presetId) {
     return "N/A"
   }
