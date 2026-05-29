@@ -6,6 +6,7 @@ export function PublicSimulationApp() {
   const simulationId = getPublicSimulationIdFromPathname(
     window.location.pathname
   )
+  const demoMode = shouldEnablePublicSimulationDemoMode(window.location.search)
   const hideHeader = shouldHidePublicSimulationHeader(window.location.search)
 
   if (!simulationId) {
@@ -18,6 +19,7 @@ export function PublicSimulationApp() {
 
   return (
     <PublicSimulationPage
+      demoMode={demoMode}
       hideHeader={hideHeader}
       simulationId={simulationId}
     />
@@ -49,4 +51,10 @@ function shouldHidePublicSimulationHeader(search: string) {
   const hideHeaderValue = searchParams.get("hideHeader")
 
   return hideHeaderValue === "1" || hideHeaderValue === "true"
+}
+
+function shouldEnablePublicSimulationDemoMode(search: string) {
+  const searchParams = new URLSearchParams(search)
+
+  return searchParams.get("demo") === "true"
 }

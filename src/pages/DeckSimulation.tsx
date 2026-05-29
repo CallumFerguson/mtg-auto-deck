@@ -611,9 +611,11 @@ function UsageLimitReachedNotice({
 }
 
 export function PublicSimulationPage({
+  demoMode = false,
   hideHeader = false,
   simulationId,
 }: {
+  demoMode?: boolean
   hideHeader?: boolean
   simulationId: string
 }) {
@@ -705,6 +707,7 @@ export function PublicSimulationPage({
             cards={publicSimulation.deck.cards}
             commanders={publicSimulation.deck.commanders}
             defaultTimelineSelection="opening_hand"
+            demoMode={demoMode}
             deckId={publicSimulation.deck.id}
             initialResultsInfo={publicSimulation.results}
             isLoadingStartingHand={false}
@@ -2203,6 +2206,7 @@ function SimulationDetails({
   cards,
   commanders,
   defaultTimelineSelection = "latest",
+  demoMode = false,
   deckId,
   initialResultsInfo = null,
   isLoadingStartingHand,
@@ -2222,6 +2226,7 @@ function SimulationDetails({
   cards: DeckCard[]
   commanders: DeckCard[]
   defaultTimelineSelection?: SimulationResultsTimelineDefaultSelection
+  demoMode?: boolean
   deckId: string
   initialResultsInfo?: SimulationResultsInfo | null
   isLoadingStartingHand: boolean
@@ -2741,6 +2746,7 @@ function SimulationDetails({
       cards={cards}
       commanders={commanders}
       defaultTimelineSelection={defaultTimelineSelection}
+      demoMode={demoMode}
       hasUsableModelPreset={selectedModelPreset !== null}
       isStartingOpeningHandRun={isStartingOpeningHandRun}
       isStartingTurnRun={isStartingTurnRun}
@@ -2837,6 +2843,7 @@ function SimulationResultsPanel({
   cards,
   commanders,
   defaultTimelineSelection,
+  demoMode,
   hasUsableModelPreset,
   isStartingOpeningHandRun,
   isStartingTurnRun,
@@ -2868,6 +2875,7 @@ function SimulationResultsPanel({
   cards: DeckCard[]
   commanders: DeckCard[]
   defaultTimelineSelection: SimulationResultsTimelineDefaultSelection
+  demoMode: boolean
   hasUsableModelPreset: boolean
   isStartingOpeningHandRun: boolean
   isStartingTurnRun: boolean
@@ -3083,7 +3091,7 @@ function SimulationResultsPanel({
       resultEntries: getSimulationResultEntries(run.mcpFunctionCalls),
     })),
   ]
-  const timelineSteps = useMemo(
+  const allTimelineSteps = useMemo(
     () =>
       buildSimulationResultsTimelineSteps({
         hasPresetStartingHand,
@@ -3091,10 +3099,54 @@ function SimulationResultsPanel({
       }),
     [hasPresetStartingHand, resultsInfo]
   )
+  const demoTurnSteps = useMemo(
+    () => allTimelineSteps.filter(isSimulationTimelineTurnStep),
+    [allTimelineSteps]
+  )
+  const [demoRevealedTurnCount, setDemoRevealedTurnCount] = useState(0)
+
+  useEffect(() => {
+    setDemoRevealedTurnCount(0)
+  }, [demoMode, simulation.id])
+
+  const demoNextTurnStep =
+    demoMode && demoRevealedTurnCount < demoTurnSteps.length
+      ? demoTurnSteps[demoRevealedTurnCount]
+      : null
+  const timelineSteps = useMemo(() => {
+    if (!demoMode) {
+      return allTimelineSteps
+    }
+
+    let remainingRevealedTurns = demoRevealedTurnCount
+
+    return allTimelineSteps.filter((step) => {
+      if (step.kind !== "turn") {
+        return true
+      }
+
+      if (remainingRevealedTurns <= 0) {
+        return false
+      }
+
+      remainingRevealedTurns -= 1
+      return true
+    })
+  }, [allTimelineSteps, demoMode, demoRevealedTurnCount])
   const displayedTimelineSteps = useMemo<
     SimulationResultsDisplayTimelineStep[]
   >(() => {
     const steps: SimulationResultsDisplayTimelineStep[] = [...timelineSteps]
+
+    if (demoMode) {
+      const turnNumber = demoNextTurnStep?.run?.turnNumber
+
+      if (typeof turnNumber === "number") {
+        steps.push(createNextTurnTimelineStep(turnNumber, false, "Add turn"))
+      }
+
+      return steps
+    }
 
     if (renderedSimulationAction?.kind === "turn") {
       const turnNumber = renderedSimulationAction.turnNumber
@@ -3105,7 +3157,13 @@ function SimulationResultsPanel({
     }
 
     return steps
-  }, [isStartingTurnRun, renderedSimulationAction, timelineSteps])
+  }, [
+    demoMode,
+    demoNextTurnStep,
+    isStartingTurnRun,
+    renderedSimulationAction,
+    timelineSteps,
+  ])
   const [
     selectedTimelineStepIdPreference,
     setSelectedTimelineStepIdPreference,
@@ -3439,6 +3497,18 @@ function SimulationResultsPanel({
     )
   }
 
+  function revealNextDemoTurn() {
+    if (!demoNextTurnStep) {
+      return
+    }
+
+    setDemoRevealedTurnCount((currentCount) =>
+      Math.min(currentCount + 1, demoTurnSteps.length)
+    )
+    setSelectedTimelineStepIdPreference(demoNextTurnStep.id)
+    onKeepResultsScrolledToBottom()
+  }
+
   function renderTimelineHeader() {
     if (displayedTimelineSteps.length === 0) {
       return null
@@ -3497,6 +3567,11 @@ function SimulationResultsPanel({
                     onClick={() => {
                       if (step.kind === "simulate_turn") {
                         if (step.status === "starting_turn") {
+                          return
+                        }
+
+                        if (demoMode) {
+                          revealNextDemoTurn()
                           return
                         }
 
@@ -3650,16 +3725,21 @@ function getSimulationTimelineStepSelectionSnapshot(
 
 function createNextTurnTimelineStep(
   turnNumber: number,
-  isStartingTurnRun: boolean
+  isStartingTurnRun: boolean,
+  detailLabel = "Simulate next turn"
 ): SimulationResultsNextTurnTimelineStep {
   return {
     id: `action:turn:${turnNumber}`,
     kind: "simulate_turn",
     label: `Turn ${turnNumber}`,
-    detailLabel: "Simulate next turn",
+    detailLabel,
     status: isStartingTurnRun ? "starting_turn" : "next_turn",
     turnNumber,
   }
+}
+
+function isSimulationTimelineTurnStep(step: SimulationResultsTimelineStep) {
+  return step.kind === "turn"
 }
 
 function hasSimulationTimelineTurnStep(
