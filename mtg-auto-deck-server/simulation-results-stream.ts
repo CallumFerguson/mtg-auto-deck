@@ -181,7 +181,7 @@ export function redactSimulationResultsStreamEventCosts(
   return event
 }
 
-function redactSimulationResultsInfoCosts(
+export function redactSimulationResultsInfoCosts(
   results: SimulationResultsStreamInfo
 ): SimulationResultsStreamInfo {
   return {

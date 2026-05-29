@@ -3,6 +3,7 @@ import test from "node:test"
 import {
   SimulationResultsBroadcaster,
   formatSseEvent,
+  redactSimulationResultsInfoCosts,
   redactSimulationResultsStreamEventCosts,
   type SimulationResultsStreamEvent,
   type SimulationResultsStreamInfo,
@@ -108,6 +109,30 @@ test("redacts snapshot and done run costs when costs are excluded", () => {
     null
   )
   assert.equal(redactedDone.results.turnLlmRuns[0].estimatedPriceCents, null)
+})
+
+test("redacts result info run costs for exported JSON", () => {
+  const results = createResultsInfo({
+    openingHandLlmRuns: [
+      createRun({
+        estimatedPriceCents: "1.2",
+      }),
+    ],
+    turnLlmRuns: [
+      createRun({
+        estimatedPriceCents: "3.4",
+        phase: "turn",
+        turnNumber: 1,
+      }),
+    ],
+  })
+
+  const redactedResults = redactSimulationResultsInfoCosts(results)
+
+  assert.equal(redactedResults.openingHandLlmRuns[0].estimatedPriceCents, null)
+  assert.equal(redactedResults.turnLlmRuns[0].estimatedPriceCents, null)
+  assert.equal(results.openingHandLlmRuns[0].estimatedPriceCents, "1.2")
+  assert.equal(results.turnLlmRuns[0].estimatedPriceCents, "3.4")
 })
 
 test("redacts updated run costs when costs are excluded", () => {

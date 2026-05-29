@@ -207,6 +207,7 @@ import {
   SimulationResultsBroadcaster,
   formatSseComment,
   formatSseEvent,
+  redactSimulationResultsInfoCosts,
   redactSimulationResultsStreamEventCosts,
   type SimulationResultsStreamEvent,
   type SimulationResultsStreamInfo,
@@ -738,7 +739,9 @@ async function getPublicSimulationExport(deckId: string, simulationId: string) {
     deck,
     simulation,
     startingHand,
-    results: await getSimulationResultsInfo(deckId, simulationId),
+    results: redactSimulationResultsInfoCosts(
+      await getSimulationResultsInfo(deckId, simulationId)
+    ),
   } as const
 }
 
