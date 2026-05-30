@@ -117,6 +117,7 @@ export type ClaimedQueuedLlmRun = {
   createdAt: string
   startedAt: string
   fullPrompt: string
+  ownerUserId: string | null
   turnNumber?: number
 }
 
@@ -432,6 +433,7 @@ export type CreateSimulationInput = {
   turnsToSimulate: number
   reasoningSummariesEnabled?: boolean
   useFlexServiceTier?: boolean
+  forceFlexServiceTier?: boolean
   startingHandId: string | null
   createdVia?: SimulationCreatedVia
 }
@@ -1428,8 +1430,8 @@ export async function createSimulation(
   const seed = input.seed.trim()
   const createdVia = input.createdVia ?? "app"
   const llmModelPresetId = input.llmModelPresetId?.trim() || null
-  const llmProcessingMode = input.llmProcessingMode ?? "realtime"
-  const useFlexServiceTier = input.useFlexServiceTier ?? false
+  let llmProcessingMode = input.llmProcessingMode ?? "realtime"
+  let useFlexServiceTier = input.useFlexServiceTier ?? false
 
   if (!seed) {
     throw new SimulationValidationError("Simulation seed is required.")
@@ -1466,13 +1468,17 @@ export async function createSimulation(
     throw new SimulationValidationError("Deck not found.")
   }
 
-  if (llmProcessingMode === "openai_batch" && useFlexServiceTier) {
+  if (
+    !input.forceFlexServiceTier &&
+    llmProcessingMode === "openai_batch" &&
+    useFlexServiceTier
+  ) {
     throw new SimulationValidationError(
       "Batch processing cannot be combined with the flex service tier."
     )
   }
 
-  if (llmModelPresetId !== null) {
+    if (llmModelPresetId !== null) {
     const presetResult = await queryDatabase<{
       provider: string
       supports_flex: boolean
@@ -1488,6 +1494,11 @@ export async function createSimulation(
 
     if (presetResult.rowCount === 0) {
       throw new SimulationValidationError("Model preset not found or disabled.")
+    }
+
+    if (input.forceFlexServiceTier && presetResult.rows[0].supports_flex) {
+      llmProcessingMode = "realtime"
+      useFlexServiceTier = true
     }
 
     if (useFlexServiceTier && !presetResult.rows[0].supports_flex) {
@@ -1643,6 +1654,7 @@ export type UpdateSimulationInput = {
   llmProcessingMode?: LlmProcessingMode
   reasoningSummariesEnabled?: boolean
   useFlexServiceTier?: boolean
+  forceFlexServiceTier?: boolean
 }
 
 export async function updateSimulation(
@@ -1656,7 +1668,8 @@ export async function updateSimulation(
     trimmedPresetId === undefined &&
     input.llmProcessingMode === undefined &&
     input.reasoningSummariesEnabled === undefined &&
-    input.useFlexServiceTier === undefined
+    input.useFlexServiceTier === undefined &&
+    input.forceFlexServiceTier === undefined
   ) {
     throw new SimulationValidationError("Simulation update is required.")
   }
@@ -1666,6 +1679,7 @@ export async function updateSimulation(
   }
 
   if (
+    !input.forceFlexServiceTier &&
     input.llmProcessingMode === "openai_batch" &&
     input.useFlexServiceTier === true
   ) {
@@ -1729,7 +1743,8 @@ export async function updateSimulation(
     if (
       trimmedPresetId !== undefined ||
       nextUseFlexServiceTier ||
-      nextProcessingMode === "openai_batch"
+      nextProcessingMode === "openai_batch" ||
+      (input.forceFlexServiceTier && targetPresetId !== null)
     ) {
       if (!targetPresetId) {
         throw new SimulationValidationError("Model preset is required.")
@@ -1760,6 +1775,17 @@ export async function updateSimulation(
 
       const targetPreset = presetResult.rows[0]
       const supportsFlex = targetPreset.supports_flex
+
+      if (
+        input.forceFlexServiceTier &&
+        supportsFlex &&
+        (input.useFlexServiceTier === false ||
+          input.llmProcessingMode === "openai_batch")
+      ) {
+        throw new SimulationValidationError(
+          "Free tier users must enable flex processing before starting LLM runs."
+        )
+      }
 
       if (
         nextProcessingMode === "openai_batch" &&
@@ -3483,6 +3509,7 @@ export async function claimNextQueuedLlmRun({
       createdAt: run.created_at.toISOString(),
       startedAt: claimed.started_at.toISOString(),
       fullPrompt: run.full_prompt,
+      ownerUserId: run.owner_user_id,
     }
 
     if (run.turn_number !== null) {

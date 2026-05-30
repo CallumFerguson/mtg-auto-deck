@@ -9,6 +9,7 @@ import {
 
 import { Button } from "@/components/ui/button"
 import { loadApiHelpers } from "@/lib/api-lazy"
+import { useOptionalBillingTier } from "@/lib/billing-tier-state"
 import type {
   LlmProcessingMode,
   Simulation,
@@ -25,7 +26,10 @@ import {
   getLlmRunEstimatedPriceText,
   getSimulationRunFinishedDurationText,
 } from "./simulationRunFormatting"
-import { FlexServiceTierSwitch } from "./SimulationSetupControls"
+import {
+  FlexServiceTierRequiredModal,
+  FlexServiceTierSwitch,
+} from "./SimulationSetupControls"
 
 export function SimulationDetailsModal({
   deckId,
@@ -340,19 +344,28 @@ function SimulationLlmOptionsSetting({
   selectedModelPreset: LlmModelPreset | null
   simulation: Simulation
 }) {
+  const billingTierContext = useOptionalBillingTier()
+  const isFreeBillingTier = billingTierContext
+    ? billingTierContext.hasLoadedBillingTier &&
+      billingTierContext.billingTier === "free"
+    : true
   const [selectedProcessingMode, setSelectedProcessingMode] =
     useState<LlmProcessingMode>(simulation.llmProcessingMode)
   const [selectedUseFlexServiceTier, setSelectedUseFlexServiceTier] = useState(
     simulation.useFlexServiceTier
   )
   const [isSaving, setIsSaving] = useState(false)
+  const [isFlexRequiredModalOpen, setIsFlexRequiredModalOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const supportsFlex = Boolean(selectedModelPreset?.supportsFlex)
   const isLocked =
     simulation.status === "running" || simulation.activeLlmRunCount > 0
   const isBatchEnabled = selectedProcessingMode === "openai_batch"
+  const isFreeTierFlexRestricted = isFreeBillingTier && supportsFlex
   const flexChecked =
     selectedProcessingMode === "realtime" && selectedUseFlexServiceTier
+  const shouldShowFreeTierFlexWarning =
+    isFreeTierFlexRestricted && !flexChecked
 
   useEffect(() => {
     setSelectedProcessingMode(simulation.llmProcessingMode)
@@ -366,6 +379,13 @@ function SimulationLlmOptionsSetting({
 
   async function handleFlexServiceTierChange(nextUseFlexServiceTier: boolean) {
     const nextProcessingMode: LlmProcessingMode = "realtime"
+
+    if (isFreeTierFlexRestricted && flexChecked && !nextUseFlexServiceTier) {
+      setSelectedProcessingMode(nextProcessingMode)
+      setSelectedUseFlexServiceTier(true)
+      setIsFlexRequiredModalOpen(true)
+      return
+    }
 
     if (
       isSaving ||
@@ -422,38 +442,51 @@ function SimulationLlmOptionsSetting({
   }
 
   return (
-    <div className="grid gap-2">
-      {isBatchEnabled ? (
-        <p className="rounded-md border border-sky-300/35 bg-sky-400/10 px-3 py-2 text-sm font-medium text-sky-100">
-          Batch processing enabled
-        </p>
+    <>
+      <div className="grid gap-2">
+        {isBatchEnabled ? (
+          <p className="rounded-md border border-sky-300/35 bg-sky-400/10 px-3 py-2 text-sm font-medium text-sky-100">
+            Batch processing enabled
+          </p>
+        ) : null}
+        <FlexServiceTierSwitch
+          checked={flexChecked}
+          disabled={isSaving || isLocked || !supportsFlex}
+          label="Flex processing"
+          activeWarning="Less usage, but simulation may be slower and has a higher chance of failing."
+          onCheckedChange={(nextEnabled) =>
+            void handleFlexServiceTierChange(nextEnabled)
+          }
+        />
+        {shouldShowFreeTierFlexWarning ? (
+          <p className="rounded-md border border-amber-300/35 bg-amber-400/10 px-3 py-2 text-sm text-amber-100">
+            Free tier users must use flex processing before starting LLM calls.
+          </p>
+        ) : null}
+        {isLocked ? (
+          <p className="text-sm text-muted-foreground">
+            Processing options are locked while this simulation is running.
+          </p>
+        ) : null}
+        {isSaving ? (
+          <p className="text-sm text-muted-foreground">Saving...</p>
+        ) : null}
+        {error ? (
+          <p
+            className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            role="alert"
+          >
+            {error}
+          </p>
+        ) : null}
+      </div>
+
+      {isFlexRequiredModalOpen ? (
+        <FlexServiceTierRequiredModal
+          onClose={() => setIsFlexRequiredModalOpen(false)}
+        />
       ) : null}
-      <FlexServiceTierSwitch
-        checked={flexChecked}
-        disabled={isSaving || isLocked || !supportsFlex}
-        label="Flex processing"
-        activeWarning="Less usage, but simulation may be slower and has a higher chance of failing."
-        onCheckedChange={(nextEnabled) =>
-          void handleFlexServiceTierChange(nextEnabled)
-        }
-      />
-      {isLocked ? (
-        <p className="text-sm text-muted-foreground">
-          Processing options are locked while this simulation is running.
-        </p>
-      ) : null}
-      {isSaving ? (
-        <p className="text-sm text-muted-foreground">Saving...</p>
-      ) : null}
-      {error ? (
-        <p
-          className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-          role="alert"
-        >
-          {error}
-        </p>
-      ) : null}
-    </div>
+    </>
   )
 }
 

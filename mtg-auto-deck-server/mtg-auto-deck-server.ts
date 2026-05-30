@@ -258,6 +258,8 @@ const OPENAI_BATCH_TMP_PREFIX = "mtg-auto-deck-openai-batch-"
 const QUEUED_MCP_RUN_TOKEN_PLACEHOLDER = "queued"
 const SUBMITTED_BATCH_RUN_STOP_MESSAGE =
   "Submitted batch runs cannot be stopped. Stop future turns instead."
+const FREE_TIER_FLEX_PROCESSING_REQUIRED_MESSAGE =
+  "Free tier users must enable flex processing before starting LLM runs."
 const LOOPBACK_ALLOWED_ORIGINS = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
@@ -2409,6 +2411,17 @@ async function getRequiredEnabledSimulationLlmModelPreset(
     )
   }
 
+  if (
+    preset.supportsFlex &&
+    (await isFreeTierSimulationOwner(deckId, simulationId)) &&
+    (simulation.llmProcessingMode !== "realtime" ||
+      !simulation.useFlexServiceTier)
+  ) {
+    throw new SimulationValidationError(
+      FREE_TIER_FLEX_PROCESSING_REQUIRED_MESSAGE
+    )
+  }
+
   return {
     preset,
     llmProcessingMode: simulation.llmProcessingMode,
@@ -2849,7 +2862,13 @@ async function submitPendingOpenAiBatches(config: LlmRunQueueConfig) {
 }
 
 async function submitOpenAiBatchRunGroup(runs: OpenAiBatchPendingRun[]) {
-  const usageAllowedRuns = await filterUsageAllowedOpenAiBatchRuns(runs)
+  const flexAllowedRuns = await filterFlexAllowedOpenAiBatchRuns(runs)
+
+  if (flexAllowedRuns.length === 0) {
+    return
+  }
+
+  const usageAllowedRuns = await filterUsageAllowedOpenAiBatchRuns(flexAllowedRuns)
 
   if (usageAllowedRuns.length === 0) {
     return
@@ -2904,22 +2923,58 @@ async function failPreparedOpenAiBatchRuns(
   }
 
   for (const run of runs) {
-    await failLlmRun(run.llmRunId, failureMessage).catch(
-      (failError: unknown) => {
-        console.error("Failed to mark OpenAI batch run failed:", failError)
-      }
-    )
-    await publishSimulationResultsState({
-      deckId: run.deckId,
-      llmRunId: run.llmRunId,
-      simulationId: run.simulationId,
-    }).catch((publishError: unknown) => {
-      console.error(
-        "Failed to publish failed OpenAI batch run state:",
-        publishError
-      )
-    })
+    await failOpenAiBatchRun(run, failureMessage)
   }
+}
+
+async function filterFlexAllowedOpenAiBatchRuns(
+  runs: OpenAiBatchPendingRun[]
+) {
+  const allowedRuns: OpenAiBatchPendingRun[] = []
+
+  for (const run of runs) {
+    let modelPreset: LlmModelPreset
+
+    try {
+      modelPreset = await getRequiredOpenAiBatchRunModelPreset(run)
+    } catch (error) {
+      await failOpenAiBatchRun(run, getErrorMessage(error))
+      continue
+    }
+
+    if (await shouldFailRunForMissingFlex(run, modelPreset)) {
+      await failOpenAiBatchRun(
+        run,
+        FREE_TIER_FLEX_PROCESSING_REQUIRED_MESSAGE
+      )
+      continue
+    }
+
+    allowedRuns.push(run)
+  }
+
+  return allowedRuns
+}
+
+async function failOpenAiBatchRun(
+  run: OpenAiBatchPendingRun,
+  failureMessage: string
+) {
+  await failLlmRun(run.llmRunId, failureMessage).catch(
+    (failError: unknown) => {
+      console.error("Failed to mark OpenAI batch run failed:", failError)
+    }
+  )
+  await publishSimulationResultsState({
+    deckId: run.deckId,
+    llmRunId: run.llmRunId,
+    simulationId: run.simulationId,
+  }).catch((publishError: unknown) => {
+    console.error(
+      "Failed to publish failed OpenAI batch run state:",
+      publishError
+    )
+  })
 }
 
 async function filterUsageAllowedOpenAiBatchRuns(
@@ -3589,6 +3644,14 @@ async function startClaimedQueuedLlmRun(run: ClaimedQueuedLlmRun) {
   try {
     const modelPreset = await getRequiredEnabledQueuedRunLlmModelPreset(run)
 
+    if (await shouldFailQueuedRunForMissingFlex(run, modelPreset)) {
+      await failClaimedQueuedLlmRun(
+        run,
+        FREE_TIER_FLEX_PROCESSING_REQUIRED_MESSAGE
+      )
+      return
+    }
+
     if (run.phase === "opening_hand") {
       const config = withCapturedLlmRunServiceTier(
         await resolveLlmRunConfigModel(
@@ -3658,6 +3721,33 @@ async function startClaimedQueuedLlmRun(run: ClaimedQueuedLlmRun) {
     console.error("Failed to start queued LLM run:", error)
     await failClaimedQueuedLlmRun(run, getErrorMessage(error))
   }
+}
+
+async function shouldFailQueuedRunForMissingFlex(
+  run: ClaimedQueuedLlmRun,
+  modelPreset: LlmModelPreset
+) {
+  return shouldFailRunForMissingFlex(run, modelPreset)
+}
+
+async function shouldFailRunForMissingFlex(
+  run: { ownerUserId: string | null; serviceTier: string | null },
+  modelPreset: LlmModelPreset
+) {
+  if (
+    run.ownerUserId === null ||
+    !modelPreset.supportsFlex ||
+    run.serviceTier === "flex"
+  ) {
+    return false
+  }
+
+  const billingTierSummary = await getUserBillingTierSummary(
+    { query: queryDatabase },
+    run.ownerUserId
+  )
+
+  return billingTierSummary.effectiveTier === "free"
 }
 
 function assertClaimedRunMatchesConfig(
@@ -6174,9 +6264,12 @@ async function main() {
       }
 
       try {
+        const forceFlexServiceTier =
+          await shouldForceFlexServiceTierForRequest(req)
         const simulation = await createSimulation(deckId, {
           ...parsedSimulation.data,
           createdVia: "app",
+          forceFlexServiceTier,
         })
         createdSimulationId = simulation.id
 
@@ -6650,10 +6743,15 @@ async function main() {
       }
 
       try {
+        const forceFlexServiceTier =
+          await shouldForceFlexServiceTierForRequest(req)
         const simulation = await updateSimulation(
           deckId,
           simulationId,
-          parsedUpdate.data
+          {
+            ...parsedUpdate.data,
+            forceFlexServiceTier,
+          }
         )
 
         await publishSimulationResultsState({
@@ -7263,6 +7361,44 @@ function getAuthenticatedUser(req: Request) {
   }
 
   return user
+}
+
+async function shouldForceFlexServiceTierForRequest(req: Request) {
+  const billingTierSummary = await getUserBillingTierSummary(
+    { query: queryDatabase },
+    getAuthenticatedUser(req).id
+  )
+
+  return billingTierSummary.effectiveTier === "free"
+}
+
+async function isFreeTierSimulationOwner(
+  deckId: string,
+  simulationId: string
+) {
+  const result = await queryDatabase<{ owner_user_id: string | null }>(
+    `
+      SELECT deck.owner_user_id
+      FROM simulations simulation
+      JOIN decks deck
+        ON deck.id = simulation.deck_id
+      WHERE simulation.id = $1
+        AND simulation.deck_id = $2
+    `,
+    [simulationId, deckId]
+  )
+  const ownerUserId = result.rows[0]?.owner_user_id
+
+  if (!ownerUserId) {
+    return false
+  }
+
+  const billingTierSummary = await getUserBillingTierSummary(
+    { query: queryDatabase },
+    ownerUserId
+  )
+
+  return billingTierSummary.effectiveTier === "free"
 }
 
 function requireAdminUser(req: Request, res: Response) {

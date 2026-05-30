@@ -113,6 +113,7 @@ import {
 } from "./deck-simulation/simulationRunFormatting"
 import { SimulationDetailsModal } from "./deck-simulation/SimulationDetailsModal"
 import {
+  FlexServiceTierRequiredModal,
   FlexServiceTierSwitch,
   SimulationSetupChoiceCard,
 } from "./deck-simulation/SimulationSetupControls"
@@ -767,6 +768,11 @@ export function DeckSimulation({
   selectedSimulationIdFromUrl: string | null
 }) {
   const navigate = useNavigate()
+  const billingTierContext = useOptionalBillingTier()
+  const isFreeBillingTier = billingTierContext
+    ? billingTierContext.hasLoadedBillingTier &&
+      billingTierContext.billingTier === "free"
+    : true
   const [simulations, setSimulations] = useState<Simulation[]>([])
   const [isLoadingSimulations, setIsLoadingSimulations] = useState(true)
   const [startingHands, setStartingHands] = useState<StartingHand[]>([])
@@ -809,6 +815,7 @@ export function DeckSimulation({
   const [isChooseSeedModalOpen, setIsChooseSeedModalOpen] = useState(false)
   const [isCreateHandModalOpen, setIsCreateHandModalOpen] = useState(false)
   const [isCreateSeedModalOpen, setIsCreateSeedModalOpen] = useState(false)
+  const [isFlexRequiredModalOpen, setIsFlexRequiredModalOpen] = useState(false)
   const [createSimulationError, setCreateSimulationError] = useState<
     string | null
   >(null)
@@ -862,6 +869,11 @@ export function DeckSimulation({
   const selectedModelPresetSupportsFlex = Boolean(
     selectedModelPreset?.supportsFlex
   )
+  const isCreateSimulationFlexRequired =
+    isFreeBillingTier && selectedModelPresetSupportsFlex
+  const effectiveCreateSimulationUseFlexServiceTier =
+    selectedModelPresetSupportsFlex &&
+    (isCreateSimulationFlexRequired || useFlexServiceTier)
   const isModelPresetSelectionResolved =
     !isLoadingModelPresets &&
     (modelPresetLoadError !== null ||
@@ -939,6 +951,15 @@ export function DeckSimulation({
     Boolean(selectedModelPreset) &&
     turnsToSimulate.length > 0 &&
     (openingHandMode !== "provide" || Boolean(selectedOpeningHand))
+
+  useEffect(() => {
+    if (!isCreateSimulationFlexRequired || useFlexServiceTier) {
+      return
+    }
+
+    setUseFlexServiceTier(true)
+    storeCreateSimulationUseFlexServiceTier(true)
+  }, [isCreateSimulationFlexRequired, useFlexServiceTier])
 
   const loadSimulations = useCallback(
     async (options?: { silent?: boolean }) => {
@@ -1385,6 +1406,13 @@ export function DeckSimulation({
   }
 
   function handleCreateSimulationUseFlexChange(nextEnabled: boolean) {
+    if (isCreateSimulationFlexRequired && !nextEnabled) {
+      setUseFlexServiceTier(true)
+      storeCreateSimulationUseFlexServiceTier(true)
+      setIsFlexRequiredModalOpen(true)
+      return
+    }
+
     setUseFlexServiceTier(nextEnabled)
     storeCreateSimulationUseFlexServiceTier(nextEnabled)
   }
@@ -1428,8 +1456,7 @@ export function DeckSimulation({
             llmModelPresetId: selectedModelPreset.id,
             turnsToSimulate: parsedTurnsToSimulate,
             llmProcessingMode: "realtime",
-            useFlexServiceTier:
-              selectedModelPreset.supportsFlex && useFlexServiceTier,
+            useFlexServiceTier: effectiveCreateSimulationUseFlexServiceTier,
             startingHandId:
               openingHandMode === "provide" && selectedOpeningHand
                 ? selectedOpeningHand.id
@@ -1920,10 +1947,7 @@ export function DeckSimulation({
                       {isModelPresetSelectionResolved ? (
                         <div className="grid gap-3">
                           <FlexServiceTierSwitch
-                            checked={
-                              selectedModelPresetSupportsFlex &&
-                              useFlexServiceTier
-                            }
+                            checked={effectiveCreateSimulationUseFlexServiceTier}
                             disabled={!selectedModelPresetSupportsFlex}
                             label="Flex processing"
                             activeWarning="Less usage, but simulation may be slower and has a higher chance of failing."
@@ -2028,6 +2052,12 @@ export function DeckSimulation({
           deckId={deckId}
           onClose={() => setIsCreateSeedModalOpen(false)}
           onSaved={selectCreatedSavedSeed}
+        />
+      ) : null}
+
+      {isFlexRequiredModalOpen ? (
+        <FlexServiceTierRequiredModal
+          onClose={() => setIsFlexRequiredModalOpen(false)}
         />
       ) : null}
 
@@ -2721,6 +2751,7 @@ function SimulationDetails({
       defaultTimelineSelection={defaultTimelineSelection}
       demoMode={demoMode}
       hasUsableModelPreset={selectedModelPreset !== null}
+      selectedModelPresetSupportsFlex={Boolean(selectedModelPreset?.supportsFlex)}
       isStartingOpeningHandRun={isStartingOpeningHandRun}
       isStartingTurnRun={isStartingTurnRun}
       isLoadingStartingHand={isLoadingStartingHand}
@@ -2822,6 +2853,7 @@ function SimulationResultsPanel({
   defaultTimelineSelection,
   demoMode,
   hasUsableModelPreset,
+  selectedModelPresetSupportsFlex,
   isStartingOpeningHandRun,
   isStartingTurnRun,
   isLoadingStartingHand,
@@ -2855,6 +2887,7 @@ function SimulationResultsPanel({
   defaultTimelineSelection: SimulationResultsTimelineDefaultSelection
   demoMode: boolean
   hasUsableModelPreset: boolean
+  selectedModelPresetSupportsFlex: boolean
   isStartingOpeningHandRun: boolean
   isStartingTurnRun: boolean
   isLoadingStartingHand: boolean
@@ -2897,6 +2930,13 @@ function SimulationResultsPanel({
     canUpgradeUsage &&
     hasLoadedBillingTier &&
     (billingTier === "free" || billingTier === "plus")
+  const isFreeTierFlexProcessingRequired =
+    !readOnly &&
+    hasLoadedBillingTier &&
+    billingTier === "free" &&
+    selectedModelPresetSupportsFlex &&
+    (simulation.llmProcessingMode !== "realtime" ||
+      !simulation.useFlexServiceTier)
   const isOpeningHandRunning = resultsInfo.openingHandLlmRuns.some((run) =>
     isActiveLlmRunStatus(run.status)
   )
@@ -3047,6 +3087,19 @@ function SimulationResultsPanel({
 
     onModelPresetRequired()
     return false
+  }
+
+  function canContinueWithFlexProcessing() {
+    if (!isFreeTierFlexProcessingRequired) {
+      return true
+    }
+
+    onModelPresetRequired()
+    return false
+  }
+
+  function canContinueWithSimulationSetup() {
+    return canContinueWithModelPreset() && canContinueWithFlexProcessing()
   }
 
   const runs = [
@@ -3621,7 +3674,7 @@ function SimulationResultsPanel({
                       : `Rerun turn ${run.turnNumber}`
                   }
                   onClick={() => {
-                    if (!canContinueWithModelPreset()) {
+                    if (!canContinueWithSimulationSetup()) {
                       return
                     }
 
@@ -3785,7 +3838,7 @@ function SimulationResultsPanel({
                           return
                         }
 
-                        if (!canContinueWithModelPreset()) {
+                        if (!canContinueWithSimulationSetup()) {
                           return
                         }
 
