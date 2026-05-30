@@ -103,6 +103,10 @@ import {
   getKnownSimulationResultToolLabel,
   getSimulationResultToolReason,
 } from "@/lib/simulation-result-tool-labels"
+import {
+  getPublicSimulationJsonUrl,
+  getPublicSimulationLoadFailureMessage,
+} from "@/lib/public-simulation-url"
 import { useOptionalUsageLimits } from "@/lib/usage-limits"
 import {
   formatMinutesSeconds,
@@ -651,10 +655,12 @@ function UsageLimitReachedNotice({
 }
 
 export function PublicSimulationPage({
+  bundled = false,
   demoMode = false,
   hideHeader = false,
   simulationId,
 }: {
+  bundled?: boolean
   demoMode?: boolean
   hideHeader?: boolean
   simulationId: string
@@ -670,7 +676,10 @@ export function PublicSimulationPage({
 
     try {
       const response = await fetch(
-        `/simulations/${encodeURIComponent(simulationId)}.json`,
+        getPublicSimulationJsonUrl({
+          bundled,
+          simulationId,
+        }),
         {
           credentials: "omit",
         }
@@ -693,12 +702,12 @@ export function PublicSimulationPage({
       }
 
       setPublicSimulation(redactPublicSimulationRunCosts(data))
-    } catch {
-      setLoadError("Public simulation could not be loaded.")
+    } catch (error) {
+      setLoadError(getPublicSimulationLoadFailureMessage(error))
     } finally {
       setIsLoading(false)
     }
-  }, [simulationId])
+  }, [bundled, simulationId])
 
   useEffect(() => {
     void loadPublicSimulation()

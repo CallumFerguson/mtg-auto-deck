@@ -8,6 +8,7 @@ export function PublicSimulationApp() {
   )
   const demoMode = shouldEnablePublicSimulationDemoMode(window.location.search)
   const hideHeader = shouldHidePublicSimulationHeader(window.location.search)
+  const bundled = shouldLoadBundledPublicSimulation(window.location.search)
 
   if (!simulationId) {
     return (
@@ -19,6 +20,7 @@ export function PublicSimulationApp() {
 
   return (
     <PublicSimulationPage
+      bundled={bundled}
       demoMode={demoMode}
       hideHeader={hideHeader}
       simulationId={simulationId}
@@ -57,4 +59,10 @@ function shouldEnablePublicSimulationDemoMode(search: string) {
   const searchParams = new URLSearchParams(search)
 
   return searchParams.get("demo") === "true"
+}
+
+function shouldLoadBundledPublicSimulation(search: string) {
+  const searchParams = new URLSearchParams(search)
+
+  return searchParams.get("bundled") === "true"
 }
