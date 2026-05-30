@@ -16,6 +16,7 @@ export type LlmModelPreset = {
   reasoningEffort: ReasoningEffort
   openrouterModelProvider: string | null
   supportsFlex: boolean
+  isFreeTier: boolean
   inputTokenCostUsdPerMillion: number | null
   cachedInputTokenCostUsdPerMillion: number | null
   outputTokenCostUsdPerMillion: number | null

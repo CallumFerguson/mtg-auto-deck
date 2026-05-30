@@ -260,6 +260,8 @@ const SUBMITTED_BATCH_RUN_STOP_MESSAGE =
   "Submitted batch runs cannot be stopped. Stop future turns instead."
 const FREE_TIER_FLEX_PROCESSING_REQUIRED_MESSAGE =
   "Free tier users must enable flex processing before starting LLM runs."
+const FREE_TIER_MODEL_PRESET_REQUIRED_MESSAGE =
+  "Free tier users must choose a free tier model preset before starting LLM runs."
 const LOOPBACK_ALLOWED_ORIGINS = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
@@ -368,6 +370,7 @@ const createLlmModelPresetSchema = z.object({
   reasoningEffort: reasoningEffortSchema,
   openrouterModelProvider: z.string().trim().nullable().default(null),
   supportsFlex: z.boolean().default(false),
+  isFreeTier: z.boolean().default(false),
   inputTokenCostUsdPerMillion: optionalTokenCostSchema,
   cachedInputTokenCostUsdPerMillion: optionalTokenCostSchema,
   outputTokenCostUsdPerMillion: optionalTokenCostSchema,
@@ -381,6 +384,7 @@ const updateLlmModelPresetSchema = z
     reasoningEffort: reasoningEffortSchema,
     openrouterModelProvider: z.string().trim().nullable().default(null),
     supportsFlex: z.boolean().default(false),
+    isFreeTier: z.boolean().default(false),
     inputTokenCostUsdPerMillion: optionalTokenCostSchema,
     cachedInputTokenCostUsdPerMillion: optionalTokenCostSchema,
     outputTokenCostUsdPerMillion: optionalTokenCostSchema,
@@ -2411,9 +2415,17 @@ async function getRequiredEnabledSimulationLlmModelPreset(
     )
   }
 
+  const isFreeTierOwner = await isFreeTierSimulationOwner(deckId, simulationId)
+
+  if (isFreeTierOwner && !preset.isFreeTier) {
+    throw new SimulationValidationError(
+      FREE_TIER_MODEL_PRESET_REQUIRED_MESSAGE
+    )
+  }
+
   if (
+    isFreeTierOwner &&
     preset.supportsFlex &&
-    (await isFreeTierSimulationOwner(deckId, simulationId)) &&
     (simulation.llmProcessingMode !== "realtime" ||
       !simulation.useFlexServiceTier)
   ) {
@@ -2862,13 +2874,16 @@ async function submitPendingOpenAiBatches(config: LlmRunQueueConfig) {
 }
 
 async function submitOpenAiBatchRunGroup(runs: OpenAiBatchPendingRun[]) {
-  const flexAllowedRuns = await filterFlexAllowedOpenAiBatchRuns(runs)
+  const freeTierPolicyAllowedRuns =
+    await filterFreeTierPolicyAllowedOpenAiBatchRuns(runs)
 
-  if (flexAllowedRuns.length === 0) {
+  if (freeTierPolicyAllowedRuns.length === 0) {
     return
   }
 
-  const usageAllowedRuns = await filterUsageAllowedOpenAiBatchRuns(flexAllowedRuns)
+  const usageAllowedRuns = await filterUsageAllowedOpenAiBatchRuns(
+    freeTierPolicyAllowedRuns
+  )
 
   if (usageAllowedRuns.length === 0) {
     return
@@ -2927,7 +2942,7 @@ async function failPreparedOpenAiBatchRuns(
   }
 }
 
-async function filterFlexAllowedOpenAiBatchRuns(
+async function filterFreeTierPolicyAllowedOpenAiBatchRuns(
   runs: OpenAiBatchPendingRun[]
 ) {
   const allowedRuns: OpenAiBatchPendingRun[] = []
@@ -2942,11 +2957,11 @@ async function filterFlexAllowedOpenAiBatchRuns(
       continue
     }
 
-    if (await shouldFailRunForMissingFlex(run, modelPreset)) {
-      await failOpenAiBatchRun(
-        run,
-        FREE_TIER_FLEX_PROCESSING_REQUIRED_MESSAGE
-      )
+    const freeTierPolicyFailureMessage =
+      await getFreeTierRunPolicyFailureMessage(run, modelPreset)
+
+    if (freeTierPolicyFailureMessage) {
+      await failOpenAiBatchRun(run, freeTierPolicyFailureMessage)
       continue
     }
 
@@ -3644,11 +3659,11 @@ async function startClaimedQueuedLlmRun(run: ClaimedQueuedLlmRun) {
   try {
     const modelPreset = await getRequiredEnabledQueuedRunLlmModelPreset(run)
 
-    if (await shouldFailQueuedRunForMissingFlex(run, modelPreset)) {
-      await failClaimedQueuedLlmRun(
-        run,
-        FREE_TIER_FLEX_PROCESSING_REQUIRED_MESSAGE
-      )
+    const freeTierPolicyFailureMessage =
+      await getFreeTierRunPolicyFailureMessage(run, modelPreset)
+
+    if (freeTierPolicyFailureMessage) {
+      await failClaimedQueuedLlmRun(run, freeTierPolicyFailureMessage)
       return
     }
 
@@ -3723,31 +3738,27 @@ async function startClaimedQueuedLlmRun(run: ClaimedQueuedLlmRun) {
   }
 }
 
-async function shouldFailQueuedRunForMissingFlex(
-  run: ClaimedQueuedLlmRun,
-  modelPreset: LlmModelPreset
-) {
-  return shouldFailRunForMissingFlex(run, modelPreset)
-}
-
-async function shouldFailRunForMissingFlex(
+async function getFreeTierRunPolicyFailureMessage(
   run: { ownerUserId: string | null; serviceTier: string | null },
   modelPreset: LlmModelPreset
 ) {
-  if (
-    run.ownerUserId === null ||
-    !modelPreset.supportsFlex ||
-    run.serviceTier === "flex"
-  ) {
-    return false
+  if (run.ownerUserId === null) {
+    return null
   }
 
-  const billingTierSummary = await getUserBillingTierSummary(
-    { query: queryDatabase },
-    run.ownerUserId
-  )
+  if (!(await isFreeTierUser(run.ownerUserId))) {
+    return null
+  }
 
-  return billingTierSummary.effectiveTier === "free"
+  if (!modelPreset.isFreeTier) {
+    return FREE_TIER_MODEL_PRESET_REQUIRED_MESSAGE
+  }
+
+  if (modelPreset.supportsFlex && run.serviceTier !== "flex") {
+    return FREE_TIER_FLEX_PROCESSING_REQUIRED_MESSAGE
+  }
+
+  return null
 }
 
 function assertClaimedRunMatchesConfig(
@@ -6264,12 +6275,12 @@ async function main() {
       }
 
       try {
-        const forceFlexServiceTier =
-          await shouldForceFlexServiceTierForRequest(req)
+        const isFreeTier = await isFreeTierRequest(req)
         const simulation = await createSimulation(deckId, {
           ...parsedSimulation.data,
           createdVia: "app",
-          forceFlexServiceTier,
+          forceFlexServiceTier: isFreeTier,
+          requireFreeTierModelPreset: isFreeTier,
         })
         createdSimulationId = simulation.id
 
@@ -6743,14 +6754,14 @@ async function main() {
       }
 
       try {
-        const forceFlexServiceTier =
-          await shouldForceFlexServiceTierForRequest(req)
+        const isFreeTier = await isFreeTierRequest(req)
         const simulation = await updateSimulation(
           deckId,
           simulationId,
           {
             ...parsedUpdate.data,
-            forceFlexServiceTier,
+            forceFlexServiceTier: isFreeTier,
+            requireFreeTierModelPreset: isFreeTier,
           }
         )
 
@@ -7363,10 +7374,14 @@ function getAuthenticatedUser(req: Request) {
   return user
 }
 
-async function shouldForceFlexServiceTierForRequest(req: Request) {
+async function isFreeTierRequest(req: Request) {
+  return isFreeTierUser(getAuthenticatedUser(req).id)
+}
+
+async function isFreeTierUser(userId: string) {
   const billingTierSummary = await getUserBillingTierSummary(
     { query: queryDatabase },
-    getAuthenticatedUser(req).id
+    userId
   )
 
   return billingTierSummary.effectiveTier === "free"
@@ -7393,12 +7408,7 @@ async function isFreeTierSimulationOwner(
     return false
   }
 
-  const billingTierSummary = await getUserBillingTierSummary(
-    { query: queryDatabase },
-    ownerUserId
-  )
-
-  return billingTierSummary.effectiveTier === "free"
+  return isFreeTierUser(ownerUserId)
 }
 
 function requireAdminUser(req: Request, res: Response) {

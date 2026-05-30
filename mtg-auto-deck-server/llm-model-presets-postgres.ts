@@ -14,6 +14,7 @@ export type LlmModelPreset = {
   reasoningEffort: ReasoningEffort
   openrouterModelProvider: string | null
   supportsFlex: boolean
+  isFreeTier: boolean
   inputTokenCostUsdPerMillion: number | null
   cachedInputTokenCostUsdPerMillion: number | null
   outputTokenCostUsdPerMillion: number | null
@@ -36,6 +37,7 @@ export type CreateLlmModelPresetInput = {
   reasoningEffort: ReasoningEffort
   openrouterModelProvider: string | null
   supportsFlex: boolean
+  isFreeTier: boolean
   inputTokenCostUsdPerMillion: number | null
   cachedInputTokenCostUsdPerMillion: number | null
   outputTokenCostUsdPerMillion: number | null
@@ -49,6 +51,7 @@ export type UpdateLlmModelPresetInput = {
   reasoningEffort: ReasoningEffort
   openrouterModelProvider: string | null
   supportsFlex: boolean
+  isFreeTier: boolean
   inputTokenCostUsdPerMillion: number | null
   cachedInputTokenCostUsdPerMillion: number | null
   outputTokenCostUsdPerMillion: number | null
@@ -62,6 +65,7 @@ export type CreateLlmModelPresetInsertQuery = {
     string,
     ReasoningEffort,
     string | null,
+    boolean,
     boolean,
     number | null,
     number | null,
@@ -80,6 +84,7 @@ export type UpdateLlmModelPresetUpdateQuery = {
     ReasoningEffort,
     string | null,
     boolean,
+    boolean,
     number | null,
     number | null,
     number | null,
@@ -94,6 +99,7 @@ type LlmModelPresetRow = {
   reasoning_effort: ReasoningEffort
   openrouter_model_provider: string | null
   supports_flex: boolean
+  is_free_tier: boolean
   input_token_cost_usd_per_million: string | number | null
   cached_input_token_cost_usd_per_million: string | number | null
   output_token_cost_usd_per_million: string | number | null
@@ -123,6 +129,7 @@ const UPDATE_LLM_MODEL_PRESET_INPUT_KEYS = new Set([
   "reasoningEffort",
   "openrouterModelProvider",
   "supportsFlex",
+  "isFreeTier",
   "inputTokenCostUsdPerMillion",
   "cachedInputTokenCostUsdPerMillion",
   "outputTokenCostUsdPerMillion",
@@ -139,6 +146,7 @@ export async function ensureLlmModelPresetsSchema() {
       reasoning_effort text NOT NULL,
       openrouter_model_provider text,
       supports_flex boolean NOT NULL DEFAULT false,
+      is_free_tier boolean NOT NULL DEFAULT false,
 
       input_token_cost_usd_per_million numeric(12,6),
       cached_input_token_cost_usd_per_million numeric(12,6),
@@ -162,6 +170,10 @@ export async function ensureLlmModelPresetsSchema() {
   await queryDatabase(`
     ALTER TABLE llm_model_presets
     ADD COLUMN IF NOT EXISTS supports_flex boolean NOT NULL DEFAULT false
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_model_presets
+    ADD COLUMN IF NOT EXISTS is_free_tier boolean NOT NULL DEFAULT false
   `)
   await backfillLlmModelPresetSupportsFlex()
   await queryDatabase(`
@@ -239,6 +251,7 @@ export async function listAdminLlmModelPresets() {
       preset.reasoning_effort,
       preset.openrouter_model_provider,
       preset.supports_flex,
+      preset.is_free_tier,
       preset.input_token_cost_usd_per_million,
       preset.cached_input_token_cost_usd_per_million,
       preset.output_token_cost_usd_per_million,
@@ -344,13 +357,14 @@ function buildValidatedCreateLlmModelPresetInsertQuery(
         reasoning_effort,
         openrouter_model_provider,
         supports_flex,
+        is_free_tier,
         input_token_cost_usd_per_million,
         cached_input_token_cost_usd_per_million,
         output_token_cost_usd_per_million,
         is_enabled,
         is_default
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING
         id,
         name,
@@ -359,6 +373,7 @@ function buildValidatedCreateLlmModelPresetInsertQuery(
         reasoning_effort,
         openrouter_model_provider,
         supports_flex,
+        is_free_tier,
         input_token_cost_usd_per_million,
         cached_input_token_cost_usd_per_million,
         output_token_cost_usd_per_million,
@@ -374,6 +389,7 @@ function buildValidatedCreateLlmModelPresetInsertQuery(
       normalizedInput.reasoningEffort,
       normalizedInput.openrouterModelProvider,
       normalizedInput.supportsFlex,
+      normalizedInput.isFreeTier,
       normalizedInput.inputTokenCostUsdPerMillion,
       normalizedInput.cachedInputTokenCostUsdPerMillion,
       normalizedInput.outputTokenCostUsdPerMillion,
@@ -439,9 +455,10 @@ function buildValidatedUpdateLlmModelPresetUpdateQuery(
           reasoning_effort = $4,
           openrouter_model_provider = $5,
           supports_flex = $6,
-          input_token_cost_usd_per_million = $7,
-          cached_input_token_cost_usd_per_million = $8,
-          output_token_cost_usd_per_million = $9,
+          is_free_tier = $7,
+          input_token_cost_usd_per_million = $8,
+          cached_input_token_cost_usd_per_million = $9,
+          output_token_cost_usd_per_million = $10,
           updated_at = now()
       WHERE id = $1
       RETURNING
@@ -452,6 +469,7 @@ function buildValidatedUpdateLlmModelPresetUpdateQuery(
         reasoning_effort,
         openrouter_model_provider,
         supports_flex,
+        is_free_tier,
         input_token_cost_usd_per_million,
         cached_input_token_cost_usd_per_million,
         output_token_cost_usd_per_million,
@@ -467,6 +485,7 @@ function buildValidatedUpdateLlmModelPresetUpdateQuery(
       normalizedInput.reasoningEffort,
       normalizedInput.openrouterModelProvider,
       normalizedInput.supportsFlex,
+      normalizedInput.isFreeTier,
       normalizedInput.inputTokenCostUsdPerMillion,
       normalizedInput.cachedInputTokenCostUsdPerMillion,
       normalizedInput.outputTokenCostUsdPerMillion,
@@ -493,6 +512,7 @@ export async function setLlmModelPresetEnabled(
         reasoning_effort,
         openrouter_model_provider,
         supports_flex,
+        is_free_tier,
         input_token_cost_usd_per_million,
         cached_input_token_cost_usd_per_million,
         output_token_cost_usd_per_million,
@@ -562,6 +582,7 @@ export async function setDefaultLlmModelPreset(presetId: string | null) {
           reasoning_effort,
           openrouter_model_provider,
           supports_flex,
+          is_free_tier,
           input_token_cost_usd_per_million,
           cached_input_token_cost_usd_per_million,
           output_token_cost_usd_per_million,
@@ -629,6 +650,7 @@ const LLM_MODEL_PRESET_SELECT_SQL = `
     reasoning_effort,
     openrouter_model_provider,
     supports_flex,
+    is_free_tier,
     input_token_cost_usd_per_million,
     cached_input_token_cost_usd_per_million,
     output_token_cost_usd_per_million,
@@ -777,6 +799,7 @@ function validateCreateLlmModelPresetInput(
       parsedProvider.data === "openrouter" ? openrouterModelProvider : null,
     supportsFlex:
       parsedProvider.data === "llamacpp" ? false : input.supportsFlex,
+    isFreeTier: input.isFreeTier,
     inputTokenCostUsdPerMillion: validateOptionalCost(
       input.inputTokenCostUsdPerMillion,
       "Input token cost"
@@ -845,6 +868,7 @@ function validateUpdateLlmModelPresetInput(
       parsedProvider.data === "openrouter" ? openrouterModelProvider : null,
     supportsFlex:
       parsedProvider.data === "llamacpp" ? false : input.supportsFlex,
+    isFreeTier: input.isFreeTier,
     inputTokenCostUsdPerMillion: validateOptionalCost(
       input.inputTokenCostUsdPerMillion,
       "Input token cost"
@@ -881,6 +905,7 @@ function mapLlmModelPresetRow(row: LlmModelPresetRow): LlmModelPreset {
     reasoningEffort: row.reasoning_effort,
     openrouterModelProvider: row.openrouter_model_provider,
     supportsFlex: row.supports_flex,
+    isFreeTier: row.is_free_tier,
     inputTokenCostUsdPerMillion: toOptionalNumber(
       row.input_token_cost_usd_per_million
     ),

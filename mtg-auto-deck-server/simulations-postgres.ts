@@ -12,6 +12,9 @@ import {
   ensureUserUsageLimitWindowsForRunStartWithClient,
 } from "./usage-limits-postgres.js"
 
+export const FREE_TIER_MODEL_PRESET_REQUIRED_MESSAGE =
+  "Free tier users must choose a free tier model preset before starting LLM runs."
+
 type DatabaseTransactionClient = Parameters<
   Parameters<typeof withDatabaseTransaction>[0]
 >[0]
@@ -434,6 +437,7 @@ export type CreateSimulationInput = {
   reasoningSummariesEnabled?: boolean
   useFlexServiceTier?: boolean
   forceFlexServiceTier?: boolean
+  requireFreeTierModelPreset?: boolean
   startingHandId: string | null
   createdVia?: SimulationCreatedVia
 }
@@ -1478,13 +1482,14 @@ export async function createSimulation(
     )
   }
 
-    if (llmModelPresetId !== null) {
+  if (llmModelPresetId !== null) {
     const presetResult = await queryDatabase<{
+      is_free_tier: boolean
       provider: string
       supports_flex: boolean
     }>(
       `
-        SELECT provider, supports_flex
+        SELECT is_free_tier, provider, supports_flex
         FROM llm_model_presets
         WHERE id = $1
           AND is_enabled = true
@@ -1494,6 +1499,15 @@ export async function createSimulation(
 
     if (presetResult.rowCount === 0) {
       throw new SimulationValidationError("Model preset not found or disabled.")
+    }
+
+    if (
+      input.requireFreeTierModelPreset &&
+      !presetResult.rows[0].is_free_tier
+    ) {
+      throw new SimulationValidationError(
+        FREE_TIER_MODEL_PRESET_REQUIRED_MESSAGE
+      )
     }
 
     if (input.forceFlexServiceTier && presetResult.rows[0].supports_flex) {
@@ -1655,6 +1669,7 @@ export type UpdateSimulationInput = {
   reasoningSummariesEnabled?: boolean
   useFlexServiceTier?: boolean
   forceFlexServiceTier?: boolean
+  requireFreeTierModelPreset?: boolean
 }
 
 export async function updateSimulation(
@@ -1669,7 +1684,8 @@ export async function updateSimulation(
     input.llmProcessingMode === undefined &&
     input.reasoningSummariesEnabled === undefined &&
     input.useFlexServiceTier === undefined &&
-    input.forceFlexServiceTier === undefined
+    input.forceFlexServiceTier === undefined &&
+    input.requireFreeTierModelPreset === undefined
   ) {
     throw new SimulationValidationError("Simulation update is required.")
   }
@@ -1744,18 +1760,20 @@ export async function updateSimulation(
       trimmedPresetId !== undefined ||
       nextUseFlexServiceTier ||
       nextProcessingMode === "openai_batch" ||
-      (input.forceFlexServiceTier && targetPresetId !== null)
+      (input.forceFlexServiceTier && targetPresetId !== null) ||
+      (input.requireFreeTierModelPreset && targetPresetId !== null)
     ) {
       if (!targetPresetId) {
         throw new SimulationValidationError("Model preset is required.")
       }
 
       const presetResult = await client.query<{
+        is_free_tier: boolean
         provider: string
         supports_flex: boolean
       }>(
         `
-          SELECT provider, supports_flex
+          SELECT is_free_tier, provider, supports_flex
           FROM llm_model_presets
           WHERE id = $1
             AND is_enabled = true
@@ -1774,7 +1792,14 @@ export async function updateSimulation(
       }
 
       const targetPreset = presetResult.rows[0]
+      const isFreeTierPreset = targetPreset.is_free_tier
       const supportsFlex = targetPreset.supports_flex
+
+      if (input.requireFreeTierModelPreset && !isFreeTierPreset) {
+        throw new SimulationValidationError(
+          FREE_TIER_MODEL_PRESET_REQUIRED_MESSAGE
+        )
+      }
 
       if (
         input.forceFlexServiceTier &&

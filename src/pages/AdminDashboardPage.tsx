@@ -113,6 +113,7 @@ type UpdateLlmModelPresetPayload = {
   reasoningEffort: ReasoningEffort
   openrouterModelProvider: string | null
   supportsFlex: boolean
+  isFreeTier: boolean
   inputTokenCostUsdPerMillion: number | null
   cachedInputTokenCostUsdPerMillion: number | null
   outputTokenCostUsdPerMillion: number | null
@@ -1006,6 +1007,7 @@ function AdminModelPresetsSection() {
     reasoningEffort: "medium" as ReasoningEffort,
     openrouterModelProvider: "",
     supportsFlex: false,
+    isFreeTier: false,
     inputTokenCostUsdPerMillion: "",
     cachedInputTokenCostUsdPerMillion: "",
     outputTokenCostUsdPerMillion: "",
@@ -1070,6 +1072,7 @@ function AdminModelPresetsSection() {
                 : null,
             supportsFlex:
               form.provider === "llamacpp" ? false : form.supportsFlex,
+            isFreeTier: form.isFreeTier,
             inputTokenCostUsdPerMillion: parseOptionalCost(
               form.inputTokenCostUsdPerMillion
             ),
@@ -1099,6 +1102,7 @@ function AdminModelPresetsSection() {
         model: "",
         openrouterModelProvider: "",
         supportsFlex: false,
+        isFreeTier: false,
         inputTokenCostUsdPerMillion: "",
         cachedInputTokenCostUsdPerMillion: "",
         outputTokenCostUsdPerMillion: "",
@@ -1345,6 +1349,22 @@ function AdminModelPresetsSection() {
                 Supports flex
               </label>
             </AdminFormField>
+            <AdminFormField label="Free tier">
+              <label className="flex h-9 items-center gap-2 rounded-md border border-border bg-background/35 px-3 text-sm">
+                <input
+                  className="size-4 accent-sky-300"
+                  type="checkbox"
+                  checked={form.isFreeTier}
+                  onChange={(event) =>
+                    setForm((currentForm) => ({
+                      ...currentForm,
+                      isFreeTier: event.target.checked,
+                    }))
+                  }
+                />
+                Free tier
+              </label>
+            </AdminFormField>
             <AdminFormField label="Input $/M">
               <CostInput
                 value={form.inputTokenCostUsdPerMillion}
@@ -1482,6 +1502,7 @@ function AdminModelPresetsSection() {
                       <p className="text-xs break-words text-muted-foreground">
                         {getLlmModelPresetTechnicalLabel(preset)}
                         {preset.supportsFlex ? " / supports flex" : ""}
+                        {preset.isFreeTier ? " / free tier" : ""}
                       </p>
                     </div>
                   </TableCell>
@@ -1932,6 +1953,7 @@ function EditLlmModelPresetModal({
     preset.openrouterModelProvider ?? ""
   )
   const [supportsFlex, setSupportsFlex] = useState(preset.supportsFlex)
+  const [isFreeTier, setIsFreeTier] = useState(preset.isFreeTier)
   const [inputTokenCostUsdPerMillion, setInputTokenCostUsdPerMillion] =
     useState(formatCostInputValue(preset.inputTokenCostUsdPerMillion))
   const [
@@ -1968,6 +1990,7 @@ function EditLlmModelPresetModal({
         ? openrouterModelProvider.trim() || null
         : null,
       supportsFlex: isFlexEditable ? supportsFlex : false,
+      isFreeTier,
       inputTokenCostUsdPerMillion: parseOptionalCost(
         inputTokenCostUsdPerMillion
       ),
@@ -2083,6 +2106,18 @@ function EditLlmModelPresetModal({
                   onChange={(event) => setSupportsFlex(event.target.checked)}
                 />
                 Supports flex
+              </label>
+            </AdminFormField>
+            <AdminFormField label="Free tier">
+              <label className="flex h-10 items-center gap-2 rounded-md border border-border bg-background/35 px-3 text-sm">
+                <input
+                  className="size-4 accent-sky-300"
+                  type="checkbox"
+                  checked={isFreeTier}
+                  disabled={isSaving}
+                  onChange={(event) => setIsFreeTier(event.target.checked)}
+                />
+                Free tier
               </label>
             </AdminFormField>
             <AdminFormField label="Input $/M">

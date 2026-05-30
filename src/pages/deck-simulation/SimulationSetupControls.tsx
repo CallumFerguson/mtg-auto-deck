@@ -61,6 +61,64 @@ export function FlexServiceTierRequiredModal({
   )
 }
 
+export function FreeTierModelPresetRequiredModal({
+  onClose,
+}: {
+  onClose: () => void
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-background/80 px-4 py-6 backdrop-blur-sm"
+      role="presentation"
+      onMouseDown={onClose}
+    >
+      <section
+        aria-describedby="free-tier-model-preset-required-description"
+        aria-labelledby="free-tier-model-preset-required-title"
+        className="w-full max-w-md rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
+        role="alertdialog"
+        aria-modal="true"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+          <div className="min-w-0">
+            <h2
+              id="free-tier-model-preset-required-title"
+              className="text-xl font-semibold text-foreground"
+            >
+              Free tier model preset required
+            </h2>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Close"
+            title="Close"
+            onClick={onClose}
+          >
+            <X />
+          </Button>
+        </header>
+
+        <div className="grid gap-4 px-5 py-5">
+          <p
+            id="free-tier-model-preset-required-description"
+            className="text-sm leading-6 text-muted-foreground"
+          >
+            Free tier users can only use model presets marked free tier.
+          </p>
+          <div className="flex justify-end">
+            <Button type="button" onClick={onClose}>
+              Got it
+            </Button>
+          </div>
+        </div>
+      </section>
+    </div>
+  )
+}
+
 export function FlexServiceTierSwitch({
   checked,
   disabled = false,

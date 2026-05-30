@@ -1291,7 +1291,7 @@ test("validates provider-specific LLM config requirements with presets", () => {
   assert.equal(flexConfig.serviceTier, "flex")
 })
 
-test("builds model preset insert with a supports-flex placeholder", () => {
+test("builds model preset insert with supports-flex and free-tier placeholders", () => {
   const query = buildCreateLlmModelPresetInsertQuery({
     name: " Fast budget ",
     provider: "openrouter",
@@ -1299,6 +1299,7 @@ test("builds model preset insert with a supports-flex placeholder", () => {
     reasoningEffort: "high",
     openrouterModelProvider: "openai",
     supportsFlex: true,
+    isFreeTier: true,
     inputTokenCostUsdPerMillion: 1,
     cachedInputTokenCostUsdPerMillion: 0.1,
     outputTokenCostUsdPerMillion: 10,
@@ -1308,13 +1309,15 @@ test("builds model preset insert with a supports-flex placeholder", () => {
   const normalizedSql = query.text.replace(/\s+/g, " ")
 
   assert.match(normalizedSql, /supports_flex/)
+  assert.match(normalizedSql, /is_free_tier/)
   assert.match(
     normalizedSql,
-    /VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11\)/
+    /VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11, \$12\)/
   )
-  assert.equal(query.values.length, 11)
+  assert.equal(query.values.length, 12)
   assert.equal(query.values[1], "Fast budget")
   assert.equal(query.values[5], true)
+  assert.equal(query.values[6], true)
 })
 
 test("builds model preset update with trimmed name, model, and editable costs", () => {
@@ -1327,6 +1330,7 @@ test("builds model preset update with trimmed name, model, and editable costs", 
       reasoningEffort: "high",
       openrouterModelProvider: " openai ",
       supportsFlex: true,
+      isFreeTier: true,
       inputTokenCostUsdPerMillion: 1,
       cachedInputTokenCostUsdPerMillion: 0.1,
       outputTokenCostUsdPerMillion: 10,
@@ -1340,15 +1344,17 @@ test("builds model preset update with trimmed name, model, and editable costs", 
   assert.match(normalizedSql, /reasoning_effort = \$4/)
   assert.match(normalizedSql, /openrouter_model_provider = \$5/)
   assert.match(normalizedSql, /supports_flex = \$6/)
+  assert.match(normalizedSql, /is_free_tier = \$7/)
   assert.equal(query.values[0], "preset-openrouter")
   assert.equal(query.values[1], "OpenRouter tools")
   assert.equal(query.values[2], "openai/gpt-5-nano")
   assert.equal(query.values[3], "high")
   assert.equal(query.values[4], "openai")
   assert.equal(query.values[5], true)
-  assert.equal(query.values[6], 1)
-  assert.equal(query.values[7], 0.1)
-  assert.equal(query.values[8], 10)
+  assert.equal(query.values[6], true)
+  assert.equal(query.values[7], 1)
+  assert.equal(query.values[8], 0.1)
+  assert.equal(query.values[9], 10)
 })
 
 test("normalizes blank model preset names to null", () => {
@@ -1361,6 +1367,7 @@ test("normalizes blank model preset names to null", () => {
       reasoningEffort: "medium",
       openrouterModelProvider: null,
       supportsFlex: false,
+      isFreeTier: false,
       inputTokenCostUsdPerMillion: null,
       cachedInputTokenCostUsdPerMillion: null,
       outputTokenCostUsdPerMillion: null,
@@ -1379,6 +1386,7 @@ test("rejects blank model preset updates", () => {
         reasoningEffort: "medium",
         openrouterModelProvider: null,
         supportsFlex: false,
+        isFreeTier: false,
         inputTokenCostUsdPerMillion: null,
         cachedInputTokenCostUsdPerMillion: null,
         outputTokenCostUsdPerMillion: null,
@@ -1397,6 +1405,7 @@ test("normalizes OpenRouter provider override by existing preset provider", () =
       reasoningEffort: "medium",
       openrouterModelProvider: " openai ",
       supportsFlex: false,
+      isFreeTier: false,
       inputTokenCostUsdPerMillion: null,
       cachedInputTokenCostUsdPerMillion: null,
       outputTokenCostUsdPerMillion: null,
@@ -1411,6 +1420,7 @@ test("normalizes OpenRouter provider override by existing preset provider", () =
       reasoningEffort: "medium",
       openrouterModelProvider: "openai",
       supportsFlex: false,
+      isFreeTier: false,
       inputTokenCostUsdPerMillion: null,
       cachedInputTokenCostUsdPerMillion: null,
       outputTokenCostUsdPerMillion: null,
@@ -1431,6 +1441,7 @@ test("keeps llama.cpp model preset updates from supporting flex", () => {
       reasoningEffort: "none",
       openrouterModelProvider: null,
       supportsFlex: true,
+      isFreeTier: false,
       inputTokenCostUsdPerMillion: null,
       cachedInputTokenCostUsdPerMillion: null,
       outputTokenCostUsdPerMillion: null,
@@ -1449,6 +1460,7 @@ test("rejects immutable model preset fields in update payloads", () => {
         reasoningEffort: "medium",
         openrouterModelProvider: null,
         supportsFlex: false,
+        isFreeTier: false,
         inputTokenCostUsdPerMillion: null,
         cachedInputTokenCostUsdPerMillion: null,
         outputTokenCostUsdPerMillion: null,

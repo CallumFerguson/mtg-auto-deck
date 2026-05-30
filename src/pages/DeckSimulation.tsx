@@ -115,6 +115,7 @@ import { SimulationDetailsModal } from "./deck-simulation/SimulationDetailsModal
 import {
   FlexServiceTierRequiredModal,
   FlexServiceTierSwitch,
+  FreeTierModelPresetRequiredModal,
   SimulationSetupChoiceCard,
 } from "./deck-simulation/SimulationSetupControls"
 import { CardPreviewPill } from "./deck-simulation/CardPreviewPill"
@@ -536,6 +537,32 @@ function resolveCreateSimulationDeckItemId<TItem extends { id: string }>(
   return items[0]?.id ?? ""
 }
 
+function resolveCreateSimulationModelPresetId(
+  presets: readonly LlmModelPreset[],
+  currentPresetId: string,
+  defaultPresetId: string | null,
+  isFreeBillingTier: boolean
+) {
+  const isAllowedPreset = (preset: LlmModelPreset) =>
+    !isFreeBillingTier || preset.isFreeTier
+  const currentPreset = presets.find((preset) => preset.id === currentPresetId)
+
+  if (currentPreset && isAllowedPreset(currentPreset)) {
+    return currentPreset.id
+  }
+
+  const defaultPreset =
+    defaultPresetId !== null
+      ? presets.find((preset) => preset.id === defaultPresetId)
+      : null
+
+  if (defaultPreset && isAllowedPreset(defaultPreset)) {
+    return defaultPreset.id
+  }
+
+  return presets.find(isAllowedPreset)?.id ?? ""
+}
+
 function isUsageLimitFailureMessage(message: string | null) {
   return Boolean(message && USAGE_LIMIT_FAILURE_MESSAGE_PATTERN.test(message))
 }
@@ -816,6 +843,10 @@ export function DeckSimulation({
   const [isCreateHandModalOpen, setIsCreateHandModalOpen] = useState(false)
   const [isCreateSeedModalOpen, setIsCreateSeedModalOpen] = useState(false)
   const [isFlexRequiredModalOpen, setIsFlexRequiredModalOpen] = useState(false)
+  const [
+    isFreeTierModelPresetRequiredModalOpen,
+    setIsFreeTierModelPresetRequiredModalOpen,
+  ] = useState(false)
   const [createSimulationError, setCreateSimulationError] = useState<
     string | null
   >(null)
@@ -869,6 +900,12 @@ export function DeckSimulation({
   const selectedModelPresetSupportsFlex = Boolean(
     selectedModelPreset?.supportsFlex
   )
+  const selectedModelPresetIsFreeTier = Boolean(selectedModelPreset?.isFreeTier)
+  const hasFreeTierModelPresets = modelPresets.some(
+    (preset) => preset.isFreeTier
+  )
+  const isCreateSimulationModelPresetAllowed =
+    !isFreeBillingTier || selectedModelPresetIsFreeTier
   const isCreateSimulationFlexRequired =
     isFreeBillingTier && selectedModelPresetSupportsFlex
   const effectiveCreateSimulationUseFlexServiceTier =
@@ -949,6 +986,7 @@ export function DeckSimulation({
   const canStartSimulation =
     (seedMode === "random" || Boolean(selectedSavedSeed)) &&
     Boolean(selectedModelPreset) &&
+    isCreateSimulationModelPresetAllowed &&
     turnsToSimulate.length > 0 &&
     (openingHandMode !== "provide" || Boolean(selectedOpeningHand))
 
@@ -1134,21 +1172,19 @@ export function DeckSimulation({
       setModelPresets(data.presets)
       setDefaultModelPresetId(data.defaultPresetId)
       setSelectedModelPresetId((currentPresetId) => {
-        if (
-          currentPresetId &&
-          data.presets.some((preset) => preset.id === currentPresetId)
-        ) {
-          return currentPresetId
-        }
-
-        return data.defaultPresetId ?? ""
+        return resolveCreateSimulationModelPresetId(
+          data.presets,
+          currentPresetId,
+          data.defaultPresetId,
+          isFreeBillingTier
+        )
       })
     } catch {
       setModelPresetLoadError("Model presets could not be loaded.")
     } finally {
       setIsLoadingModelPresets(false)
     }
-  }, [])
+  }, [isFreeBillingTier])
 
   useEffect(() => {
     void loadSimulations()
@@ -1357,7 +1393,14 @@ export function DeckSimulation({
         getStoredCreateSimulationSavedSeedId(deckId)
       )
     )
-    setSelectedModelPresetId(defaultModelPresetId ?? "")
+    setSelectedModelPresetId(
+      resolveCreateSimulationModelPresetId(
+        modelPresets,
+        "",
+        defaultModelPresetId,
+        isFreeBillingTier
+      )
+    )
     setTurnsToSimulate(DEFAULT_TURNS_TO_SIMULATE)
     setOpeningHandMode("simulate")
     setSelectedOpeningHandId((currentStartingHandId) =>
@@ -1417,6 +1460,19 @@ export function DeckSimulation({
     storeCreateSimulationUseFlexServiceTier(nextEnabled)
   }
 
+  function handleCreateSimulationModelPresetChange(nextPresetId: string) {
+    const nextPreset =
+      modelPresets.find((preset) => preset.id === nextPresetId) ?? null
+
+    if (isFreeBillingTier && nextPreset && !nextPreset.isFreeTier) {
+      setIsFreeTierModelPresetRequiredModalOpen(true)
+      return
+    }
+
+    setSelectedModelPresetId(nextPresetId)
+    setCreateSimulationError(null)
+  }
+
   async function handleStartSimulation() {
     if (!canStartSimulation || isCreatingSimulation) {
       return
@@ -1433,6 +1489,11 @@ export function DeckSimulation({
 
     if (!selectedModelPreset) {
       setCreateSimulationError("Choose a model preset.")
+      return
+    }
+
+    if (isFreeBillingTier && !selectedModelPreset.isFreeTier) {
+      setIsFreeTierModelPresetRequiredModalOpen(true)
       return
     }
 
@@ -1920,7 +1981,9 @@ export function DeckSimulation({
                             isLoadingModelPresets || modelPresets.length === 0
                           }
                           onChange={(event) =>
-                            setSelectedModelPresetId(event.target.value)
+                            handleCreateSimulationModelPresetChange(
+                              event.target.value
+                            )
                           }
                         >
                           {isLoadingModelPresets ? (
@@ -1940,6 +2003,17 @@ export function DeckSimulation({
                           <p className="rounded-md border border-amber-300/35 bg-amber-400/10 px-3 py-2 text-sm text-amber-100">
                             Ask an admin to add or enable a model preset before
                             creating simulations.
+                          </p>
+                        ) : null}
+                        {isFreeBillingTier &&
+                        !isLoadingModelPresets &&
+                        modelPresets.length > 0 &&
+                        (!hasFreeTierModelPresets ||
+                          (selectedModelPreset !== null &&
+                            !selectedModelPreset.isFreeTier)) ? (
+                          <p className="rounded-md border border-amber-300/35 bg-amber-400/10 px-3 py-2 text-sm text-amber-100">
+                            Free tier users must choose a free tier model preset
+                            before starting LLM calls.
                           </p>
                         ) : null}
                       </div>
@@ -2058,6 +2132,12 @@ export function DeckSimulation({
       {isFlexRequiredModalOpen ? (
         <FlexServiceTierRequiredModal
           onClose={() => setIsFlexRequiredModalOpen(false)}
+        />
+      ) : null}
+
+      {isFreeTierModelPresetRequiredModalOpen ? (
+        <FreeTierModelPresetRequiredModal
+          onClose={() => setIsFreeTierModelPresetRequiredModalOpen(false)}
         />
       ) : null}
 
@@ -2751,6 +2831,7 @@ function SimulationDetails({
       defaultTimelineSelection={defaultTimelineSelection}
       demoMode={demoMode}
       hasUsableModelPreset={selectedModelPreset !== null}
+      selectedModelPresetIsFreeTier={Boolean(selectedModelPreset?.isFreeTier)}
       selectedModelPresetSupportsFlex={Boolean(selectedModelPreset?.supportsFlex)}
       isStartingOpeningHandRun={isStartingOpeningHandRun}
       isStartingTurnRun={isStartingTurnRun}
@@ -2853,6 +2934,7 @@ function SimulationResultsPanel({
   defaultTimelineSelection,
   demoMode,
   hasUsableModelPreset,
+  selectedModelPresetIsFreeTier,
   selectedModelPresetSupportsFlex,
   isStartingOpeningHandRun,
   isStartingTurnRun,
@@ -2887,6 +2969,7 @@ function SimulationResultsPanel({
   defaultTimelineSelection: SimulationResultsTimelineDefaultSelection
   demoMode: boolean
   hasUsableModelPreset: boolean
+  selectedModelPresetIsFreeTier: boolean
   selectedModelPresetSupportsFlex: boolean
   isStartingOpeningHandRun: boolean
   isStartingTurnRun: boolean
@@ -2937,6 +3020,12 @@ function SimulationResultsPanel({
     selectedModelPresetSupportsFlex &&
     (simulation.llmProcessingMode !== "realtime" ||
       !simulation.useFlexServiceTier)
+  const isFreeTierModelPresetRequired =
+    !readOnly &&
+    hasLoadedBillingTier &&
+    billingTier === "free" &&
+    hasUsableModelPreset &&
+    !selectedModelPresetIsFreeTier
   const isOpeningHandRunning = resultsInfo.openingHandLlmRuns.some((run) =>
     isActiveLlmRunStatus(run.status)
   )
@@ -3098,8 +3187,21 @@ function SimulationResultsPanel({
     return false
   }
 
+  function canContinueWithFreeTierModelPreset() {
+    if (!isFreeTierModelPresetRequired) {
+      return true
+    }
+
+    onModelPresetRequired()
+    return false
+  }
+
   function canContinueWithSimulationSetup() {
-    return canContinueWithModelPreset() && canContinueWithFlexProcessing()
+    return (
+      canContinueWithModelPreset() &&
+      canContinueWithFreeTierModelPreset() &&
+      canContinueWithFlexProcessing()
+    )
   }
 
   const runs = [

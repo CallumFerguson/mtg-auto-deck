@@ -29,6 +29,7 @@ import {
 import {
   FlexServiceTierRequiredModal,
   FlexServiceTierSwitch,
+  FreeTierModelPresetRequiredModal,
 } from "./SimulationSetupControls"
 
 export function SimulationDetailsModal({
@@ -503,13 +504,26 @@ function SimulationModelPresetSelector({
   selectedModelPreset: LlmModelPreset | null
   simulation: Simulation
 }) {
+  const billingTierContext = useOptionalBillingTier()
+  const isFreeBillingTier = billingTierContext
+    ? billingTierContext.hasLoadedBillingTier &&
+      billingTierContext.billingTier === "free"
+    : true
   const [selectedPresetId, setSelectedPresetId] = useState(
     simulation.llmModelPresetId ?? ""
   )
   const [isSaving, setIsSaving] = useState(false)
+  const [
+    isFreeTierModelPresetRequiredModalOpen,
+    setIsFreeTierModelPresetRequiredModalOpen,
+  ] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const currentPresetUnavailable =
     Boolean(simulation.llmModelPresetId) && selectedModelPreset === null
+  const shouldShowFreeTierModelPresetWarning =
+    isFreeBillingTier &&
+    selectedModelPreset !== null &&
+    !selectedModelPreset.isFreeTier
 
   useEffect(() => {
     setSelectedPresetId(simulation.llmModelPresetId ?? "")
@@ -517,15 +531,24 @@ function SimulationModelPresetSelector({
   }, [simulation.id, simulation.llmModelPresetId])
 
   async function handleModelPresetChange(nextPresetId: string) {
-    setSelectedPresetId(nextPresetId)
     setError(null)
 
     if (!nextPresetId || nextPresetId === simulation.llmModelPresetId) {
+      setSelectedPresetId(nextPresetId)
       return
     }
 
     const nextPreset =
       modelPresets.find((preset) => preset.id === nextPresetId) ?? null
+
+    if (isFreeBillingTier && nextPreset && !nextPreset.isFreeTier) {
+      setSelectedPresetId(simulation.llmModelPresetId ?? "")
+      setIsFreeTierModelPresetRequiredModalOpen(true)
+      return
+    }
+
+    setSelectedPresetId(nextPresetId)
+
     const nextLlmProcessingMode =
       simulation.llmProcessingMode === "openai_batch" &&
       nextPreset?.provider !== "openai"
@@ -578,54 +601,70 @@ function SimulationModelPresetSelector({
   }
 
   return (
-    <div className="grid gap-2">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <label
-          className="text-sm font-medium text-foreground"
-          htmlFor={`simulation-model-preset-${simulation.id}`}
-        >
-          Intellegence level
-        </label>
-        <select
-          id={`simulation-model-preset-${simulation.id}`}
-          className="h-9 min-w-0 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50 sm:w-80"
-          value={selectedPresetId}
-          disabled={isSaving || modelPresets.length === 0}
-          onChange={(event) => void handleModelPresetChange(event.target.value)}
-        >
-          {!simulation.llmModelPresetId ? (
-            <option value="">Choose a model preset</option>
-          ) : currentPresetUnavailable ? (
-            <option value={simulation.llmModelPresetId}>
-              Current preset unavailable
-            </option>
-          ) : null}
-          {modelPresets.map((preset) => (
-            <option key={preset.id} value={preset.id}>
-              {getLlmModelPresetLabel(preset)}
-            </option>
-          ))}
-        </select>
+    <>
+      <div className="grid gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <label
+            className="text-sm font-medium text-foreground"
+            htmlFor={`simulation-model-preset-${simulation.id}`}
+          >
+            Intellegence level
+          </label>
+          <select
+            id={`simulation-model-preset-${simulation.id}`}
+            className="h-9 min-w-0 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50 sm:w-80"
+            value={selectedPresetId}
+            disabled={isSaving || modelPresets.length === 0}
+            onChange={(event) =>
+              void handleModelPresetChange(event.target.value)
+            }
+          >
+            {!simulation.llmModelPresetId ? (
+              <option value="">Choose a model preset</option>
+            ) : currentPresetUnavailable ? (
+              <option value={simulation.llmModelPresetId}>
+                Current preset unavailable
+              </option>
+            ) : null}
+            {modelPresets.map((preset) => (
+              <option key={preset.id} value={preset.id}>
+                {getLlmModelPresetLabel(preset)}
+              </option>
+            ))}
+          </select>
+        </div>
+        {!selectedModelPreset && simulation.llmModelPresetId ? (
+          <p className="rounded-md border border-amber-300/35 bg-amber-400/10 px-3 py-2 text-sm text-amber-100">
+            The selected preset is disabled or unavailable. Future LLM calls are
+            blocked until an enabled preset is selected.
+          </p>
+        ) : !selectedModelPreset ? (
+          <p className="rounded-md border border-amber-300/35 bg-amber-400/10 px-3 py-2 text-sm text-amber-100">
+            Select a model preset before starting future LLM calls.
+          </p>
+        ) : null}
+        {shouldShowFreeTierModelPresetWarning ? (
+          <p className="rounded-md border border-amber-300/35 bg-amber-400/10 px-3 py-2 text-sm text-amber-100">
+            Free tier users must choose a free tier model preset before starting
+            LLM calls.
+          </p>
+        ) : null}
+        {error ? (
+          <p
+            className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            role="alert"
+          >
+            {error}
+          </p>
+        ) : null}
       </div>
-      {!selectedModelPreset && simulation.llmModelPresetId ? (
-        <p className="rounded-md border border-amber-300/35 bg-amber-400/10 px-3 py-2 text-sm text-amber-100">
-          The selected preset is disabled or unavailable. Future LLM calls are
-          blocked until an enabled preset is selected.
-        </p>
-      ) : !selectedModelPreset ? (
-        <p className="rounded-md border border-amber-300/35 bg-amber-400/10 px-3 py-2 text-sm text-amber-100">
-          Select a model preset before starting future LLM calls.
-        </p>
+
+      {isFreeTierModelPresetRequiredModalOpen ? (
+        <FreeTierModelPresetRequiredModal
+          onClose={() => setIsFreeTierModelPresetRequiredModalOpen(false)}
+        />
       ) : null}
-      {error ? (
-        <p
-          className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-          role="alert"
-        >
-          {error}
-        </p>
-      ) : null}
-    </div>
+    </>
   )
 }
 
