@@ -18,6 +18,7 @@ import {
   BrainCircuit,
   CheckCircle2,
   CircleOff,
+  Copy,
   Download,
   Edit3,
   LayoutDashboard,
@@ -2004,6 +2005,20 @@ function AdminBenchmarksSection() {
     }
   }
 
+  async function handleCopyBenchmarkId(benchmark: AdminBenchmark) {
+    setActionError(null)
+
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("Clipboard API is unavailable.")
+      }
+
+      await navigator.clipboard.writeText(benchmark.id)
+    } catch {
+      setActionError("Benchmark ID could not be copied.")
+    }
+  }
+
   async function handleStopBenchmark(benchmark: AdminBenchmark) {
     if (stoppingBenchmarkId) {
       return
@@ -2414,6 +2429,7 @@ function AdminBenchmarksSection() {
                         benchmark={benchmark}
                         exportingBenchmarkId={exportingBenchmarkId}
                         menuId={benchmark.id}
+                        onCopyBenchmarkId={handleCopyBenchmarkId}
                         onExportBenchmark={handleExportBenchmark}
                         onStopBenchmark={handleStopBenchmark}
                         openBenchmarkMenuId={openBenchmarkMenuId}
@@ -2438,6 +2454,7 @@ function AdminBenchmarkActionsMenu({
   benchmark,
   exportingBenchmarkId,
   menuId,
+  onCopyBenchmarkId,
   onExportBenchmark,
   onStopBenchmark,
   openBenchmarkMenuId,
@@ -2447,6 +2464,7 @@ function AdminBenchmarkActionsMenu({
   benchmark: AdminBenchmark
   exportingBenchmarkId: string | null
   menuId: string
+  onCopyBenchmarkId: (benchmark: AdminBenchmark) => void
   onExportBenchmark: (benchmark: AdminBenchmark) => void
   onStopBenchmark: (benchmark: AdminBenchmark) => void
   openBenchmarkMenuId: string | null
@@ -2617,6 +2635,18 @@ function AdminBenchmarkActionsMenu({
                 role="menu"
                 style={menuStyle}
               >
+                <button
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-sky-100 transition-colors hover:bg-sky-400/10 hover:text-sky-100 focus:bg-sky-400/10 focus:outline-none"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setOpenBenchmarkMenuId(null)
+                    onCopyBenchmarkId(benchmark)
+                  }}
+                >
+                  <Copy data-icon="inline-start" />
+                  Copy ID
+                </button>
                 <button
                   className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-sky-100 transition-colors hover:bg-sky-400/10 hover:text-sky-100 focus:bg-sky-400/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
                   type="button"

@@ -803,10 +803,11 @@ async function getAdminBenchmarkZipExport(
   }
 
   const exportedAt = new Date().toISOString()
+  const benchmarkExportRootPath = benchmark.id
   const simulationFiles = await Promise.all(
     childSimulations.map(async (childSimulation) => ({
       childSimulation,
-      filePath: `simulations/${childSimulation.simulationId}.json`,
+      filePath: `${benchmarkExportRootPath}/simulations/${childSimulation.simulationId}.json`,
       value: await getPublicSimulationExport(
         childSimulation.deckId,
         childSimulation.simulationId
@@ -840,7 +841,7 @@ async function getAdminBenchmarkZipExport(
     zip: createJsonZipArchive(
       [
         {
-          path: "index.json",
+          path: `${benchmarkExportRootPath}/index.json`,
           value: index,
         },
         ...simulationFiles.map((simulationFile) => ({
