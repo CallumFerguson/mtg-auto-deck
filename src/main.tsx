@@ -8,7 +8,10 @@ import { ThemeProvider } from "@/components/theme-provider.tsx"
 
 const root = createRoot(document.getElementById("root")!)
 
-if (window.location.pathname.startsWith("/public/simulations/")) {
+if (
+  window.location.pathname.startsWith("/public/simulations/") ||
+  window.location.pathname.startsWith("/public/benchmarks/")
+) {
   const { PublicSimulationApp } = await import("./PublicSimulationApp.tsx")
 
   root.render(

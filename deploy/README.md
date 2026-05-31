@@ -305,18 +305,18 @@ environment file:
 cp .env.example .env.production
 ```
 
-Then update `.env.production` with your deployed API, app, and public
-simulation data URLs:
+Then update `.env.production` with your deployed API, app, and public data
+URLs:
 
 ```env
 VITE_API_BASE_URL=https://api.example.com
 VITE_APP_PUBLIC_URL=https://app.example.com
-VITE_PUBLIC_SIMULATIONS_BASE_URL=https://data.example.com/simulations
+VITE_PUBLIC_DATA_BASE_URL=https://data.example.com
 ```
 
 For Cloudflare Git builds, set `VITE_API_BASE_URL`, `VITE_APP_PUBLIC_URL`, and
-`VITE_PUBLIC_SIMULATIONS_BASE_URL` as build environment variables in the
-Cloudflare dashboard, since local `.env.production` files are not committed.
+`VITE_PUBLIC_DATA_BASE_URL` as build environment variables in the Cloudflare
+dashboard, since local `.env.production` files are not committed.
 
 Production domains should come from environment variables and deployment
 configuration, not from application or server source code. On the hosted server,

@@ -1,8 +1,29 @@
-import { PublicSimulationPage } from "@/pages/DeckSimulation"
+import {
+  PublicBenchmarkPage,
+  PublicSimulationPage,
+} from "@/pages/DeckSimulation"
 
+const PUBLIC_BENCHMARK_PATH_PREFIX = "/public/benchmarks/"
 const PUBLIC_SIMULATION_PATH_PREFIX = "/public/simulations/"
 
 export function PublicSimulationApp() {
+  if (window.location.pathname.startsWith(PUBLIC_BENCHMARK_PATH_PREFIX)) {
+    const benchmarkId = getPublicRouteIdFromPathname(
+      window.location.pathname,
+      PUBLIC_BENCHMARK_PATH_PREFIX
+    )
+
+    if (!benchmarkId) {
+      return (
+        <main className="flex min-h-svh items-center justify-center bg-background px-4 text-sm text-muted-foreground">
+          Public benchmark could not be found.
+        </main>
+      )
+    }
+
+    return <PublicBenchmarkPage benchmarkId={benchmarkId} />
+  }
+
   const simulationId = getPublicSimulationIdFromPathname(
     window.location.pathname
   )
@@ -29,20 +50,22 @@ export function PublicSimulationApp() {
 }
 
 function getPublicSimulationIdFromPathname(pathname: string) {
-  if (!pathname.startsWith(PUBLIC_SIMULATION_PATH_PREFIX)) {
+  return getPublicRouteIdFromPathname(pathname, PUBLIC_SIMULATION_PATH_PREFIX)
+}
+
+function getPublicRouteIdFromPathname(pathname: string, pathPrefix: string) {
+  if (!pathname.startsWith(pathPrefix)) {
     return null
   }
 
-  const encodedSimulationId = pathname
-    .slice(PUBLIC_SIMULATION_PATH_PREFIX.length)
-    .split("/")[0]
+  const encodedId = pathname.slice(pathPrefix.length).split("/")[0]
 
-  if (!encodedSimulationId) {
+  if (!encodedId) {
     return null
   }
 
   try {
-    return decodeURIComponent(encodedSimulationId)
+    return decodeURIComponent(encodedId)
   } catch {
     return null
   }

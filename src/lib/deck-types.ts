@@ -198,6 +198,63 @@ export type PublicSimulationExportV1 = {
   results: SimulationResultsInfo
 }
 
+export type PublicBenchmarkStatus =
+  | "running"
+  | "stopped"
+  | "completed"
+  | "failed"
+
+export type PublicBenchmarkDeck = {
+  id: string
+  name: string
+}
+
+export type PublicBenchmarkMetadata = {
+  id: string
+  llmModelPresetId: string
+  llmModelPresetName: string | null
+  llmModelPresetModel: string | null
+  llmModelPresetProvider: string | null
+  llmModelPresetReasoningEffort: string | null
+  llmModelPresetOpenrouterModelProvider: string | null
+  simulationsPerDeck: number
+  turnsToSimulate: number
+  llmProcessingMode: LlmProcessingMode
+  useFlexServiceTier: boolean
+  status: PublicBenchmarkStatus
+  decks: PublicBenchmarkDeck[]
+  totalSimulationCount: number
+  pendingSimulationCount: number
+  runningSimulationCount: number
+  completedSimulationCount: number
+  failedSimulationCount: number
+  cancelledSimulationCount: number
+  activeSimulationCount: number
+  averageSimulatedTurnCount: number
+  startedAt: string
+  completedAt: string | null
+  stoppedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type PublicBenchmarkSimulationIndexEntry = {
+  simulationId: string
+  deckId: string
+  deckName: string
+  deckIndex: number
+  simulationIndex: number
+  seed: string
+  filePath: string
+}
+
+export type PublicBenchmarkExportV1 = {
+  schemaVersion: 1
+  exportedAt: string
+  benchmark: PublicBenchmarkMetadata
+  simulations: PublicBenchmarkSimulationIndexEntry[]
+}
+
 export type SimulationResultsStreamEvent =
   | {
       type: "snapshot"

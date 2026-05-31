@@ -47,6 +47,9 @@ import type {
   CreateSimulationResponse,
   CreateStartingHandResponse,
   DeckCard,
+  PublicBenchmarkExportV1,
+  PublicBenchmarkMetadata,
+  PublicBenchmarkSimulationIndexEntry,
   PublicSimulationExportV1,
   SavedSeed,
   SavedSeedsResponse,
@@ -104,6 +107,10 @@ import {
   getSimulationResultToolReason,
 } from "@/lib/simulation-result-tool-labels"
 import {
+  getPublicBenchmarkIndexJsonUrl,
+  getPublicBenchmarkLoadFailureMessage,
+  getPublicBenchmarkSimulationJsonUrl,
+  getPublicBenchmarkSimulationLoadFailureMessage,
   getPublicSimulationJsonUrl,
   getPublicSimulationLoadFailureMessage,
 } from "@/lib/public-simulation-url"
@@ -780,6 +787,392 @@ export function PublicSimulationPage({
             startingHand={publicSimulation.startingHand}
             startingHandLoadError={null}
           />
+        ) : null}
+      </section>
+    </main>
+  )
+}
+
+export function PublicBenchmarkPage({ benchmarkId }: { benchmarkId: string }) {
+  const [benchmarkIndex, setBenchmarkIndex] =
+    useState<PublicBenchmarkExportV1 | null>(null)
+  const [isLoadingBenchmark, setIsLoadingBenchmark] = useState(true)
+  const [benchmarkLoadError, setBenchmarkLoadError] = useState<string | null>(
+    null
+  )
+  const [selectedSimulationId, setSelectedSimulationId] = useState(() =>
+    getPublicBenchmarkSimulationIdFromSearch(window.location.search)
+  )
+  const [publicSimulation, setPublicSimulation] =
+    useState<PublicSimulationExportV1 | null>(null)
+  const [isLoadingSimulation, setIsLoadingSimulation] = useState(false)
+  const [simulationLoadError, setSimulationLoadError] = useState<string | null>(
+    null
+  )
+  const selectedSimulationLoadIdRef = useRef(0)
+
+  const sortedSimulations = useMemo(
+    () =>
+      benchmarkIndex
+        ? sortPublicBenchmarkSimulationEntries(benchmarkIndex.simulations)
+        : [],
+    [benchmarkIndex]
+  )
+  const simulationGroups = useMemo(
+    () => groupPublicBenchmarkSimulationEntries(sortedSimulations),
+    [sortedSimulations]
+  )
+  const selectedSimulationEntry = useMemo(
+    () =>
+      getSelectedPublicBenchmarkSimulationEntry(
+        sortedSimulations,
+        selectedSimulationId
+      ),
+    [selectedSimulationId, sortedSimulations]
+  )
+
+  const loadBenchmark = useCallback(async () => {
+    setIsLoadingBenchmark(true)
+    setBenchmarkLoadError(null)
+    setSimulationLoadError(null)
+    setPublicSimulation(null)
+
+    try {
+      const response = await fetch(
+        getPublicBenchmarkIndexJsonUrl({
+          benchmarkId,
+        }),
+        {
+          credentials: "omit",
+        }
+      )
+
+      if (!response.ok) {
+        setBenchmarkLoadError(
+          response.status === 404
+            ? "Public benchmark could not be found."
+            : "Public benchmark could not be loaded."
+        )
+        setBenchmarkIndex(null)
+        return
+      }
+
+      const data = await response.json()
+
+      if (!isPublicBenchmarkExportV1(data)) {
+        setBenchmarkLoadError(
+          "Public benchmark index is not in the expected format."
+        )
+        setBenchmarkIndex(null)
+        return
+      }
+
+      setBenchmarkIndex(data)
+    } catch (error) {
+      setBenchmarkLoadError(getPublicBenchmarkLoadFailureMessage(error))
+      setBenchmarkIndex(null)
+    } finally {
+      setIsLoadingBenchmark(false)
+    }
+  }, [benchmarkId])
+
+  const loadSelectedSimulation = useCallback(async () => {
+    const loadId = selectedSimulationLoadIdRef.current + 1
+    selectedSimulationLoadIdRef.current = loadId
+    const isCurrentLoad = () => selectedSimulationLoadIdRef.current === loadId
+
+    if (!selectedSimulationEntry) {
+      setPublicSimulation(null)
+      setIsLoadingSimulation(false)
+      setSimulationLoadError(null)
+      return
+    }
+
+    setIsLoadingSimulation(true)
+    setSimulationLoadError(null)
+    setPublicSimulation(null)
+
+    try {
+      const response = await fetch(
+        getPublicBenchmarkSimulationJsonUrl({
+          benchmarkId,
+          filePath: selectedSimulationEntry.filePath,
+          simulationId: selectedSimulationEntry.simulationId,
+        }),
+        {
+          credentials: "omit",
+        }
+      )
+
+      if (!isCurrentLoad()) {
+        return
+      }
+
+      if (!response.ok) {
+        setSimulationLoadError(
+          response.status === 404
+            ? "Public benchmark simulation could not be found."
+            : "Public benchmark simulation could not be loaded."
+        )
+        return
+      }
+
+      const data = await response.json()
+
+      if (!isCurrentLoad()) {
+        return
+      }
+
+      if (!isPublicSimulationExportV1(data)) {
+        setSimulationLoadError(
+          "Public benchmark simulation file is not in the expected format."
+        )
+        return
+      }
+
+      if (data.simulation.id !== selectedSimulationEntry.simulationId) {
+        setSimulationLoadError(
+          "Public benchmark simulation file does not match the selected simulation."
+        )
+        return
+      }
+
+      setPublicSimulation(redactPublicSimulationRunCosts(data))
+    } catch (error) {
+      if (isCurrentLoad()) {
+        setSimulationLoadError(
+          getPublicBenchmarkSimulationLoadFailureMessage(error)
+        )
+      }
+    } finally {
+      if (isCurrentLoad()) {
+        setIsLoadingSimulation(false)
+      }
+    }
+  }, [benchmarkId, selectedSimulationEntry])
+
+  useEffect(() => {
+    void loadBenchmark()
+  }, [loadBenchmark])
+
+  useEffect(() => {
+    function handlePopState() {
+      setSelectedSimulationId(
+        getPublicBenchmarkSimulationIdFromSearch(window.location.search)
+      )
+    }
+
+    window.addEventListener("popstate", handlePopState)
+
+    return () => {
+      window.removeEventListener("popstate", handlePopState)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!selectedSimulationEntry) {
+      return
+    }
+
+    if (selectedSimulationEntry.simulationId !== selectedSimulationId) {
+      setSelectedSimulationId(selectedSimulationEntry.simulationId)
+      replacePublicBenchmarkSimulationSearch(
+        selectedSimulationEntry.simulationId
+      )
+    }
+  }, [selectedSimulationEntry, selectedSimulationId])
+
+  useEffect(() => {
+    void loadSelectedSimulation()
+  }, [loadSelectedSimulation])
+
+  function handleSelectSimulation(simulationId: string) {
+    if (simulationId === selectedSimulationEntry?.simulationId) {
+      return
+    }
+
+    setSelectedSimulationId(simulationId)
+    pushPublicBenchmarkSimulationSearch(simulationId)
+  }
+
+  const benchmark = benchmarkIndex?.benchmark ?? null
+
+  return (
+    <main className="flex h-svh flex-col overflow-hidden bg-background text-foreground">
+      <header className="shrink-0 border-b border-border px-4 py-4 sm:px-6 lg:px-8">
+        <div className="mx-auto flex w-full max-w-7xl flex-col gap-3">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0 space-y-2">
+              <p className="text-sm font-medium tracking-[0.18em] text-sky-300 uppercase">
+                Public benchmark
+              </p>
+              <div className="grid gap-1">
+                <h1 className="text-2xl font-semibold text-foreground sm:text-3xl">
+                  {benchmark ? getPublicBenchmarkTitle(benchmark) : "Benchmark"}
+                </h1>
+                <p className="text-sm break-all text-muted-foreground">
+                  {benchmarkId}
+                </p>
+              </div>
+            </div>
+
+            {benchmark ? (
+              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground lg:justify-end">
+                <span className="rounded-md border border-border bg-background/45 px-2.5 py-1 font-medium text-foreground">
+                  {benchmark.status}
+                </span>
+                <span className="rounded-md border border-border bg-background/45 px-2.5 py-1">
+                  {formatPublicBenchmarkDateTime(benchmark.createdAt)}
+                </span>
+                <span className="rounded-md border border-border bg-background/45 px-2.5 py-1">
+                  {benchmark.totalSimulationCount} simulations
+                </span>
+                <span className="rounded-md border border-border bg-background/45 px-2.5 py-1">
+                  {benchmark.turnsToSimulate} turns
+                </span>
+                <span className="rounded-md border border-border bg-background/45 px-2.5 py-1">
+                  {formatPublicBenchmarkProcessingMode(benchmark)}
+                </span>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </header>
+
+      <section className="min-h-0 flex-1 overflow-hidden">
+        {isLoadingBenchmark ? (
+          <div className="mx-4 mt-6 rounded-lg border border-border bg-card/70 px-4 py-8 text-sm text-muted-foreground sm:mx-6 lg:mx-8">
+            Loading public benchmark...
+          </div>
+        ) : benchmarkLoadError ? (
+          <div className="mx-4 mt-6 flex flex-col gap-3 rounded-lg border border-border bg-card/70 px-4 py-8 sm:mx-6 sm:flex-row sm:items-center sm:justify-between lg:mx-8">
+            <p className="text-sm text-destructive">{benchmarkLoadError}</p>
+            <Button type="button" variant="outline" onClick={loadBenchmark}>
+              <RefreshCw data-icon="inline-start" />
+              Try again
+            </Button>
+          </div>
+        ) : benchmarkIndex && sortedSimulations.length === 0 ? (
+          <div className="mx-4 mt-6 rounded-lg border border-border bg-card/70 px-4 py-8 text-sm text-muted-foreground sm:mx-6 lg:mx-8">
+            No simulations were exported for this benchmark.
+          </div>
+        ) : benchmarkIndex ? (
+          <div className="grid h-full min-h-0 min-w-[52rem] grid-cols-[16rem_minmax(0,1fr)] overflow-hidden">
+            <aside className="simulation-sidebar-surface min-h-0 min-w-0 border-r border-border">
+              <nav
+                className="simulation-scrollbar h-full overflow-y-auto"
+                aria-label="Benchmark simulations"
+              >
+                <div className="simulation-sidebar-surface sticky top-0 z-10 border-b border-border px-3 py-3">
+                  <p className="text-xs font-semibold tracking-[0.16em] text-muted-foreground uppercase">
+                    Simulations
+                  </p>
+                  <p className="mt-1 text-sm font-medium text-foreground">
+                    {sortedSimulations.length} total
+                  </p>
+                </div>
+
+                <div className="px-2 py-2">
+                  {simulationGroups.map((group) => (
+                    <section className="grid gap-1" key={group.deckId}>
+                      <h2 className="px-2 pt-3 pb-1 text-xs font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+                        {group.deckName}
+                      </h2>
+                      <ul className="grid gap-1">
+                        {group.simulations.map((simulation) => {
+                          const isSelected =
+                            selectedSimulationEntry?.simulationId ===
+                            simulation.simulationId
+
+                          return (
+                            <li key={simulation.simulationId}>
+                              <button
+                                className={`grid h-14 w-full content-center gap-0.5 rounded-md px-3 text-left transition-colors ${
+                                  isSelected
+                                    ? "bg-accent text-accent-foreground"
+                                    : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+                                }`}
+                                type="button"
+                                aria-pressed={isSelected}
+                                onClick={() =>
+                                  handleSelectSimulation(
+                                    simulation.simulationId
+                                  )
+                                }
+                              >
+                                <span className="truncate text-sm font-medium">
+                                  Simulation {simulation.simulationIndex}
+                                </span>
+                                <span className="truncate text-xs opacity-80">
+                                  {simulation.simulationId.slice(0, 8)} -{" "}
+                                  {simulation.seed}
+                                </span>
+                              </button>
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    </section>
+                  ))}
+                </div>
+              </nav>
+            </aside>
+
+            <section className="h-full min-h-0 min-w-0 overflow-hidden">
+              {isLoadingSimulation ? (
+                <div className="simulation-scrollbar h-full min-h-0 overflow-y-auto p-5">
+                  <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+                    Loading public benchmark simulation...
+                  </p>
+                </div>
+              ) : simulationLoadError ? (
+                <div className="simulation-scrollbar h-full min-h-0 overflow-y-auto p-5">
+                  <div className="flex flex-col gap-3 rounded-md border border-border bg-background/35 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm text-destructive">
+                      {simulationLoadError}
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void loadSelectedSimulation()}
+                    >
+                      <RefreshCw data-icon="inline-start" />
+                      Try again
+                    </Button>
+                  </div>
+                </div>
+              ) : publicSimulation ? (
+                <SimulationDetails
+                  canUpgradeUsage={false}
+                  cards={publicSimulation.deck.cards}
+                  commanders={publicSimulation.deck.commanders}
+                  defaultTimelineSelection="opening_hand"
+                  deckId={publicSimulation.deck.id}
+                  initialResultsInfo={publicSimulation.results}
+                  isLoadingStartingHand={false}
+                  modelPresets={[]}
+                  onOpenDetails={() => {}}
+                  onSimulationUpdated={(simulation) =>
+                    setPublicSimulation((currentSimulation) =>
+                      currentSimulation
+                        ? {
+                            ...currentSimulation,
+                            simulation,
+                          }
+                        : currentSimulation
+                    )
+                  }
+                  onUpgradeUsage={() => {}}
+                  readOnly={true}
+                  showRunCost={false}
+                  shouldStreamResults={false}
+                  simulation={publicSimulation.simulation}
+                  startingHand={publicSimulation.startingHand}
+                  startingHandLoadError={null}
+                />
+              ) : null}
+            </section>
+          </div>
         ) : null}
       </section>
     </main>
@@ -4991,6 +5384,115 @@ function isPublicSimulationExportV1(
   )
 }
 
+function isPublicBenchmarkExportV1(
+  value: unknown
+): value is PublicBenchmarkExportV1 {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false
+  }
+
+  const record = value as Record<string, unknown>
+
+  return (
+    record.schemaVersion === 1 &&
+    typeof record.exportedAt === "string" &&
+    isPublicBenchmarkMetadata(record.benchmark) &&
+    Array.isArray(record.simulations) &&
+    record.simulations.every(isPublicBenchmarkSimulationIndexEntry)
+  )
+}
+
+function isPublicBenchmarkMetadata(
+  value: unknown
+): value is PublicBenchmarkMetadata {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false
+  }
+
+  const record = value as Record<string, unknown>
+
+  return (
+    typeof record.id === "string" &&
+    typeof record.llmModelPresetId === "string" &&
+    isNullableString(record.llmModelPresetName) &&
+    isNullableString(record.llmModelPresetModel) &&
+    isNullableString(record.llmModelPresetProvider) &&
+    isNullableString(record.llmModelPresetReasoningEffort) &&
+    isNullableString(record.llmModelPresetOpenrouterModelProvider) &&
+    isPublicBenchmarkNumber(record.simulationsPerDeck) &&
+    isPublicBenchmarkNumber(record.turnsToSimulate) &&
+    isPublicBenchmarkLlmProcessingMode(record.llmProcessingMode) &&
+    typeof record.useFlexServiceTier === "boolean" &&
+    isPublicBenchmarkStatus(record.status) &&
+    Array.isArray(record.decks) &&
+    record.decks.every(isPublicBenchmarkDeck) &&
+    isPublicBenchmarkNumber(record.totalSimulationCount) &&
+    isPublicBenchmarkNumber(record.pendingSimulationCount) &&
+    isPublicBenchmarkNumber(record.runningSimulationCount) &&
+    isPublicBenchmarkNumber(record.completedSimulationCount) &&
+    isPublicBenchmarkNumber(record.failedSimulationCount) &&
+    isPublicBenchmarkNumber(record.cancelledSimulationCount) &&
+    isPublicBenchmarkNumber(record.activeSimulationCount) &&
+    isPublicBenchmarkNumber(record.averageSimulatedTurnCount) &&
+    typeof record.startedAt === "string" &&
+    isNullableString(record.completedAt) &&
+    isNullableString(record.stoppedAt) &&
+    typeof record.createdAt === "string" &&
+    typeof record.updatedAt === "string"
+  )
+}
+
+function isPublicBenchmarkDeck(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false
+  }
+
+  const record = value as Record<string, unknown>
+
+  return typeof record.id === "string" && typeof record.name === "string"
+}
+
+function isPublicBenchmarkSimulationIndexEntry(
+  value: unknown
+): value is PublicBenchmarkSimulationIndexEntry {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false
+  }
+
+  const record = value as Record<string, unknown>
+
+  return (
+    typeof record.simulationId === "string" &&
+    typeof record.deckId === "string" &&
+    typeof record.deckName === "string" &&
+    Number.isInteger(record.deckIndex) &&
+    Number.isInteger(record.simulationIndex) &&
+    typeof record.seed === "string" &&
+    typeof record.filePath === "string"
+  )
+}
+
+function isNullableString(value: unknown) {
+  return value === null || typeof value === "string"
+}
+
+function isPublicBenchmarkNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value)
+}
+
+function isPublicBenchmarkLlmProcessingMode(value: unknown) {
+  return value === "realtime" || value === "openai_batch"
+}
+
+function isPublicBenchmarkStatus(value: unknown) {
+  return (
+    value === "running" ||
+    value === "stopped" ||
+    value === "completed" ||
+    value === "failed"
+  )
+}
+
 function isPublicSimulationRecord(value: unknown) {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
@@ -5014,6 +5516,154 @@ function redactLlmRunCost(run: SimulationDebugLlmRun): SimulationDebugLlmRun {
     ...run,
     estimatedPriceCents: null,
   }
+}
+
+type PublicBenchmarkSimulationGroup = {
+  deckId: string
+  deckName: string
+  simulations: PublicBenchmarkSimulationIndexEntry[]
+}
+
+function getPublicBenchmarkSimulationIdFromSearch(search: string) {
+  const searchParams = new URLSearchParams(search)
+  const simulationId = searchParams.get("simulation")?.trim()
+
+  return simulationId || ""
+}
+
+function sortPublicBenchmarkSimulationEntries(
+  simulations: readonly PublicBenchmarkSimulationIndexEntry[]
+) {
+  return [...simulations].sort(
+    (firstSimulation, secondSimulation) =>
+      firstSimulation.deckIndex - secondSimulation.deckIndex ||
+      firstSimulation.simulationIndex - secondSimulation.simulationIndex ||
+      firstSimulation.simulationId.localeCompare(secondSimulation.simulationId)
+  )
+}
+
+function groupPublicBenchmarkSimulationEntries(
+  simulations: readonly PublicBenchmarkSimulationIndexEntry[]
+) {
+  const groups: PublicBenchmarkSimulationGroup[] = []
+  const groupsByDeckId = new Map<string, PublicBenchmarkSimulationGroup>()
+
+  for (const simulation of simulations) {
+    const existingGroup = groupsByDeckId.get(simulation.deckId)
+
+    if (existingGroup) {
+      existingGroup.simulations.push(simulation)
+      continue
+    }
+
+    const group = {
+      deckId: simulation.deckId,
+      deckName: simulation.deckName,
+      simulations: [simulation],
+    }
+
+    groupsByDeckId.set(simulation.deckId, group)
+    groups.push(group)
+  }
+
+  return groups
+}
+
+function getSelectedPublicBenchmarkSimulationEntry(
+  simulations: readonly PublicBenchmarkSimulationIndexEntry[],
+  selectedSimulationId: string
+) {
+  if (simulations.length === 0) {
+    return null
+  }
+
+  return (
+    simulations.find(
+      (simulation) => simulation.simulationId === selectedSimulationId
+    ) ?? simulations[0]
+  )
+}
+
+function pushPublicBenchmarkSimulationSearch(simulationId: string) {
+  updatePublicBenchmarkSimulationSearch(simulationId, "push")
+}
+
+function replacePublicBenchmarkSimulationSearch(simulationId: string) {
+  updatePublicBenchmarkSimulationSearch(simulationId, "replace")
+}
+
+function updatePublicBenchmarkSimulationSearch(
+  simulationId: string,
+  mode: "push" | "replace"
+) {
+  const url = new URL(window.location.href)
+
+  url.searchParams.set("simulation", simulationId)
+
+  const nextUrl = `${url.pathname}${url.search}${url.hash}`
+
+  if (mode === "push") {
+    window.history.pushState(null, "", nextUrl)
+    return
+  }
+
+  window.history.replaceState(null, "", nextUrl)
+}
+
+function getPublicBenchmarkTitle(benchmark: PublicBenchmarkMetadata) {
+  const presetName = benchmark.llmModelPresetName?.trim()
+
+  if (presetName) {
+    return presetName
+  }
+
+  const providerLabel = formatPublicBenchmarkProviderLabel(
+    benchmark.llmModelPresetProvider
+  )
+  const model = benchmark.llmModelPresetModel?.trim()
+  const title = [providerLabel, model].filter(Boolean).join(" ")
+
+  return title || "Benchmark"
+}
+
+function formatPublicBenchmarkProviderLabel(provider: string | null) {
+  if (!provider) {
+    return null
+  }
+
+  if (provider === "openai") {
+    return "OpenAI"
+  }
+
+  if (provider === "openrouter") {
+    return "OpenRouter"
+  }
+
+  if (provider === "llamacpp") {
+    return "llama.cpp"
+  }
+
+  return provider
+}
+
+function formatPublicBenchmarkDateTime(value: string) {
+  const timestampMs = Date.parse(value)
+
+  if (Number.isNaN(timestampMs)) {
+    return value
+  }
+
+  return new Date(timestampMs).toLocaleString()
+}
+
+function formatPublicBenchmarkProcessingMode(
+  benchmark: PublicBenchmarkMetadata
+) {
+  if (benchmark.llmProcessingMode === "openai_batch") {
+    return "OpenAI Batch"
+  }
+
+  return benchmark.useFlexServiceTier ? "Realtime Flex" : "Realtime"
 }
 
 function getSimulationRunThinkingStatusLabel({

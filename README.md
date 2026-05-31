@@ -29,7 +29,7 @@
    Vite automatically loads `.env.development` for `npm run dev` and
    `.env.production` for `npm run build`. `VITE_*` values are exposed to the
    browser, so use them only for public configuration like app, API, and
-   simulation data origins.
+   public data origins.
 
 4. Install dependencies:
 
