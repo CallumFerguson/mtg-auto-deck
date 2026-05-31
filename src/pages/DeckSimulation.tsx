@@ -1001,40 +1001,22 @@ export function PublicBenchmarkPage({ benchmarkId }: { benchmarkId: string }) {
     <main className="flex h-svh flex-col overflow-hidden bg-background text-foreground">
       <header className="shrink-0 border-b border-border px-4 py-4 sm:px-6 lg:px-8">
         <div className="mx-auto flex w-full max-w-7xl flex-col gap-3">
-          <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0 space-y-2">
-              <p className="text-sm font-medium tracking-[0.18em] text-sky-300 uppercase">
-                Public benchmark
-              </p>
-              <div className="grid gap-1">
-                <h1 className="text-2xl font-semibold text-foreground sm:text-3xl">
-                  {benchmark ? getPublicBenchmarkTitle(benchmark) : "Benchmark"}
-                </h1>
-                <p className="text-sm break-all text-muted-foreground">
-                  {benchmarkId}
+          <div className="min-w-0 space-y-2">
+            <p className="text-sm font-medium tracking-[0.18em] text-sky-300 uppercase">
+              Benchmark
+            </p>
+            <div className="grid gap-1">
+              <h1 className="text-2xl font-semibold text-foreground sm:text-3xl">
+                {benchmark
+                  ? getPublicBenchmarkModelTitle(benchmark)
+                  : "Benchmark"}
+              </h1>
+              {benchmark ? (
+                <p className="text-sm break-words text-muted-foreground">
+                  {getPublicBenchmarkDetailsText(benchmark)}
                 </p>
-              </div>
+              ) : null}
             </div>
-
-            {benchmark ? (
-              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground lg:justify-end">
-                <span className="rounded-md border border-border bg-background/45 px-2.5 py-1 font-medium text-foreground">
-                  {benchmark.status}
-                </span>
-                <span className="rounded-md border border-border bg-background/45 px-2.5 py-1">
-                  {formatPublicBenchmarkDateTime(benchmark.createdAt)}
-                </span>
-                <span className="rounded-md border border-border bg-background/45 px-2.5 py-1">
-                  {benchmark.totalSimulationCount} simulations
-                </span>
-                <span className="rounded-md border border-border bg-background/45 px-2.5 py-1">
-                  {benchmark.turnsToSimulate} turns
-                </span>
-                <span className="rounded-md border border-border bg-background/45 px-2.5 py-1">
-                  {formatPublicBenchmarkProcessingMode(benchmark)}
-                </span>
-              </div>
-            ) : null}
           </div>
         </div>
       </header>
@@ -1063,19 +1045,10 @@ export function PublicBenchmarkPage({ benchmarkId }: { benchmarkId: string }) {
                 className="simulation-scrollbar h-full overflow-y-auto"
                 aria-label="Benchmark simulations"
               >
-                <div className="simulation-sidebar-surface sticky top-0 z-10 border-b border-border px-3 py-3">
-                  <p className="text-xs font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-                    Simulations
-                  </p>
-                  <p className="mt-1 text-sm font-medium text-foreground">
-                    {sortedSimulations.length} total
-                  </p>
-                </div>
-
                 <div className="px-2 py-2">
                   {simulationGroups.map((group) => (
                     <section className="grid gap-1" key={group.deckId}>
-                      <h2 className="px-2 pt-3 pb-1 text-xs font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+                      <h2 className="truncate px-2 pt-3 pb-1 text-xs font-bold tracking-[0.12em] text-foreground uppercase">
                         {group.deckName}
                       </h2>
                       <ul className="grid gap-1">
@@ -1087,7 +1060,7 @@ export function PublicBenchmarkPage({ benchmarkId }: { benchmarkId: string }) {
                           return (
                             <li key={simulation.simulationId}>
                               <button
-                                className={`grid h-14 w-full content-center gap-0.5 rounded-md px-3 text-left transition-colors ${
+                                className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-medium transition-colors ${
                                   isSelected
                                     ? "bg-accent text-accent-foreground"
                                     : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
@@ -1100,12 +1073,8 @@ export function PublicBenchmarkPage({ benchmarkId }: { benchmarkId: string }) {
                                   )
                                 }
                               >
-                                <span className="truncate text-sm font-medium">
+                                <span className="truncate">
                                   Simulation {simulation.simulationIndex}
-                                </span>
-                                <span className="truncate text-xs opacity-80">
-                                  {simulation.simulationId.slice(0, 8)} -{" "}
-                                  {simulation.seed}
                                 </span>
                               </button>
                             </li>
@@ -5610,13 +5579,7 @@ function updatePublicBenchmarkSimulationSearch(
   window.history.replaceState(null, "", nextUrl)
 }
 
-function getPublicBenchmarkTitle(benchmark: PublicBenchmarkMetadata) {
-  const presetName = benchmark.llmModelPresetName?.trim()
-
-  if (presetName) {
-    return presetName
-  }
-
+function getPublicBenchmarkModelTitle(benchmark: PublicBenchmarkMetadata) {
   const providerLabel = formatPublicBenchmarkProviderLabel(
     benchmark.llmModelPresetProvider
   )
@@ -5624,6 +5587,39 @@ function getPublicBenchmarkTitle(benchmark: PublicBenchmarkMetadata) {
   const title = [providerLabel, model].filter(Boolean).join(" ")
 
   return title || "Benchmark"
+}
+
+function getPublicBenchmarkDetailsText(benchmark: PublicBenchmarkMetadata) {
+  return [
+    getPublicBenchmarkDetailPair(
+      "provider",
+      formatPublicBenchmarkProviderLabel(benchmark.llmModelPresetProvider)
+    ),
+    getPublicBenchmarkDetailPair(
+      "model",
+      benchmark.llmModelPresetModel?.trim() || null
+    ),
+    getPublicBenchmarkDetailPair(
+      "reasoning",
+      formatPublicBenchmarkReasoningEffort(
+        benchmark.llmModelPresetReasoningEffort
+      )
+    ),
+    getPublicBenchmarkDetailPair(
+      "OpenRouter provider",
+      benchmark.llmModelPresetOpenrouterModelProvider?.trim() || null
+    ),
+    getPublicBenchmarkDetailPair(
+      "processing",
+      formatPublicBenchmarkProcessingMode(benchmark)
+    ),
+  ]
+    .filter(Boolean)
+    .join(" / ")
+}
+
+function getPublicBenchmarkDetailPair(label: string, value: string | null) {
+  return value ? `${label}: ${value}` : null
 }
 
 function formatPublicBenchmarkProviderLabel(provider: string | null) {
@@ -5646,14 +5642,14 @@ function formatPublicBenchmarkProviderLabel(provider: string | null) {
   return provider
 }
 
-function formatPublicBenchmarkDateTime(value: string) {
-  const timestampMs = Date.parse(value)
-
-  if (Number.isNaN(timestampMs)) {
-    return value
+function formatPublicBenchmarkReasoningEffort(
+  reasoningEffort: string | null
+) {
+  if (!reasoningEffort) {
+    return null
   }
 
-  return new Date(timestampMs).toLocaleString()
+  return reasoningEffort.replaceAll("_", " ")
 }
 
 function formatPublicBenchmarkProcessingMode(
