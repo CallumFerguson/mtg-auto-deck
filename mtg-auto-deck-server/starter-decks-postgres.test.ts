@@ -64,7 +64,7 @@ type FakeStartingHandCard = {
 type FakeSimulation = {
   id: string
   deck_id: string
-  created_via: "app" | "external_mcp"
+  created_via: "app" | "benchmark" | "external_mcp"
   llm_model_preset_id: string | null
   seed: string
   random_state: number

@@ -37,6 +37,7 @@ import {
   SimulationStopTimeoutError,
   waitForSimulationStopCompletions,
 } from "./simulation-stop.js"
+import { createBenchmarkSimulationSeed } from "./benchmarks-postgres.js"
 import {
   callWithRuntimeAbortSignal,
   forEachRuntimeAbortableAsync,
@@ -2005,9 +2006,26 @@ test("startup stale running simulation cancellation message is explicit", () => 
   )
 })
 
-test("external MCP simulations use unmanaged initial status", () => {
+test("simulation creation source chooses the correct initial status", () => {
   assert.equal(getInitialSimulationStatus("app"), "pending")
+  assert.equal(getInitialSimulationStatus("benchmark"), "pending")
   assert.equal(getInitialSimulationStatus("external_mcp"), "unmanaged")
+})
+
+test("benchmark simulation seeds are deterministic by simulation index", () => {
+  assert.equal(
+    createBenchmarkSimulationSeed(1),
+    "mtg-auto-deck-benchmark-v1-1"
+  )
+  assert.equal(
+    createBenchmarkSimulationSeed(10),
+    "mtg-auto-deck-benchmark-v1-10"
+  )
+  assert.equal(
+    createBenchmarkSimulationSeed(10),
+    createBenchmarkSimulationSeed(10)
+  )
+  assert.throws(() => createBenchmarkSimulationSeed(0), /positive integer/)
 })
 
 test("new simulations choose the correct initial step", () => {

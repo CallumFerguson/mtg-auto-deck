@@ -27,6 +27,18 @@ import {
   setAdminSubscriptionTierGrant,
 } from "./billing-tiers-postgres.js"
 import {
+  createBenchmarkRun,
+  createBenchmarkSimulationSeed,
+  ensureBenchmarkRunsSchema,
+  getAdminBenchmark,
+  linkBenchmarkSimulation,
+  listAdminBenchmarks,
+  listBenchmarkRunSimulationsForAdmin,
+  markBenchmarkRunFailed,
+  markBenchmarkRunStopped,
+  MAX_BENCHMARK_SIMULATIONS_PER_DECK,
+} from "./benchmarks-postgres.js"
+import {
   isAdminGrantBillingTier,
   type AdminGrantBillingTier,
 } from "./subscription-tiers.js"
@@ -230,6 +242,7 @@ import {
   ArchidektImportError,
   importArchidektDeck,
 } from "./archidekt-import.js"
+import { createJsonZipArchive } from "./zip.js"
 
 const DEFAULT_HOST = "127.0.0.1"
 const DEFAULT_PORT = 3001
@@ -246,6 +259,7 @@ const APP_PASSWORD_RESET_TOKEN_PATH =
 const OPENING_HAND_MCP_SERVER_LABEL = "opening_hand"
 const TURN_SIMULATION_MCP_SERVER_LABEL = "turn_simulation"
 const PUBLIC_SIMULATION_EXPORT_SCHEMA_VERSION = 1
+const BENCHMARK_EXPORT_SCHEMA_VERSION = 1
 const SSE_KEEPALIVE_INTERVAL_MS = 15000
 const LLM_RUN_QUEUE_POLL_INTERVAL_MS = 1000
 const MCP_RUN_TOKEN_TTL_MS = 6 * 60 * 60 * 1000
@@ -343,6 +357,20 @@ const createSimulationSchema = z.object({
   useFlexServiceTier: z.boolean().default(false),
   startingHandId: z.uuid().nullable(),
 })
+const createBenchmarkSchema = z
+  .object({
+    deckIds: z.array(z.uuid()).min(1),
+    llmModelPresetId: z.uuid(),
+    simulationsPerDeck: z
+      .number()
+      .int()
+      .min(1)
+      .max(MAX_BENCHMARK_SIMULATIONS_PER_DECK),
+    turnsToSimulate: z.number().int().nonnegative(),
+    llmProcessingMode: z.enum(["realtime", "openai_batch"]),
+    useFlexServiceTier: z.boolean(),
+  })
+  .strict()
 const updateSimulationSchema = z
   .object({
     llmModelPresetId: z.uuid().optional(),
@@ -753,6 +781,76 @@ async function getPublicSimulationExport(deckId: string, simulationId: string) {
       await getSimulationResultsInfo(deckId, simulationId)
     ),
   } as const
+}
+
+async function getAdminBenchmarkZipExport(
+  benchmarkRunId: string,
+  adminUserId: string
+) {
+  const benchmark = await getAdminBenchmark(benchmarkRunId, adminUserId)
+
+  if (!benchmark) {
+    return null
+  }
+
+  const childSimulations = await listBenchmarkRunSimulationsForAdmin(
+    benchmarkRunId,
+    adminUserId
+  )
+
+  if (!childSimulations) {
+    return null
+  }
+
+  const exportedAt = new Date().toISOString()
+  const simulationFiles = await Promise.all(
+    childSimulations.map(async (childSimulation) => ({
+      childSimulation,
+      filePath: `simulations/${childSimulation.simulationId}.json`,
+      value: await getPublicSimulationExport(
+        childSimulation.deckId,
+        childSimulation.simulationId
+      ),
+    }))
+  )
+  const benchmarkIndexMetadata = (() => {
+    const { totalEstimatedCostUsd, ...metadata } = benchmark
+
+    void totalEstimatedCostUsd
+
+    return metadata
+  })()
+  const index = {
+    schemaVersion: BENCHMARK_EXPORT_SCHEMA_VERSION,
+    exportedAt,
+    benchmark: benchmarkIndexMetadata,
+    simulations: simulationFiles.map(({ childSimulation, filePath }) => ({
+      simulationId: childSimulation.simulationId,
+      deckId: childSimulation.deckId,
+      deckName: childSimulation.deckName,
+      deckIndex: childSimulation.deckIndex,
+      simulationIndex: childSimulation.simulationIndex,
+      seed: childSimulation.seed,
+      filePath,
+    })),
+  }
+
+  return {
+    benchmark,
+    zip: createJsonZipArchive(
+      [
+        {
+          path: "index.json",
+          value: index,
+        },
+        ...simulationFiles.map((simulationFile) => ({
+          path: simulationFile.filePath,
+          value: simulationFile.value,
+        })),
+      ],
+      new Date(exportedAt)
+    ),
+  }
 }
 
 async function publishSimulationResultsState({
@@ -2686,6 +2784,148 @@ async function startCreatedSimulationInitialStep(
       simulationId: simulation.id,
       turnNumber: decision.nextStep.turnNumber,
     })
+  }
+}
+
+async function createAdminBenchmarkRun({
+  adminUserId,
+  deckIds,
+  llmModelPresetId,
+  llmProcessingMode,
+  simulationsPerDeck,
+  turnsToSimulate,
+  useFlexServiceTier,
+}: {
+  adminUserId: string
+  deckIds: readonly string[]
+  llmModelPresetId: string
+  llmProcessingMode: LlmProcessingMode
+  simulationsPerDeck: number
+  turnsToSimulate: number
+  useFlexServiceTier: boolean
+}) {
+  const benchmarkRunId = await createBenchmarkRun({
+    adminUserId,
+    deckIds,
+    llmModelPresetId,
+    llmProcessingMode,
+    simulationsPerDeck,
+    turnsToSimulate,
+    useFlexServiceTier,
+  })
+
+  try {
+    for (const deckId of deckIds) {
+      for (
+        let simulationIndex = 1;
+        simulationIndex <= simulationsPerDeck;
+        simulationIndex += 1
+      ) {
+        const seed = createBenchmarkSimulationSeed(simulationIndex)
+        let createdSimulation: SimulationSummary | null = null
+
+        try {
+          createdSimulation = await createSimulation(deckId, {
+            createdVia: "benchmark",
+            llmModelPresetId,
+            llmProcessingMode,
+            reasoningSummariesEnabled: false,
+            seed,
+            startingHandId: null,
+            turnsToSimulate,
+            useFlexServiceTier,
+          })
+
+          await linkBenchmarkSimulation({
+            benchmarkRunId,
+            deckId,
+            seed,
+            simulationId: createdSimulation.id,
+            simulationIndex,
+          })
+
+          await startCreatedSimulationInitialStep(deckId, createdSimulation)
+        } catch (error) {
+          if (createdSimulation) {
+            await markSimulationFailed(
+              createdSimulation.id,
+              getErrorMessage(error)
+            ).catch((failError: unknown) => {
+              console.error(
+                "Failed to mark benchmark simulation failed:",
+                failError
+              )
+            })
+          }
+
+          throw error
+        }
+      }
+    }
+  } catch (error) {
+    await markBenchmarkRunFailed(
+      benchmarkRunId,
+      getErrorMessage(error)
+    ).catch((failError: unknown) => {
+      console.error("Failed to mark benchmark failed:", failError)
+    })
+
+    throw error
+  }
+
+  const benchmark = await getAdminBenchmark(benchmarkRunId, adminUserId)
+
+  if (!benchmark) {
+    throw new Error("Created benchmark could not be loaded.")
+  }
+
+  return benchmark
+}
+
+async function stopAdminBenchmarkRun(benchmarkRunId: string, adminUserId: string) {
+  const childSimulations = await listBenchmarkRunSimulationsForAdmin(
+    benchmarkRunId,
+    adminUserId
+  )
+
+  if (!childSimulations) {
+    return null
+  }
+
+  const stoppedSimulations: Awaited<
+    ReturnType<typeof stopActiveSimulationLlmRuns>
+  >[] = []
+  const errors: {
+    deckId: string
+    error: string
+    simulationId: string
+  }[] = []
+
+  for (const childSimulation of childSimulations) {
+    try {
+      stoppedSimulations.push(
+        await stopActiveSimulationLlmRuns(
+          childSimulation.deckId,
+          childSimulation.simulationId
+        )
+      )
+    } catch (error) {
+      errors.push({
+        deckId: childSimulation.deckId,
+        error: getErrorMessage(error),
+        simulationId: childSimulation.simulationId,
+      })
+    }
+  }
+
+  if (errors.length === 0) {
+    await markBenchmarkRunStopped(benchmarkRunId)
+  }
+
+  return {
+    benchmark: await getAdminBenchmark(benchmarkRunId, adminUserId),
+    errors,
+    stoppedSimulations,
   }
 }
 
@@ -5434,6 +5674,7 @@ async function main() {
   await ensureSavedSeedsSchema()
   await ensureLlmModelPresetsSchema()
   await ensureSimulationsSchema()
+  await ensureBenchmarkRunsSchema()
   await ensureUsageLimitsSchema({ query: queryDatabase })
   const staleLlmRunCleanup = await cancelStaleInFlightLlmRuns()
 
@@ -5857,6 +6098,229 @@ async function main() {
       })
     }
   })
+
+  app.get("/admin/benchmarks", async (req: Request, res: Response) => {
+    const adminUser = requireAdminUser(req, res)
+
+    if (!adminUser) {
+      return
+    }
+
+    try {
+      const benchmarks = await listAdminBenchmarks(adminUser.id)
+
+      res.status(200).json({
+        benchmarks,
+        total: benchmarks.length,
+      })
+    } catch (error) {
+      console.error("Failed to list benchmarks:", error)
+      res.status(500).json({
+        error: "Failed to list benchmarks.",
+      })
+    }
+  })
+
+  app.get(
+    "/admin/benchmarks/:benchmarkId/export",
+    async (req: Request, res: Response) => {
+      const adminUser = requireAdminUser(req, res)
+
+      if (!adminUser) {
+        return
+      }
+
+      const benchmarkId = String(req.params.benchmarkId)
+
+      try {
+        const exportData = await getAdminBenchmarkZipExport(
+          benchmarkId,
+          adminUser.id
+        )
+
+        if (!exportData) {
+          res.status(404).json({
+            error: "Benchmark not found.",
+          })
+          return
+        }
+
+        res.setHeader("Content-Type", "application/zip")
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="benchmark-${exportData.benchmark.id}.zip"`
+        )
+        res.status(200).send(exportData.zip)
+      } catch (error) {
+        if (error instanceof SimulationValidationError) {
+          const status =
+            error.message === "Simulation not found."
+              ? 404
+              : error.message ===
+                  "Simulation cannot be exported while LLM runs are active."
+                ? 409
+                : 400
+
+          res.status(status).json({
+            error: error.message,
+          })
+          return
+        }
+
+        console.error("Failed to export benchmark ZIP:", error)
+        res.status(500).json({
+          error: "Failed to export benchmark ZIP.",
+        })
+      }
+    }
+  )
+
+  app.post("/admin/benchmarks", async (req: Request, res: Response) => {
+    const adminUser = requireAdminUser(req, res)
+
+    if (!adminUser) {
+      return
+    }
+
+    const parsedBenchmark = createBenchmarkSchema.safeParse(req.body)
+
+    if (!parsedBenchmark.success) {
+      res.status(400).json({
+        error: "Benchmark payload is not in the expected format.",
+      })
+      return
+    }
+
+    const benchmarkInput = parsedBenchmark.data
+    const deckIds = Array.from(new Set(benchmarkInput.deckIds))
+
+    if (deckIds.length !== benchmarkInput.deckIds.length) {
+      res.status(400).json({
+        error: "Choose each benchmark deck only once.",
+      })
+      return
+    }
+
+    if (
+      benchmarkInput.llmProcessingMode === "openai_batch" &&
+      benchmarkInput.useFlexServiceTier
+    ) {
+      res.status(400).json({
+        error: "Batch processing cannot be combined with flex processing.",
+      })
+      return
+    }
+
+    try {
+      const [ownedDecks, modelPreset] = await Promise.all([
+        listDecks(adminUser.id),
+        getEnabledLlmModelPreset(benchmarkInput.llmModelPresetId),
+      ])
+      const ownedDeckIds = new Set(ownedDecks.map((deck) => deck.id))
+
+      if (deckIds.some((deckId) => !ownedDeckIds.has(deckId))) {
+        res.status(400).json({
+          error: "Benchmarks can only use decks owned by your account.",
+        })
+        return
+      }
+
+      if (!modelPreset) {
+        res.status(400).json({
+          error: "Model preset not found or disabled.",
+        })
+        return
+      }
+
+      if (
+        benchmarkInput.llmProcessingMode === "openai_batch" &&
+        modelPreset.provider !== "openai"
+      ) {
+        res.status(400).json({
+          error: "Batch processing can only use OpenAI model presets.",
+        })
+        return
+      }
+
+      if (
+        benchmarkInput.useFlexServiceTier &&
+        !modelPreset.supportsFlex
+      ) {
+        res.status(400).json({
+          error:
+            "Flex processing can only be enabled for model presets that support flex.",
+        })
+        return
+      }
+
+      const benchmark = await createAdminBenchmarkRun({
+        adminUserId: adminUser.id,
+        deckIds,
+        llmModelPresetId: benchmarkInput.llmModelPresetId,
+        llmProcessingMode: benchmarkInput.llmProcessingMode,
+        simulationsPerDeck: benchmarkInput.simulationsPerDeck,
+        turnsToSimulate: benchmarkInput.turnsToSimulate,
+        useFlexServiceTier: benchmarkInput.useFlexServiceTier,
+      })
+
+      res.status(201).json({
+        benchmark,
+      })
+    } catch (error) {
+      if (error instanceof SimulationValidationError) {
+        res.status(400).json({
+          error: error.message,
+        })
+        return
+      }
+
+      if (error instanceof LlmConfigurationError) {
+        res.status(500).json({
+          error: error.message,
+        })
+        return
+      }
+
+      console.error("Failed to create benchmark:", error)
+      res.status(500).json({
+        error: "Failed to create benchmark.",
+      })
+    }
+  })
+
+  app.post(
+    "/admin/benchmarks/:benchmarkId/stop",
+    async (req: Request, res: Response) => {
+      const adminUser = requireAdminUser(req, res)
+
+      if (!adminUser) {
+        return
+      }
+
+      const benchmarkId = String(req.params.benchmarkId)
+
+      try {
+        const stopResult = await stopAdminBenchmarkRun(
+          benchmarkId,
+          adminUser.id
+        )
+
+        if (!stopResult) {
+          res.status(404).json({
+            error: "Benchmark not found.",
+          })
+          return
+        }
+
+        res.status(200).json(stopResult)
+      } catch (error) {
+        console.error("Failed to stop benchmark:", error)
+        res.status(500).json({
+          error: "Failed to stop benchmark.",
+        })
+      }
+    }
+  )
 
   app.get("/llm-model-presets", async (_req: Request, res: Response) => {
     try {

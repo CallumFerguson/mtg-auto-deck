@@ -37,7 +37,7 @@ type SimulationStatus =
   | "failed"
   | "cancelled"
 
-type SimulationCreatedVia = "app" | "external_mcp"
+type SimulationCreatedVia = "app" | "benchmark" | "external_mcp"
 export type LlmProcessingMode = "realtime" | "openai_batch"
 
 export type Simulation = {

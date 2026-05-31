@@ -1,5 +1,5 @@
 export type DeckPageTab = "details" | "simulation"
-export type AdminDashboardSectionId = "users" | "model-presets"
+export type AdminDashboardSectionId = "users" | "model-presets" | "benchmarks"
 
 export function getAdminDashboardSectionIdFromPathname(
   pathname: string
@@ -10,6 +10,10 @@ export function getAdminDashboardSectionIdFromPathname(
 
   if (pathname === "/admin/model-presets") {
     return "model-presets"
+  }
+
+  if (pathname === "/admin/benchmarks") {
+    return "benchmarks"
   }
 
   return null

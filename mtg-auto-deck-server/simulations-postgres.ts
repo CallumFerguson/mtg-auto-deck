@@ -27,7 +27,7 @@ export type SimulationStatus =
   | "failed"
   | "cancelled"
 
-export type SimulationCreatedVia = "app" | "external_mcp"
+export type SimulationCreatedVia = "app" | "benchmark" | "external_mcp"
 
 export type LlmProcessingMode = "realtime" | "openai_batch"
 
@@ -625,7 +625,11 @@ export async function ensureSimulationsSchema() {
     "failed",
     "cancelled",
   ])
-  await createEnumType("simulation_created_via", ["app", "external_mcp"])
+  await createEnumType("simulation_created_via", [
+    "app",
+    "benchmark",
+    "external_mcp",
+  ])
   await createEnumType("llm_processing_mode", ["realtime", "openai_batch"])
   await createEnumType("llm_run_status", [
     "pending",
@@ -1418,7 +1422,7 @@ export async function listSimulationsForDeck(
         updated_at
       FROM simulations
       WHERE deck_id = $1
-        AND created_via = 'app'
+        AND created_via IN ('app', 'benchmark')
       ORDER BY created_at DESC
     `,
     [deckId]
@@ -1448,7 +1452,11 @@ export async function createSimulation(
     throw new SimulationValidationError("LLM processing mode is invalid.")
   }
 
-  if (createdVia !== "app" && createdVia !== "external_mcp") {
+  if (
+    createdVia !== "app" &&
+    createdVia !== "benchmark" &&
+    createdVia !== "external_mcp"
+  ) {
     throw new SimulationValidationError(
       "Simulation creation source is invalid."
     )

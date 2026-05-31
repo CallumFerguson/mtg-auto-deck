@@ -256,6 +256,22 @@ function App() {
             }
           />
           <Route
+            path="/admin/benchmarks"
+            element={
+              <RequireVerifiedUser sessionUser={sessionUser}>
+                {verifiedPageProps ? (
+                  <AdminDashboardRoute
+                    {...verifiedPageProps}
+                    onSessionChanged={async () => {
+                      await session.refetch()
+                      navigate("/")
+                    }}
+                  />
+                ) : null}
+              </RequireVerifiedUser>
+            }
+          />
+          <Route
             path="*"
             element={<UnknownRoute sessionUser={sessionUser} />}
           />

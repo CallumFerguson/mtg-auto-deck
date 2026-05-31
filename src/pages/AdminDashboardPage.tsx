@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -13,9 +14,11 @@ import {
 import { createPortal } from "react-dom"
 import {
   ArrowLeft,
+  BarChart3,
   BrainCircuit,
   CheckCircle2,
   CircleOff,
+  Download,
   Edit3,
   LayoutDashboard,
   LogIn,
@@ -27,6 +30,7 @@ import {
   ShieldCheck,
   ShieldMinus,
   Star,
+  Square,
   Trash2,
   UserRound,
   UsersRound,
@@ -39,8 +43,16 @@ import { AccountMenu } from "@/components/AccountMenu"
 import { Button } from "@/components/ui/button"
 import { API_BASE_URL, apiFetch } from "@/lib/api"
 import { readApiError } from "@/lib/api-error"
-import type { AdminUser, AdminUsersResponse } from "@/lib/admin-types"
+import type {
+  AdminBenchmark,
+  AdminBenchmarksResponse,
+  AdminUser,
+  AdminUsersResponse,
+  CreateAdminBenchmarkResponse,
+  StopAdminBenchmarkResponse,
+} from "@/lib/admin-types"
 import { authClient, type AuthUser } from "@/lib/auth-client"
+import type { Deck, DecksResponse, LlmProcessingMode } from "@/lib/deck-types"
 import {
   BILLING_TIER_LABELS,
   type AdminGrantBillingTier,
@@ -51,12 +63,15 @@ import {
   formatProviderLabel,
   getLlmModelPresetLabel,
   getLlmModelPresetTechnicalLabel,
+  type LlmModelPreset,
+  type LlmModelPresetsResponse,
   type AdminLlmModelPreset,
   type AdminLlmModelPresetsResponse,
   type LlmProvider,
   type ReasoningEffort,
 } from "@/lib/llm-model-preset-types"
 import type { AdminDashboardSectionId } from "@/lib/navigation"
+import { FlexServiceTierSwitch } from "./deck-simulation/SimulationSetupControls"
 
 type AdminDashboardProps = {
   activeSectionId: AdminDashboardSectionId | null
@@ -92,6 +107,13 @@ const ADMIN_SECTIONS: readonly AdminSection[] = [
     path: "/admin/model-presets",
     Icon: BrainCircuit,
   },
+  {
+    id: "benchmarks",
+    label: "Benchmarks",
+    description: "Preset comparisons",
+    path: "/admin/benchmarks",
+    Icon: BarChart3,
+  },
 ]
 
 const ADMIN_USER_ACTIONS_MENU_WIDTH = 208
@@ -100,6 +122,9 @@ const ADMIN_USER_ACTIONS_MENU_VIEWPORT_MARGIN = 8
 const ADMIN_MODEL_PRESET_ACTIONS_MENU_WIDTH = 192
 const ADMIN_MODEL_PRESET_ACTIONS_MENU_GAP = 6
 const ADMIN_MODEL_PRESET_ACTIONS_MENU_VIEWPORT_MARGIN = 8
+const ADMIN_BENCHMARK_ACTIONS_MENU_WIDTH = 192
+const ADMIN_BENCHMARK_ACTIONS_MENU_GAP = 6
+const ADMIN_BENCHMARK_ACTIONS_MENU_VIEWPORT_MARGIN = 8
 
 type FloatingMenuPosition = {
   left: number
@@ -187,6 +212,8 @@ export function AdminDashboardPage({
               />
             ) : activeSection?.id === "model-presets" ? (
               <AdminModelPresetsSection />
+            ) : activeSection?.id === "benchmarks" ? (
+              <AdminBenchmarksSection />
             ) : (
               <UnknownAdminSection />
             )}
@@ -1691,6 +1718,940 @@ function AdminModelPresetsSection() {
   )
 }
 
+function AdminBenchmarksSection() {
+  const [benchmarks, setBenchmarks] = useState<AdminBenchmark[]>([])
+  const [decks, setDecks] = useState<Deck[]>([])
+  const [modelPresets, setModelPresets] = useState<LlmModelPreset[]>([])
+  const [isLoadingBenchmarks, setIsLoadingBenchmarks] = useState(true)
+  const [isLoadingOptions, setIsLoadingOptions] = useState(true)
+  const [benchmarkLoadError, setBenchmarkLoadError] = useState<string | null>(
+    null
+  )
+  const [optionLoadError, setOptionLoadError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [isCreatingBenchmark, setIsCreatingBenchmark] = useState(false)
+  const [exportingBenchmarkId, setExportingBenchmarkId] = useState<
+    string | null
+  >(null)
+  const [stoppingBenchmarkId, setStoppingBenchmarkId] = useState<string | null>(
+    null
+  )
+  const [openBenchmarkMenuId, setOpenBenchmarkMenuId] = useState<string | null>(
+    null
+  )
+  const [selectedDeckIds, setSelectedDeckIds] = useState<string[]>([])
+  const [selectedModelPresetId, setSelectedModelPresetId] = useState("")
+  const [simulationsPerDeck, setSimulationsPerDeck] = useState("1")
+  const [turnsToSimulate, setTurnsToSimulate] = useState("1")
+  const [llmProcessingMode, setLlmProcessingMode] =
+    useState<LlmProcessingMode>("realtime")
+  const [useFlexServiceTier, setUseFlexServiceTier] = useState(false)
+
+  const selectedModelPreset = useMemo(
+    () =>
+      modelPresets.find((preset) => preset.id === selectedModelPresetId) ??
+      null,
+    [modelPresets, selectedModelPresetId]
+  )
+  const isBatchMode = llmProcessingMode === "openai_batch"
+  const supportsSelectedPresetBatch = selectedModelPreset?.provider === "openai"
+  const supportsSelectedPresetFlex = Boolean(selectedModelPreset?.supportsFlex)
+  const totalBenchmarkSimulationCount =
+    selectedDeckIds.length * (Number(simulationsPerDeck) || 0)
+
+  const loadBenchmarks = useCallback(async () => {
+    setIsLoadingBenchmarks(true)
+    setBenchmarkLoadError(null)
+
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/admin/benchmarks`)
+
+      if (!response.ok) {
+        setBenchmarkLoadError(
+          await readApiError(response, "Benchmarks could not be loaded.")
+        )
+        return
+      }
+
+      const data = (await response.json()) as AdminBenchmarksResponse
+      setBenchmarks(data.benchmarks)
+    } catch {
+      setBenchmarkLoadError("Benchmarks could not be loaded.")
+    } finally {
+      setIsLoadingBenchmarks(false)
+    }
+  }, [])
+
+  const loadBenchmarkOptions = useCallback(async () => {
+    setIsLoadingOptions(true)
+    setOptionLoadError(null)
+
+    try {
+      const [decksResponse, presetsResponse] = await Promise.all([
+        apiFetch(`${API_BASE_URL}/decks`),
+        apiFetch(`${API_BASE_URL}/llm-model-presets`),
+      ])
+
+      if (!decksResponse.ok) {
+        setOptionLoadError(
+          await readApiError(decksResponse, "Decks could not be loaded.")
+        )
+        return
+      }
+
+      if (!presetsResponse.ok) {
+        setOptionLoadError(
+          await readApiError(
+            presetsResponse,
+            "Model presets could not be loaded."
+          )
+        )
+        return
+      }
+
+      const decksData = (await decksResponse.json()) as DecksResponse
+      const presetsData =
+        (await presetsResponse.json()) as LlmModelPresetsResponse
+      setDecks(decksData.decks)
+      setModelPresets(presetsData.presets)
+      setSelectedDeckIds((currentDeckIds) =>
+        currentDeckIds.filter((deckId) =>
+          decksData.decks.some((deck) => deck.id === deckId)
+        )
+      )
+      setSelectedModelPresetId((currentPresetId) => {
+        if (presetsData.presets.some((preset) => preset.id === currentPresetId)) {
+          return currentPresetId
+        }
+
+        return presetsData.defaultPresetId ?? presetsData.presets[0]?.id ?? ""
+      })
+    } catch {
+      setOptionLoadError("Benchmark options could not be loaded.")
+    } finally {
+      setIsLoadingOptions(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadBenchmarks()
+  }, [loadBenchmarks])
+
+  useEffect(() => {
+    void loadBenchmarkOptions()
+  }, [loadBenchmarkOptions])
+
+  useEffect(() => {
+    if (isBatchMode && selectedModelPreset?.provider !== "openai") {
+      setLlmProcessingMode("realtime")
+    }
+
+    if (useFlexServiceTier && !selectedModelPreset?.supportsFlex) {
+      setUseFlexServiceTier(false)
+    }
+  }, [isBatchMode, selectedModelPreset, useFlexServiceTier])
+
+  function toggleSelectedDeck(deckId: string) {
+    setSelectedDeckIds((currentDeckIds) =>
+      currentDeckIds.includes(deckId)
+        ? currentDeckIds.filter((currentDeckId) => currentDeckId !== deckId)
+        : [...currentDeckIds, deckId]
+    )
+    setActionError(null)
+  }
+
+  function handleBatchModeChange(checked: boolean) {
+    setLlmProcessingMode(checked ? "openai_batch" : "realtime")
+
+    if (checked) {
+      setUseFlexServiceTier(false)
+    }
+
+    setActionError(null)
+  }
+
+  function handleFlexServiceTierChange(checked: boolean) {
+    setUseFlexServiceTier(checked)
+
+    if (checked) {
+      setLlmProcessingMode("realtime")
+    }
+
+    setActionError(null)
+  }
+
+  async function handleCreateBenchmark(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (isCreatingBenchmark) {
+      return
+    }
+
+    const parsedSimulationsPerDeck = Number(simulationsPerDeck)
+    const parsedTurnsToSimulate = Number(turnsToSimulate)
+
+    if (selectedDeckIds.length === 0) {
+      setActionError("Choose at least one deck.")
+      return
+    }
+
+    if (!selectedModelPreset) {
+      setActionError("Choose a model preset.")
+      return
+    }
+
+    if (
+      !Number.isInteger(parsedSimulationsPerDeck) ||
+      parsedSimulationsPerDeck < 1 ||
+      parsedSimulationsPerDeck > 100
+    ) {
+      setActionError("Simulations per deck must be a whole number from 1 to 100.")
+      return
+    }
+
+    if (
+      !Number.isInteger(parsedTurnsToSimulate) ||
+      parsedTurnsToSimulate < 0
+    ) {
+      setActionError("Turns to simulate must be a non-negative integer.")
+      return
+    }
+
+    if (isBatchMode && selectedModelPreset.provider !== "openai") {
+      setActionError("Batch mode requires an OpenAI model preset.")
+      return
+    }
+
+    if (useFlexServiceTier && !selectedModelPreset.supportsFlex) {
+      setActionError("Flex requires a model preset that supports flex.")
+      return
+    }
+
+    setIsCreatingBenchmark(true)
+    setActionError(null)
+
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/admin/benchmarks`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          deckIds: selectedDeckIds,
+          llmModelPresetId: selectedModelPreset.id,
+          llmProcessingMode,
+          simulationsPerDeck: parsedSimulationsPerDeck,
+          turnsToSimulate: parsedTurnsToSimulate,
+          useFlexServiceTier,
+        }),
+      })
+
+      if (!response.ok) {
+        setActionError(
+          await readApiError(response, "Benchmark could not be created.")
+        )
+        return
+      }
+
+      const data = (await response.json()) as CreateAdminBenchmarkResponse
+      setBenchmarks((currentBenchmarks) => [
+        data.benchmark,
+        ...currentBenchmarks.filter(
+          (benchmark) => benchmark.id !== data.benchmark.id
+        ),
+      ])
+      await loadBenchmarks()
+    } catch {
+      setActionError("Benchmark could not be created.")
+    } finally {
+      setIsCreatingBenchmark(false)
+    }
+  }
+
+  async function handleExportBenchmark(benchmark: AdminBenchmark) {
+    if (exportingBenchmarkId) {
+      return
+    }
+
+    setExportingBenchmarkId(benchmark.id)
+    setActionError(null)
+
+    try {
+      const response = await apiFetch(
+        `${API_BASE_URL}/admin/benchmarks/${benchmark.id}/export`
+      )
+
+      if (!response.ok) {
+        setActionError(
+          await readApiError(response, "Benchmark ZIP could not be exported.")
+        )
+        return
+      }
+
+      const blob = await response.blob()
+      const downloadUrl = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = downloadUrl
+      link.download = `benchmark-${benchmark.id}.zip`
+      document.body.append(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(downloadUrl)
+    } catch {
+      setActionError("Benchmark ZIP could not be exported.")
+    } finally {
+      setExportingBenchmarkId(null)
+    }
+  }
+
+  async function handleStopBenchmark(benchmark: AdminBenchmark) {
+    if (stoppingBenchmarkId) {
+      return
+    }
+
+    setStoppingBenchmarkId(benchmark.id)
+    setActionError(null)
+
+    try {
+      const response = await apiFetch(
+        `${API_BASE_URL}/admin/benchmarks/${benchmark.id}/stop`,
+        {
+          method: "POST",
+        }
+      )
+
+      if (!response.ok) {
+        setActionError(
+          await readApiError(response, "Benchmark could not be stopped.")
+        )
+        return
+      }
+
+      const data = (await response.json()) as StopAdminBenchmarkResponse
+
+      if (data.benchmark) {
+        setBenchmarks((currentBenchmarks) =>
+          currentBenchmarks.map((currentBenchmark) =>
+            currentBenchmark.id === data.benchmark?.id
+              ? data.benchmark
+              : currentBenchmark
+          )
+        )
+      }
+
+      if (data.errors.length > 0) {
+        setActionError(
+          `${data.errors.length} ${
+            data.errors.length === 1 ? "simulation" : "simulations"
+          } could not be stopped.`
+        )
+      }
+
+      await loadBenchmarks()
+    } catch {
+      setActionError("Benchmark could not be stopped.")
+    } finally {
+      setStoppingBenchmarkId(null)
+    }
+  }
+
+  return (
+    <section className="min-w-0 space-y-4">
+      <div className="flex flex-col gap-3 rounded-lg border border-border bg-card/70 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 space-y-1">
+          <div className="flex items-center gap-2">
+            <BarChart3 className="size-5 shrink-0 text-sky-300" aria-hidden />
+            <h2 className="text-xl font-semibold">Benchmarks</h2>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {isLoadingBenchmarks
+              ? "Loading benchmarks..."
+              : `${benchmarks.length} ${
+                  benchmarks.length === 1 ? "benchmark" : "benchmarks"
+                }`}
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => void loadBenchmarks()}
+          disabled={isLoadingBenchmarks}
+        >
+          <RefreshCw
+            data-icon="inline-start"
+            className={isLoadingBenchmarks ? "animate-spin" : undefined}
+          />
+          Refresh
+        </Button>
+      </div>
+
+      <div className="rounded-lg border border-border bg-card/70 p-4">
+        <form className="grid gap-4" onSubmit={handleCreateBenchmark}>
+          <div className="flex items-center gap-2">
+            <Plus className="size-4 text-sky-300" aria-hidden />
+            <h3 className="text-sm font-semibold">New benchmark</h3>
+          </div>
+
+          {optionLoadError ? (
+            <div className="flex flex-col gap-3 rounded-md border border-destructive/35 bg-destructive/10 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-destructive" role="alert">
+                {optionLoadError}
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void loadBenchmarkOptions()}
+              >
+                Try again
+              </Button>
+            </div>
+          ) : null}
+
+          <div className="grid min-w-0 gap-5">
+            <div className="grid min-w-0 content-start gap-3">
+              <p className="text-sm font-medium">Decks</p>
+              {isLoadingOptions ? (
+                <div className="rounded-md border border-border bg-background/35 px-3 py-6 text-sm text-muted-foreground">
+                  Loading decks...
+                </div>
+              ) : decks.length > 0 ? (
+                <div className="grid max-h-56 auto-rows-min gap-2 overflow-y-auto rounded-md border border-border bg-background/25 p-2">
+                  {decks.map((deck) => {
+                    const isSelected = selectedDeckIds.includes(deck.id)
+
+                    return (
+                      <label
+                        className={`grid cursor-pointer grid-cols-[auto_minmax(0,1fr)] items-start gap-2 rounded-md border px-3 py-2 text-sm transition-colors ${
+                          isSelected
+                            ? "border-sky-300/45 bg-sky-400/10 text-foreground"
+                            : "border-border bg-background/35 text-muted-foreground hover:bg-muted/35 hover:text-foreground"
+                        }`}
+                        key={deck.id}
+                      >
+                        <input
+                          className="mt-0.5 size-4 accent-sky-300"
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelectedDeck(deck.id)}
+                        />
+                        <span className="min-w-0 truncate font-medium">
+                          {deck.name}
+                        </span>
+                      </label>
+                    )
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-md border border-border bg-background/35 px-3 py-6 text-sm text-muted-foreground">
+                  No owned decks found.
+                </div>
+              )}
+            </div>
+
+            <div className="grid min-w-0 content-start gap-3">
+              <AdminFormField label="Model preset">
+                <select
+                  className="h-10 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-3 focus:ring-ring/30 disabled:opacity-50"
+                  value={selectedModelPresetId}
+                  disabled={isLoadingOptions || modelPresets.length === 0}
+                  onChange={(event) => {
+                    setSelectedModelPresetId(event.target.value)
+                    setActionError(null)
+                  }}
+                >
+                  {modelPresets.map((preset) => (
+                    <option key={preset.id} value={preset.id}>
+                      {getLlmModelPresetLabel(preset)}
+                    </option>
+                  ))}
+                </select>
+              </AdminFormField>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <AdminFormField label="Simulations per deck">
+                  <input
+                    className="no-number-spinner h-10 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-3 focus:ring-ring/30"
+                    type="number"
+                    min="1"
+                    max="100"
+                    step="1"
+                    value={simulationsPerDeck}
+                    onChange={(event) => {
+                      setSimulationsPerDeck(event.target.value)
+                      setActionError(null)
+                    }}
+                  />
+                </AdminFormField>
+                <AdminFormField label="Turns">
+                  <input
+                    className="no-number-spinner h-10 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-3 focus:ring-ring/30"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={turnsToSimulate}
+                    onChange={(event) => {
+                      setTurnsToSimulate(event.target.value)
+                      setActionError(null)
+                    }}
+                  />
+                </AdminFormField>
+              </div>
+
+              <label
+                className={`flex min-h-14 items-start gap-3 rounded-md border px-3 py-3 text-sm transition-colors ${
+                  isBatchMode
+                    ? "border-ring bg-accent text-accent-foreground"
+                    : "border-border bg-background/35 text-muted-foreground"
+                } ${
+                  !supportsSelectedPresetBatch || useFlexServiceTier
+                    ? "cursor-not-allowed opacity-60"
+                    : ""
+                }`}
+              >
+                <input
+                  className="mt-1 size-4 accent-sky-300"
+                  type="checkbox"
+                  checked={isBatchMode}
+                  disabled={!supportsSelectedPresetBatch || useFlexServiceTier}
+                  onChange={(event) =>
+                    handleBatchModeChange(event.target.checked)
+                  }
+                />
+                <span className="grid min-w-0 gap-1">
+                  <span className="font-medium">Use batch mode</span>
+                  <span className="text-xs leading-5 text-muted-foreground">
+                    OpenAI batch processing
+                  </span>
+                </span>
+              </label>
+
+              <FlexServiceTierSwitch
+                checked={useFlexServiceTier}
+                disabled={!supportsSelectedPresetFlex || isBatchMode}
+                activeWarning={
+                  isBatchMode
+                    ? "Batch mode and flex processing are mutually exclusive."
+                    : undefined
+                }
+                onCheckedChange={handleFlexServiceTierChange}
+              />
+
+              <div className="rounded-md border border-border bg-background/35 px-3 py-3">
+                <dl className="grid gap-2 text-sm sm:grid-cols-3">
+                  <AdminCostSummary label="Decks">
+                    {selectedDeckIds.length}
+                  </AdminCostSummary>
+                  <AdminCostSummary label="Simulations">
+                    {Number.isFinite(totalBenchmarkSimulationCount)
+                      ? totalBenchmarkSimulationCount
+                      : 0}
+                  </AdminCostSummary>
+                  <AdminCostSummary label="Mode">
+                    {formatBenchmarkProcessingMode(
+                      llmProcessingMode,
+                      useFlexServiceTier
+                    )}
+                  </AdminCostSummary>
+                </dl>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+            {actionError ? (
+              <p
+                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                role="alert"
+              >
+                {actionError}
+              </p>
+            ) : (
+              <span />
+            )}
+            <Button
+              type="submit"
+              disabled={
+                isCreatingBenchmark ||
+                isLoadingOptions ||
+                selectedDeckIds.length === 0 ||
+                !selectedModelPreset
+              }
+            >
+              <Plus data-icon="inline-start" />
+              {isCreatingBenchmark ? "Starting..." : "Start benchmark"}
+            </Button>
+          </div>
+        </form>
+      </div>
+
+      {isLoadingBenchmarks ? (
+        <AdminPanelMessage>Loading benchmarks...</AdminPanelMessage>
+      ) : benchmarkLoadError ? (
+        <div className="flex flex-col gap-3 rounded-lg border border-destructive/35 bg-destructive/10 px-4 py-5 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-destructive" role="alert">
+            {benchmarkLoadError}
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void loadBenchmarks()}
+          >
+            Try again
+          </Button>
+        </div>
+      ) : benchmarks.length > 0 ? (
+        <div className="overflow-hidden rounded-lg border border-border bg-card/70">
+          <table className="w-full table-fixed border-collapse text-sm">
+            <colgroup>
+              <col className="w-[24%]" />
+              <col className="w-[18%]" />
+              <col className="w-[18%]" />
+              <col className="w-[20%]" />
+              <col className="w-[14%]" />
+              <col className="w-[6%]" />
+            </colgroup>
+            <thead className="border-b border-border bg-muted/25 text-xs text-muted-foreground">
+              <tr>
+                <TableHeader>Benchmark</TableHeader>
+                <TableHeader>Decks</TableHeader>
+                <TableHeader>Settings</TableHeader>
+                <TableHeader>Progress</TableHeader>
+                <TableHeader>Metrics</TableHeader>
+                <TableHeader>
+                  <span className="sr-only">Actions</span>
+                </TableHeader>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {benchmarks.map((benchmark) => {
+                return (
+                  <tr
+                    className="transition-colors hover:bg-muted/25"
+                    key={benchmark.id}
+                  >
+                    <TableCell>
+                      <div className="grid gap-2">
+                        <div className="min-w-0">
+                          <p className="font-medium break-words text-foreground">
+                            {getBenchmarkPresetLabel(benchmark)}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {formatDateTime(benchmark.createdAt)}
+                          </p>
+                        </div>
+                        <BenchmarkStatusBadge status={benchmark.status} />
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="grid gap-1 text-xs text-muted-foreground">
+                        {benchmark.decks.slice(0, 3).map((deck) => (
+                          <span className="break-words" key={deck.id}>
+                            {deck.name}
+                          </span>
+                        ))}
+                        {benchmark.decks.length > 3 ? (
+                          <span>+{benchmark.decks.length - 3} more</span>
+                        ) : null}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <CompactMetricList
+                        items={[
+                          [
+                            "mode",
+                            formatBenchmarkProcessingMode(
+                              benchmark.llmProcessingMode,
+                              benchmark.useFlexServiceTier
+                            ),
+                          ],
+                          ["turns", String(benchmark.turnsToSimulate)],
+                          ["per deck", String(benchmark.simulationsPerDeck)],
+                        ]}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <CompactMetricList
+                        items={[
+                          [
+                            "total",
+                            String(benchmark.totalSimulationCount),
+                          ],
+                          [
+                            "active",
+                            String(benchmark.activeSimulationCount),
+                          ],
+                          [
+                            "done",
+                            String(benchmark.completedSimulationCount),
+                          ],
+                          [
+                            "failed",
+                            String(benchmark.failedSimulationCount),
+                          ],
+                          [
+                            "stopped",
+                            String(benchmark.cancelledSimulationCount),
+                          ],
+                        ]}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <CompactMetricList
+                        items={[
+                          [
+                            "avg turns",
+                            benchmark.averageSimulatedTurnCount.toFixed(1),
+                          ],
+                          [
+                            "cost",
+                            formatUsdCost(benchmark.totalEstimatedCostUsd),
+                          ],
+                        ]}
+                      />
+                    </TableCell>
+                    <TableCell className="px-2">
+                      <AdminBenchmarkActionsMenu
+                        benchmark={benchmark}
+                        exportingBenchmarkId={exportingBenchmarkId}
+                        menuId={benchmark.id}
+                        onExportBenchmark={handleExportBenchmark}
+                        onStopBenchmark={handleStopBenchmark}
+                        openBenchmarkMenuId={openBenchmarkMenuId}
+                        setOpenBenchmarkMenuId={setOpenBenchmarkMenuId}
+                        stoppingBenchmarkId={stoppingBenchmarkId}
+                      />
+                    </TableCell>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <AdminPanelMessage>No benchmarks found.</AdminPanelMessage>
+      )}
+    </section>
+  )
+}
+
+function AdminBenchmarkActionsMenu({
+  benchmark,
+  exportingBenchmarkId,
+  menuId,
+  onExportBenchmark,
+  onStopBenchmark,
+  openBenchmarkMenuId,
+  setOpenBenchmarkMenuId,
+  stoppingBenchmarkId,
+}: {
+  benchmark: AdminBenchmark
+  exportingBenchmarkId: string | null
+  menuId: string
+  onExportBenchmark: (benchmark: AdminBenchmark) => void
+  onStopBenchmark: (benchmark: AdminBenchmark) => void
+  openBenchmarkMenuId: string | null
+  setOpenBenchmarkMenuId: Dispatch<SetStateAction<string | null>>
+  stoppingBenchmarkId: string | null
+}) {
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [menuPosition, setMenuPosition] = useState<FloatingMenuPosition | null>(
+    null
+  )
+  const isOpen = openBenchmarkMenuId === menuId
+  const isExporting = exportingBenchmarkId === benchmark.id
+  const isStopping = stoppingBenchmarkId === benchmark.id
+  const isStopDisabled =
+    benchmark.status !== "running" ||
+    Boolean(stoppingBenchmarkId) ||
+    Boolean(exportingBenchmarkId)
+  const isExportDisabled =
+    Boolean(exportingBenchmarkId) || Boolean(stoppingBenchmarkId)
+
+  const updateMenuPosition = useCallback(() => {
+    const trigger = triggerRef.current
+
+    if (!trigger || trigger.getClientRects().length === 0) {
+      setOpenBenchmarkMenuId(null)
+      return
+    }
+
+    const triggerRect = trigger.getBoundingClientRect()
+    const menuWidth =
+      menuRef.current?.offsetWidth ?? ADMIN_BENCHMARK_ACTIONS_MENU_WIDTH
+    const menuHeight = menuRef.current?.offsetHeight ?? 0
+    const viewportWidth = window.innerWidth
+    const viewportHeight = window.innerHeight
+    const minimumLeft = ADMIN_BENCHMARK_ACTIONS_MENU_VIEWPORT_MARGIN
+    const maximumLeft = Math.max(
+      minimumLeft,
+      viewportWidth -
+        menuWidth -
+        ADMIN_BENCHMARK_ACTIONS_MENU_VIEWPORT_MARGIN
+    )
+    const left = Math.min(
+      Math.max(triggerRect.right - menuWidth, minimumLeft),
+      maximumLeft
+    )
+    const belowTop = triggerRect.bottom + ADMIN_BENCHMARK_ACTIONS_MENU_GAP
+    const aboveTop =
+      triggerRect.top - menuHeight - ADMIN_BENCHMARK_ACTIONS_MENU_GAP
+    const shouldOpenBelow =
+      belowTop + menuHeight <=
+      viewportHeight - ADMIN_BENCHMARK_ACTIONS_MENU_VIEWPORT_MARGIN
+    const preferredTop = shouldOpenBelow ? belowTop : aboveTop
+    const maximumTop = Math.max(
+      ADMIN_BENCHMARK_ACTIONS_MENU_VIEWPORT_MARGIN,
+      viewportHeight -
+        menuHeight -
+        ADMIN_BENCHMARK_ACTIONS_MENU_VIEWPORT_MARGIN
+    )
+    const top = Math.min(
+      Math.max(preferredTop, ADMIN_BENCHMARK_ACTIONS_MENU_VIEWPORT_MARGIN),
+      maximumTop
+    )
+    const maxHeight = Math.max(
+      80,
+      Math.floor(
+        viewportHeight - top - ADMIN_BENCHMARK_ACTIONS_MENU_VIEWPORT_MARGIN
+      )
+    )
+    const nextPosition = {
+      left: Math.round(left),
+      maxHeight,
+      top: Math.round(top),
+    }
+
+    setMenuPosition((currentPosition) =>
+      currentPosition?.left === nextPosition.left &&
+      currentPosition.maxHeight === nextPosition.maxHeight &&
+      currentPosition.top === nextPosition.top
+        ? currentPosition
+        : nextPosition
+    )
+  }, [setOpenBenchmarkMenuId])
+
+  useLayoutEffect(() => {
+    if (isOpen) {
+      updateMenuPosition()
+    }
+  }, [isOpen, updateMenuPosition])
+
+  useEffect(() => {
+    if (!isOpen) {
+      return
+    }
+
+    window.addEventListener("resize", updateMenuPosition)
+    window.addEventListener("scroll", updateMenuPosition, true)
+
+    return () => {
+      window.removeEventListener("resize", updateMenuPosition)
+      window.removeEventListener("scroll", updateMenuPosition, true)
+    }
+  }, [isOpen, updateMenuPosition])
+
+  useEffect(() => {
+    if (!isOpen) {
+      return
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpenBenchmarkMenuId(null)
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [isOpen, setOpenBenchmarkMenuId])
+
+  const menuStyle: CSSProperties = menuPosition
+    ? {
+        left: menuPosition.left,
+        maxHeight: menuPosition.maxHeight,
+        top: menuPosition.top,
+      }
+    : {
+        left: 0,
+        top: 0,
+        visibility: "hidden",
+      }
+
+  return (
+    <div className="flex justify-end">
+      <Button
+        ref={triggerRef}
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        aria-label={`Open actions for benchmark ${getBenchmarkPresetLabel(
+          benchmark
+        )}`}
+        aria-expanded={isOpen}
+        aria-haspopup="menu"
+        title="Benchmark actions"
+        disabled={isExporting || isStopping}
+        onClick={() =>
+          setOpenBenchmarkMenuId((currentBenchmarkMenuId) =>
+            currentBenchmarkMenuId === menuId ? null : menuId
+          )
+        }
+      >
+        <MoreVertical />
+      </Button>
+
+      {isOpen && typeof document !== "undefined"
+        ? createPortal(
+            <>
+              <button
+                className="fixed inset-0 z-10 cursor-default"
+                type="button"
+                aria-label="Close benchmark actions"
+                onClick={() => setOpenBenchmarkMenuId(null)}
+              />
+              <div
+                ref={menuRef}
+                className="fixed z-20 w-48 max-w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-2xl shadow-black/40"
+                role="menu"
+                style={menuStyle}
+              >
+                <button
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-sky-100 transition-colors hover:bg-sky-400/10 hover:text-sky-100 focus:bg-sky-400/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                  type="button"
+                  role="menuitem"
+                  disabled={isExportDisabled}
+                  onClick={() => {
+                    setOpenBenchmarkMenuId(null)
+                    onExportBenchmark(benchmark)
+                  }}
+                >
+                  <Download data-icon="inline-start" />
+                  {isExporting ? "Exporting..." : "Export"}
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                  type="button"
+                  role="menuitem"
+                  disabled={isStopDisabled}
+                  onClick={() => {
+                    setOpenBenchmarkMenuId(null)
+                    onStopBenchmark(benchmark)
+                  }}
+                >
+                  <Square data-icon="inline-start" />
+                  {isStopping ? "Stopping..." : "Stop"}
+                </button>
+              </div>
+            </>,
+            document.body
+          )
+        : null}
+    </div>
+  )
+}
+
 function UnknownAdminSection() {
   const navigate = useNavigate()
 
@@ -3072,6 +4033,82 @@ function PromoteAdminUserModal({
   )
 }
 
+function BenchmarkStatusBadge({ status }: { status: AdminBenchmark["status"] }) {
+  if (status === "completed") {
+    return (
+      <StatusBadge
+        className="w-fit border-emerald-300/35 bg-emerald-400/10 text-emerald-200"
+        icon={<CheckCircle2 className="size-3.5" aria-hidden />}
+      >
+        Completed
+      </StatusBadge>
+    )
+  }
+
+  if (status === "stopped") {
+    return (
+      <StatusBadge
+        className="w-fit border-amber-300/35 bg-amber-400/10 text-amber-200"
+        icon={<Square className="size-3.5" aria-hidden />}
+      >
+        Stopped
+      </StatusBadge>
+    )
+  }
+
+  if (status === "failed") {
+    return (
+      <StatusBadge
+        className="w-fit border-destructive/40 bg-destructive/10 text-destructive"
+        icon={<XCircle className="size-3.5" aria-hidden />}
+      >
+        Failed
+      </StatusBadge>
+    )
+  }
+
+  return (
+    <StatusBadge
+      className="w-fit border-sky-300/35 bg-sky-400/10 text-sky-200"
+      icon={<RefreshCw className="size-3.5" aria-hidden />}
+    >
+      Running
+    </StatusBadge>
+  )
+}
+
+function getBenchmarkPresetLabel(benchmark: AdminBenchmark) {
+  const name = benchmark.llmModelPresetName?.trim()
+
+  if (name) {
+    return name
+  }
+
+  return (
+    [
+      benchmark.llmModelPresetProvider
+        ? formatProviderLabel(benchmark.llmModelPresetProvider)
+        : null,
+      benchmark.llmModelPresetModel,
+      benchmark.llmModelPresetOpenrouterModelProvider,
+      benchmark.llmModelPresetReasoningEffort,
+    ]
+      .filter(Boolean)
+      .join(" / ") || "Unknown preset"
+  )
+}
+
+function formatBenchmarkProcessingMode(
+  llmProcessingMode: LlmProcessingMode,
+  useFlexServiceTier: boolean
+) {
+  if (llmProcessingMode === "openai_batch") {
+    return "Batch"
+  }
+
+  return useFlexServiceTier ? "Realtime flex" : "Realtime"
+}
+
 function AdminFormField({
   children,
   label,
@@ -3194,16 +4231,34 @@ function CostText({ children }: { children: ReactNode }) {
   )
 }
 
-function TableHeader({ children }: { children: ReactNode }) {
+function TableHeader({
+  children,
+  className = "",
+}: {
+  children: ReactNode
+  className?: string
+}) {
   return (
-    <th className="px-4 py-3 text-left font-medium whitespace-nowrap">
+    <th
+      className={`overflow-hidden px-4 py-3 text-left font-medium whitespace-nowrap ${className}`}
+    >
       {children}
     </th>
   )
 }
 
-function TableCell({ children }: { children: ReactNode }) {
-  return <td className="px-4 py-3 align-middle">{children}</td>
+function TableCell({
+  children,
+  className = "",
+}: {
+  children: ReactNode
+  className?: string
+}) {
+  return (
+    <td className={`overflow-hidden px-4 py-3 align-middle ${className}`}>
+      {children}
+    </td>
+  )
 }
 
 function AdminPanelMessage({ children }: { children: ReactNode }) {
