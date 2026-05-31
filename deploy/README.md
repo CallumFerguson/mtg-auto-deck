@@ -334,6 +334,62 @@ After the Worker deploys, add the production app domain, such as
 `app.example.com`, to the `mtg-auto-deck` Worker in Cloudflare Workers Domains
 & Routes.
 
+## Uploading Public Data to Cloudflare R2
+
+Benchmark and public simulation exports are uploaded to the `mtg-auto-deck` R2
+bucket with Wrangler. The upload scripts use remote R2 by default, set
+`Content-Type: application/json`, and set:
+
+```http
+Cache-Control: public, max-age=3600
+```
+
+Upload an exported benchmark ZIP:
+
+```sh
+npm run upload-benchmark -- ./benchmark-28826cbf-78f8-4a36-b552-3ee4164c0fc2.zip
+```
+
+The ZIP is extracted to an OS temp directory, uploaded, then cleaned up. Objects
+are written under:
+
+```text
+benchmarks/<benchmarkId>/index.json
+benchmarks/<benchmarkId>/simulations/<simulationId>.json
+```
+
+Upload a single exported simulation JSON:
+
+```sh
+npm run upload-simulation -- ./367f86d6-b1f7-4f91-a616-a2f5b5951d87.json
+```
+
+Single simulation objects are written under:
+
+```text
+simulations/<simulationId>.json
+```
+
+Use `--dry-run` to print the Wrangler commands without uploading:
+
+```sh
+npm run upload-benchmark -- ./benchmark-28826cbf-78f8-4a36-b552-3ee4164c0fc2.zip --dry-run
+npm run upload-simulation -- ./367f86d6-b1f7-4f91-a616-a2f5b5951d87.json --dry-run
+```
+
+Use `--bucket` only if uploading to a different R2 bucket:
+
+```sh
+npm run upload-benchmark -- ./benchmark.zip --bucket other-bucket
+npm run upload-simulation -- ./simulation.json --bucket other-bucket
+```
+
+The Wrangler login or API token used for these commands must have R2 write
+access, such as Cloudflare's `Workers R2 Storage: Edit` account permission. Do
+not commit Cloudflare API tokens or account credentials. If Wrangler can deploy
+Workers but R2 upload returns `403: Forbidden`, update the local Wrangler auth
+token permissions for R2.
+
 ## Deploying the Landing Page to Cloudflare Workers
 
 The landing page is a separate Astro app in `landing` and deploys to its own

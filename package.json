@@ -8,6 +8,8 @@
     "build": "tsc -b && vite build",
     "build:client": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit && vite build",
     "deploy": "npm run build:client && wrangler deploy",
+    "upload-benchmark": "node scripts/upload-benchmark-to-r2.mjs",
+    "upload-simulation": "node scripts/upload-simulation-to-r2.mjs",
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
     "ngrok": "ngrok http 3001 --host-header=rewrite",
