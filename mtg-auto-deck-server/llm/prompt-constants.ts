@@ -71,6 +71,7 @@ Simulate one of your own turns in a multiplayer Commander game against 3 non-int
 The provided game state is from the end of the previous turn.
 
 Rules:
+- When goldfishing, cards like Exotic Orchard and Fellwar Stone can make any mana color even though your opponents do not control any lands.
 - Card reference first; otherwise use normal MTG and Commander rules.
 - In multiplayer Commander, you draw on turn 1.
 - "Cards in library" lists remaining cards, not library order.
