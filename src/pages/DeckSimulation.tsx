@@ -1048,7 +1048,10 @@ export function PublicBenchmarkPage({ benchmarkId }: { benchmarkId: string }) {
                 <div className="px-2 py-2">
                   {simulationGroups.map((group) => (
                     <section className="grid gap-1" key={group.deckId}>
-                      <h2 className="truncate px-2 pt-3 pb-1 text-xs font-bold tracking-[0.12em] text-foreground uppercase">
+                      <h2
+                        className="truncate px-2 pt-3 pb-1 text-xs font-bold tracking-[0.12em] text-foreground uppercase"
+                        title={group.deckName}
+                      >
                         {group.deckName}
                       </h2>
                       <ul className="grid gap-1">
