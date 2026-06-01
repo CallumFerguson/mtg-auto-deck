@@ -1,4 +1,4 @@
-export type LlmProvider = "openai" | "openrouter" | "llamacpp"
+export type LlmProvider = "openai" | "openrouter" | "llamacpp" | "anthropic"
 
 export type ReasoningEffort =
   | "none"
@@ -7,6 +7,7 @@ export type ReasoningEffort =
   | "medium"
   | "high"
   | "xhigh"
+  | "max"
 
 export type LlmModelPreset = {
   id: string
@@ -19,6 +20,7 @@ export type LlmModelPreset = {
   isFreeTier: boolean
   inputTokenCostUsdPerMillion: number | null
   cachedInputTokenCostUsdPerMillion: number | null
+  cacheWriteInputTokenCostUsdPerMillion: number | null
   outputTokenCostUsdPerMillion: number | null
   isEnabled: boolean
   isDefault: boolean
@@ -45,7 +47,11 @@ export type AdminLlmModelPresetsResponse = {
 export function getLlmModelPresetLabel(
   preset: Pick<
     LlmModelPreset,
-    "model" | "name" | "openrouterModelProvider" | "provider" | "reasoningEffort"
+    | "model"
+    | "name"
+    | "openrouterModelProvider"
+    | "provider"
+    | "reasoningEffort"
   >
 ) {
   const name = preset.name?.trim()
@@ -84,6 +90,10 @@ export function formatProviderLabel(provider: LlmProvider | string) {
 
   if (provider === "llamacpp") {
     return "llama.cpp"
+  }
+
+  if (provider === "anthropic") {
+    return "Anthropic"
   }
 
   return provider

@@ -11,8 +11,16 @@ import { createReadStream } from "node:fs"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import Anthropic from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 import { z } from "zod/v4"
+import {
+  assertCompletedAnthropicMessage,
+  buildAnthropicRequestPayload,
+  getAnthropicMessageOutputText,
+  normalizeAnthropicUsage,
+  type AnthropicRequestPayload,
+} from "./anthropic-messages.js"
 import {
   auth,
   ensureAuthSchema,
@@ -70,8 +78,10 @@ import {
   withDatabaseTransaction,
 } from "./db.js"
 import {
-  buildStartingHandSimulationPrompt,
-  buildTurnSimulationPrompt,
+  buildStartingHandSimulationPromptParts,
+  buildTurnSimulationPromptParts,
+  isStructuredSimulationPrompt,
+  type StructuredSimulationPrompt,
 } from "./simulation-prompts.js"
 import {
   createDeck,
@@ -201,12 +211,15 @@ import {
   llmProviderSchema,
   reasoningEffortSchema,
   type OpenAiRunConfig,
+  type AnthropicRunConfig,
   type OpenRouterRunConfig,
   type OpeningHandLlmRunConfig,
+  type OpeningHandAnthropicRunConfig,
   type OpeningHandOpenAiRunConfig,
   type ResolvedLlamaCppRunConfig,
   type ResolvedOpeningHandLlmRunConfig,
   type ResolvedTurnSimulationLlmRunConfig,
+  type TurnSimulationAnthropicRunConfig,
   type TurnSimulationLlmRunConfig,
   type TurnSimulationOpenAiRunConfig,
   type LlmRunQueueConfig,
@@ -401,6 +414,7 @@ const createLlmModelPresetSchema = z.object({
   isFreeTier: z.boolean().default(false),
   inputTokenCostUsdPerMillion: optionalTokenCostSchema,
   cachedInputTokenCostUsdPerMillion: optionalTokenCostSchema,
+  cacheWriteInputTokenCostUsdPerMillion: optionalTokenCostSchema,
   outputTokenCostUsdPerMillion: optionalTokenCostSchema,
   isEnabled: z.boolean().default(true),
   isDefault: z.boolean().default(false),
@@ -415,6 +429,7 @@ const updateLlmModelPresetSchema = z
     isFreeTier: z.boolean().default(false),
     inputTokenCostUsdPerMillion: optionalTokenCostSchema,
     cachedInputTokenCostUsdPerMillion: optionalTokenCostSchema,
+    cacheWriteInputTokenCostUsdPerMillion: optionalTokenCostSchema,
     outputTokenCostUsdPerMillion: optionalTokenCostSchema,
   })
   .strict()
@@ -426,10 +441,7 @@ const setDefaultLlmModelPresetSchema = z.object({
 })
 const adminSubscriptionTierGrantSchema = z.object({
   days: z.number().int().min(1).max(3650),
-  tier: z
-    .string()
-    .trim()
-    .refine(isAdminGrantBillingTier),
+  tier: z.string().trim().refine(isAdminGrantBillingTier),
 })
 const createTurnLlmRunSchema = z.object({
   turnNumber: z.number().int().positive(),
@@ -485,7 +497,7 @@ let openAiBatchPollTimer: NodeJS.Timeout | null = null
 let openAiBatchPollPromise: Promise<void> | null = null
 
 function createRuntimeCompletion() {
-  let resolveCompletion: () => void = () => { }
+  let resolveCompletion: () => void = () => {}
   const completionPromise = new Promise<void>((resolve) => {
     resolveCompletion = resolve
   })
@@ -1002,17 +1014,23 @@ function getLlmTokenUsageSummary(usage: unknown) {
   )
   const inputDetails = asRecord(
     usageRecord.input_tokens_details ??
-    usageRecord.inputTokensDetails ??
-    usageRecord.prompt_tokens_details ??
-    usageRecord.promptTokensDetails
+      usageRecord.inputTokensDetails ??
+      usageRecord.prompt_tokens_details ??
+      usageRecord.promptTokensDetails
+  )
+  const cacheReadInputTokens = getNumberProperty(
+    usageRecord,
+    "cache_read_input_tokens",
+    "cacheReadInputTokens"
   )
   const cachedInputTokens =
-    inputTokens === null
+    cacheReadInputTokens ??
+    (inputTokens === null
       ? null
       : Math.min(
-        getNumberProperty(inputDetails, "cached_tokens", "cachedTokens") ?? 0,
-        inputTokens
-      )
+          getNumberProperty(inputDetails, "cached_tokens", "cachedTokens") ?? 0,
+          inputTokens
+        ))
   const outputTokens = getNumberProperty(
     usageRecord,
     "output_tokens",
@@ -1022,12 +1040,18 @@ function getLlmTokenUsageSummary(usage: unknown) {
   )
   const outputDetails = asRecord(
     usageRecord.output_tokens_details ??
-    usageRecord.outputTokensDetails ??
-    usageRecord.completion_tokens_details ??
-    usageRecord.completionTokensDetails
+      usageRecord.outputTokensDetails ??
+      usageRecord.completion_tokens_details ??
+      usageRecord.completionTokensDetails
   )
   const reasoningTokens =
-    getNumberProperty(outputDetails, "reasoning_tokens", "reasoningTokens") ?? 0
+    getNumberProperty(
+      outputDetails,
+      "reasoning_tokens",
+      "reasoningTokens",
+      "thinking_tokens",
+      "thinkingTokens"
+    ) ?? 0
   const visibleOutputTokens =
     outputTokens === null ? null : Math.max(outputTokens - reasoningTokens, 0)
   const totalTokens =
@@ -1039,6 +1063,16 @@ function getLlmTokenUsageSummary(usage: unknown) {
         "inputTokens",
         "prompt_tokens",
         "promptTokens"
+      ),
+      getNumberProperty(
+        usageRecord,
+        "cache_creation_input_tokens",
+        "cacheCreationInputTokens"
+      ),
+      getNumberProperty(
+        usageRecord,
+        "cache_read_input_tokens",
+        "cacheReadInputTokens"
       ),
       reasoningTokens,
       visibleOutputTokens,
@@ -1075,6 +1109,10 @@ function formatProviderName(provider: string) {
 
   if (provider === "openrouter") {
     return "OpenRouter"
+  }
+
+  if (provider === "anthropic") {
+    return "Anthropic"
   }
 
   if (provider === "llamacpp") {
@@ -1186,7 +1224,9 @@ const llmRunMcpIdentifier: McpSimulationIdentifierConfig = {
   requireReason: true,
 }
 
-function createAuditedMcpToolHandler<TInput extends McpSimulationIdentifierInput>(
+function createAuditedMcpToolHandler<
+  TInput extends McpSimulationIdentifierInput,
+>(
   mcpFunctionName: string,
   identifier: McpSimulationIdentifierConfig,
   handler: McpToolHandler<TInput>
@@ -1253,9 +1293,9 @@ function addMcpReasonToToolResult<T extends object>(
 ) {
   return identifier.requireReason && typeof input.reason === "string"
     ? {
-      ...response,
-      reason: input.reason.trim(),
-    }
+        ...response,
+        reason: input.reason.trim(),
+      }
     : response
 }
 
@@ -2071,11 +2111,13 @@ async function createProviderMcpClient({
 
 function buildOpeningHandOpenAiRequestPayload(
   config: OpeningHandOpenAiRunConfig,
-  fullPrompt: string,
+  prompt: LlmPromptInput,
   mcpRunToken: string,
   simulationId: string,
   reasoningSummariesEnabled: boolean
 ) {
+  const fullPrompt = getLlmPromptFullText(prompt)
+
   return {
     providerType: "openai" as const,
     model: config.model,
@@ -2108,12 +2150,14 @@ function buildOpeningHandOpenAiRequestPayload(
 
 function buildTurnSimulationOpenAiRequestPayload(
   config: TurnSimulationOpenAiRunConfig,
-  fullPrompt: string,
+  prompt: LlmPromptInput,
   mcpRunToken: string,
   simulationId: string,
   turnNumber: number,
   reasoningSummariesEnabled: boolean
 ) {
+  const fullPrompt = getLlmPromptFullText(prompt)
+
   return {
     providerType: "openai" as const,
     model: config.model,
@@ -2144,11 +2188,53 @@ function buildTurnSimulationOpenAiRequestPayload(
   }
 }
 
+function buildOpeningHandAnthropicRequestPayload(
+  config: OpeningHandAnthropicRunConfig,
+  prompt: LlmPromptInput,
+  mcpRunToken: string,
+  reasoningSummariesEnabled: boolean
+) {
+  return buildAnthropicRequestPayload({
+    maxOutputTokens: config.maxOutputTokens,
+    mcpServerName: OPENING_HAND_MCP_SERVER_LABEL,
+    mcpServerUrl: appendMcpRunTokenToUrl(
+      config.openingHandMcpPublicUrl,
+      mcpRunToken
+    ),
+    model: config.model,
+    prompt: requireStructuredLlmPrompt(prompt),
+    reasoningEffort: config.reasoningEffort,
+    reasoningSummariesEnabled,
+  })
+}
+
+function buildTurnSimulationAnthropicRequestPayload(
+  config: TurnSimulationAnthropicRunConfig,
+  prompt: LlmPromptInput,
+  mcpRunToken: string,
+  reasoningSummariesEnabled: boolean
+) {
+  return buildAnthropicRequestPayload({
+    maxOutputTokens: config.maxOutputTokens,
+    mcpServerName: TURN_SIMULATION_MCP_SERVER_LABEL,
+    mcpServerUrl: appendMcpRunTokenToUrl(
+      config.turnSimulationMcpPublicUrl,
+      mcpRunToken
+    ),
+    model: config.model,
+    prompt: requireStructuredLlmPrompt(prompt),
+    reasoningEffort: config.reasoningEffort,
+    reasoningSummariesEnabled,
+  })
+}
+
 function getTurnSimulationMcpServerDescription() {
   return "Tools for resolving one Magic: The Gathering goldfish turn, including library operations and random coin/dice results."
 }
 
-function generateMcpRunToken(ttlMs = MCP_RUN_TOKEN_TTL_MS): GeneratedMcpRunToken {
+function generateMcpRunToken(
+  ttlMs = MCP_RUN_TOKEN_TTL_MS
+): GeneratedMcpRunToken {
   const token = randomBytes(32).toString("base64url")
 
   return {
@@ -2178,12 +2264,30 @@ function appendMcpRunTokenToPath(path: string, token: string) {
   return `${parsedUrl.pathname}${parsedUrl.search}`
 }
 
+type LlmPromptInput = string | StructuredSimulationPrompt
+
+function getLlmPromptFullText(prompt: LlmPromptInput) {
+  return typeof prompt === "string" ? prompt : prompt.fullPrompt
+}
+
+function requireStructuredLlmPrompt(
+  prompt: LlmPromptInput
+): StructuredSimulationPrompt {
+  if (typeof prompt === "string") {
+    throw new Error("Anthropic LLM requests require structured prompt parts.")
+  }
+
+  return prompt
+}
+
 function buildOpeningHandOpenRouterRequestPayload(
   config: OpenRouterRunConfig,
-  fullPrompt: string,
+  prompt: LlmPromptInput,
   simulationId: string,
   reasoningSummariesEnabled: boolean
 ) {
+  const fullPrompt = getLlmPromptFullText(prompt)
+
   return {
     providerType: "openrouter" as const,
     model: config.model,
@@ -2206,9 +2310,11 @@ function buildOpeningHandOpenRouterRequestPayload(
 
 function buildOpeningHandLlamaCppRequestPayload(
   config: ResolvedLlamaCppRunConfig,
-  fullPrompt: string,
+  prompt: LlmPromptInput,
   simulationId: string
 ): LlamaCppChatCompletionRequestPayload {
+  const fullPrompt = getLlmPromptFullText(prompt)
+
   return {
     providerType: "llamacpp",
     model: config.model,
@@ -2231,11 +2337,13 @@ function buildOpeningHandLlamaCppRequestPayload(
 
 function buildTurnSimulationOpenRouterRequestPayload(
   config: OpenRouterRunConfig,
-  fullPrompt: string,
+  prompt: LlmPromptInput,
   simulationId: string,
   turnNumber: number,
   reasoningSummariesEnabled: boolean
 ) {
+  const fullPrompt = getLlmPromptFullText(prompt)
+
   return {
     providerType: "openrouter" as const,
     model: config.model,
@@ -2259,10 +2367,12 @@ function buildTurnSimulationOpenRouterRequestPayload(
 
 function buildTurnSimulationLlamaCppRequestPayload(
   config: ResolvedLlamaCppRunConfig,
-  fullPrompt: string,
+  prompt: LlmPromptInput,
   simulationId: string,
   turnNumber: number
 ): LlamaCppChatCompletionRequestPayload {
+  const fullPrompt = getLlmPromptFullText(prompt)
+
   return {
     providerType: "llamacpp",
     model: config.model,
@@ -2306,15 +2416,33 @@ function getLlmRunOpenRouterModelProvider(
 function getLlmRunServiceTier(
   config: ResolvedOpeningHandLlmRunConfig | ResolvedTurnSimulationLlmRunConfig
 ) {
-  return config.provider === "llamacpp" ? null : config.serviceTier
+  return config.provider === "llamacpp" || config.provider === "anthropic"
+    ? null
+    : config.serviceTier
+}
+
+function getQueuedLlmPromptInput(run: ClaimedQueuedLlmRun): LlmPromptInput {
+  if (run.provider !== "anthropic") {
+    return run.fullPrompt
+  }
+
+  const prompt = asRecord(run.requestPayload).prompt
+
+  if (!isStructuredSimulationPrompt(prompt)) {
+    throw new Error(
+      "Queued Anthropic LLM run is missing structured prompt parts."
+    )
+  }
+
+  return prompt
 }
 
 function withCapturedLlmRunServiceTier<
   TConfig extends
-  | ResolvedOpeningHandLlmRunConfig
-  | ResolvedTurnSimulationLlmRunConfig,
+    | ResolvedOpeningHandLlmRunConfig
+    | ResolvedTurnSimulationLlmRunConfig,
 >(config: TConfig, serviceTier: string | null): TConfig {
-  if (config.provider === "llamacpp") {
+  if (config.provider === "llamacpp" || config.provider === "anthropic") {
     return config
   }
 
@@ -2326,7 +2454,7 @@ function withCapturedLlmRunServiceTier<
 
 function buildOpeningHandLlmRequestPayload(
   config: ResolvedOpeningHandLlmRunConfig,
-  fullPrompt: string,
+  prompt: LlmPromptInput,
   mcpRunToken: string,
   simulationId: string,
   reasoningSummariesEnabled: boolean
@@ -2334,24 +2462,29 @@ function buildOpeningHandLlmRequestPayload(
   if (config.provider === "openai") {
     return buildOpeningHandOpenAiRequestPayload(
       config,
-      fullPrompt,
+      prompt,
       mcpRunToken,
       simulationId,
       reasoningSummariesEnabled
     )
   }
 
-  if (config.provider === "llamacpp") {
-    return buildOpeningHandLlamaCppRequestPayload(
+  if (config.provider === "anthropic") {
+    return buildOpeningHandAnthropicRequestPayload(
       config,
-      fullPrompt,
-      simulationId
+      prompt,
+      mcpRunToken,
+      reasoningSummariesEnabled
     )
+  }
+
+  if (config.provider === "llamacpp") {
+    return buildOpeningHandLlamaCppRequestPayload(config, prompt, simulationId)
   }
 
   return buildOpeningHandOpenRouterRequestPayload(
     config,
-    fullPrompt,
+    prompt,
     simulationId,
     reasoningSummariesEnabled
   )
@@ -2359,7 +2492,7 @@ function buildOpeningHandLlmRequestPayload(
 
 function buildTurnSimulationLlmRequestPayload(
   config: ResolvedTurnSimulationLlmRunConfig,
-  fullPrompt: string,
+  prompt: LlmPromptInput,
   mcpRunToken: string,
   simulationId: string,
   turnNumber: number,
@@ -2368,7 +2501,7 @@ function buildTurnSimulationLlmRequestPayload(
   if (config.provider === "openai") {
     return buildTurnSimulationOpenAiRequestPayload(
       config,
-      fullPrompt,
+      prompt,
       mcpRunToken,
       simulationId,
       turnNumber,
@@ -2376,10 +2509,19 @@ function buildTurnSimulationLlmRequestPayload(
     )
   }
 
+  if (config.provider === "anthropic") {
+    return buildTurnSimulationAnthropicRequestPayload(
+      config,
+      prompt,
+      mcpRunToken,
+      reasoningSummariesEnabled
+    )
+  }
+
   if (config.provider === "llamacpp") {
     return buildTurnSimulationLlamaCppRequestPayload(
       config,
-      fullPrompt,
+      prompt,
       simulationId,
       turnNumber
     )
@@ -2387,7 +2529,7 @@ function buildTurnSimulationLlmRequestPayload(
 
   return buildTurnSimulationOpenRouterRequestPayload(
     config,
-    fullPrompt,
+    prompt,
     simulationId,
     turnNumber,
     reasoningSummariesEnabled
@@ -2441,7 +2583,9 @@ function redactMcpRunTokens(value: unknown): unknown {
     return Object.fromEntries(
       Object.entries(value).map(([key, propertyValue]) => [
         key,
-        key === "mcpRunToken" ? "[redacted]" : redactMcpRunTokens(propertyValue),
+        key === "mcpRunToken"
+          ? "[redacted]"
+          : redactMcpRunTokens(propertyValue),
       ])
     )
   }
@@ -2517,9 +2661,7 @@ async function getRequiredEnabledSimulationLlmModelPreset(
   const isFreeTierOwner = await isFreeTierSimulationOwner(deckId, simulationId)
 
   if (isFreeTierOwner && !preset.isFreeTier) {
-    throw new SimulationValidationError(
-      FREE_TIER_MODEL_PRESET_REQUIRED_MESSAGE
-    )
+    throw new SimulationValidationError(FREE_TIER_MODEL_PRESET_REQUIRED_MESSAGE)
   }
 
   if (
@@ -2565,8 +2707,9 @@ function getLlmModelPresetRunConfig(preset: LlmModelPreset) {
     openrouterModelProvider: preset.openrouterModelProvider,
     supportsFlex: preset.supportsFlex,
     inputTokenCostUsdPerMillion: preset.inputTokenCostUsdPerMillion,
-    cachedInputTokenCostUsdPerMillion:
-      preset.cachedInputTokenCostUsdPerMillion,
+    cachedInputTokenCostUsdPerMillion: preset.cachedInputTokenCostUsdPerMillion,
+    cacheWriteInputTokenCostUsdPerMillion:
+      preset.cacheWriteInputTokenCostUsdPerMillion,
     outputTokenCostUsdPerMillion: preset.outputTokenCostUsdPerMillion,
   }
 }
@@ -2614,12 +2757,13 @@ async function prepareAndStartOpeningHandLlmRun({
     })
     createdLlmRunId = openingHandRun.llmRunId
 
-    const fullPrompt = await buildStartingHandSimulationPrompt({
+    const prompt = await buildStartingHandSimulationPromptParts({
       llmRunId: openingHandRun.llmRunId,
     })
+    const fullPrompt = prompt.fullPrompt
     const requestPayload = buildOpeningHandLlmRequestPayload(
       llmConfig,
-      fullPrompt,
+      prompt,
       QUEUED_MCP_RUN_TOKEN_PLACEHOLDER,
       simulationId,
       openingHandRun.reasoningSummariesEnabled
@@ -2702,16 +2846,17 @@ async function prepareAndStartTurnLlmRun({
     })
     createdLlmRunId = turnRun.llmRunId
 
-    const fullPrompt =
+    const prompt =
       turnNumber === 1
-        ? await buildTurnSimulationPrompt({ llmRunId: turnRun.llmRunId })
-        : await buildTurnSimulationPrompt(
-          { llmRunId: turnRun.llmRunId },
-          turnRun.previousGameState ?? undefined
-        )
+        ? await buildTurnSimulationPromptParts({ llmRunId: turnRun.llmRunId })
+        : await buildTurnSimulationPromptParts(
+            { llmRunId: turnRun.llmRunId },
+            turnRun.previousGameState ?? undefined
+          )
+    const fullPrompt = prompt.fullPrompt
     const requestPayload = buildTurnSimulationLlmRequestPayload(
       llmConfig,
-      fullPrompt,
+      prompt,
       QUEUED_MCP_RUN_TOKEN_PLACEHOLDER,
       simulationId,
       turnNumber,
@@ -2864,12 +3009,11 @@ async function createAdminBenchmarkRun({
       }
     }
   } catch (error) {
-    await markBenchmarkRunFailed(
-      benchmarkRunId,
-      getErrorMessage(error)
-    ).catch((failError: unknown) => {
-      console.error("Failed to mark benchmark failed:", failError)
-    })
+    await markBenchmarkRunFailed(benchmarkRunId, getErrorMessage(error)).catch(
+      (failError: unknown) => {
+        console.error("Failed to mark benchmark failed:", failError)
+      }
+    )
 
     throw error
   }
@@ -2883,7 +3027,10 @@ async function createAdminBenchmarkRun({
   return benchmark
 }
 
-async function stopAdminBenchmarkRun(benchmarkRunId: string, adminUserId: string) {
+async function stopAdminBenchmarkRun(
+  benchmarkRunId: string,
+  adminUserId: string
+) {
   const childSimulations = await listBenchmarkRunSimulationsForAdmin(
     benchmarkRunId,
     adminUserId
@@ -2947,7 +3094,6 @@ async function handleSimulationCompletionNextStep(
       })
       return
     }
-
   } catch (error) {
     if (isBenignAutoAdvanceAbortError(error)) {
       console.log(
@@ -3216,11 +3362,9 @@ async function failOpenAiBatchRun(
   run: OpenAiBatchPendingRun,
   failureMessage: string
 ) {
-  await failLlmRun(run.llmRunId, failureMessage).catch(
-    (failError: unknown) => {
-      console.error("Failed to mark OpenAI batch run failed:", failError)
-    }
-  )
+  await failLlmRun(run.llmRunId, failureMessage).catch((failError: unknown) => {
+    console.error("Failed to mark OpenAI batch run failed:", failError)
+  })
   await publishSimulationResultsState({
     deckId: run.deckId,
     llmRunId: run.llmRunId,
@@ -3284,15 +3428,15 @@ async function prepareOpenAiBatchLine(
   const requestPayload =
     run.phase === "opening_hand"
       ? await buildOpenAiBatchOpeningHandRequestPayload({
-        modelPreset,
-        mcpRunToken: mcpRunToken.token,
-        run,
-      })
+          modelPreset,
+          mcpRunToken: mcpRunToken.token,
+          run,
+        })
       : await buildOpenAiBatchTurnRequestPayload({
-        modelPreset,
-        mcpRunToken: mcpRunToken.token,
-        run,
-      })
+          modelPreset,
+          mcpRunToken: mcpRunToken.token,
+          run,
+        })
   const requestPayloadRedacted = getPersistableLlmRequestPayload(requestPayload)
 
   await updateLlmRunRequestData({
@@ -3319,7 +3463,9 @@ async function getRequiredOpenAiBatchRunModelPreset(
   const modelPreset = await getEnabledLlmModelPreset(run.llmModelPresetId)
 
   if (!modelPreset || modelPreset.provider !== "openai") {
-    throw new Error("Batch LLM run model preset is disabled, missing, or not OpenAI.")
+    throw new Error(
+      "Batch LLM run model preset is disabled, missing, or not OpenAI."
+    )
   }
 
   return modelPreset
@@ -3411,13 +3557,15 @@ function assertOpenAiBatchRunMatchesConfig(
     run.serviceTier !== expectedServiceTier
   ) {
     throw new Error(
-      `Batch LLM run config changed before submission: expected ${formatLlmRunConfigParts({
-        model: config.model,
-        openrouterModelProvider: expectedOpenRouterModelProvider,
-        provider: config.provider,
-        reasoningEffort: config.reasoningEffort,
-        serviceTier: expectedServiceTier,
-      })}, got ${formatLlmRunConfigParts({
+      `Batch LLM run config changed before submission: expected ${formatLlmRunConfigParts(
+        {
+          model: config.model,
+          openrouterModelProvider: expectedOpenRouterModelProvider,
+          provider: config.provider,
+          reasoningEffort: config.reasoningEffort,
+          serviceTier: expectedServiceTier,
+        }
+      )}, got ${formatLlmRunConfigParts({
         model: run.model,
         openrouterModelProvider: run.openrouterModelProvider,
         provider: run.provider,
@@ -3485,15 +3633,15 @@ async function submitPreparedOpenAiBatchLineChunk(
   )
 
   if (config.provider !== "openai") {
-    throw new Error("OpenAI batch model preset resolved to a non-OpenAI config.")
+    throw new Error(
+      "OpenAI batch model preset resolved to a non-OpenAI config."
+    )
   }
 
   const client = new OpenAI({
     apiKey: config.apiKey,
   })
-  const tempDirectory = await mkdtemp(
-    join(tmpdir(), OPENAI_BATCH_TMP_PREFIX)
-  )
+  const tempDirectory = await mkdtemp(join(tmpdir(), OPENAI_BATCH_TMP_PREFIX))
   const jsonlPath = join(tempDirectory, "requests.jsonl")
 
   try {
@@ -3706,7 +3854,8 @@ async function reconcileOpenAiBatchOutputLine({
         usage,
       })
     } else {
-      const parsedTurn = parseTurnSimulationCompletionFromResponseText(outputText)
+      const parsedTurn =
+        parseTurnSimulationCompletionFromResponseText(outputText)
       completion = await completeTurnLlmRun({
         finalOutputText: outputText,
         gameState: parsedTurn.gameState,
@@ -3930,6 +4079,7 @@ async function startClaimedQueuedLlmRun(run: ClaimedQueuedLlmRun) {
         fullPrompt: run.fullPrompt,
         llmRunId: run.llmRunId,
         llmModelPresetName: modelPreset.name,
+        prompt: getQueuedLlmPromptInput(run),
         reasoningSummariesEnabled: run.reasoningSummariesEnabled,
         runtimeStreamKey: run.runtimeStreamKey,
         simulationId: run.simulationId,
@@ -3964,6 +4114,7 @@ async function startClaimedQueuedLlmRun(run: ClaimedQueuedLlmRun) {
         fullPrompt: run.fullPrompt,
         llmRunId: run.llmRunId,
         llmModelPresetName: modelPreset.name,
+        prompt: getQueuedLlmPromptInput(run),
         reasoningSummariesEnabled: run.reasoningSummariesEnabled,
         runtimeStreamKey: run.runtimeStreamKey,
         simulationId: run.simulationId,
@@ -3972,7 +4123,6 @@ async function startClaimedQueuedLlmRun(run: ClaimedQueuedLlmRun) {
       })
       return
     }
-
   } catch (error) {
     console.error("Failed to start queued LLM run:", error)
     await failClaimedQueuedLlmRun(run, getErrorMessage(error))
@@ -4107,33 +4257,31 @@ type OpenRouterRequestPayload =
   | TurnSimulationOpenRouterRequestPayload
 
 function isOpenAiRequestPayload(
-  requestPayload:
-    | OpeningHandLlmRequestPayload
-    | TurnSimulationLlmRequestPayload
+  requestPayload: OpeningHandLlmRequestPayload | TurnSimulationLlmRequestPayload
 ): requestPayload is OpenAiRequestPayload {
   return asRecord(requestPayload).providerType === "openai"
 }
 
 function isOpenRouterRequestPayload(
-  requestPayload:
-    | OpeningHandLlmRequestPayload
-    | TurnSimulationLlmRequestPayload
+  requestPayload: OpeningHandLlmRequestPayload | TurnSimulationLlmRequestPayload
 ): requestPayload is OpenRouterRequestPayload {
   return asRecord(requestPayload).providerType === "openrouter"
 }
 
+function isAnthropicRequestPayload(
+  requestPayload: OpeningHandLlmRequestPayload | TurnSimulationLlmRequestPayload
+): requestPayload is AnthropicRequestPayload {
+  return asRecord(requestPayload).providerType === "anthropic"
+}
+
 function isLlamaCppRequestPayload(
-  requestPayload:
-    | OpeningHandLlmRequestPayload
-    | TurnSimulationLlmRequestPayload
+  requestPayload: OpeningHandLlmRequestPayload | TurnSimulationLlmRequestPayload
 ): requestPayload is LlamaCppRequestPayload {
   return asRecord(requestPayload).providerType === "llamacpp"
 }
 
 function requireOpenAiRequestPayload(
-  requestPayload:
-    | OpeningHandLlmRequestPayload
-    | TurnSimulationLlmRequestPayload
+  requestPayload: OpeningHandLlmRequestPayload | TurnSimulationLlmRequestPayload
 ) {
   if (!isOpenAiRequestPayload(requestPayload)) {
     throw new Error("LLM run config and request payload provider mismatch.")
@@ -4143,9 +4291,7 @@ function requireOpenAiRequestPayload(
 }
 
 function requireOpenRouterRequestPayload(
-  requestPayload:
-    | OpeningHandLlmRequestPayload
-    | TurnSimulationLlmRequestPayload
+  requestPayload: OpeningHandLlmRequestPayload | TurnSimulationLlmRequestPayload
 ) {
   if (!isOpenRouterRequestPayload(requestPayload)) {
     throw new Error("LLM run config and request payload provider mismatch.")
@@ -4154,10 +4300,18 @@ function requireOpenRouterRequestPayload(
   return requestPayload
 }
 
+function requireAnthropicRequestPayload(
+  requestPayload: OpeningHandLlmRequestPayload | TurnSimulationLlmRequestPayload
+) {
+  if (!isAnthropicRequestPayload(requestPayload)) {
+    throw new Error("LLM run config and request payload provider mismatch.")
+  }
+
+  return requestPayload
+}
+
 function requireLlamaCppRequestPayload(
-  requestPayload:
-    | OpeningHandLlmRequestPayload
-    | TurnSimulationLlmRequestPayload
+  requestPayload: OpeningHandLlmRequestPayload | TurnSimulationLlmRequestPayload
 ) {
   if (!isLlamaCppRequestPayload(requestPayload)) {
     throw new Error("LLM run config and request payload provider mismatch.")
@@ -4225,6 +4379,70 @@ async function collectOpenAiLlmResponse({
   }
 }
 
+async function collectAnthropicLlmResponse({
+  config,
+  llmRunId,
+  phase,
+  requestPayload,
+  runtime,
+}: {
+  config: AnthropicRunConfig
+  llmRunId: string
+  phase: LlmRunPhase
+  requestPayload: AnthropicRequestPayload
+  runtime: ActiveLlmRunRuntime
+}): Promise<CompletedLlmResponseResult> {
+  const client = new Anthropic({
+    apiKey: config.apiKey,
+  })
+  const signal = runtime.abortController.signal
+  const anthropicRequestPayload: Record<string, unknown> = {
+    ...requestPayload,
+  }
+  delete anthropicRequestPayload.providerType
+  delete anthropicRequestPayload.prompt
+
+  logLlmApiCallStarted({
+    llmRunId,
+    model: requestPayload.model,
+    phase,
+    provider: config.provider,
+  })
+
+  throwIfRuntimeAborted(signal)
+
+  const response = await client.beta.messages.create(
+    anthropicRequestPayload as unknown as Parameters<
+      typeof client.beta.messages.create
+    >[0],
+    { signal }
+  )
+  assertCompletedAnthropicMessage(response, formatLlmRunPhase(phase))
+  const outputText = getAnthropicMessageOutputText(response)
+  const responseRecord = asRecord(response)
+  const usage = normalizeAnthropicUsage(responseRecord.usage ?? {})
+
+  if (!outputText.trim()) {
+    throw new Error("Anthropic response did not include final text content.")
+  }
+
+  logLlmApiCallFinished({
+    llmRunId,
+    model: requestPayload.model,
+    phase,
+    provider: config.provider,
+    serviceTier: config.serviceTier,
+    tokenCosts: config.tokenCosts,
+    usage,
+  })
+
+  return {
+    outputText,
+    rawResponse: response,
+    usage,
+  }
+}
+
 async function collectOpenRouterLlmResponse({
   config,
   llmRunId,
@@ -4258,10 +4476,10 @@ async function collectOpenRouterLlmResponse({
   const mcpClient =
     mcpPath && toolDefinitions.length > 0
       ? await createProviderMcpClient({
-        clientName: "openrouter-agent",
-        path: mcpPath,
-        signal,
-      })
+          clientName: "openrouter-agent",
+          path: mcpPath,
+          signal,
+        })
       : null
   let mcpClientClosePromise: Promise<void> | null = null
   const responses: unknown[] = []
@@ -4360,7 +4578,9 @@ async function collectOpenRouterLlmResponse({
         }
 
         if (!mcpClient) {
-          throw new Error("OpenRouter requested a tool but no MCP tools are available.")
+          throw new Error(
+            "OpenRouter requested a tool but no MCP tools are available."
+          )
         }
 
         const toolOutputItems: unknown[] = []
@@ -4369,7 +4589,9 @@ async function collectOpenRouterLlmResponse({
           const toolDefinition = toolDefinitionsByName.get(toolCall.name)
 
           if (!toolDefinition) {
-            throw new Error(`OpenRouter requested unknown tool: ${toolCall.name}.`)
+            throw new Error(
+              `OpenRouter requested unknown tool: ${toolCall.name}.`
+            )
           }
 
           const toolInput = parseAndValidateOpenRouterToolArguments(
@@ -4438,10 +4660,10 @@ async function collectOpenRouterChatCompletionLlmResponse({
   const mcpClient =
     mcpPath && toolDefinitions.length > 0
       ? await createProviderMcpClient({
-        clientName: "openrouter-chat-agent",
-        path: mcpPath,
-        signal,
-      })
+          clientName: "openrouter-chat-agent",
+          path: mcpPath,
+          signal,
+        })
       : null
   let mcpClientClosePromise: Promise<void> | null = null
 
@@ -4474,12 +4696,12 @@ async function collectOpenRouterChatCompletionLlmResponse({
         callTool: (name, args, toolSignal) =>
           mcpClient
             ? callMcpToolForProvider(
-              mcpClient,
-              name,
-              args,
-              toolSignal,
-              "OpenRouter"
-            )
+                mcpClient,
+                name,
+                args,
+                toolSignal,
+                "OpenRouter"
+              )
             : Promise.reject(new Error("No MCP tools are available.")),
         createChatCompletion: createOpenRouterChatCompletion(config),
         requestPayload: createOpenRouterChatCompletionToolLoopPayload(
@@ -4602,9 +4824,7 @@ function createOpenRouterChatCompletion(
     }
 
     if (!responseText.trim()) {
-      return {} as Awaited<
-        ReturnType<LlamaCppChatCompletionCreateNonStreaming>
-      >
+      return {} as Awaited<ReturnType<LlamaCppChatCompletionCreateNonStreaming>>
     }
 
     try {
@@ -4612,9 +4832,12 @@ function createOpenRouterChatCompletion(
         ReturnType<LlamaCppChatCompletionCreateNonStreaming>
       >
     } catch (error) {
-      throw new Error("OpenRouter Chat Completions API returned non-JSON output.", {
-        cause: error,
-      })
+      throw new Error(
+        "OpenRouter Chat Completions API returned non-JSON output.",
+        {
+          cause: error,
+        }
+      )
     }
   }
 }
@@ -4691,7 +4914,9 @@ async function createOpenRouterResponsesApiResponse(
   }
 }
 
-function getOpenRouterFunctionCalls(response: unknown): OpenRouterFunctionCall[] {
+function getOpenRouterFunctionCalls(
+  response: unknown
+): OpenRouterFunctionCall[] {
   const output = asRecord(response).output
 
   if (!Array.isArray(output)) {
@@ -4712,7 +4937,9 @@ function getOpenRouterFunctionCalls(response: unknown): OpenRouterFunctionCall[]
       getStringProperty(itemRecord, "id")
 
     if (!name || !callId) {
-      throw new Error("OpenRouter returned a function call without a name or call id.")
+      throw new Error(
+        "OpenRouter returned a function call without a name or call id."
+      )
     }
 
     return [
@@ -5047,10 +5274,10 @@ async function collectLlamaCppLlmResponse({
   const mcpClient =
     mcpPath && toolDefinitions.length > 0
       ? await createProviderMcpClient({
-        clientName: "llamacpp-agent",
-        path: mcpPath,
-        signal,
-      })
+          clientName: "llamacpp-agent",
+          path: mcpPath,
+          signal,
+        })
       : null
   let mcpClientClosePromise: Promise<void> | null = null
 
@@ -5083,12 +5310,12 @@ async function collectLlamaCppLlmResponse({
         callTool: (name, args, toolSignal) =>
           mcpClient
             ? callMcpToolForProvider(
-              mcpClient,
-              name,
-              args,
-              toolSignal,
-              "llama.cpp"
-            )
+                mcpClient,
+                name,
+                args,
+                toolSignal,
+                "llama.cpp"
+              )
             : Promise.reject(new Error("No MCP tools are available.")),
         createChatCompletion: (body, options) =>
           client.chat.completions.create(body, options),
@@ -5133,6 +5360,7 @@ function startOpeningHandLlmRun({
   fullPrompt,
   llmRunId,
   llmModelPresetName,
+  prompt,
   reasoningSummariesEnabled,
   runtimeStreamKey,
   simulationId,
@@ -5145,6 +5373,7 @@ function startOpeningHandLlmRun({
   fullPrompt: string
   llmRunId: string
   llmModelPresetName: string | null
+  prompt: LlmPromptInput
   reasoningSummariesEnabled: boolean
   runtimeStreamKey: string
   simulationId: string
@@ -5158,6 +5387,7 @@ function startOpeningHandLlmRun({
     fullPrompt,
     llmRunId,
     llmModelPresetName,
+    prompt,
     reasoningSummariesEnabled,
     runtimeStreamKey,
     simulationId,
@@ -5173,6 +5403,7 @@ async function runOpeningHandLlmRun({
   fullPrompt,
   llmRunId,
   llmModelPresetName,
+  prompt,
   reasoningSummariesEnabled,
   runtimeStreamKey,
   simulationId,
@@ -5185,6 +5416,7 @@ async function runOpeningHandLlmRun({
   fullPrompt: string
   llmRunId: string
   llmModelPresetName: string | null
+  prompt: LlmPromptInput
   reasoningSummariesEnabled: boolean
   runtimeStreamKey: string
   simulationId: string
@@ -5237,7 +5469,7 @@ async function runOpeningHandLlmRun({
     throwIfRuntimeAborted(runtime.abortController.signal)
     const requestPayload = buildOpeningHandLlmRequestPayload(
       config,
-      fullPrompt,
+      prompt,
       mcpRunToken.token,
       simulationId,
       reasoningSummariesEnabled
@@ -5253,37 +5485,45 @@ async function runOpeningHandLlmRun({
     responseResult =
       config.provider === "openai"
         ? await collectOpenAiLlmResponse({
-          config,
-          llmRunId,
-          phase: "opening_hand",
-          requestPayload: requireOpenAiRequestPayload(requestPayload),
-          runtime,
-        })
-        : config.provider === "openrouter"
-          ? await collectOpenRouterLlmResponse({
             config,
             llmRunId,
-            mcpPath: appendMcpRunTokenToPath(
-              OPENING_HAND_MCP_PATH,
-              mcpRunToken.token
-            ),
             phase: "opening_hand",
-            requestPayload: requireOpenRouterRequestPayload(requestPayload),
+            requestPayload: requireOpenAiRequestPayload(requestPayload),
             runtime,
-            toolDefinitions: openingHandLlmToolDefinitions,
           })
-          : await collectLlamaCppLlmResponse({
-            config,
-            llmRunId,
-            mcpPath: appendMcpRunTokenToPath(
-              OPENING_HAND_MCP_PATH,
-              mcpRunToken.token
-            ),
-            phase: "opening_hand",
-            requestPayload: requireLlamaCppRequestPayload(requestPayload),
-            runtime,
-            toolDefinitions: openingHandLlmToolDefinitions,
-          })
+        : config.provider === "anthropic"
+          ? await collectAnthropicLlmResponse({
+              config,
+              llmRunId,
+              phase: "opening_hand",
+              requestPayload: requireAnthropicRequestPayload(requestPayload),
+              runtime,
+            })
+          : config.provider === "openrouter"
+            ? await collectOpenRouterLlmResponse({
+                config,
+                llmRunId,
+                mcpPath: appendMcpRunTokenToPath(
+                  OPENING_HAND_MCP_PATH,
+                  mcpRunToken.token
+                ),
+                phase: "opening_hand",
+                requestPayload: requireOpenRouterRequestPayload(requestPayload),
+                runtime,
+                toolDefinitions: openingHandLlmToolDefinitions,
+              })
+            : await collectLlamaCppLlmResponse({
+                config,
+                llmRunId,
+                mcpPath: appendMcpRunTokenToPath(
+                  OPENING_HAND_MCP_PATH,
+                  mcpRunToken.token
+                ),
+                phase: "opening_hand",
+                requestPayload: requireLlamaCppRequestPayload(requestPayload),
+                runtime,
+                toolDefinitions: openingHandLlmToolDefinitions,
+              })
 
     throwIfRuntimeAborted(runtime.abortController.signal)
     const parsedOpeningHand = parseOpeningHandCompletionFromResponseText(
@@ -5365,6 +5605,7 @@ function startTurnLlmRun({
   fullPrompt,
   llmRunId,
   llmModelPresetName,
+  prompt,
   reasoningSummariesEnabled,
   runtimeStreamKey,
   simulationId,
@@ -5378,6 +5619,7 @@ function startTurnLlmRun({
   fullPrompt: string
   llmRunId: string
   llmModelPresetName: string | null
+  prompt: LlmPromptInput
   reasoningSummariesEnabled: boolean
   runtimeStreamKey: string
   simulationId: string
@@ -5392,6 +5634,7 @@ function startTurnLlmRun({
     fullPrompt,
     llmRunId,
     llmModelPresetName,
+    prompt,
     reasoningSummariesEnabled,
     runtimeStreamKey,
     simulationId,
@@ -5408,6 +5651,7 @@ async function runTurnLlmRun({
   fullPrompt,
   llmRunId,
   llmModelPresetName,
+  prompt,
   reasoningSummariesEnabled,
   runtimeStreamKey,
   simulationId,
@@ -5421,6 +5665,7 @@ async function runTurnLlmRun({
   fullPrompt: string
   llmRunId: string
   llmModelPresetName: string | null
+  prompt: LlmPromptInput
   reasoningSummariesEnabled: boolean
   runtimeStreamKey: string
   simulationId: string
@@ -5475,7 +5720,7 @@ async function runTurnLlmRun({
     throwIfRuntimeAborted(runtime.abortController.signal)
     const requestPayload = buildTurnSimulationLlmRequestPayload(
       config,
-      fullPrompt,
+      prompt,
       mcpRunToken.token,
       simulationId,
       turnNumber,
@@ -5492,37 +5737,45 @@ async function runTurnLlmRun({
     responseResult =
       config.provider === "openai"
         ? await collectOpenAiLlmResponse({
-          config,
-          llmRunId,
-          phase: "turn",
-          requestPayload: requireOpenAiRequestPayload(requestPayload),
-          runtime,
-        })
-        : config.provider === "openrouter"
-          ? await collectOpenRouterLlmResponse({
             config,
             llmRunId,
-            mcpPath: appendMcpRunTokenToPath(
-              TURN_SIMULATION_MCP_PATH,
-              mcpRunToken.token
-            ),
             phase: "turn",
-            requestPayload: requireOpenRouterRequestPayload(requestPayload),
+            requestPayload: requireOpenAiRequestPayload(requestPayload),
             runtime,
-            toolDefinitions: getTurnSimulationLlmToolDefinitions(),
           })
-          : await collectLlamaCppLlmResponse({
-            config,
-            llmRunId,
-            mcpPath: appendMcpRunTokenToPath(
-              TURN_SIMULATION_MCP_PATH,
-              mcpRunToken.token
-            ),
-            phase: "turn",
-            requestPayload: requireLlamaCppRequestPayload(requestPayload),
-            runtime,
-            toolDefinitions: getTurnSimulationLlmToolDefinitions(),
-          })
+        : config.provider === "anthropic"
+          ? await collectAnthropicLlmResponse({
+              config,
+              llmRunId,
+              phase: "turn",
+              requestPayload: requireAnthropicRequestPayload(requestPayload),
+              runtime,
+            })
+          : config.provider === "openrouter"
+            ? await collectOpenRouterLlmResponse({
+                config,
+                llmRunId,
+                mcpPath: appendMcpRunTokenToPath(
+                  TURN_SIMULATION_MCP_PATH,
+                  mcpRunToken.token
+                ),
+                phase: "turn",
+                requestPayload: requireOpenRouterRequestPayload(requestPayload),
+                runtime,
+                toolDefinitions: getTurnSimulationLlmToolDefinitions(),
+              })
+            : await collectLlamaCppLlmResponse({
+                config,
+                llmRunId,
+                mcpPath: appendMcpRunTokenToPath(
+                  TURN_SIMULATION_MCP_PATH,
+                  mcpRunToken.token
+                ),
+                phase: "turn",
+                requestPayload: requireLlamaCppRequestPayload(requestPayload),
+                runtime,
+                toolDefinitions: getTurnSimulationLlmToolDefinitions(),
+              })
 
     throwIfRuntimeAborted(runtime.abortController.signal)
     const parsedTurn = parseTurnSimulationCompletionFromResponseText(
@@ -5772,25 +6025,28 @@ async function main() {
     }
   })
 
-  app.get(APP_PASSWORD_RESET_TOKEN_PATH, async (req: Request, res: Response) => {
-    const token = parsePasswordResetTokenParam(req.params.token)
+  app.get(
+    APP_PASSWORD_RESET_TOKEN_PATH,
+    async (req: Request, res: Response) => {
+      const token = parsePasswordResetTokenParam(req.params.token)
 
-    if (!token) {
-      res.status(200).json({ valid: false })
-      return
-    }
+      if (!token) {
+        res.status(200).json({ valid: false })
+        return
+      }
 
-    try {
-      res.status(200).json({
-        valid: await isPasswordResetTokenValid(token),
-      })
-    } catch (error) {
-      console.error("Failed to check password reset token:", error)
-      res.status(500).json({
-        error: "Password reset link could not be checked.",
-      })
+      try {
+        res.status(200).json({
+          valid: await isPasswordResetTokenValid(token),
+        })
+      } catch (error) {
+        console.error("Failed to check password reset token:", error)
+        res.status(500).json({
+          error: "Password reset link could not be checked.",
+        })
+      }
     }
-  })
+  )
 
   app.get(
     APP_EMAIL_VERIFICATION_CODE_PATH,
@@ -5833,11 +6089,7 @@ async function main() {
   })
 
   app.use(async (req: Request, res: Response, next) => {
-    if (
-      req.path === "/health" ||
-      isAuthPath(req.path) ||
-      isMcpPath(req.path)
-    ) {
+    if (req.path === "/health" || isAuthPath(req.path) || isMcpPath(req.path)) {
       next()
       return
     }
@@ -5904,9 +6156,11 @@ async function main() {
     const user = getAuthenticatedUser(req)
 
     try {
-      res.status(200).json(
-        await getUserBillingTierSummary({ query: queryDatabase }, user.id)
-      )
+      res
+        .status(200)
+        .json(
+          await getUserBillingTierSummary({ query: queryDatabase }, user.id)
+        )
     } catch (error) {
       console.error("Failed to load billing tier:", error)
       res.status(500).json({
@@ -6243,10 +6497,7 @@ async function main() {
         return
       }
 
-      if (
-        benchmarkInput.useFlexServiceTier &&
-        !modelPreset.supportsFlex
-      ) {
+      if (benchmarkInput.useFlexServiceTier && !modelPreset.supportsFlex) {
         res.status(400).json({
           error:
             "Flex processing can only be enabled for model presets that support flex.",
@@ -6329,8 +6580,7 @@ async function main() {
 
       res.status(200).json({
         presets,
-        defaultPresetId:
-          presets.find((preset) => preset.isDefault)?.id ?? null,
+        defaultPresetId: presets.find((preset) => preset.isDefault)?.id ?? null,
       })
     } catch (error) {
       console.error("Failed to list model presets:", error)
@@ -6358,66 +6608,60 @@ async function main() {
     }
   })
 
-  app.get(
-    "/admin/llm-model-presets",
-    async (req: Request, res: Response) => {
-      if (!requireAdminUser(req, res)) {
-        return
-      }
-
-      try {
-        const presets = await listAdminLlmModelPresets()
-
-        res.status(200).json({
-          presets,
-          total: presets.length,
-        })
-      } catch (error) {
-        console.error("Failed to list admin model presets:", error)
-        res.status(500).json({
-          error: "Failed to list model presets.",
-        })
-      }
+  app.get("/admin/llm-model-presets", async (req: Request, res: Response) => {
+    if (!requireAdminUser(req, res)) {
+      return
     }
-  )
 
-  app.post(
-    "/admin/llm-model-presets",
-    async (req: Request, res: Response) => {
-      if (!requireAdminUser(req, res)) {
-        return
-      }
+    try {
+      const presets = await listAdminLlmModelPresets()
 
-      const parsedPreset = createLlmModelPresetSchema.safeParse(req.body)
+      res.status(200).json({
+        presets,
+        total: presets.length,
+      })
+    } catch (error) {
+      console.error("Failed to list admin model presets:", error)
+      res.status(500).json({
+        error: "Failed to list model presets.",
+      })
+    }
+  })
 
-      if (!parsedPreset.success) {
+  app.post("/admin/llm-model-presets", async (req: Request, res: Response) => {
+    if (!requireAdminUser(req, res)) {
+      return
+    }
+
+    const parsedPreset = createLlmModelPresetSchema.safeParse(req.body)
+
+    if (!parsedPreset.success) {
+      res.status(400).json({
+        error: "Model preset payload is not in the expected format.",
+      })
+      return
+    }
+
+    try {
+      const preset = await createLlmModelPreset(parsedPreset.data)
+
+      res.status(201).json({
+        preset,
+      })
+    } catch (error) {
+      if (error instanceof LlmModelPresetValidationError) {
         res.status(400).json({
-          error: "Model preset payload is not in the expected format.",
+          error: error.message,
         })
         return
       }
 
-      try {
-        const preset = await createLlmModelPreset(parsedPreset.data)
-
-        res.status(201).json({
-          preset,
-        })
-      } catch (error) {
-        if (error instanceof LlmModelPresetValidationError) {
-          res.status(400).json({
-            error: error.message,
-          })
-          return
-        }
-
-        console.error("Failed to create model preset:", error)
-        res.status(500).json({
-          error: "Failed to create model preset.",
-        })
-      }
+      console.error("Failed to create model preset:", error)
+      res.status(500).json({
+        error: "Failed to create model preset.",
+      })
     }
-  )
+  })
 
   app.patch(
     "/admin/llm-model-presets/:presetId",
@@ -7067,7 +7311,7 @@ async function main() {
         let hasSentSnapshot = false
         let shouldEndAfterSnapshot = false
         let isStreamOpen = true
-        let unsubscribe = () => { }
+        let unsubscribe = () => {}
         const keepaliveIntervalId = setInterval(() => {
           if (isStreamOpen) {
             res.write(formatSseComment("keepalive"))
@@ -7168,7 +7412,10 @@ async function main() {
 
           res.write(
             formatSseEvent(
-              redactSimulationResultsStreamEventCosts(doneEvent, includeRunCosts)
+              redactSimulationResultsStreamEventCosts(
+                doneEvent,
+                includeRunCosts
+              )
             )
           )
           cleanup()
@@ -7220,15 +7467,11 @@ async function main() {
 
       try {
         const isFreeTier = await isFreeTierRequest(req)
-        const simulation = await updateSimulation(
-          deckId,
-          simulationId,
-          {
-            ...parsedUpdate.data,
-            forceFlexServiceTier: isFreeTier,
-            requireFreeTierModelPreset: isFreeTier,
-          }
-        )
+        const simulation = await updateSimulation(deckId, simulationId, {
+          ...parsedUpdate.data,
+          forceFlexServiceTier: isFreeTier,
+          requireFreeTierModelPreset: isFreeTier,
+        })
 
         await publishSimulationResultsState({
           deckId,
@@ -7631,9 +7874,14 @@ async function main() {
   registerMcpEndpoint(app, OPENING_HAND_MCP_PATH, createOpeningHandServer, {
     phase: "opening_hand",
   })
-  registerMcpEndpoint(app, TURN_SIMULATION_MCP_PATH, createTurnSimulationServer, {
-    phase: "turn",
-  })
+  registerMcpEndpoint(
+    app,
+    TURN_SIMULATION_MCP_PATH,
+    createTurnSimulationServer,
+    {
+      phase: "turn",
+    }
+  )
 
   app.listen(port, host, (error?: Error) => {
     if (error) {
@@ -7800,7 +8048,6 @@ function registerShutdownHandlers() {
   process.once("SIGTERM", shutdown)
 }
 
-
 function applyCors(
   req: Request,
   res: Response,
@@ -7852,10 +8099,7 @@ async function isFreeTierUser(userId: string) {
   return billingTierSummary.effectiveTier === "free"
 }
 
-async function isFreeTierSimulationOwner(
-  deckId: string,
-  simulationId: string
-) {
+async function isFreeTierSimulationOwner(deckId: string, simulationId: string) {
   const result = await queryDatabase<{ owner_user_id: string | null }>(
     `
       SELECT deck.owner_user_id
@@ -8000,7 +8244,9 @@ function getRequiredServerEnvironmentVariable(environmentVariable: string) {
   const value = process.env[environmentVariable]?.trim()
 
   if (!value) {
-    throw new Error(`Missing server environment variable: ${environmentVariable}.`)
+    throw new Error(
+      `Missing server environment variable: ${environmentVariable}.`
+    )
   }
 
   return value

@@ -120,6 +120,7 @@ export type ClaimedQueuedLlmRun = {
   createdAt: string
   startedAt: string
   fullPrompt: string
+  requestPayload: unknown
   ownerUserId: string | null
   turnNumber?: number
 }
@@ -641,11 +642,7 @@ export async function ensureSimulationsSchema() {
     "cancel_requested",
     "cancelled",
   ])
-  await createEnumType("llm_run_phase", [
-    "opening_hand",
-    "turn",
-    "other",
-  ])
+  await createEnumType("llm_run_phase", ["opening_hand", "turn", "other"])
   await queryDatabase(`
     DROP TABLE IF EXISTS llm_run_chunk_card_mentions
   `)
@@ -773,6 +770,15 @@ export async function ensureSimulationsSchema() {
   await queryDatabase(`
     ALTER TABLE llm_runs
     ADD COLUMN IF NOT EXISTS openrouter_reported_cost_usd numeric
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_runs
+    DROP CONSTRAINT IF EXISTS llm_runs_provider_check
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_runs
+    ADD CONSTRAINT llm_runs_provider_check
+      CHECK (provider IN ('openai', 'openrouter', 'llamacpp', 'anthropic'))
   `)
   await queryDatabase(`
     ALTER TABLE llm_runs
@@ -3374,6 +3380,7 @@ export async function claimNextQueuedLlmRun({
       attempt_number: number
       created_at: Date
       full_prompt: string
+      request_payload: unknown
       turn_number: number | null
       owner_user_id: string | null
     }>(
@@ -3443,6 +3450,7 @@ export async function claimNextQueuedLlmRun({
           candidate.attempt_number,
           llm_run.created_at,
           llm_run.full_prompt,
+          llm_run.request_payload,
           candidate.turn_number,
           llm_run.owner_user_id
         FROM candidate
@@ -3542,6 +3550,7 @@ export async function claimNextQueuedLlmRun({
       createdAt: run.created_at.toISOString(),
       startedAt: claimed.started_at.toISOString(),
       fullPrompt: run.full_prompt,
+      requestPayload: run.request_payload,
       ownerUserId: run.owner_user_id,
     }
 
@@ -3576,11 +3585,32 @@ export function buildClaimQueuedLlmRunStartQuery(
 function getRunningLlmRunInitialCostSql() {
   return `(
             SELECT CASE
-              WHEN preset.cached_input_token_cost_usd_per_million IS NOT NULL
-                AND preset.cached_input_token_cost_usd_per_million >= 0
+              WHEN COALESCE(
+                CASE
+                  WHEN llm_run.provider = 'anthropic'
+                  THEN preset.cache_write_input_token_cost_usd_per_million
+                  ELSE NULL
+                END,
+                preset.cached_input_token_cost_usd_per_million
+              ) IS NOT NULL
+                AND COALESCE(
+                  CASE
+                    WHEN llm_run.provider = 'anthropic'
+                    THEN preset.cache_write_input_token_cost_usd_per_million
+                    ELSE NULL
+                  END,
+                  preset.cached_input_token_cost_usd_per_million
+                ) >= 0
               THEN
                 (length(llm_run.full_prompt)::numeric / 4) *
-                preset.cached_input_token_cost_usd_per_million /
+                COALESCE(
+                  CASE
+                    WHEN llm_run.provider = 'anthropic'
+                    THEN preset.cache_write_input_token_cost_usd_per_million
+                    ELSE NULL
+                  END,
+                  preset.cached_input_token_cost_usd_per_million
+                ) /
                 1000000 *
                 ${getLlmRunEstimatedCostServiceTierMultiplierSql()}
               ELSE NULL
@@ -3750,6 +3780,7 @@ export async function completeOpeningHandLlmRun({
       service_tier: string | null
       input_token_cost_usd_per_million: string | number | null
       cached_input_token_cost_usd_per_million: string | number | null
+      cache_write_input_token_cost_usd_per_million: string | number | null
       output_token_cost_usd_per_million: string | number | null
       library: unknown
       random_state: string
@@ -3768,6 +3799,7 @@ export async function completeOpeningHandLlmRun({
           llm_run.service_tier,
           preset.input_token_cost_usd_per_million,
           preset.cached_input_token_cost_usd_per_million,
+          preset.cache_write_input_token_cost_usd_per_million,
           preset.output_token_cost_usd_per_million,
           simulation.library,
           simulation.random_state,
@@ -3889,6 +3921,7 @@ export async function completeTurnLlmRun({
       service_tier: string | null
       input_token_cost_usd_per_million: string | number | null
       cached_input_token_cost_usd_per_million: string | number | null
+      cache_write_input_token_cost_usd_per_million: string | number | null
       output_token_cost_usd_per_million: string | number | null
       turn_number: number
       library: unknown
@@ -3906,6 +3939,7 @@ export async function completeTurnLlmRun({
           llm_run.service_tier,
           preset.input_token_cost_usd_per_million,
           preset.cached_input_token_cost_usd_per_million,
+          preset.cache_write_input_token_cost_usd_per_million,
           preset.output_token_cost_usd_per_million,
           turn_run.turn_number,
           simulation.library,
@@ -3993,6 +4027,7 @@ function getCompletedLlmRunCostValues(
     service_tier: string | null
     input_token_cost_usd_per_million: string | number | null
     cached_input_token_cost_usd_per_million: string | number | null
+    cache_write_input_token_cost_usd_per_million: string | number | null
     output_token_cost_usd_per_million: string | number | null
   },
   usage: unknown
@@ -4004,6 +4039,9 @@ function getCompletedLlmRunCostValues(
       ),
       cachedInputDollarsPerMillion: toOptionalNumber(
         run.cached_input_token_cost_usd_per_million
+      ),
+      cacheWriteInputDollarsPerMillion: toOptionalNumber(
+        run.cache_write_input_token_cost_usd_per_million
       ),
       outputDollarsPerMillion: toOptionalNumber(
         run.output_token_cost_usd_per_million
@@ -4019,7 +4057,9 @@ function getCompletedLlmRunCostValues(
       serviceTier: run.service_tier,
     }),
     openrouterReportedCostUsd:
-      run.provider === "openrouter" ? getOpenRouterReportedCostUsd(usage) : null,
+      run.provider === "openrouter"
+        ? getOpenRouterReportedCostUsd(usage)
+        : null,
   }
 }
 
@@ -4970,9 +5010,7 @@ async function getSimulationDebugLlmRunMetadata({
   tableName,
 }: {
   simulationId: string
-  tableName:
-    | "simulation_opening_hand_llm_runs"
-    | "simulation_turn_llm_runs"
+  tableName: "simulation_opening_hand_llm_runs" | "simulation_turn_llm_runs"
   selectColumns: string
   orderBy: string
 }): Promise<SimulationDebugLlmRunMetadata[]> {
@@ -5079,9 +5117,7 @@ async function getSimulationDebugLlmRuns({
   tableName,
 }: {
   simulationId: string
-  tableName:
-    | "simulation_opening_hand_llm_runs"
-    | "simulation_turn_llm_runs"
+  tableName: "simulation_opening_hand_llm_runs" | "simulation_turn_llm_runs"
   selectColumns: string
   orderBy: string
   additionalWhereSql?: string
@@ -6349,7 +6385,6 @@ async function createEnumType(name: string, values: readonly string[]) {
     )
   }
 }
-
 
 function getSafeSqlIdentifier(identifier: string) {
   if (!/^[a-z_][a-z0-9_]*$/u.test(identifier)) {

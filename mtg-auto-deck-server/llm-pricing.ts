@@ -1,6 +1,7 @@
 export type TokenPrice = {
   inputDollarsPerMillion: number | null
   cachedInputDollarsPerMillion: number | null
+  cacheWriteInputDollarsPerMillion?: number | null
   outputDollarsPerMillion: number | null
 }
 
@@ -13,6 +14,9 @@ export function estimatePresetTokenCostUsd({
 }) {
   const inputRate = getCostValue(tokenCosts.inputDollarsPerMillion)
   const cachedInputRate = getCostValue(tokenCosts.cachedInputDollarsPerMillion)
+  const cacheWriteInputRate = getCostValue(
+    tokenCosts.cacheWriteInputDollarsPerMillion
+  )
   const outputRate = getCostValue(tokenCosts.outputDollarsPerMillion)
 
   if (inputRate === null || cachedInputRate === null || outputRate === null) {
@@ -37,6 +41,36 @@ export function estimatePresetTokenCostUsd({
 
   if (inputTokens === null || outputTokens === null) {
     return null
+  }
+
+  const anthropicCacheCreationTokens = getNumberProperty(
+    usageRecord,
+    "cache_creation_input_tokens",
+    "cacheCreationInputTokens"
+  )
+  const anthropicCacheReadTokens = getNumberProperty(
+    usageRecord,
+    "cache_read_input_tokens",
+    "cacheReadInputTokens"
+  )
+
+  if (
+    anthropicCacheCreationTokens !== null ||
+    anthropicCacheReadTokens !== null
+  ) {
+    const cacheCreationTokens = anthropicCacheCreationTokens ?? 0
+    const cacheReadTokens = anthropicCacheReadTokens ?? 0
+
+    if (cacheCreationTokens > 0 && cacheWriteInputRate === null) {
+      return null
+    }
+
+    return (
+      (inputTokens * inputRate) / 1_000_000 +
+      (cacheReadTokens * cachedInputRate) / 1_000_000 +
+      (cacheCreationTokens * (cacheWriteInputRate ?? 0)) / 1_000_000 +
+      (outputTokens * outputRate) / 1_000_000
+    )
   }
 
   const inputDetails = asRecord(
@@ -67,9 +101,7 @@ export function estimatePartialLlmRunCostUsd({
   fullPromptCharCount: number
   tokenCosts: Pick<TokenPrice, "cachedInputDollarsPerMillion">
 }) {
-  const cachedInputRate = getCostValue(
-    tokenCosts.cachedInputDollarsPerMillion
-  )
+  const cachedInputRate = getCostValue(tokenCosts.cachedInputDollarsPerMillion)
 
   if (cachedInputRate === null) {
     return null
@@ -91,9 +123,7 @@ export function estimateRunningLlmRunInitialCostUsd({
   fullPromptCharCount: number
   tokenCosts: Pick<TokenPrice, "cachedInputDollarsPerMillion">
 }) {
-  const cachedInputRate = getCostValue(
-    tokenCosts.cachedInputDollarsPerMillion
-  )
+  const cachedInputRate = getCostValue(tokenCosts.cachedInputDollarsPerMillion)
 
   if (cachedInputRate === null) {
     return null
@@ -153,9 +183,7 @@ export function formatUsdCostAsCents(costUsd: number | null | undefined) {
   return roundedCents.toFixed(1)
 }
 
-export function formatUsdCostAsCentLabel(
-  costUsd: number | null | undefined
-) {
+export function formatUsdCostAsCentLabel(costUsd: number | null | undefined) {
   const cents = formatUsdCostAsCents(costUsd)
 
   return cents === null ? null : `${cents}c`
@@ -254,7 +282,7 @@ export function aggregateOpenRouterUsage(
   return aggregate
 }
 
-function getCostValue(value: number | null) {
+function getCostValue(value: number | null | undefined) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0
     ? value
     : null

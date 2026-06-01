@@ -1,11 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
-import {
-  Bug,
-  Download,
-  LoaderCircle,
-  RefreshCw,
-  X,
-} from "lucide-react"
+import { Bug, Download, LoaderCircle, RefreshCw, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { loadApiHelpers } from "@/lib/api-lazy"
@@ -19,6 +13,7 @@ import type {
   UpdateSimulationResponse,
 } from "@/lib/deck-types"
 import {
+  formatProviderLabel,
   getLlmModelPresetLabel,
   type LlmModelPreset,
 } from "@/lib/llm-model-preset-types"
@@ -128,10 +123,7 @@ export function SimulationDetailsModal({
 
       if (!response.ok) {
         setExportError(
-          await readApiError(
-            response,
-            "Simulation JSON could not be exported."
-          )
+          await readApiError(response, "Simulation JSON could not be exported.")
         )
         return
       }
@@ -365,8 +357,7 @@ function SimulationLlmOptionsSetting({
   const isFreeTierFlexRestricted = isFreeBillingTier && supportsFlex
   const flexChecked =
     selectedProcessingMode === "realtime" && selectedUseFlexServiceTier
-  const shouldShowFreeTierFlexWarning =
-    isFreeTierFlexRestricted && !flexChecked
+  const shouldShowFreeTierFlexWarning = isFreeTierFlexRestricted && !flexChecked
 
   useEffect(() => {
     setSelectedProcessingMode(simulation.llmProcessingMode)
@@ -907,7 +898,10 @@ function SimulationDebugRunGroup({
                   value={formatDebugBoolean(run.outdated)}
                 />
               ) : null}
-              <DebugMetadataItem label="Provider" value={run.provider} />
+              <DebugMetadataItem
+                label="Provider"
+                value={formatProviderLabel(run.provider)}
+              />
               <DebugMetadataItem label="Model" value={run.model} />
               <DebugMetadataItem
                 label="Intellegence level"

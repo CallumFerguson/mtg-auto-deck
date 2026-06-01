@@ -23,6 +23,7 @@
     "preview:cloudflare": "npm run build:client && wrangler dev"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.100.1",
     "@better-auth/stripe": "^1.6.11",
     "@fontsource-variable/inter": "^5.2.8",
     "@modelcontextprotocol/sdk": "^1.27.1",

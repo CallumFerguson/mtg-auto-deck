@@ -17,6 +17,7 @@ export type LlmModelPreset = {
   isFreeTier: boolean
   inputTokenCostUsdPerMillion: number | null
   cachedInputTokenCostUsdPerMillion: number | null
+  cacheWriteInputTokenCostUsdPerMillion: number | null
   outputTokenCostUsdPerMillion: number | null
   isEnabled: boolean
   isDefault: boolean
@@ -40,6 +41,7 @@ export type CreateLlmModelPresetInput = {
   isFreeTier: boolean
   inputTokenCostUsdPerMillion: number | null
   cachedInputTokenCostUsdPerMillion: number | null
+  cacheWriteInputTokenCostUsdPerMillion?: number | null
   outputTokenCostUsdPerMillion: number | null
   isEnabled: boolean
   isDefault: boolean
@@ -54,6 +56,7 @@ export type UpdateLlmModelPresetInput = {
   isFreeTier: boolean
   inputTokenCostUsdPerMillion: number | null
   cachedInputTokenCostUsdPerMillion: number | null
+  cacheWriteInputTokenCostUsdPerMillion?: number | null
   outputTokenCostUsdPerMillion: number | null
 }
 
@@ -67,6 +70,7 @@ export type CreateLlmModelPresetInsertQuery = {
     string | null,
     boolean,
     boolean,
+    number | null,
     number | null,
     number | null,
     number | null,
@@ -88,6 +92,7 @@ export type UpdateLlmModelPresetUpdateQuery = {
     number | null,
     number | null,
     number | null,
+    number | null,
   ]
 }
 
@@ -102,6 +107,7 @@ type LlmModelPresetRow = {
   is_free_tier: boolean
   input_token_cost_usd_per_million: string | number | null
   cached_input_token_cost_usd_per_million: string | number | null
+  cache_write_input_token_cost_usd_per_million: string | number | null
   output_token_cost_usd_per_million: string | number | null
   is_enabled: boolean
   is_default: boolean
@@ -132,6 +138,7 @@ const UPDATE_LLM_MODEL_PRESET_INPUT_KEYS = new Set([
   "isFreeTier",
   "inputTokenCostUsdPerMillion",
   "cachedInputTokenCostUsdPerMillion",
+  "cacheWriteInputTokenCostUsdPerMillion",
   "outputTokenCostUsdPerMillion",
 ])
 
@@ -150,6 +157,7 @@ export async function ensureLlmModelPresetsSchema() {
 
       input_token_cost_usd_per_million numeric(12,6),
       cached_input_token_cost_usd_per_million numeric(12,6),
+      cache_write_input_token_cost_usd_per_million numeric(12,6),
       output_token_cost_usd_per_million numeric(12,6),
 
       is_enabled boolean NOT NULL DEFAULT true,
@@ -183,6 +191,10 @@ export async function ensureLlmModelPresetsSchema() {
   await queryDatabase(`
     ALTER TABLE llm_model_presets
     ADD COLUMN IF NOT EXISTS cached_input_token_cost_usd_per_million numeric(12,6)
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_model_presets
+    ADD COLUMN IF NOT EXISTS cache_write_input_token_cost_usd_per_million numeric(12,6)
   `)
   await queryDatabase(`
     ALTER TABLE llm_model_presets
@@ -254,6 +266,7 @@ export async function listAdminLlmModelPresets() {
       preset.is_free_tier,
       preset.input_token_cost_usd_per_million,
       preset.cached_input_token_cost_usd_per_million,
+      preset.cache_write_input_token_cost_usd_per_million,
       preset.output_token_cost_usd_per_million,
       preset.is_enabled,
       preset.is_default,
@@ -288,8 +301,7 @@ export async function listAdminLlmModelPresets() {
       ...preset,
       simulationReferenceCount,
       llmRunReferenceCount,
-      canDelete:
-        simulationReferenceCount === 0 && llmRunReferenceCount === 0,
+      canDelete: simulationReferenceCount === 0 && llmRunReferenceCount === 0,
     } satisfies AdminLlmModelPreset
   })
 }
@@ -360,11 +372,12 @@ function buildValidatedCreateLlmModelPresetInsertQuery(
         is_free_tier,
         input_token_cost_usd_per_million,
         cached_input_token_cost_usd_per_million,
+        cache_write_input_token_cost_usd_per_million,
         output_token_cost_usd_per_million,
         is_enabled,
         is_default
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       RETURNING
         id,
         name,
@@ -376,6 +389,7 @@ function buildValidatedCreateLlmModelPresetInsertQuery(
         is_free_tier,
         input_token_cost_usd_per_million,
         cached_input_token_cost_usd_per_million,
+        cache_write_input_token_cost_usd_per_million,
         output_token_cost_usd_per_million,
         is_enabled,
         is_default,
@@ -392,6 +406,7 @@ function buildValidatedCreateLlmModelPresetInsertQuery(
       normalizedInput.isFreeTier,
       normalizedInput.inputTokenCostUsdPerMillion,
       normalizedInput.cachedInputTokenCostUsdPerMillion,
+      normalizedInput.cacheWriteInputTokenCostUsdPerMillion ?? null,
       normalizedInput.outputTokenCostUsdPerMillion,
       normalizedInput.isEnabled,
       normalizedInput.isDefault,
@@ -458,7 +473,8 @@ function buildValidatedUpdateLlmModelPresetUpdateQuery(
           is_free_tier = $7,
           input_token_cost_usd_per_million = $8,
           cached_input_token_cost_usd_per_million = $9,
-          output_token_cost_usd_per_million = $10,
+          cache_write_input_token_cost_usd_per_million = $10,
+          output_token_cost_usd_per_million = $11,
           updated_at = now()
       WHERE id = $1
       RETURNING
@@ -472,6 +488,7 @@ function buildValidatedUpdateLlmModelPresetUpdateQuery(
         is_free_tier,
         input_token_cost_usd_per_million,
         cached_input_token_cost_usd_per_million,
+        cache_write_input_token_cost_usd_per_million,
         output_token_cost_usd_per_million,
         is_enabled,
         is_default,
@@ -488,6 +505,7 @@ function buildValidatedUpdateLlmModelPresetUpdateQuery(
       normalizedInput.isFreeTier,
       normalizedInput.inputTokenCostUsdPerMillion,
       normalizedInput.cachedInputTokenCostUsdPerMillion,
+      normalizedInput.cacheWriteInputTokenCostUsdPerMillion ?? null,
       normalizedInput.outputTokenCostUsdPerMillion,
     ],
   }
@@ -515,6 +533,7 @@ export async function setLlmModelPresetEnabled(
         is_free_tier,
         input_token_cost_usd_per_million,
         cached_input_token_cost_usd_per_million,
+        cache_write_input_token_cost_usd_per_million,
         output_token_cost_usd_per_million,
         is_enabled,
         is_default,
@@ -585,6 +604,7 @@ export async function setDefaultLlmModelPreset(presetId: string | null) {
           is_free_tier,
           input_token_cost_usd_per_million,
           cached_input_token_cost_usd_per_million,
+          cache_write_input_token_cost_usd_per_million,
           output_token_cost_usd_per_million,
           is_enabled,
           is_default,
@@ -653,6 +673,7 @@ const LLM_MODEL_PRESET_SELECT_SQL = `
     is_free_tier,
     input_token_cost_usd_per_million,
     cached_input_token_cost_usd_per_million,
+    cache_write_input_token_cost_usd_per_million,
     output_token_cost_usd_per_million,
     is_enabled,
     is_default,
@@ -723,6 +744,7 @@ async function ensureLlmModelPresetConstraints() {
       CHECK (
         (input_token_cost_usd_per_million IS NULL OR input_token_cost_usd_per_million >= 0)
         AND (cached_input_token_cost_usd_per_million IS NULL OR cached_input_token_cost_usd_per_million >= 0)
+        AND (cache_write_input_token_cost_usd_per_million IS NULL OR cache_write_input_token_cost_usd_per_million >= 0)
         AND (output_token_cost_usd_per_million IS NULL OR output_token_cost_usd_per_million >= 0)
       )
   `)
@@ -754,7 +776,7 @@ function validateCreateLlmModelPresetInput(
 
   if (!parsedProvider.success) {
     throw new LlmModelPresetValidationError(
-      "Provider must be openai, openrouter, or llamacpp."
+      "Provider must be openai, openrouter, llamacpp, or anthropic."
     )
   }
 
@@ -764,9 +786,13 @@ function validateCreateLlmModelPresetInput(
 
   if (!parsedReasoningEffort.success) {
     throw new LlmModelPresetValidationError(
-      "Reasoning effort must be one of: none, minimal, low, medium, high, xhigh."
+      "Reasoning effort must be one of: none, minimal, low, medium, high, xhigh, max."
     )
   }
+  validateReasoningEffortForProvider(
+    parsedProvider.data,
+    parsedReasoningEffort.data
+  )
 
   const model = input.model.trim()
   const name = input.name?.trim() || null
@@ -783,7 +809,11 @@ function validateCreateLlmModelPresetInput(
     )
   }
 
-  if (parsedProvider.data === "llamacpp" && input.supportsFlex) {
+  if (
+    parsedProvider.data !== "openai" &&
+    parsedProvider.data !== "openrouter" &&
+    input.supportsFlex
+  ) {
     throw new LlmModelPresetValidationError(
       "Flex service tier can only be supported by OpenAI or OpenRouter presets."
     )
@@ -798,7 +828,9 @@ function validateCreateLlmModelPresetInput(
     openrouterModelProvider:
       parsedProvider.data === "openrouter" ? openrouterModelProvider : null,
     supportsFlex:
-      parsedProvider.data === "llamacpp" ? false : input.supportsFlex,
+      parsedProvider.data === "openai" || parsedProvider.data === "openrouter"
+        ? input.supportsFlex
+        : false,
     isFreeTier: input.isFreeTier,
     inputTokenCostUsdPerMillion: validateOptionalCost(
       input.inputTokenCostUsdPerMillion,
@@ -807,6 +839,10 @@ function validateCreateLlmModelPresetInput(
     cachedInputTokenCostUsdPerMillion: validateOptionalCost(
       input.cachedInputTokenCostUsdPerMillion,
       "Cached input token cost"
+    ),
+    cacheWriteInputTokenCostUsdPerMillion: validateOptionalCost(
+      input.cacheWriteInputTokenCostUsdPerMillion,
+      "Cache write input token cost"
     ),
     outputTokenCostUsdPerMillion: validateOptionalCost(
       input.outputTokenCostUsdPerMillion,
@@ -836,7 +872,7 @@ function validateUpdateLlmModelPresetInput(
 
   if (!parsedProvider.success) {
     throw new LlmModelPresetValidationError(
-      "Provider must be openai, openrouter, or llamacpp."
+      "Provider must be openai, openrouter, llamacpp, or anthropic."
     )
   }
 
@@ -846,9 +882,13 @@ function validateUpdateLlmModelPresetInput(
 
   if (!parsedReasoningEffort.success) {
     throw new LlmModelPresetValidationError(
-      "Reasoning effort must be one of: none, minimal, low, medium, high, xhigh."
+      "Reasoning effort must be one of: none, minimal, low, medium, high, xhigh, max."
     )
   }
+  validateReasoningEffortForProvider(
+    parsedProvider.data,
+    parsedReasoningEffort.data
+  )
 
   const model = input.model.trim()
   const name = input.name?.trim() || null
@@ -867,7 +907,9 @@ function validateUpdateLlmModelPresetInput(
     openrouterModelProvider:
       parsedProvider.data === "openrouter" ? openrouterModelProvider : null,
     supportsFlex:
-      parsedProvider.data === "llamacpp" ? false : input.supportsFlex,
+      parsedProvider.data === "openai" || parsedProvider.data === "openrouter"
+        ? input.supportsFlex
+        : false,
     isFreeTier: input.isFreeTier,
     inputTokenCostUsdPerMillion: validateOptionalCost(
       input.inputTokenCostUsdPerMillion,
@@ -877,6 +919,10 @@ function validateUpdateLlmModelPresetInput(
       input.cachedInputTokenCostUsdPerMillion,
       "Cached input token cost"
     ),
+    cacheWriteInputTokenCostUsdPerMillion: validateOptionalCost(
+      input.cacheWriteInputTokenCostUsdPerMillion,
+      "Cache write input token cost"
+    ),
     outputTokenCostUsdPerMillion: validateOptionalCost(
       input.outputTokenCostUsdPerMillion,
       "Output token cost"
@@ -884,8 +930,8 @@ function validateUpdateLlmModelPresetInput(
   }
 }
 
-function validateOptionalCost(value: number | null, label: string) {
-  if (value === null) {
+function validateOptionalCost(value: number | null | undefined, label: string) {
+  if (value == null) {
     return null
   }
 
@@ -894,6 +940,27 @@ function validateOptionalCost(value: number | null, label: string) {
   }
 
   return value
+}
+
+function validateReasoningEffortForProvider(
+  provider: LlmProvider,
+  reasoningEffort: ReasoningEffort
+) {
+  if (provider === "anthropic") {
+    if (reasoningEffort === "none" || reasoningEffort === "minimal") {
+      throw new LlmModelPresetValidationError(
+        "Anthropic model presets require low, medium, high, xhigh, or max reasoning effort."
+      )
+    }
+
+    return
+  }
+
+  if (reasoningEffort === "max") {
+    throw new LlmModelPresetValidationError(
+      "Max reasoning effort can only be used for Anthropic model presets."
+    )
+  }
 }
 
 function mapLlmModelPresetRow(row: LlmModelPresetRow): LlmModelPreset {
@@ -911,6 +978,9 @@ function mapLlmModelPresetRow(row: LlmModelPresetRow): LlmModelPreset {
     ),
     cachedInputTokenCostUsdPerMillion: toOptionalNumber(
       row.cached_input_token_cost_usd_per_million
+    ),
+    cacheWriteInputTokenCostUsdPerMillion: toOptionalNumber(
+      row.cache_write_input_token_cost_usd_per_million
     ),
     outputTokenCostUsdPerMillion: toOptionalNumber(
       row.output_token_cost_usd_per_million

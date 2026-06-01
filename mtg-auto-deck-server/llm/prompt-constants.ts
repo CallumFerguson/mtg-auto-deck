@@ -206,6 +206,7 @@ If an already-made tool call makes the run impossible to complete accurately, st
   "gameState": null,
   "error": "Short explanation of the unrecoverable mistake."
 }
+This includes any misuse of the library tools. For example, if you draw or return a card to the deck when you should not have, do not try to use another tool call to undo the mistake.
 
 Before final response, verify legality, mana payments/colors, tools used for hidden/random actions, land count, triggers, targets, life totals, commander damage/tax, tapped status, counters, and every zone.
 

@@ -1383,8 +1383,7 @@ export function DeckSimulation({
       }
 
       try {
-        const { API_BASE_URL, apiFetch, readApiError } =
-          await loadApiHelpers()
+        const { API_BASE_URL, apiFetch, readApiError } = await loadApiHelpers()
         const response = await apiFetch(
           `${API_BASE_URL}/decks/${deckId}/simulations`
         )
@@ -1468,8 +1467,7 @@ export function DeckSimulation({
   const loadStartingHandById = useCallback(
     async (startingHandId: string) => {
       try {
-        const { API_BASE_URL, apiFetch, readApiError } =
-          await loadApiHelpers()
+        const { API_BASE_URL, apiFetch, readApiError } = await loadApiHelpers()
         const response = await apiFetch(
           `${API_BASE_URL}/decks/${deckId}/starting-hands/${encodeURIComponent(
             startingHandId
@@ -2395,7 +2393,9 @@ export function DeckSimulation({
                       {isModelPresetSelectionResolved ? (
                         <div className="grid gap-3">
                           <FlexServiceTierSwitch
-                            checked={effectiveCreateSimulationUseFlexServiceTier}
+                            checked={
+                              effectiveCreateSimulationUseFlexServiceTier
+                            }
                             disabled={!selectedModelPresetSupportsFlex}
                             label="Flex processing"
                             activeWarning="Less usage, but simulation may be slower and has a higher chance of failing."
@@ -3206,7 +3206,9 @@ function SimulationDetails({
       demoMode={demoMode}
       hasUsableModelPreset={selectedModelPreset !== null}
       selectedModelPresetIsFreeTier={Boolean(selectedModelPreset?.isFreeTier)}
-      selectedModelPresetSupportsFlex={Boolean(selectedModelPreset?.supportsFlex)}
+      selectedModelPresetSupportsFlex={Boolean(
+        selectedModelPreset?.supportsFlex
+      )}
       isStartingOpeningHandRun={isStartingOpeningHandRun}
       isStartingTurnRun={isStartingTurnRun}
       isLoadingStartingHand={isLoadingStartingHand}
@@ -3374,8 +3376,7 @@ function SimulationResultsPanel({
 }) {
   const billingTierContext = useOptionalBillingTier()
   const billingTier = billingTierContext?.billingTier ?? "free"
-  const hasLoadedBillingTier =
-    billingTierContext?.hasLoadedBillingTier ?? false
+  const hasLoadedBillingTier = billingTierContext?.hasLoadedBillingTier ?? false
   const cardLookup = useMemo(
     () => createSimulationCardLookup({ cards, commanders }),
     [cards, commanders]
@@ -3622,16 +3623,13 @@ function SimulationResultsPanel({
   const [demoHasRevealedOpeningHand, setDemoHasRevealedOpeningHand] =
     useState(false)
   const [demoRevealedTurnCount, setDemoRevealedTurnCount] = useState(0)
-  const [
-    demoSkipGameStateAnimationKey,
-    setDemoSkipGameStateAnimationKey,
-  ] = useState(0)
+  const [demoSkipGameStateAnimationKey, setDemoSkipGameStateAnimationKey] =
+    useState(0)
   const [demoCoachMarkVisual, setDemoCoachMarkVisual] =
     useState<DemoCoachMarkVisualState | null>(null)
-  const [
-    demoRevealAnimationStepId,
-    setDemoRevealAnimationStepId,
-  ] = useState<string | null>(null)
+  const [demoRevealAnimationStepId, setDemoRevealAnimationStepId] = useState<
+    string | null
+  >(null)
   const demoAnimatedStepIdsRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
@@ -4235,7 +4233,7 @@ function SimulationResultsPanel({
         ? {
             phase: "button",
             rect: startRect,
-        }
+          }
         : null
     )
     setDemoHasStarted(true)
@@ -4473,8 +4471,8 @@ function SimulationResultsPanel({
         <span
           className={`absolute top-1/2 left-0 size-3 border-b border-l border-sky-200 bg-sky-50 transition-[opacity,transform] duration-300 ${
             isCoachMark
-              ? "-translate-x-1/2 -translate-y-1/2 rotate-45 scale-100 opacity-100 delay-300"
-              : "translate-x-1 -translate-y-1/2 rotate-45 scale-50 opacity-0"
+              ? "-translate-x-1/2 -translate-y-1/2 scale-100 rotate-45 opacity-100 delay-300"
+              : "translate-x-1 -translate-y-1/2 scale-50 rotate-45 opacity-0"
           }`}
           aria-hidden="true"
         />
@@ -4509,7 +4507,7 @@ function SimulationResultsPanel({
         className={
           isDemoIntroOverlayVisible || demoIsReleasingIntroBlur
             ? "pointer-events-none h-full min-h-0 blur-sm transition-[filter] duration-750 ease-out"
-            : "h-full min-h-0 blur-0 transition-[filter] duration-750 ease-out"
+            : "blur-0 h-full min-h-0 transition-[filter] duration-750 ease-out"
         }
       >
         {resultsShell}
@@ -4663,7 +4661,9 @@ function getDemoCoachMarkTargetRect({
   const minTop = DEMO_COACH_MARK_EDGE_PADDING_PX
   const maxTop = Math.max(
     minTop,
-    rootRect.height - DEMO_COACH_MARK_HEIGHT_PX - DEMO_COACH_MARK_EDGE_PADDING_PX
+    rootRect.height -
+      DEMO_COACH_MARK_HEIGHT_PX -
+      DEMO_COACH_MARK_EDGE_PADDING_PX
   )
   const rightSideLeft =
     targetRect.right - rootRect.left + DEMO_COACH_MARK_OFFSET_PX
@@ -5638,6 +5638,10 @@ function formatPublicBenchmarkProviderLabel(provider: string | null) {
     return "OpenRouter"
   }
 
+  if (provider === "anthropic") {
+    return "Anthropic"
+  }
+
   if (provider === "llamacpp") {
     return "llama.cpp"
   }
@@ -5645,9 +5649,7 @@ function formatPublicBenchmarkProviderLabel(provider: string | null) {
   return provider
 }
 
-function formatPublicBenchmarkReasoningEffort(
-  reasoningEffort: string | null
-) {
+function formatPublicBenchmarkReasoningEffort(reasoningEffort: string | null) {
   if (!reasoningEffort) {
     return null
   }
@@ -5705,7 +5707,9 @@ function getFinishedSimulationRunStatusLabel({
       : "Batch run complete"
   }
 
-  return finishedDurationText ? `Thought for ${finishedDurationText}` : "Thought"
+  return finishedDurationText
+    ? `Thought for ${finishedDurationText}`
+    : "Thought"
 }
 
 const simulationResultSummaryMarkdownClassName =

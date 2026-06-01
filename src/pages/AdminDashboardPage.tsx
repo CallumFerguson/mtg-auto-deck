@@ -142,6 +142,7 @@ type UpdateLlmModelPresetPayload = {
   isFreeTier: boolean
   inputTokenCostUsdPerMillion: number | null
   cachedInputTokenCostUsdPerMillion: number | null
+  cacheWriteInputTokenCostUsdPerMillion: number | null
   outputTokenCostUsdPerMillion: number | null
 }
 
@@ -152,7 +153,34 @@ const REASONING_EFFORT_OPTIONS: readonly ReasoningEffort[] = [
   "medium",
   "high",
   "xhigh",
+  "max",
 ]
+const ANTHROPIC_REASONING_EFFORT_OPTIONS: readonly ReasoningEffort[] = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]
+
+function getReasoningEffortOptions(provider: LlmProvider) {
+  return provider === "anthropic"
+    ? ANTHROPIC_REASONING_EFFORT_OPTIONS
+    : REASONING_EFFORT_OPTIONS.filter((effort) => effort !== "max")
+}
+
+function normalizeReasoningEffortForProvider(
+  provider: LlmProvider,
+  reasoningEffort: ReasoningEffort
+): ReasoningEffort {
+  const options = getReasoningEffortOptions(provider)
+
+  return options.includes(reasoningEffort) ? reasoningEffort : "medium"
+}
+
+function supportsProviderFlex(provider: LlmProvider) {
+  return provider === "openai" || provider === "openrouter"
+}
 const ADMIN_GRANT_TIER_OPTIONS: readonly AdminGrantBillingTier[] = [
   "plus",
   "pro",
@@ -842,9 +870,7 @@ function AdminUsersSection({
                         revokingAdminTierGrantUserId={
                           revokingAdminTierGrantUserId
                         }
-                        savingAdminTierGrantUserId={
-                          savingAdminTierGrantUserId
-                        }
+                        savingAdminTierGrantUserId={savingAdminTierGrantUserId}
                         setOpenUserMenuId={setOpenUserMenuId}
                         user={user}
                         onDeleteUser={(selectedUser) => {
@@ -1038,6 +1064,7 @@ function AdminModelPresetsSection() {
     isFreeTier: false,
     inputTokenCostUsdPerMillion: "",
     cachedInputTokenCostUsdPerMillion: "",
+    cacheWriteInputTokenCostUsdPerMillion: "",
     outputTokenCostUsdPerMillion: "",
     isEnabled: true,
     isDefault: false,
@@ -1098,14 +1125,18 @@ function AdminModelPresetsSection() {
               form.provider === "openrouter"
                 ? form.openrouterModelProvider.trim() || null
                 : null,
-            supportsFlex:
-              form.provider === "llamacpp" ? false : form.supportsFlex,
+            supportsFlex: supportsProviderFlex(form.provider)
+              ? form.supportsFlex
+              : false,
             isFreeTier: form.isFreeTier,
             inputTokenCostUsdPerMillion: parseOptionalCost(
               form.inputTokenCostUsdPerMillion
             ),
             cachedInputTokenCostUsdPerMillion: parseOptionalCost(
               form.cachedInputTokenCostUsdPerMillion
+            ),
+            cacheWriteInputTokenCostUsdPerMillion: parseOptionalCost(
+              form.cacheWriteInputTokenCostUsdPerMillion
             ),
             outputTokenCostUsdPerMillion: parseOptionalCost(
               form.outputTokenCostUsdPerMillion
@@ -1133,6 +1164,7 @@ function AdminModelPresetsSection() {
         isFreeTier: false,
         inputTokenCostUsdPerMillion: "",
         cachedInputTokenCostUsdPerMillion: "",
+        cacheWriteInputTokenCostUsdPerMillion: "",
         outputTokenCostUsdPerMillion: "",
         isDefault: false,
       }))
@@ -1300,17 +1332,25 @@ function AdminModelPresetsSection() {
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-3 focus:ring-ring/30"
                 value={form.provider}
                 onChange={(event) =>
-                  setForm((currentForm) => ({
-                    ...currentForm,
-                    provider: event.target.value as LlmProvider,
-                    supportsFlex:
-                      event.target.value === "llamacpp"
-                        ? false
-                        : currentForm.supportsFlex,
-                  }))
+                  setForm((currentForm) => {
+                    const provider = event.target.value as LlmProvider
+
+                    return {
+                      ...currentForm,
+                      provider,
+                      reasoningEffort: normalizeReasoningEffortForProvider(
+                        provider,
+                        currentForm.reasoningEffort
+                      ),
+                      supportsFlex: supportsProviderFlex(provider)
+                        ? currentForm.supportsFlex
+                        : false,
+                    }
+                  })
                 }
               >
                 <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
                 <option value="openrouter">OpenRouter</option>
                 <option value="llamacpp">llama.cpp</option>
               </select>
@@ -1339,7 +1379,7 @@ function AdminModelPresetsSection() {
                   }))
                 }
               >
-                {REASONING_EFFORT_OPTIONS.map((effort) => (
+                {getReasoningEffortOptions(form.provider).map((effort) => (
                   <option key={effort} value={effort}>
                     {effort}
                   </option>
@@ -1365,8 +1405,10 @@ function AdminModelPresetsSection() {
                 <input
                   className="size-4 accent-sky-300"
                   type="checkbox"
-                  checked={form.supportsFlex && form.provider !== "llamacpp"}
-                  disabled={form.provider === "llamacpp"}
+                  checked={
+                    form.supportsFlex && supportsProviderFlex(form.provider)
+                  }
+                  disabled={!supportsProviderFlex(form.provider)}
                   onChange={(event) =>
                     setForm((currentForm) => ({
                       ...currentForm,
@@ -1411,6 +1453,17 @@ function AdminModelPresetsSection() {
                   setForm((currentForm) => ({
                     ...currentForm,
                     cachedInputTokenCostUsdPerMillion: value,
+                  }))
+                }
+              />
+            </AdminFormField>
+            <AdminFormField label="Cache write $/M">
+              <CostInput
+                value={form.cacheWriteInputTokenCostUsdPerMillion}
+                onChange={(value) =>
+                  setForm((currentForm) => ({
+                    ...currentForm,
+                    cacheWriteInputTokenCostUsdPerMillion: value,
                   }))
                 }
               />
@@ -1646,6 +1699,12 @@ function AdminModelPresetsSection() {
                           ),
                         ],
                         [
+                          "write",
+                          formatOptionalCost(
+                            preset.cacheWriteInputTokenCostUsdPerMillion
+                          ),
+                        ],
+                        [
                           "out",
                           formatOptionalCost(
                             preset.outputTokenCostUsdPerMillion
@@ -1821,7 +1880,9 @@ function AdminBenchmarksSection() {
         )
       )
       setSelectedModelPresetId((currentPresetId) => {
-        if (presetsData.presets.some((preset) => preset.id === currentPresetId)) {
+        if (
+          presetsData.presets.some((preset) => preset.id === currentPresetId)
+        ) {
           return currentPresetId
         }
 
@@ -1906,14 +1967,13 @@ function AdminBenchmarksSection() {
       parsedSimulationsPerDeck < 1 ||
       parsedSimulationsPerDeck > 100
     ) {
-      setActionError("Simulations per deck must be a whole number from 1 to 100.")
+      setActionError(
+        "Simulations per deck must be a whole number from 1 to 100."
+      )
       return
     }
 
-    if (
-      !Number.isInteger(parsedTurnsToSimulate) ||
-      parsedTurnsToSimulate < 0
-    ) {
+    if (!Number.isInteger(parsedTurnsToSimulate) || parsedTurnsToSimulate < 0) {
       setActionError("Turns to simulate must be a non-negative integer.")
       return
     }
@@ -2387,22 +2447,10 @@ function AdminBenchmarksSection() {
                     <TableCell>
                       <CompactMetricList
                         items={[
-                          [
-                            "total",
-                            String(benchmark.totalSimulationCount),
-                          ],
-                          [
-                            "active",
-                            String(benchmark.activeSimulationCount),
-                          ],
-                          [
-                            "done",
-                            String(benchmark.completedSimulationCount),
-                          ],
-                          [
-                            "failed",
-                            String(benchmark.failedSimulationCount),
-                          ],
+                          ["total", String(benchmark.totalSimulationCount)],
+                          ["active", String(benchmark.activeSimulationCount)],
+                          ["done", String(benchmark.completedSimulationCount)],
+                          ["failed", String(benchmark.failedSimulationCount)],
                           [
                             "stopped",
                             String(benchmark.cancelledSimulationCount),
@@ -2503,9 +2551,7 @@ function AdminBenchmarkActionsMenu({
     const minimumLeft = ADMIN_BENCHMARK_ACTIONS_MENU_VIEWPORT_MARGIN
     const maximumLeft = Math.max(
       minimumLeft,
-      viewportWidth -
-        menuWidth -
-        ADMIN_BENCHMARK_ACTIONS_MENU_VIEWPORT_MARGIN
+      viewportWidth - menuWidth - ADMIN_BENCHMARK_ACTIONS_MENU_VIEWPORT_MARGIN
     )
     const left = Math.min(
       Math.max(triggerRect.right - menuWidth, minimumLeft),
@@ -2520,9 +2566,7 @@ function AdminBenchmarkActionsMenu({
     const preferredTop = shouldOpenBelow ? belowTop : aboveTop
     const maximumTop = Math.max(
       ADMIN_BENCHMARK_ACTIONS_MENU_VIEWPORT_MARGIN,
-      viewportHeight -
-        menuHeight -
-        ADMIN_BENCHMARK_ACTIONS_MENU_VIEWPORT_MARGIN
+      viewportHeight - menuHeight - ADMIN_BENCHMARK_ACTIONS_MENU_VIEWPORT_MARGIN
     )
     const top = Math.min(
       Math.max(preferredTop, ADMIN_BENCHMARK_ACTIONS_MENU_VIEWPORT_MARGIN),
@@ -2951,11 +2995,17 @@ function EditLlmModelPresetModal({
     cachedInputTokenCostUsdPerMillion,
     setCachedInputTokenCostUsdPerMillion,
   ] = useState(formatCostInputValue(preset.cachedInputTokenCostUsdPerMillion))
+  const [
+    cacheWriteInputTokenCostUsdPerMillion,
+    setCacheWriteInputTokenCostUsdPerMillion,
+  ] = useState(
+    formatCostInputValue(preset.cacheWriteInputTokenCostUsdPerMillion)
+  )
   const [outputTokenCostUsdPerMillion, setOutputTokenCostUsdPerMillion] =
     useState(formatCostInputValue(preset.outputTokenCostUsdPerMillion))
   const [localError, setLocalError] = useState<string | null>(null)
   const isOpenRouterPreset = preset.provider === "openrouter"
-  const isFlexEditable = preset.provider !== "llamacpp"
+  const isFlexEditable = supportsProviderFlex(preset.provider)
   const closeIfAllowed = () => {
     if (!isSaving) {
       onClose()
@@ -2987,6 +3037,9 @@ function EditLlmModelPresetModal({
       ),
       cachedInputTokenCostUsdPerMillion: parseOptionalCost(
         cachedInputTokenCostUsdPerMillion
+      ),
+      cacheWriteInputTokenCostUsdPerMillion: parseOptionalCost(
+        cacheWriteInputTokenCostUsdPerMillion
       ),
       outputTokenCostUsdPerMillion: parseOptionalCost(
         outputTokenCostUsdPerMillion
@@ -3067,7 +3120,7 @@ function EditLlmModelPresetModal({
                   setReasoningEffort(event.target.value as ReasoningEffort)
                 }
               >
-                {REASONING_EFFORT_OPTIONS.map((effort) => (
+                {getReasoningEffortOptions(preset.provider).map((effort) => (
                   <option key={effort} value={effort}>
                     {effort}
                   </option>
@@ -3123,6 +3176,13 @@ function EditLlmModelPresetModal({
                 value={cachedInputTokenCostUsdPerMillion}
                 disabled={isSaving}
                 onChange={setCachedInputTokenCostUsdPerMillion}
+              />
+            </AdminFormField>
+            <AdminFormField label="Cache write $/M">
+              <CostInput
+                value={cacheWriteInputTokenCostUsdPerMillion}
+                disabled={isSaving}
+                onChange={setCacheWriteInputTokenCostUsdPerMillion}
               />
             </AdminFormField>
             <AdminFormField label="Output $/M">
@@ -4063,7 +4123,11 @@ function PromoteAdminUserModal({
   )
 }
 
-function BenchmarkStatusBadge({ status }: { status: AdminBenchmark["status"] }) {
+function BenchmarkStatusBadge({
+  status,
+}: {
+  status: AdminBenchmark["status"]
+}) {
   if (status === "completed") {
     return (
       <StatusBadge

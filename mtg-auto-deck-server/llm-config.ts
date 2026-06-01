@@ -1,7 +1,12 @@
 import { z } from "zod/v4"
 import type { TokenPrice } from "./llm-pricing.js"
 
-export const llmProviderSchema = z.enum(["openai", "openrouter", "llamacpp"])
+export const llmProviderSchema = z.enum([
+  "openai",
+  "openrouter",
+  "llamacpp",
+  "anthropic",
+])
 export const reasoningEffortSchema = z.enum([
   "none",
   "minimal",
@@ -9,6 +14,7 @@ export const reasoningEffortSchema = z.enum([
   "medium",
   "high",
   "xhigh",
+  "max",
 ])
 
 export type LlmProvider = z.infer<typeof llmProviderSchema>
@@ -45,11 +51,17 @@ export type LlmModelPresetRunConfig = {
   supportsFlex: boolean
   inputTokenCostUsdPerMillion: number | null
   cachedInputTokenCostUsdPerMillion: number | null
+  cacheWriteInputTokenCostUsdPerMillion?: number | null
   outputTokenCostUsdPerMillion: number | null
 }
 
 export type OpenAiRunConfig = ConfiguredModelLlmRunConfig & {
   provider: "openai"
+}
+
+export type AnthropicRunConfig = ConfiguredModelLlmRunConfig & {
+  provider: "anthropic"
+  serviceTier: null
 }
 
 export type OpenRouterRunConfig = ConfiguredModelLlmRunConfig & {
@@ -73,27 +85,39 @@ export type OpeningHandOpenAiRunConfig = OpenAiRunConfig & {
   openingHandMcpPublicUrl: string
 }
 
+export type OpeningHandAnthropicRunConfig = AnthropicRunConfig & {
+  openingHandMcpPublicUrl: string
+}
+
 export type TurnSimulationOpenAiRunConfig = OpenAiRunConfig & {
+  turnSimulationMcpPublicUrl: string
+}
+
+export type TurnSimulationAnthropicRunConfig = AnthropicRunConfig & {
   turnSimulationMcpPublicUrl: string
 }
 
 export type OpeningHandLlmRunConfig =
   | OpeningHandOpenAiRunConfig
+  | OpeningHandAnthropicRunConfig
   | OpenRouterRunConfig
   | LlamaCppRunConfig
 
 export type TurnSimulationLlmRunConfig =
   | TurnSimulationOpenAiRunConfig
+  | TurnSimulationAnthropicRunConfig
   | OpenRouterRunConfig
   | LlamaCppRunConfig
 
 export type ResolvedOpeningHandLlmRunConfig =
   | OpeningHandOpenAiRunConfig
+  | OpeningHandAnthropicRunConfig
   | OpenRouterRunConfig
   | ResolvedLlamaCppRunConfig
 
 export type ResolvedTurnSimulationLlmRunConfig =
   | TurnSimulationOpenAiRunConfig
+  | TurnSimulationAnthropicRunConfig
   | OpenRouterRunConfig
   | ResolvedLlamaCppRunConfig
 
@@ -149,6 +173,16 @@ export function getOpeningHandLlmRunConfig(
     }
   }
 
+  if (config.provider === "anthropic") {
+    return {
+      ...config,
+      openingHandMcpPublicUrl: getRequiredEnvironmentVariable(
+        environment,
+        "OPENING_HAND_MCP_PUBLIC_URL"
+      ),
+    }
+  }
+
   return config
 }
 
@@ -160,6 +194,16 @@ export function getTurnSimulationLlmRunConfig(
   const config = getLlmRunConfig(preset, environment, serviceTierOptions)
 
   if (config.provider === "openai") {
+    return {
+      ...config,
+      turnSimulationMcpPublicUrl: getRequiredEnvironmentVariable(
+        environment,
+        "TURN_SIMULATION_MCP_PUBLIC_URL"
+      ),
+    }
+  }
+
+  if (config.provider === "anthropic") {
     return {
       ...config,
       turnSimulationMcpPublicUrl: getRequiredEnvironmentVariable(
@@ -197,7 +241,11 @@ function getLlmRunConfig(
   preset: LlmModelPresetRunConfig,
   environment: Environment,
   serviceTierOptions: LlmRunServiceTierOptions = {}
-): OpenAiRunConfig | OpenRouterRunConfig | LlamaCppRunConfig {
+):
+  | OpenAiRunConfig
+  | AnthropicRunConfig
+  | OpenRouterRunConfig
+  | LlamaCppRunConfig {
   const maxOutputTokens = getRequiredPositiveIntegerEnvironmentVariable(
     environment,
     "LLM_MAX_OUTPUT_TOKENS"
@@ -239,6 +287,19 @@ function getLlmRunConfig(
     }
   }
 
+  if (preset.provider === "anthropic") {
+    return {
+      apiKey: getRequiredEnvironmentVariable(environment, "ANTHROPIC_API_KEY"),
+      maxOutputTokens,
+      model: preset.model,
+      modelPresetId: preset.id,
+      provider: preset.provider,
+      reasoningEffort: preset.reasoningEffort,
+      serviceTier: null,
+      tokenCosts,
+    }
+  }
+
   return {
     apiKey: getRequiredEnvironmentVariable(environment, "OPENROUTER_API_KEY"),
     maxOutputTokens,
@@ -260,6 +321,8 @@ function getPresetTokenCosts(preset: LlmModelPresetRunConfig): TokenPrice {
   return {
     inputDollarsPerMillion: preset.inputTokenCostUsdPerMillion,
     cachedInputDollarsPerMillion: preset.cachedInputTokenCostUsdPerMillion,
+    cacheWriteInputDollarsPerMillion:
+      preset.cacheWriteInputTokenCostUsdPerMillion,
     outputDollarsPerMillion: preset.outputTokenCostUsdPerMillion,
   }
 }
@@ -321,5 +384,7 @@ function getOptionalBooleanEnvironmentVariable(
     return false
   }
 
-  throw new LlmConfigurationError(`${environmentVariable} must be true or false.`)
+  throw new LlmConfigurationError(
+    `${environmentVariable} must be true or false.`
+  )
 }

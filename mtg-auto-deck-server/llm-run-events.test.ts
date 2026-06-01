@@ -57,8 +57,13 @@ import {
 } from "./llm-pricing.js"
 import {
   buildSimulateTurnPrompt,
+  DRAW_STARTING_HAND_PROMPT,
   GENERIC_GAME_RULES_REFERENCE,
 } from "./llm/prompt-constants.js"
+import {
+  buildStartingHandSimulationPromptFromData,
+  buildTurnSimulationPromptFromData,
+} from "./simulation-prompts.js"
 import {
   buildOpenRouterReasoningOptions,
   buildProviderReasoningOptions,
@@ -68,6 +73,13 @@ import {
   getOpeningHandLlmRunConfig,
   getTurnSimulationLlmRunConfig,
 } from "./llm-config.js"
+import {
+  ANTHROPIC_MCP_CLIENT_BETA,
+  assertCompletedAnthropicMessage,
+  buildAnthropicRequestPayload,
+  getAnthropicMessageOutputText,
+  normalizeAnthropicUsage,
+} from "./anthropic-messages.js"
 import {
   buildCreateLlmModelPresetInsertQuery,
   buildUpdateLlmModelPresetUpdateQuery,
@@ -505,6 +517,40 @@ test("handles token usage aliases and clamps cached input tokens", () => {
   assert.equal(costUsd?.toFixed(4), "0.0003")
 })
 
+test("estimates Anthropic cache creation and read token costs separately", () => {
+  const costUsd = estimatePresetTokenCostUsd({
+    tokenCosts: {
+      inputDollarsPerMillion: 3,
+      cachedInputDollarsPerMillion: 0.3,
+      cacheWriteInputDollarsPerMillion: 3.75,
+      outputDollarsPerMillion: 15,
+    },
+    usage: {
+      input_tokens: 100,
+      cache_creation_input_tokens: 2000,
+      cache_read_input_tokens: 3000,
+      output_tokens: 400,
+    },
+  })
+
+  assert.equal(costUsd?.toFixed(4), "0.0147")
+  assert.equal(
+    estimatePresetTokenCostUsd({
+      tokenCosts: {
+        inputDollarsPerMillion: 3,
+        cachedInputDollarsPerMillion: 0.3,
+        outputDollarsPerMillion: 15,
+      },
+      usage: {
+        input_tokens: 100,
+        cache_creation_input_tokens: 2000,
+        output_tokens: 400,
+      },
+    }),
+    null
+  )
+})
+
 test("estimates partial LLM run cost from cached prompt chars only", () => {
   const costUsd = estimatePartialLlmRunCostUsd({
     fullPromptCharCount: 401,
@@ -739,10 +785,7 @@ test("rounds usage remaining percentage with protected endpoints", () => {
     99
   )
   assert.equal(roundUsageRemainingPercent({ limitUsd: 1, spentUsd: 1 }), 0)
-  assert.equal(
-    roundUsageRemainingPercent({ limitUsd: 1, spentUsd: 0.9999 }),
-    1
-  )
+  assert.equal(roundUsageRemainingPercent({ limitUsd: 1, spentUsd: 0.9999 }), 1)
   assert.equal(roundUsageRemainingPercent({ limitUsd: 1, spentUsd: 0.37 }), 63)
 })
 
@@ -896,9 +939,7 @@ test("builds usage spend query for started runs with cost", () => {
 })
 
 test("builds admin user LLM cost aggregate query", () => {
-  const query = buildListAdminUsersQuery(
-    new Date("2026-05-16T10:30:00.000Z")
-  )
+  const query = buildListAdminUsersQuery(new Date("2026-05-16T10:30:00.000Z"))
   const normalizedSql = query.text.replace(/\s+/g, " ")
 
   assert.deepEqual(query.values, [
@@ -914,7 +955,10 @@ test("builds admin user LLM cost aggregate query", () => {
     normalizedSql,
     /COALESCE\(openrouter_reported_cost_usd, estimated_cost_usd\) IS NOT NULL/
   )
-  assert.match(normalizedSql, /status IN \('completed', 'failed', 'cancelled'\)/)
+  assert.match(
+    normalizedSql,
+    /status IN \('completed', 'failed', 'cancelled'\)/
+  )
   assert.match(normalizedSql, /WHEN started_at >= \$1 THEN cost_usd/)
   assert.match(
     normalizedSql,
@@ -923,7 +967,10 @@ test("builds admin user LLM cost aggregate query", () => {
   assert.match(normalizedSql, /active_admin_grants AS/)
   assert.match(normalizedSql, /expires_at > \$3/)
   assert.match(normalizedSql, /WHEN active_admin_grants\.tier = 'super_max'/)
-  assert.match(normalizedSql, /COALESCE\(active_stripe_tiers\.stripe_tier, 'free'\) AS "stripeTier"/)
+  assert.match(
+    normalizedSql,
+    /COALESCE\(active_stripe_tiers\.stripe_tier, 'free'\) AS "stripeTier"/
+  )
 })
 
 test("builds billing tier summary query with active admin grants", () => {
@@ -1037,7 +1084,9 @@ test("builds queued LLM run claim query with explicit claim timestamp", () => {
   assert.match(normalizedSql, /estimated_cost_usd =/)
   assert.match(normalizedSql, /length\(llm_run\.full_prompt\)::numeric \/ 4/)
   assert.match(normalizedSql, /cached_input_token_cost_usd_per_million/)
-  assert.match(normalizedSql, /cached_input_token_cost_usd_per_million >= 0/)
+  assert.match(normalizedSql, /cache_write_input_token_cost_usd_per_million/)
+  assert.match(normalizedSql, /llm_run\.provider = 'anthropic'/)
+  assert.match(normalizedSql, /cached_input_token_cost_usd_per_million \) >= 0/)
   assert.doesNotMatch(normalizedSql, /output_token_cost_usd_per_million >= 0/)
   assert.match(
     normalizedSql,
@@ -1242,6 +1291,228 @@ test("builds turn prompt with optional generic rules reference", () => {
   assert.equal(minimalPrompt.includes(GENERIC_GAME_RULES_REFERENCE), false)
 })
 
+test("builds structured opening-hand prompt parts without caching dynamic run input", () => {
+  const llmRunId = "00000000-0000-0000-0000-000000000001"
+  const prompt = buildStartingHandSimulationPromptFromData(
+    {
+      simulationId: "simulation-1",
+      deckId: "deck-1",
+      mulliganGuidelines: "Keep hands with Sol Ring.",
+      commanders: [
+        createPromptCard({
+          name: "Atraxa, Praetors' Voice",
+          quantity: 1,
+          zone: "commander",
+        }),
+      ],
+      library: [
+        createPromptCard({
+          manaCost: "{1}",
+          name: "Sol Ring",
+          oracleText: "{T}: Add {C}{C}.",
+          quantity: 2,
+          typeLine: "Artifact",
+          zone: "library",
+        }),
+      ],
+    },
+    llmRunId
+  )
+  const dynamicWithoutRunId = prompt.dynamicRunInput.replace(
+    `\n\nLLM Run ID: ${llmRunId}`,
+    ""
+  )
+
+  assert.equal(prompt.baseInstructions, DRAW_STARTING_HAND_PROMPT)
+  assert.match(prompt.cardReference, /^Card reference:\n/)
+  assert.match(prompt.cardReference, /Sol Ring/)
+  assert.match(prompt.userGuidelines ?? "", /USER PROVIDED MULLIGAN GUIDELINES/)
+  assert.match(prompt.dynamicRunInput, /LLM Run ID:/)
+  assert.equal(prompt.baseInstructions.includes(llmRunId), false)
+  assert.equal(prompt.cardReference.includes(llmRunId), false)
+  assert.equal(prompt.userGuidelines?.includes(llmRunId) ?? false, false)
+  assert.equal(
+    prompt.fullPrompt,
+    `${prompt.baseInstructions}
+
+${dynamicWithoutRunId}
+
+${prompt.cardReference}
+
+${prompt.userGuidelines}
+
+LLM Run ID: ${llmRunId}`.trim()
+  )
+})
+
+test("builds structured turn prompt parts with mutable state in dynamic input", () => {
+  const llmRunId = "00000000-0000-0000-0000-000000000002"
+  const prompt = buildTurnSimulationPromptFromData(
+    {
+      simulationId: "simulation-1",
+      deckId: "deck-1",
+      strategyGuidelines: "Prioritize fast mana.",
+      commanders: [
+        createPromptCard({
+          name: "Atraxa, Praetors' Voice",
+          quantity: 1,
+          zone: "commander",
+        }),
+      ],
+      libraryCards: [
+        createPromptCard({
+          manaCost: "{1}",
+          name: "Sol Ring",
+          oracleText: "{T}: Add {C}{C}.",
+          quantity: 1,
+          typeLine: "Artifact",
+          zone: "library",
+        }),
+      ],
+      library: ["Sol Ring"],
+      startingHand: ["Forest"],
+    },
+    llmRunId,
+    {
+      turnNumber: 3,
+      zones: {
+        hand: [{ name: "Forest" }],
+      },
+    }
+  )
+
+  assert.match(prompt.baseInstructions, /You are an expert Magic/)
+  assert.match(prompt.cardReference, /^Card reference:\n/)
+  assert.match(prompt.userGuidelines ?? "", /USER PROVIDED STRATEGY GUIDELINES/)
+  assert.match(prompt.dynamicRunInput, /turnNumber/)
+  assert.match(prompt.dynamicRunInput, /LLM Run ID:/)
+  assert.equal(prompt.baseInstructions.includes("turnNumber"), false)
+  assert.equal(prompt.cardReference.includes("turnNumber"), false)
+  assert.equal(prompt.userGuidelines?.includes("turnNumber") ?? false, false)
+  assert.equal(
+    prompt.fullPrompt,
+    `${prompt.baseInstructions}
+
+${prompt.cardReference}
+
+${prompt.userGuidelines}
+
+${prompt.dynamicRunInput}`.trim()
+  )
+})
+
+test("builds Anthropic payload with adaptive thinking, remote MCP, and 5m cache controls", () => {
+  const prompt = {
+    baseInstructions: "Base rules",
+    cardReference: "Card reference:\nSol Ring\nRules Text: {T}: Add {C}{C}.",
+    userGuidelines: "Stable user guidelines",
+    dynamicRunInput: "Mutable game state\nLLM Run ID: run-1",
+    fullPrompt: "legacy prompt",
+  }
+  const payload = buildAnthropicRequestPayload({
+    maxOutputTokens: 12000,
+    mcpServerName: "turn-simulation",
+    mcpServerUrl: "https://mcp.example/turn?mcp_run_token=secret",
+    model: "claude-sonnet-4-5",
+    prompt,
+    reasoningEffort: "max",
+    reasoningSummariesEnabled: true,
+  })
+
+  assert.deepEqual(payload.betas, [ANTHROPIC_MCP_CLIENT_BETA])
+  assert.equal(payload.max_tokens, 12000)
+  assert.deepEqual(payload.mcp_servers, [
+    {
+      type: "url",
+      name: "turn-simulation",
+      url: "https://mcp.example/turn?mcp_run_token=secret",
+    },
+  ])
+  assert.deepEqual(payload.thinking, {
+    type: "adaptive",
+    display: "summarized",
+  })
+  assert.deepEqual(payload.output_config, { effort: "max" })
+  assert.deepEqual(payload.messages, [
+    {
+      role: "user",
+      content: prompt.dynamicRunInput,
+    },
+  ])
+  assert.deepEqual(payload.tools, [
+    {
+      type: "mcp_toolset",
+      mcp_server_name: "turn-simulation",
+      cache_control: {
+        type: "ephemeral",
+        ttl: "5m",
+      },
+    },
+  ])
+  assert.equal(payload.system.length, 2)
+  assert.equal(payload.system[1].text, `${prompt.cardReference}\n\n${prompt.userGuidelines}`)
+  assert.deepEqual(
+    payload.system.map((block) => block.cache_control),
+    [
+      { type: "ephemeral", ttl: "5m" },
+      { type: "ephemeral", ttl: "5m" },
+    ]
+  )
+  assert.equal(
+    payload.system.some((block) => block.text.includes("LLM Run ID")),
+    false
+  )
+})
+
+test("extracts and validates Anthropic responses and usage", () => {
+  const response = {
+    stop_reason: "end_turn",
+    content: [
+      {
+        type: "thinking",
+        thinking: "hidden",
+      },
+      {
+        type: "text",
+        text: '{"summary":"kept"}',
+      },
+    ],
+    usage: {
+      input_tokens: 100,
+      cache_creation_input_tokens: 200,
+      cache_read_input_tokens: 300,
+      output_tokens: 40,
+      output_tokens_details: {
+        thinking_tokens: 12,
+      },
+    },
+  }
+
+  assert.doesNotThrow(() => assertCompletedAnthropicMessage(response, "turn"))
+  assert.equal(getAnthropicMessageOutputText(response), '{"summary":"kept"}')
+  assert.deepEqual(normalizeAnthropicUsage(response.usage), {
+    input_tokens: 100,
+    cache_creation_input_tokens: 200,
+    cache_read_input_tokens: 300,
+    output_tokens: 40,
+    output_tokens_details: {
+      thinking_tokens: 12,
+      reasoning_tokens: 12,
+    },
+  })
+  assert.throws(
+    () =>
+      assertCompletedAnthropicMessage(
+        {
+          stop_reason: "max_tokens",
+          content: [{ type: "text", text: "partial" }],
+        },
+        "opening-hand"
+      ),
+    /stop_reason "max_tokens"/
+  )
+})
+
 test("builds LLM run owner concurrency SQL from effective billing tier", () => {
   const normalizedSql = getLlmRunOwnerConcurrencyLimitSql().replace(/\s+/g, " ")
 
@@ -1292,6 +1563,151 @@ test("validates provider-specific LLM config requirements with presets", () => {
   assert.equal(flexConfig.serviceTier, "flex")
 })
 
+test("validates Anthropic LLM config requirements with shared MCP URLs", () => {
+  assert.throws(
+    () =>
+      getOpeningHandLlmRunConfig(createAnthropicPreset(), {
+        LLM_MAX_OUTPUT_TOKENS: "12000",
+        OPENING_HAND_MCP_PUBLIC_URL: "https://example.com/opening",
+      }),
+    /ANTHROPIC_API_KEY/
+  )
+  assert.throws(
+    () =>
+      getOpeningHandLlmRunConfig(createAnthropicPreset(), {
+        ANTHROPIC_API_KEY: "key",
+        LLM_MAX_OUTPUT_TOKENS: "12000",
+      }),
+    /OPENING_HAND_MCP_PUBLIC_URL/
+  )
+
+  const openingConfig = getOpeningHandLlmRunConfig(createAnthropicPreset(), {
+    ANTHROPIC_API_KEY: "key",
+    LLM_MAX_OUTPUT_TOKENS: "12000",
+    OPENING_HAND_MCP_PUBLIC_URL: "https://example.com/opening",
+  })
+  const turnConfig = getTurnSimulationLlmRunConfig(
+    createAnthropicPreset("max"),
+    {
+      ANTHROPIC_API_KEY: "key",
+      LLM_MAX_OUTPUT_TOKENS: "12000",
+      TURN_SIMULATION_MCP_PUBLIC_URL: "https://example.com/turn",
+    },
+    { useFlexServiceTier: true }
+  )
+
+  assert.equal(openingConfig.provider, "anthropic")
+  assert.equal(openingConfig.apiKey, "key")
+  assert.equal(
+    openingConfig.openingHandMcpPublicUrl,
+    "https://example.com/opening"
+  )
+  assert.equal(openingConfig.reasoningEffort, "high")
+  assert.equal(openingConfig.serviceTier, null)
+  assert.equal(openingConfig.tokenCosts.cacheWriteInputDollarsPerMillion, 1.25)
+  assert.equal(turnConfig.provider, "anthropic")
+  assert.equal(turnConfig.reasoningEffort, "max")
+  assert.equal(
+    turnConfig.turnSimulationMcpPublicUrl,
+    "https://example.com/turn"
+  )
+  assert.equal(turnConfig.serviceTier, null)
+})
+
+test("validates Anthropic model preset provider constraints", () => {
+  const query = buildCreateLlmModelPresetInsertQuery({
+    name: "Claude",
+    provider: "anthropic",
+    model: "claude-sonnet-4-5",
+    reasoningEffort: "max",
+    openrouterModelProvider: null,
+    supportsFlex: false,
+    isFreeTier: false,
+    inputTokenCostUsdPerMillion: 3,
+    cachedInputTokenCostUsdPerMillion: 0.3,
+    cacheWriteInputTokenCostUsdPerMillion: 3.75,
+    outputTokenCostUsdPerMillion: 15,
+    isEnabled: true,
+    isDefault: false,
+  })
+
+  assert.equal(query.values[0], "anthropic")
+  assert.equal(query.values[3], "max")
+  assert.equal(query.values[9], 3.75)
+  assert.throws(
+    () =>
+      buildCreateLlmModelPresetInsertQuery({
+        name: null,
+        provider: "anthropic",
+        model: "claude-sonnet-4-5",
+        reasoningEffort: "none",
+        openrouterModelProvider: null,
+        supportsFlex: false,
+        isFreeTier: false,
+        inputTokenCostUsdPerMillion: null,
+        cachedInputTokenCostUsdPerMillion: null,
+        outputTokenCostUsdPerMillion: null,
+        isEnabled: true,
+        isDefault: false,
+      }),
+    /Anthropic model presets require low, medium, high, xhigh, or max reasoning effort\./
+  )
+  assert.throws(
+    () =>
+      buildCreateLlmModelPresetInsertQuery({
+        name: null,
+        provider: "openai",
+        model: "gpt-5.4-mini",
+        reasoningEffort: "max",
+        openrouterModelProvider: null,
+        supportsFlex: false,
+        isFreeTier: false,
+        inputTokenCostUsdPerMillion: null,
+        cachedInputTokenCostUsdPerMillion: null,
+        outputTokenCostUsdPerMillion: null,
+        isEnabled: true,
+        isDefault: false,
+      }),
+    /Max reasoning effort can only be used for Anthropic model presets\./
+  )
+  assert.throws(
+    () =>
+      buildCreateLlmModelPresetInsertQuery({
+        name: null,
+        provider: "anthropic",
+        model: "claude-sonnet-4-5",
+        reasoningEffort: "high",
+        openrouterModelProvider: "anthropic",
+        supportsFlex: false,
+        isFreeTier: false,
+        inputTokenCostUsdPerMillion: null,
+        cachedInputTokenCostUsdPerMillion: null,
+        outputTokenCostUsdPerMillion: null,
+        isEnabled: true,
+        isDefault: false,
+      }),
+    /OpenRouter model provider can only be set for OpenRouter presets\./
+  )
+  assert.throws(
+    () =>
+      buildCreateLlmModelPresetInsertQuery({
+        name: null,
+        provider: "anthropic",
+        model: "claude-sonnet-4-5",
+        reasoningEffort: "high",
+        openrouterModelProvider: null,
+        supportsFlex: true,
+        isFreeTier: false,
+        inputTokenCostUsdPerMillion: null,
+        cachedInputTokenCostUsdPerMillion: null,
+        outputTokenCostUsdPerMillion: null,
+        isEnabled: true,
+        isDefault: false,
+      }),
+    /Flex service tier can only be supported by OpenAI or OpenRouter presets\./
+  )
+})
+
 test("builds model preset insert with supports-flex and free-tier placeholders", () => {
   const query = buildCreateLlmModelPresetInsertQuery({
     name: " Fast budget ",
@@ -1311,14 +1727,16 @@ test("builds model preset insert with supports-flex and free-tier placeholders",
 
   assert.match(normalizedSql, /supports_flex/)
   assert.match(normalizedSql, /is_free_tier/)
+  assert.match(normalizedSql, /cache_write_input_token_cost_usd_per_million/)
   assert.match(
     normalizedSql,
-    /VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11, \$12\)/
+    /VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11, \$12, \$13\)/
   )
-  assert.equal(query.values.length, 12)
+  assert.equal(query.values.length, 13)
   assert.equal(query.values[1], "Fast budget")
   assert.equal(query.values[5], true)
   assert.equal(query.values[6], true)
+  assert.equal(query.values[9], null)
 })
 
 test("builds model preset update with trimmed name, model, and editable costs", () => {
@@ -1334,6 +1752,7 @@ test("builds model preset update with trimmed name, model, and editable costs", 
       isFreeTier: true,
       inputTokenCostUsdPerMillion: 1,
       cachedInputTokenCostUsdPerMillion: 0.1,
+      cacheWriteInputTokenCostUsdPerMillion: 0.2,
       outputTokenCostUsdPerMillion: 10,
     }
   )
@@ -1346,6 +1765,10 @@ test("builds model preset update with trimmed name, model, and editable costs", 
   assert.match(normalizedSql, /openrouter_model_provider = \$5/)
   assert.match(normalizedSql, /supports_flex = \$6/)
   assert.match(normalizedSql, /is_free_tier = \$7/)
+  assert.match(
+    normalizedSql,
+    /cache_write_input_token_cost_usd_per_million = \$10/
+  )
   assert.equal(query.values[0], "preset-openrouter")
   assert.equal(query.values[1], "OpenRouter tools")
   assert.equal(query.values[2], "openai/gpt-5-nano")
@@ -1355,7 +1778,8 @@ test("builds model preset update with trimmed name, model, and editable costs", 
   assert.equal(query.values[6], true)
   assert.equal(query.values[7], 1)
   assert.equal(query.values[8], 0.1)
-  assert.equal(query.values[9], 10)
+  assert.equal(query.values[9], 0.2)
+  assert.equal(query.values[10], 10)
 })
 
 test("normalizes blank model preset names to null", () => {
@@ -1553,6 +1977,40 @@ test("reads optional llama.cpp API key config", () => {
   assert.equal(config.apiKey, "local-secret")
 })
 
+function createPromptCard({
+  convertedManaCost = "1",
+  manaCost = null,
+  name,
+  oracleText = "Rules text.",
+  quantity,
+  typeLine = "Legendary Creature",
+  zone,
+}: {
+  convertedManaCost?: string | null
+  manaCost?: string | null
+  name: string
+  oracleText?: string | null
+  quantity: number
+  typeLine?: string | null
+  zone: "commander" | "library"
+}) {
+  return {
+    deckCardId: 1,
+    oracleId: `oracle-${name}`,
+    name,
+    quantity,
+    zone,
+    manaCost,
+    convertedManaCost,
+    typeLine,
+    oracleText,
+    power: null,
+    toughness: null,
+    loyalty: null,
+    cardFaces: [],
+  }
+}
+
 function createOpenAiPreset() {
   return {
     id: "preset-openai",
@@ -1565,6 +2023,22 @@ function createOpenAiPreset() {
     inputTokenCostUsdPerMillion: 1,
     cachedInputTokenCostUsdPerMillion: 0.1,
     outputTokenCostUsdPerMillion: 10,
+  }
+}
+
+function createAnthropicPreset(reasoningEffort: "high" | "max" = "high") {
+  return {
+    id: "preset-anthropic",
+    name: null,
+    provider: "anthropic" as const,
+    model: "claude-sonnet-4-5",
+    reasoningEffort,
+    openrouterModelProvider: null,
+    supportsFlex: false,
+    inputTokenCostUsdPerMillion: 3,
+    cachedInputTokenCostUsdPerMillion: 0.3,
+    cacheWriteInputTokenCostUsdPerMillion: 1.25,
+    outputTokenCostUsdPerMillion: 15,
   }
 }
 
@@ -1904,9 +2378,7 @@ test("rejects completed turn JSON with invalid turn action phase values", () => 
 test("rejects completed turn JSON without game state", () => {
   assert.throws(
     () =>
-      parseTurnSimulationFromResponseText(
-        '{"gameState":null,"error":null}'
-      ),
+      parseTurnSimulationFromResponseText('{"gameState":null,"error":null}'),
     /Turn LLM response did not include gameState\./
   )
 })
@@ -2013,10 +2485,7 @@ test("simulation creation source chooses the correct initial status", () => {
 })
 
 test("benchmark simulation seeds are deterministic by simulation index", () => {
-  assert.equal(
-    createBenchmarkSimulationSeed(1),
-    "mtg-auto-deck-benchmark-v1-1"
-  )
+  assert.equal(createBenchmarkSimulationSeed(1), "mtg-auto-deck-benchmark-v1-1")
   assert.equal(
     createBenchmarkSimulationSeed(10),
     "mtg-auto-deck-benchmark-v1-10"
@@ -2310,9 +2779,7 @@ function createTurnGameState({
   }
 }
 
-function createTurnActions(
-  overrides: Partial<Record<string, string[]>> = {}
-) {
+function createTurnActions(overrides: Partial<Record<string, string[]>> = {}) {
   return {
     untap: [],
     upkeep: [],

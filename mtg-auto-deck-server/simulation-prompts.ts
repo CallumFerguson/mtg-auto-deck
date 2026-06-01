@@ -18,6 +18,14 @@ type LlmRunIdentifier = {
   llmRunId: string
 }
 
+export type StructuredSimulationPrompt = {
+  baseInstructions: string
+  cardReference: string
+  userGuidelines: string | null
+  dynamicRunInput: string
+  fullPrompt: string
+}
+
 async function resolveSimulationPromptIdentifier(identifier: LlmRunIdentifier) {
   const llmRunId = identifier.llmRunId.trim()
 
@@ -36,6 +44,14 @@ async function resolveSimulationPromptIdentifier(identifier: LlmRunIdentifier) {
 export async function buildStartingHandSimulationPrompt(
   identifier: LlmRunIdentifier
 ) {
+  const promptParts = await buildStartingHandSimulationPromptParts(identifier)
+
+  return promptParts.fullPrompt
+}
+
+export async function buildStartingHandSimulationPromptParts(
+  identifier: LlmRunIdentifier
+): Promise<StructuredSimulationPrompt> {
   const { llmRunId, simulationId } =
     await resolveSimulationPromptIdentifier(identifier)
   const promptData = await getStartingHandSimulationPromptData(simulationId)
@@ -47,15 +63,15 @@ export async function buildStartingHandSimulationPrompt(
   return buildStartingHandSimulationPromptFromData(promptData, llmRunId)
 }
 
-function buildStartingHandSimulationPromptFromData(
+export function buildStartingHandSimulationPromptFromData(
   { commanders, library, mulliganGuidelines }: StartingHandSimulationPromptData,
   llmRunId: string
-) {
+): StructuredSimulationPrompt {
   const commanderLabel = commanders.length === 1 ? "Commander" : "Commanders"
   const commanderNames = expandCardNames(commanders)
   const cardNames = expandCardNames(library)
   const uniqueCards = dedupeCardsByNameAndText([...commanders, ...library])
-  const cardReference = formatCardReference(uniqueCards)
+  const formattedCardReference = formatCardReference(uniqueCards)
   const mulliganGuidelinesSection = formatUserGuidelinesSection(
     "User provided mulligan guidelines",
     "USER PROVIDED MULLIGAN GUIDELINES",
@@ -64,8 +80,16 @@ function buildStartingHandSimulationPromptFromData(
   const mulliganGuidelinesBlock = mulliganGuidelinesSection
     ? `\n\n${mulliganGuidelinesSection}`
     : ""
+  const cardReference = `Card reference:\n${formattedCardReference}`
+  const dynamicRunInput = `${commanderLabel}:
+${commanderNames.join("\n")}
 
-  return `${DRAW_STARTING_HAND_PROMPT}
+Decklist:
+${cardNames.join("\n")}
+
+LLM Run ID: ${llmRunId}`
+
+  const fullPrompt = `${DRAW_STARTING_HAND_PROMPT}
 
 ${commanderLabel}:
 ${commanderNames.join("\n")}
@@ -73,11 +97,18 @@ ${commanderNames.join("\n")}
 Decklist:
 ${cardNames.join("\n")}
 
-Card reference:
 ${cardReference}${mulliganGuidelinesBlock}
 
 LLM Run ID: ${llmRunId}
 `.trim()
+
+  return {
+    baseInstructions: DRAW_STARTING_HAND_PROMPT,
+    cardReference,
+    dynamicRunInput,
+    fullPrompt,
+    userGuidelines: mulliganGuidelinesSection || null,
+  }
 }
 
 function expandCardNames(cards: readonly SimulationPromptCard[]) {
@@ -155,6 +186,18 @@ export async function buildTurnSimulationPrompt(
   identifier: LlmRunIdentifier,
   gameState?: unknown
 ) {
+  const promptParts = await buildTurnSimulationPromptParts(
+    identifier,
+    gameState
+  )
+
+  return promptParts.fullPrompt
+}
+
+export async function buildTurnSimulationPromptParts(
+  identifier: LlmRunIdentifier,
+  gameState?: unknown
+): Promise<StructuredSimulationPrompt> {
   const { llmRunId, simulationId } =
     await resolveSimulationPromptIdentifier(identifier)
   const promptData = await getTurnSimulationPromptData(simulationId)
@@ -166,7 +209,7 @@ export async function buildTurnSimulationPrompt(
   return buildTurnSimulationPromptFromData(promptData, llmRunId, gameState)
 }
 
-function buildTurnSimulationPromptFromData(
+export function buildTurnSimulationPromptFromData(
   {
     commanders,
     library,
@@ -176,15 +219,16 @@ function buildTurnSimulationPromptFromData(
   }: TurnSimulationPromptData,
   llmRunId: string,
   gameState?: unknown
-) {
+): StructuredSimulationPrompt {
   const commanderNames = expandCardNames(commanders)
   const cardNames = [...library].sort((left, right) =>
     left.localeCompare(right)
   )
   const uniqueCards = dedupeCardsByNameAndText([...commanders, ...libraryCards])
-  const cardReference = formatCardReference(uniqueCards)
+  const formattedCardReference = formatCardReference(uniqueCards)
   const resolvedGameState =
-    gameState ?? buildInitialTurnGameState({
+    gameState ??
+    buildInitialTurnGameState({
       commanderNames,
       startingHand,
     })
@@ -199,10 +243,20 @@ function buildTurnSimulationPromptFromData(
   const simulateTurnPrompt = buildSimulateTurnPrompt({
     genericGameRulesReferenceEnabled: getGenericGameRulesReferenceEnabled(),
   })
+  const cardReference = `Card reference:\n${formattedCardReference}`
+  const dynamicRunInput = `Cards in library. Not actual order of library. Use tools to interact with library:
+${cardNames.join("\n")}
 
-  return `${simulateTurnPrompt}
+===Start Previous End of Turn Game State===
 
-Card reference:
+${formatJsonForPrompt(resolvedGameState)}
+
+===End Game State===
+
+LLM Run ID: ${llmRunId}`
+
+  const fullPrompt = `${simulateTurnPrompt}
+
 ${cardReference}${strategyGuidelinesBlock}
 
 Cards in library. Not actual order of library. Use tools to interact with library:
@@ -216,6 +270,35 @@ ${formatJsonForPrompt(resolvedGameState)}
 
 LLM Run ID: ${llmRunId}
 `.trim()
+
+  return {
+    baseInstructions: simulateTurnPrompt,
+    cardReference,
+    dynamicRunInput,
+    fullPrompt,
+    userGuidelines: strategyGuidelinesSection || null,
+  }
+}
+
+export function isStructuredSimulationPrompt(
+  value: unknown
+): value is StructuredSimulationPrompt {
+  if (typeof value !== "object" || value === null) {
+    return false
+  }
+
+  const record = value as Partial<
+    Record<keyof StructuredSimulationPrompt, unknown>
+  >
+
+  return (
+    typeof record.baseInstructions === "string" &&
+    typeof record.cardReference === "string" &&
+    (record.userGuidelines === null ||
+      typeof record.userGuidelines === "string") &&
+    typeof record.dynamicRunInput === "string" &&
+    typeof record.fullPrompt === "string"
+  )
 }
 
 function buildInitialTurnGameState({
