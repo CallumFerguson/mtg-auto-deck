@@ -4,6 +4,7 @@ export type DeckSummary = {
   id: string
   name: string
   description: string | null
+  isStarter: boolean
   mulliganGuidelines: string | null
   strategyGuidelines: string | null
   format: string
@@ -44,6 +45,7 @@ export type CreateDeckInput = {
 export type UpdateDeckDetailsInput = {
   name: string
   description: string
+  isStarter?: boolean
   mulliganGuidelines: string
   strategyGuidelines: string
 }
@@ -52,6 +54,7 @@ type DeckSummaryRow = {
   id: string
   name: string
   description: string | null
+  is_starter: boolean
   mulligan_guidelines: string | null
   strategy_guidelines: string | null
   format: string
@@ -147,6 +150,7 @@ export async function listDecks(ownerUserId?: string): Promise<DeckSummary[]> {
         id,
         name,
         description,
+        is_starter,
         mulligan_guidelines,
         strategy_guidelines,
         format,
@@ -172,6 +176,7 @@ export async function getDeck(
         id,
         name,
         description,
+        is_starter,
         mulligan_guidelines,
         strategy_guidelines,
         format,
@@ -263,6 +268,7 @@ export async function updateDeckDetails(
   deckId: string,
   {
     description,
+    isStarter,
     mulliganGuidelines,
     name,
     strategyGuidelines,
@@ -277,13 +283,15 @@ export async function updateDeckDetails(
         description = $3,
         mulligan_guidelines = $4,
         strategy_guidelines = $5,
+        is_starter = COALESCE($6::boolean, is_starter),
         updated_at = now()
       WHERE id = $1
-        AND ($6::text IS NULL OR owner_user_id = $6)
+        AND ($7::text IS NULL OR owner_user_id = $7)
       RETURNING
         id,
         name,
         description,
+        is_starter,
         mulligan_guidelines,
         strategy_guidelines,
         format,
@@ -296,6 +304,7 @@ export async function updateDeckDetails(
       normalizeNullableText(description),
       normalizeNullableText(mulliganGuidelines),
       normalizeNullableText(strategyGuidelines),
+      isStarter ?? null,
       ownerUserId ?? null,
     ]
   )
@@ -332,6 +341,7 @@ export async function createDeck({
           id,
           name,
           description,
+          is_starter,
           mulligan_guidelines,
           strategy_guidelines,
           format,
@@ -388,6 +398,7 @@ function mapDeckSummaryRow(deck: DeckSummaryRow): DeckSummary {
     id: deck.id,
     name: deck.name,
     description: deck.description,
+    isStarter: deck.is_starter,
     mulliganGuidelines: deck.mulligan_guidelines,
     strategyGuidelines: deck.strategy_guidelines,
     format: deck.format,

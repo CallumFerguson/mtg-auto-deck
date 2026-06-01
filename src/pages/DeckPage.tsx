@@ -321,6 +321,7 @@ export function DeckPage({
             )
             setIsEditDeckOpen(false)
           }}
+          showAdminOptions={shouldShowAdminOptions}
         />
       ) : null}
     </main>

@@ -338,6 +338,7 @@ const passwordResetTokenSchema = z.string().trim().min(1).max(256)
 const updateDeckDetailsSchema = z.object({
   name: z.string().trim().min(1),
   description: z.string(),
+  isStarter: z.boolean().optional(),
   mulliganGuidelines: createDeckGuidelinesSchema(),
   strategyGuidelines: createDeckGuidelinesSchema(),
 })
@@ -7776,10 +7777,19 @@ async function main() {
     }
 
     try {
+      const user = getAuthenticatedUser(req)
+
+      if (parsedDeck.data.isStarter !== undefined && user.role !== "admin") {
+        res.status(403).json({
+          error: "Admin access required.",
+        })
+        return
+      }
+
       const updatedDeck = await updateDeckDetails(
         deckId,
         parsedDeck.data,
-        getAuthenticatedUser(req).id
+        user.id
       )
 
       if (!updatedDeck) {

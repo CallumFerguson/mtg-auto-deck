@@ -2,6 +2,7 @@ export type Deck = {
   id: string
   name: string
   description: string | null
+  isStarter: boolean
   mulliganGuidelines: string | null
   strategyGuidelines: string | null
 }

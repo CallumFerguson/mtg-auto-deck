@@ -78,6 +78,8 @@ export function DeckListPage({
     )
   }
 
+  const shouldShowAdminOptions = user.role === "admin" && adminOptionsEnabled
+
   async function handleDeleteDeck() {
     if (!deckToDelete) {
       return
@@ -269,6 +271,7 @@ export function DeckListPage({
             )
             setDeckToEdit(null)
           }}
+          showAdminOptions={shouldShowAdminOptions}
         />
       ) : null}
 

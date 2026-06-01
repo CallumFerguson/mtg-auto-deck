@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type ReactNode } from "react"
-import { Save, X } from "lucide-react"
+import { Save, Star, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { API_BASE_URL, apiFetch } from "@/lib/api"
@@ -11,10 +11,12 @@ export function EditDeckDetailsModal({
   deck,
   onClose,
   onUpdated,
+  showAdminOptions = false,
 }: {
   deck: Deck
   onClose: () => void
   onUpdated: (deck: Deck) => void
+  showAdminOptions?: boolean
 }) {
   const [error, setError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
@@ -31,6 +33,7 @@ export function EditDeckDetailsModal({
     const strategyGuidelines = String(
       formData.get("strategyGuidelines") ?? ""
     ).trim()
+    const isStarter = formData.get("isStarter") === "on"
 
     if (!name) {
       setError("Deck name is required.")
@@ -51,17 +54,29 @@ export function EditDeckDetailsModal({
     setIsSaving(true)
 
     try {
+      const payload: {
+        description: string
+        isStarter?: boolean
+        mulliganGuidelines: string
+        name: string
+        strategyGuidelines: string
+      } = {
+        name,
+        description,
+        mulliganGuidelines,
+        strategyGuidelines,
+      }
+
+      if (showAdminOptions) {
+        payload.isStarter = isStarter
+      }
+
       const response = await apiFetch(`${API_BASE_URL}/decks/${deck.id}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          name,
-          description,
-          mulliganGuidelines,
-          strategyGuidelines,
-        }),
+        body: JSON.stringify(payload),
       })
 
       if (!response.ok) {
@@ -99,7 +114,7 @@ export function EditDeckDetailsModal({
               Edit deck
             </h2>
             <p className="text-sm text-muted-foreground">
-              Update the deck title and description.
+              Update the deck details and play guidance.
             </p>
           </div>
           <Button
@@ -137,6 +152,31 @@ export function EditDeckDetailsModal({
               disabled={isSaving}
             />
           </Field>
+
+          {showAdminOptions ? (
+            <label
+              className="flex items-start gap-3 rounded-md border border-sky-300/30 bg-sky-400/10 px-3 py-3 text-sm transition focus-within:border-sky-300/60 focus-within:ring-3 focus-within:ring-sky-300/20"
+              htmlFor="edit-deck-is-starter"
+            >
+              <input
+                id="edit-deck-is-starter"
+                name="isStarter"
+                className="mt-0.5 size-4 shrink-0 accent-sky-300 disabled:opacity-50"
+                type="checkbox"
+                defaultChecked={deck.isStarter}
+                disabled={isSaving}
+              />
+              <span className="grid min-w-0 gap-1">
+                <span className="flex min-w-0 items-center gap-2 font-medium text-foreground">
+                  <Star className="size-4 shrink-0 text-sky-300" aria-hidden />
+                  <span className="truncate">Starter deck</span>
+                </span>
+                <span className="text-xs leading-5 text-muted-foreground">
+                  New users receive a copy of this deck.
+                </span>
+              </span>
+            </label>
+          ) : null}
 
           <Field
             label="Mulligan guidelines"
