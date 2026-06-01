@@ -14,6 +14,7 @@ import {
   getAdminDashboardSectionIdFromPathname,
   getDeckPageTabFromSearchParams,
   getDeckSimulationIdFromSearchParams,
+  getDeckSimulationTurnFromSearchParams,
 } from "@/lib/navigation"
 import { Button } from "@/components/ui/button"
 import { authClient, type AuthSession, type AuthUser } from "@/lib/auth-client"
@@ -407,6 +408,9 @@ function DeckPageRoute({
       isImpersonating={isImpersonating}
       initialTab={getDeckPageTabFromSearchParams(searchParams)}
       initialSimulationId={getDeckSimulationIdFromSearchParams(searchParams)}
+      initialSimulationTurn={getDeckSimulationTurnFromSearchParams(
+        searchParams
+      )}
       onAdminOptionsEnabledChange={onAdminOptionsEnabledChange}
       onSignedOut={onSignedOut}
       onStopImpersonating={onStopImpersonating}

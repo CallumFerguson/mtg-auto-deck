@@ -1,3 +1,5 @@
+import { getSimulationResultsTimelineTurnFromSearchParams } from "./simulation-results-timeline"
+
 export type DeckPageTab = "details" | "simulation"
 export type AdminDashboardSectionId = "users" | "model-presets" | "benchmarks"
 
@@ -35,13 +37,27 @@ export function getDeckSimulationIdFromSearchParams(
   return simulationId || null
 }
 
-export function getDeckSimulationPath(deckId: string, simulationId?: string) {
+export function getDeckSimulationTurnFromSearchParams(
+  searchParams: URLSearchParams
+) {
+  return getSimulationResultsTimelineTurnFromSearchParams(searchParams)
+}
+
+export function getDeckSimulationPath(
+  deckId: string,
+  simulationId?: string,
+  turnNumber?: number | null
+) {
   const searchParams = new URLSearchParams({
     tab: "simulation",
   })
 
   if (simulationId) {
     searchParams.set("simulation", simulationId)
+  }
+
+  if (typeof turnNumber === "number") {
+    searchParams.set("turn", String(turnNumber))
   }
 
   return `/decks/${encodeURIComponent(deckId)}?${searchParams.toString()}`

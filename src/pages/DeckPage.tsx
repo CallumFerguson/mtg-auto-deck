@@ -20,6 +20,7 @@ export function DeckPage({
   isImpersonating,
   initialTab,
   initialSimulationId,
+  initialSimulationTurn,
   onAdminOptionsEnabledChange,
   onSignedOut,
   onStopImpersonating,
@@ -30,6 +31,7 @@ export function DeckPage({
   isImpersonating: boolean
   initialTab: DeckPageTab
   initialSimulationId: string | null
+  initialSimulationTurn: number | null
   onAdminOptionsEnabledChange: (isEnabled: boolean) => void
   onSignedOut: () => void
   onStopImpersonating: () => Promise<void> | void
@@ -82,7 +84,11 @@ export function DeckPage({
     setActiveTab(tab)
     navigate(
       tab === "simulation"
-        ? getDeckSimulationPath(deckId, initialSimulationId ?? undefined)
+        ? getDeckSimulationPath(
+            deckId,
+            initialSimulationId ?? undefined,
+            initialSimulationTurn
+          )
         : `/decks/${encodeURIComponent(deckId)}?tab=${tab}`
     )
   }
@@ -255,6 +261,7 @@ export function DeckPage({
                   setUsageUpgradeRequestId((currentId) => currentId + 1)
                 }}
                 selectedSimulationIdFromUrl={initialSimulationId}
+                selectedTimelineTurnFromUrl={initialSimulationTurn}
               />
             </div>
           ) : null

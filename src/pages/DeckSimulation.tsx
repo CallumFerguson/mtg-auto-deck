@@ -82,6 +82,8 @@ import {
 import { applySimulationResultsStreamEvent } from "@/lib/simulation-results-stream"
 import {
   buildSimulationResultsTimelineSteps,
+  getSimulationResultsTimelineStepTurn,
+  getSimulationResultsTimelineTurnFromSearchParams,
   isActiveSimulationResultsTimelineStep,
   resolveSimulationResultsTimelineSelection,
   shouldPreserveFinishedSimulationResultsTimelineSelection,
@@ -179,6 +181,10 @@ type SimulationResultsDisplayTimelineStep =
   | SimulationResultsTimelineStep
   | SimulationResultsDemoRevealTimelineStep
   | SimulationResultsNextTurnTimelineStep
+
+type SimulationTimelineTurnSearchUpdateOptions = {
+  historyMode?: "push" | "replace"
+}
 
 const MIN_TURNS_TO_SIMULATE = 0
 const MAX_TURNS_TO_SIMULATE = 8
@@ -676,6 +682,32 @@ export function PublicSimulationPage({
     useState<PublicSimulationExportV1 | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [requestedTimelineTurn, setRequestedTimelineTurn] = useState(() =>
+    getSimulationTimelineTurnFromCurrentSearch()
+  )
+
+  useEffect(() => {
+    function handlePopState() {
+      setRequestedTimelineTurn(getSimulationTimelineTurnFromCurrentSearch())
+    }
+
+    window.addEventListener("popstate", handlePopState)
+
+    return () => {
+      window.removeEventListener("popstate", handlePopState)
+    }
+  }, [])
+
+  function handleTimelineTurnSelected(
+    turnNumber: number,
+    options?: SimulationTimelineTurnSearchUpdateOptions
+  ) {
+    setRequestedTimelineTurn(turnNumber)
+    updateSimulationTimelineTurnSearch(
+      turnNumber,
+      options?.historyMode ?? "push"
+    )
+  }
 
   const loadPublicSimulation = useCallback(async () => {
     setIsLoading(true)
@@ -780,7 +812,9 @@ export function PublicSimulationPage({
               )
             }
             onUpgradeUsage={() => {}}
+            onTimelineTurnSelected={handleTimelineTurnSelected}
             readOnly={true}
+            requestedTimelineTurn={requestedTimelineTurn}
             showRunCost={false}
             shouldStreamResults={false}
             simulation={publicSimulation.simulation}
@@ -802,6 +836,9 @@ export function PublicBenchmarkPage({ benchmarkId }: { benchmarkId: string }) {
   )
   const [selectedSimulationId, setSelectedSimulationId] = useState(() =>
     getPublicBenchmarkSimulationIdFromSearch(window.location.search)
+  )
+  const [requestedTimelineTurn, setRequestedTimelineTurn] = useState(() =>
+    getSimulationTimelineTurnFromCurrentSearch()
   )
   const [publicSimulation, setPublicSimulation] =
     useState<PublicSimulationExportV1 | null>(null)
@@ -960,6 +997,7 @@ export function PublicBenchmarkPage({ benchmarkId }: { benchmarkId: string }) {
       setSelectedSimulationId(
         getPublicBenchmarkSimulationIdFromSearch(window.location.search)
       )
+      setRequestedTimelineTurn(getSimulationTimelineTurnFromCurrentSearch())
     }
 
     window.addEventListener("popstate", handlePopState)
@@ -993,6 +1031,17 @@ export function PublicBenchmarkPage({ benchmarkId }: { benchmarkId: string }) {
 
     setSelectedSimulationId(simulationId)
     pushPublicBenchmarkSimulationSearch(simulationId)
+  }
+
+  function handleTimelineTurnSelected(
+    turnNumber: number,
+    options?: SimulationTimelineTurnSearchUpdateOptions
+  ) {
+    setRequestedTimelineTurn(turnNumber)
+    updateSimulationTimelineTurnSearch(
+      turnNumber,
+      options?.historyMode ?? "push"
+    )
   }
 
   const benchmark = benchmarkIndex?.benchmark ?? null
@@ -1135,7 +1184,9 @@ export function PublicBenchmarkPage({ benchmarkId }: { benchmarkId: string }) {
                     )
                   }
                   onUpgradeUsage={() => {}}
+                  onTimelineTurnSelected={handleTimelineTurnSelected}
                   readOnly={true}
+                  requestedTimelineTurn={requestedTimelineTurn}
                   showRunCost={false}
                   shouldStreamResults={false}
                   simulation={publicSimulation.simulation}
@@ -1159,6 +1210,7 @@ export function DeckSimulation({
   isAdmin,
   onUpgradeUsage,
   selectedSimulationIdFromUrl,
+  selectedTimelineTurnFromUrl,
 }: {
   canUpgradeUsage: boolean
   cards: DeckCard[]
@@ -1167,6 +1219,7 @@ export function DeckSimulation({
   isAdmin: boolean
   onUpgradeUsage: () => void
   selectedSimulationIdFromUrl: string | null
+  selectedTimelineTurnFromUrl: number | null
 }) {
   const navigate = useNavigate()
   const billingTierContext = useOptionalBillingTier()
@@ -1200,6 +1253,9 @@ export function DeckSimulation({
   )
   const [isNewSimulationSelected, setIsNewSimulationSelected] = useState(true)
   const [selectedSimulationId, setSelectedSimulationId] = useState("")
+  const [selectedTimelineTurn, setSelectedTimelineTurn] = useState(
+    selectedTimelineTurnFromUrl
+  )
   const [seedMode, setSeedMode] = useState<"random" | "set">("random")
   const [selectedSavedSeedId, setSelectedSavedSeedId] = useState("")
   const [turnsToSimulate, setTurnsToSimulate] = useState(
@@ -1644,6 +1700,33 @@ export function DeckSimulation({
     setIsNewSimulationSelected(true)
   }, [selectedSimulationIdFromUrl])
 
+  useEffect(() => {
+    setSelectedTimelineTurn(selectedTimelineTurnFromUrl)
+  }, [selectedTimelineTurnFromUrl])
+
+  useEffect(() => {
+    function handlePopState() {
+      setSelectedTimelineTurn(getSimulationTimelineTurnFromCurrentSearch())
+    }
+
+    window.addEventListener("popstate", handlePopState)
+
+    return () => {
+      window.removeEventListener("popstate", handlePopState)
+    }
+  }, [])
+
+  function handleTimelineTurnSelected(
+    turnNumber: number,
+    options?: SimulationTimelineTurnSearchUpdateOptions
+  ) {
+    setSelectedTimelineTurn(turnNumber)
+    updateSimulationTimelineTurnSearch(
+      turnNumber,
+      options?.historyMode ?? "push"
+    )
+  }
+
   function selectCreatedStartingHand(hand: StartingHand) {
     setStartingHands((currentStartingHands) =>
       mergeStartingHandLists([hand], currentStartingHands)
@@ -2054,7 +2137,13 @@ export function DeckSimulation({
                         onClick={() => {
                           setSelectedSimulationId(simulation.id)
                           setIsNewSimulationSelected(false)
-                          navigate(getDeckSimulationPath(deckId, simulation.id))
+                          navigate(
+                            getDeckSimulationPath(
+                              deckId,
+                              simulation.id,
+                              selectedTimelineTurn
+                            )
+                          )
                         }}
                       >
                         {getSimulationLabel(simulation)}
@@ -2445,6 +2534,8 @@ export function DeckSimulation({
               }
               onSimulationUpdated={updateSimulation}
               onUpgradeUsage={onUpgradeUsage}
+              onTimelineTurnSelected={handleTimelineTurnSelected}
+              requestedTimelineTurn={selectedTimelineTurn}
               showRunCost={isAdmin}
               simulation={selectedSimulation}
               startingHand={selectedSimulationStartingHand}
@@ -2668,10 +2759,12 @@ function SimulationDetails({
   modelPresets,
   onOpenDetails,
   onSimulationUpdated,
+  onTimelineTurnSelected,
   onUpgradeUsage,
   readOnly = false,
   resultsStreamUrl,
   resultsStreamWithCredentials = true,
+  requestedTimelineTurn = null,
   showRunCost,
   shouldStreamResults = true,
   simulation,
@@ -2689,10 +2782,15 @@ function SimulationDetails({
   modelPresets: LlmModelPreset[]
   onOpenDetails: () => void
   onSimulationUpdated: (simulation: Simulation) => void
+  onTimelineTurnSelected?: (
+    turnNumber: number,
+    options?: SimulationTimelineTurnSearchUpdateOptions
+  ) => void
   onUpgradeUsage: () => void
   readOnly?: boolean
   resultsStreamUrl?: string
   resultsStreamWithCredentials?: boolean
+  requestedTimelineTurn?: number | null
   showRunCost: boolean
   shouldStreamResults?: boolean
   simulation: Simulation
@@ -3222,9 +3320,11 @@ function SimulationDetails({
       onStartTurnRun={(turnNumber) => void handleStartTurnRun(turnNumber)}
       onStopFutureTurns={() => void handleStopFutureTurns()}
       onStopSimulation={() => void handleStopSimulation()}
+      onTimelineTurnSelected={onTimelineTurnSelected}
       onUpgradeUsage={onUpgradeUsage}
       openingHandRunError={openingHandRunError}
       readOnly={readOnly}
+      requestedTimelineTurn={requestedTimelineTurn}
       resultsError={resultsError}
       resultsInfo={resultsInfo}
       resultsPanelRef={resultsPanelRef}
@@ -3325,9 +3425,11 @@ function SimulationResultsPanel({
   onStartTurnRun,
   onStopFutureTurns,
   onStopSimulation,
+  onTimelineTurnSelected,
   onUpgradeUsage,
   openingHandRunError,
   readOnly,
+  requestedTimelineTurn,
   resultsError,
   resultsInfo,
   resultsPanelRef,
@@ -3360,9 +3462,14 @@ function SimulationResultsPanel({
   onStartTurnRun: (turnNumber: number) => void
   onStopFutureTurns: () => void
   onStopSimulation: () => void
+  onTimelineTurnSelected?: (
+    turnNumber: number,
+    options?: SimulationTimelineTurnSearchUpdateOptions
+  ) => void
   onUpgradeUsage: () => void
   openingHandRunError: string | null
   readOnly: boolean
+  requestedTimelineTurn: number | null
   resultsError: string | null
   resultsInfo: SimulationResultsInfo
   resultsPanelRef: RefObject<HTMLElement | null>
@@ -3784,6 +3891,9 @@ function SimulationResultsPanel({
     selectedTimelineStepIdPreference,
     setSelectedTimelineStepIdPreference,
   ] = useState<string | null>(null)
+  const previousRequestedTimelineTurnRef = useRef<number | null>(
+    requestedTimelineTurn
+  )
   const previousSelectedTimelineStepIdRef = useRef<string | null>(null)
   const previousSelectedTimelineStepRef =
     useRef<SimulationResultsTimelineSelectionSnapshot | null>(null)
@@ -3791,6 +3901,16 @@ function SimulationResultsPanel({
   const timelineStepButtonRefs = useRef<Map<string, HTMLButtonElement>>(
     new Map()
   )
+
+  useEffect(() => {
+    if (previousRequestedTimelineTurnRef.current === requestedTimelineTurn) {
+      return
+    }
+
+    previousRequestedTimelineTurnRef.current = requestedTimelineTurn
+    setSelectedTimelineStepIdPreference(null)
+  }, [requestedTimelineTurn])
+
   useEffect(() => {
     if (demoMode && demoHasStarted && demoCoachMarkTargetStep) {
       return
@@ -3853,10 +3973,14 @@ function SimulationResultsPanel({
     timelineSteps,
     selectedTimelineStepIdPreference,
     null,
-    timelineDefaultSelection
+    timelineDefaultSelection,
+    requestedTimelineTurn
   )
   const selectedTimelineStep =
     timelineSteps.find((step) => step.id === selectedTimelineStepId) ?? null
+  const selectedTimelineTurn = selectedTimelineStep
+    ? getSimulationResultsTimelineStepTurn(selectedTimelineStep)
+    : null
   const selectedTimelineStepSnapshot = useMemo(
     () =>
       selectedTimelineStep
@@ -3882,6 +4006,26 @@ function SimulationResultsPanel({
     demoMode &&
     selectedTimelineStep !== null &&
     selectedTimelineStep.id === demoRevealAnimationStepId
+
+  useEffect(() => {
+    if (
+      requestedTimelineTurn === null ||
+      requestedTimelineTurn === selectedTimelineTurn ||
+      selectedTimelineTurn === null ||
+      selectedTimelineTurn === 0 ||
+      requestedTimelineTurn <= selectedTimelineTurn
+    ) {
+      return
+    }
+
+    onTimelineTurnSelected?.(selectedTimelineTurn, {
+      historyMode: "replace",
+    })
+  }, [
+    onTimelineTurnSelected,
+    requestedTimelineTurn,
+    selectedTimelineTurn,
+  ])
 
   useSimulationResultReveal(resultsPanelRef, selectedTimelineRun, {
     forceAnimate: shouldAnimateDemoReveal,
@@ -4193,6 +4337,7 @@ function SimulationResultsPanel({
 
       setDemoHasRevealedOpeningHand(true)
       setSelectedTimelineStepIdPreference(targetStep.id)
+      syncTimelineStepTurn(targetStep)
       onKeepResultsScrolledToBottom()
       return
     }
@@ -4210,6 +4355,7 @@ function SimulationResultsPanel({
       Math.min(currentCount + 1, demoTurnSteps.length)
     )
     setSelectedTimelineStepIdPreference(targetStep.id)
+    syncTimelineStepTurn(targetStep)
     onKeepResultsScrolledToBottom()
   }
 
@@ -4243,7 +4389,23 @@ function SimulationResultsPanel({
     setDemoSkipGameStateAnimationKey((currentKey) => currentKey + 1)
     setDemoRevealAnimationStepId(openingHandStepId)
     setSelectedTimelineStepIdPreference(openingHandStepId)
+    if (demoOpeningHandStep) {
+      syncTimelineStepTurn(demoOpeningHandStep)
+    }
     onKeepResultsScrolledToBottom()
+  }
+
+  function syncTimelineStepTurn(
+    step: SimulationResultsTimelineStep,
+    options?: SimulationTimelineTurnSearchUpdateOptions
+  ) {
+    const turnNumber = getSimulationResultsTimelineStepTurn(step)
+
+    if (turnNumber === null) {
+      return
+    }
+
+    onTimelineTurnSelected?.(turnNumber, options)
   }
 
   function renderTimelineHeader() {
@@ -4317,6 +4479,7 @@ function SimulationResultsPanel({
                         }
 
                         setSelectedTimelineStepIdPreference(null)
+                        onTimelineTurnSelected?.(step.turnNumber)
                         onKeepResultsScrolledToBottom()
                         onStartTurnRun(step.turnNumber)
                         return
@@ -4324,6 +4487,7 @@ function SimulationResultsPanel({
 
                       if (isResultStep) {
                         setSelectedTimelineStepIdPreference(step.id)
+                        syncTimelineStepTurn(step)
                         onKeepResultsScrolledToBottom()
                       }
                     }}
@@ -5503,6 +5667,22 @@ function getPublicBenchmarkSimulationIdFromSearch(search: string) {
   return simulationId || ""
 }
 
+function getSimulationTimelineTurnFromCurrentSearch() {
+  return getSimulationResultsTimelineTurnFromSearchParams(
+    new URLSearchParams(window.location.search)
+  )
+}
+
+function updateSimulationTimelineTurnSearch(
+  turnNumber: number,
+  mode: "push" | "replace"
+) {
+  const url = new URL(window.location.href)
+
+  url.searchParams.set("turn", String(turnNumber))
+  updateWindowHistoryUrl(url, mode)
+}
+
 function sortPublicBenchmarkSimulationEntries(
   simulations: readonly PublicBenchmarkSimulationIndexEntry[]
 ) {
@@ -5571,8 +5751,16 @@ function updatePublicBenchmarkSimulationSearch(
   const url = new URL(window.location.href)
 
   url.searchParams.set("simulation", simulationId)
+  updateWindowHistoryUrl(url, mode)
+}
 
+function updateWindowHistoryUrl(url: URL, mode: "push" | "replace") {
   const nextUrl = `${url.pathname}${url.search}${url.hash}`
+  const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`
+
+  if (nextUrl === currentUrl) {
+    return
+  }
 
   if (mode === "push") {
     window.history.pushState(null, "", nextUrl)

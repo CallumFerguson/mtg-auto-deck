@@ -45,6 +45,20 @@ export type SimulationResultsTimelineDefaultSelection =
   | "latest"
   | "opening_hand"
 
+export function getSimulationResultsTimelineTurnFromSearchParams(
+  searchParams: URLSearchParams
+) {
+  const turnValue = searchParams.get("turn")?.trim()
+
+  if (!turnValue || !/^\d+$/.test(turnValue)) {
+    return null
+  }
+
+  const turnNumber = Number(turnValue)
+
+  return Number.isSafeInteger(turnNumber) ? turnNumber : null
+}
+
 export function buildSimulationResultsTimelineSteps({
   hasPresetStartingHand,
   resultsInfo,
@@ -92,10 +106,20 @@ export function resolveSimulationResultsTimelineSelection(
   steps: readonly SimulationResultsTimelineStep[],
   selectedStepId: string | null,
   previousSelection: SimulationResultsTimelineSelectionSnapshot | null = null,
-  defaultSelection: SimulationResultsTimelineDefaultSelection = "latest"
+  defaultSelection: SimulationResultsTimelineDefaultSelection = "latest",
+  requestedTurn: number | null = null
 ) {
   if (selectedStepId && steps.some((step) => step.id === selectedStepId)) {
     return selectedStepId
+  }
+
+  const requestedStepId = getRequestedSimulationResultsTimelineStepId(
+    steps,
+    requestedTurn
+  )
+
+  if (requestedStepId) {
+    return requestedStepId
   }
 
   const preservedStepId = getPreservedFinishedTimelineStepId(
@@ -129,6 +153,54 @@ export function isActiveSimulationResultsTimelineStep(
   step: SimulationResultsTimelineStep
 ) {
   return isActiveSimulationResultsTimelineStatus(step.status)
+}
+
+export function getSimulationResultsTimelineStepTurn(
+  step: SimulationResultsTimelineStep
+) {
+  if (step.kind === "preset_opening_hand" || step.kind === "opening_hand") {
+    return 0
+  }
+
+  return typeof step.run.turnNumber === "number" ? step.run.turnNumber : null
+}
+
+function getRequestedSimulationResultsTimelineStepId(
+  steps: readonly SimulationResultsTimelineStep[],
+  requestedTurn: number | null
+) {
+  if (requestedTurn === null) {
+    return null
+  }
+
+  if (requestedTurn === 0) {
+    return (
+      findLastStepByKind(steps, "opening_hand") ??
+      findLastStepByKind(steps, "preset_opening_hand") ??
+      null
+    )?.id
+  }
+
+  const requestedTurnStep = findLastTurnStepByNumber(steps, requestedTurn)
+
+  if (requestedTurnStep) {
+    return requestedTurnStep.id
+  }
+
+  const latestTurnStep = findLastStepByKind(steps, "turn")
+  const latestTurnNumber = latestTurnStep
+    ? getSimulationResultsTimelineStepTurn(latestTurnStep)
+    : null
+
+  if (
+    latestTurnStep &&
+    latestTurnNumber !== null &&
+    requestedTurn > latestTurnNumber
+  ) {
+    return latestTurnStep.id
+  }
+
+  return null
 }
 
 function getPreferredSimulationResultsTimelineStep(
@@ -165,6 +237,24 @@ function findLastStepByKind(
   for (let index = steps.length - 1; index >= 0; index -= 1) {
     if (steps[index].kind === kind) {
       return steps[index]
+    }
+  }
+
+  return null
+}
+
+function findLastTurnStepByNumber(
+  steps: readonly SimulationResultsTimelineStep[],
+  turnNumber: number
+) {
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    const step = steps[index]
+
+    if (
+      step.kind === "turn" &&
+      getSimulationResultsTimelineStepTurn(step) === turnNumber
+    ) {
+      return step
     }
   }
 

@@ -17,7 +17,9 @@
     "src/lib/simulation-game-state-library.ts",
     "src/lib/simulation-result-tool-labels.ts",
     "src/lib/simulation-results-stream.ts",
+    "src/lib/simulation-results-timeline.ts",
     "src/lib/simulation-turn-actions.ts",
+    "tests/simulation-results-timeline.test.ts",
     "tests/simulation-results-stream.test.ts"
   ]
 }
