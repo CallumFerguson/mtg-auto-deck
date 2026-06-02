@@ -73,6 +73,7 @@ import {
 } from "@/lib/llm-model-preset-types"
 import type { AdminDashboardSectionId } from "@/lib/navigation"
 import { FlexServiceTierSwitch } from "./deck-simulation/SimulationSetupControls"
+import { BenchmarkEvaluationModal } from "./admin/BenchmarkEvaluationModal"
 
 type AdminDashboardProps = {
   activeSectionId: AdminDashboardSectionId | null
@@ -1799,6 +1800,8 @@ function AdminBenchmarksSection() {
   const [openBenchmarkMenuId, setOpenBenchmarkMenuId] = useState<string | null>(
     null
   )
+  const [evaluatingBenchmark, setEvaluatingBenchmark] =
+    useState<AdminBenchmark | null>(null)
   const [selectedDeckIds, setSelectedDeckIds] = useState<string[]>([])
   const [selectedModelPresetId, setSelectedModelPresetId] = useState("")
   const [simulationsPerDeck, setSimulationsPerDeck] = useState("1")
@@ -2478,6 +2481,7 @@ function AdminBenchmarksSection() {
                         exportingBenchmarkId={exportingBenchmarkId}
                         menuId={benchmark.id}
                         onCopyBenchmarkId={handleCopyBenchmarkId}
+                        onEvaluateBenchmark={setEvaluatingBenchmark}
                         onExportBenchmark={handleExportBenchmark}
                         onStopBenchmark={handleStopBenchmark}
                         openBenchmarkMenuId={openBenchmarkMenuId}
@@ -2494,6 +2498,14 @@ function AdminBenchmarksSection() {
       ) : (
         <AdminPanelMessage>No benchmarks found.</AdminPanelMessage>
       )}
+
+      {evaluatingBenchmark ? (
+        <BenchmarkEvaluationModal
+          benchmark={evaluatingBenchmark}
+          modelPresets={modelPresets}
+          onClose={() => setEvaluatingBenchmark(null)}
+        />
+      ) : null}
     </section>
   )
 }
@@ -2503,6 +2515,7 @@ function AdminBenchmarkActionsMenu({
   exportingBenchmarkId,
   menuId,
   onCopyBenchmarkId,
+  onEvaluateBenchmark,
   onExportBenchmark,
   onStopBenchmark,
   openBenchmarkMenuId,
@@ -2513,6 +2526,7 @@ function AdminBenchmarkActionsMenu({
   exportingBenchmarkId: string | null
   menuId: string
   onCopyBenchmarkId: (benchmark: AdminBenchmark) => void
+  onEvaluateBenchmark: (benchmark: AdminBenchmark) => void
   onExportBenchmark: (benchmark: AdminBenchmark) => void
   onStopBenchmark: (benchmark: AdminBenchmark) => void
   openBenchmarkMenuId: string | null
@@ -2703,6 +2717,18 @@ function AdminBenchmarkActionsMenu({
                 >
                   <Download data-icon="inline-start" />
                   {isExporting ? "Exporting..." : "Export"}
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-sky-100 transition-colors hover:bg-sky-400/10 hover:text-sky-100 focus:bg-sky-400/10 focus:outline-none"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setOpenBenchmarkMenuId(null)
+                    onEvaluateBenchmark(benchmark)
+                  }}
+                >
+                  <BrainCircuit data-icon="inline-start" />
+                  Evaluate benchmark
                 </button>
                 <button
                   className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-destructive transition-colors hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"

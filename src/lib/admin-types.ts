@@ -75,6 +75,30 @@ export type AdminBenchmarksResponse = {
   total: number
 }
 
+export type AdminBenchmarkEvaluationSummary = {
+  targetRunCount: number
+  evaluationCount: number
+  completedEvaluationCount: number
+  activeEvaluationCount: number
+  averageSimulationQualityScore: number | null
+  legalPassCount: number
+  legalFailCount: number
+  strategicPassCount: number
+  strategicFailCount: number
+}
+
+export type AdminBenchmarkEvaluationsResponse = {
+  summary: AdminBenchmarkEvaluationSummary
+}
+
+export type StartAdminBenchmarkEvaluationsResponse = {
+  summary: AdminBenchmarkEvaluationSummary
+  startedEvaluationCount: number
+  skippedRunCount: number
+  errorCount: number
+  errorMessage: string | null
+}
+
 export type CreateAdminBenchmarkResponse = {
   benchmark: AdminBenchmark
 }

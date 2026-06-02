@@ -42,11 +42,19 @@ import {
   getAdminBenchmark,
   linkBenchmarkSimulation,
   listAdminBenchmarks,
+  listBenchmarkEvaluationLatestRunsForAdmin,
   listBenchmarkRunSimulationsForAdmin,
+  listLatestBenchmarkEvaluationSnapshotsForTargets,
   markBenchmarkRunFailed,
   markBenchmarkRunStopped,
   MAX_BENCHMARK_SIMULATIONS_PER_DECK,
 } from "./benchmarks-postgres.js"
+import {
+  buildBenchmarkEvaluationSummary,
+  getEligibleBenchmarkEvaluationTargetRuns,
+  type BenchmarkEvaluationSummary,
+  type BenchmarkEvaluationTargetRun,
+} from "./benchmark-evaluations.js"
 import {
   isAdminGrantBillingTier,
   type AdminGrantBillingTier,
@@ -464,6 +472,7 @@ const createSimulationRunEvaluationSchema = z
     useFlexServiceTier: z.boolean().default(false),
   })
   .strict()
+const createBenchmarkEvaluationSchema = createSimulationRunEvaluationSchema
 
 type ActiveLlmRunRuntime = {
   abortController: AbortController
@@ -3204,6 +3213,79 @@ async function prepareAndStartSimulationRunEvaluation({
 
     throw error
   }
+}
+
+async function getAdminBenchmarkEvaluationSummary({
+  adminUserId,
+  benchmarkId,
+}: {
+  adminUserId: string
+  benchmarkId: string
+}): Promise<{
+  skippedRunCount: number
+  summary: BenchmarkEvaluationSummary
+  targetRuns: BenchmarkEvaluationTargetRun[]
+} | null> {
+  const latestRuns = await listBenchmarkEvaluationLatestRunsForAdmin(
+    benchmarkId,
+    adminUserId
+  )
+
+  if (latestRuns === null) {
+    return null
+  }
+
+  const { skippedRunCount, targetRuns } =
+    getEligibleBenchmarkEvaluationTargetRuns(latestRuns)
+  const latestEvaluations =
+    await listLatestBenchmarkEvaluationSnapshotsForTargets(
+      targetRuns.map((run) => run.targetLlmRunId)
+    )
+
+  return {
+    skippedRunCount,
+    summary: buildBenchmarkEvaluationSummary({
+      latestEvaluations,
+      targetRuns,
+    }),
+    targetRuns,
+  }
+}
+
+async function validateBenchmarkEvaluationModelPreset({
+  llmModelPresetId,
+  llmProcessingMode,
+  useFlexServiceTier,
+}: {
+  llmModelPresetId: string
+  llmProcessingMode: LlmProcessingMode
+  useFlexServiceTier: boolean
+}) {
+  if (llmProcessingMode === "openai_batch" && useFlexServiceTier) {
+    throw new SimulationValidationError(
+      "Batch processing cannot be combined with flex processing."
+    )
+  }
+
+  const modelPreset = await getEnabledLlmModelPreset(llmModelPresetId)
+
+  if (!modelPreset) {
+    throw new SimulationValidationError("Model preset not found or disabled.")
+  }
+
+  if (llmProcessingMode === "openai_batch" && modelPreset.provider !== "openai") {
+    throw new SimulationValidationError(
+      "Batch evaluations require an OpenAI model preset."
+    )
+  }
+
+  if (useFlexServiceTier && !modelPreset.supportsFlex) {
+    throw new SimulationValidationError(
+      "Flex processing can only be enabled for model presets that support flex."
+    )
+  }
+
+  return modelPreset
 }
 
 function abortSupersededEvaluationRuntimes(runtimeStreamKeys: readonly string[]) {
@@ -7013,6 +7095,135 @@ async function main() {
       })
     }
   })
+
+  app.get(
+    "/admin/benchmarks/:benchmarkId/evaluations",
+    async (req: Request, res: Response) => {
+      const adminUser = requireAdminUser(req, res)
+
+      if (!adminUser) {
+        return
+      }
+
+      const benchmarkId = String(req.params.benchmarkId)
+
+      try {
+        const summaryResult = await getAdminBenchmarkEvaluationSummary({
+          adminUserId: adminUser.id,
+          benchmarkId,
+        })
+
+        if (summaryResult === null) {
+          res.status(404).json({
+            error: "Benchmark not found.",
+          })
+          return
+        }
+
+        res.status(200).json({
+          summary: summaryResult.summary,
+        })
+      } catch (error) {
+        console.error("Failed to summarize benchmark evaluations:", error)
+        res.status(500).json({
+          error: "Failed to summarize benchmark evaluations.",
+        })
+      }
+    }
+  )
+
+  app.post(
+    "/admin/benchmarks/:benchmarkId/evaluations",
+    async (req: Request, res: Response) => {
+      const adminUser = requireAdminUser(req, res)
+
+      if (!adminUser) {
+        return
+      }
+
+      const benchmarkId = String(req.params.benchmarkId)
+      const parsedBody = createBenchmarkEvaluationSchema.safeParse(req.body)
+
+      if (!parsedBody.success) {
+        res.status(400).json({
+          error: parsedBody.error.message,
+        })
+        return
+      }
+
+      try {
+        await validateBenchmarkEvaluationModelPreset(parsedBody.data)
+
+        const summaryResult = await getAdminBenchmarkEvaluationSummary({
+          adminUserId: adminUser.id,
+          benchmarkId,
+        })
+
+        if (summaryResult === null) {
+          res.status(404).json({
+            error: "Benchmark not found.",
+          })
+          return
+        }
+
+        let startedEvaluationCount = 0
+        let errorCount = 0
+
+        for (const targetRun of summaryResult.targetRuns) {
+          try {
+            await prepareAndStartSimulationRunEvaluation({
+              deckId: targetRun.deckId,
+              evaluatorUserId: adminUser.id,
+              llmModelPresetId: parsedBody.data.llmModelPresetId,
+              llmProcessingMode: parsedBody.data.llmProcessingMode,
+              simulationId: targetRun.simulationId,
+              targetLlmRunId: targetRun.targetLlmRunId,
+              useFlexServiceTier: parsedBody.data.useFlexServiceTier,
+            })
+            startedEvaluationCount += 1
+          } catch (error) {
+            errorCount += 1
+            console.error("Failed to start benchmark evaluation run:", error)
+          }
+        }
+
+        const refreshedSummaryResult =
+          await getAdminBenchmarkEvaluationSummary({
+            adminUserId: adminUser.id,
+            benchmarkId,
+          })
+
+        res.status(201).json({
+          summary:
+            refreshedSummaryResult?.summary ?? summaryResult.summary,
+          startedEvaluationCount,
+          skippedRunCount: summaryResult.skippedRunCount,
+          errorCount,
+          errorMessage:
+            errorCount === 0
+              ? null
+              : `${errorCount} ${
+                  errorCount === 1 ? "evaluation" : "evaluations"
+                } could not be started.`,
+        })
+      } catch (error) {
+        if (
+          error instanceof SimulationValidationError ||
+          error instanceof LlmConfigurationError
+        ) {
+          res.status(400).json({
+            error: error.message,
+          })
+          return
+        }
+
+        console.error("Failed to start benchmark evaluations:", error)
+        res.status(500).json({
+          error: "Failed to start benchmark evaluations.",
+        })
+      }
+    }
+  )
 
   app.get(
     "/admin/benchmarks/:benchmarkId/export",

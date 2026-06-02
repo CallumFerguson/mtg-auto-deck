@@ -40,6 +40,11 @@ import {
 } from "./simulation-stop.js"
 import { createBenchmarkSimulationSeed } from "./benchmarks-postgres.js"
 import {
+  buildBenchmarkEvaluationSummary,
+  getEligibleBenchmarkEvaluationTargetRuns,
+  type BenchmarkEvaluationLatestRunSnapshot,
+} from "./benchmark-evaluations.js"
+import {
   callWithRuntimeAbortSignal,
   forEachRuntimeAbortableAsync,
   registerRuntimeAbortHandler,
@@ -2683,6 +2688,133 @@ test("benchmark simulation seeds are deterministic by simulation index", () => {
   assert.throws(() => createBenchmarkSimulationSeed(0), /positive integer/)
 })
 
+test("selects eligible benchmark evaluation target runs", () => {
+  const latestRuns: BenchmarkEvaluationLatestRunSnapshot[] = [
+    createBenchmarkEvaluationLatestRun({
+      targetLlmRunId: "opening-valid",
+      targetRunPhase: "opening_hand",
+    }),
+    createBenchmarkEvaluationLatestRun({
+      targetLlmRunId: "turn-valid",
+      targetRunPhase: "turn",
+    }),
+    createBenchmarkEvaluationLatestRun({
+      status: "streaming",
+      targetLlmRunId: "active-turn",
+      targetRunPhase: "turn",
+    }),
+    createBenchmarkEvaluationLatestRun({
+      failureMessage: "Tool failed.",
+      targetLlmRunId: "failed-opening",
+      targetRunPhase: "opening_hand",
+    }),
+    createBenchmarkEvaluationLatestRun({
+      openingHandIsValid: false,
+      targetLlmRunId: "invalid-opening",
+      targetRunPhase: "opening_hand",
+    }),
+    createBenchmarkEvaluationLatestRun({
+      gameState: null,
+      targetLlmRunId: "turn-missing-output",
+      targetRunPhase: "turn",
+    }),
+    createBenchmarkEvaluationLatestRun({
+      finalOutputText: JSON.stringify({
+        gameState: null,
+        error: "Impossible mana payment.",
+      }),
+      targetLlmRunId: "turn-model-error",
+      targetRunPhase: "turn",
+    }),
+  ]
+
+  assert.deepEqual(getEligibleBenchmarkEvaluationTargetRuns(latestRuns), {
+    skippedRunCount: 5,
+    targetRuns: [
+      {
+        deckId: "deck-1",
+        simulationId: "simulation-1",
+        targetLlmRunId: "opening-valid",
+        targetRunPhase: "opening_hand",
+      },
+      {
+        deckId: "deck-1",
+        simulationId: "simulation-1",
+        targetLlmRunId: "turn-valid",
+        targetRunPhase: "turn",
+      },
+    ],
+  })
+})
+
+test("summarizes latest benchmark evaluations only", () => {
+  const targetRuns = [
+    {
+      deckId: "deck-1",
+      simulationId: "simulation-1",
+      targetLlmRunId: "target-1",
+      targetRunPhase: "opening_hand" as const,
+    },
+    {
+      deckId: "deck-1",
+      simulationId: "simulation-1",
+      targetLlmRunId: "target-2",
+      targetRunPhase: "turn" as const,
+    },
+  ]
+
+  assert.deepEqual(
+    buildBenchmarkEvaluationSummary({
+      targetRuns,
+      latestEvaluations: [
+        {
+          attemptNumber: 1,
+          legalPass: true,
+          simulationQualityScore: 9,
+          status: "completed",
+          strategicPass: true,
+          targetLlmRunId: "target-1",
+        },
+        {
+          attemptNumber: 2,
+          legalPass: false,
+          simulationQualityScore: 7,
+          status: "completed",
+          strategicPass: true,
+          targetLlmRunId: "target-1",
+        },
+        {
+          attemptNumber: 1,
+          legalPass: null,
+          simulationQualityScore: null,
+          status: "streaming",
+          strategicPass: null,
+          targetLlmRunId: "target-2",
+        },
+        {
+          attemptNumber: 10,
+          legalPass: true,
+          simulationQualityScore: 10,
+          status: "completed",
+          strategicPass: true,
+          targetLlmRunId: "unrelated",
+        },
+      ],
+    }),
+    {
+      targetRunCount: 2,
+      evaluationCount: 2,
+      completedEvaluationCount: 1,
+      activeEvaluationCount: 1,
+      averageSimulationQualityScore: 7,
+      legalPassCount: 0,
+      legalFailCount: 1,
+      strategicPassCount: 1,
+      strategicFailCount: 0,
+    }
+  )
+})
+
 test("new simulations choose the correct initial step", () => {
   assert.deepEqual(
     getSimulationCreationDecision({
@@ -2931,6 +3063,40 @@ function assertThrowsModelReportedSimulationError(
 
     return true
   })
+}
+
+function createBenchmarkEvaluationLatestRun(
+  overrides: Partial<BenchmarkEvaluationLatestRunSnapshot> = {}
+): BenchmarkEvaluationLatestRunSnapshot {
+  const targetRunPhase = overrides.targetRunPhase ?? "turn"
+  const finalOutputText =
+    overrides.finalOutputText ??
+    (targetRunPhase === "opening_hand"
+      ? JSON.stringify({
+          keptHand: ["Sol Ring", "Command Tower"],
+          summary: "Kept a fast mana hand.",
+          error: null,
+        })
+      : JSON.stringify({
+          gameState: createTurnGameState(),
+          turnActions: createTurnActions(),
+          error: null,
+        }))
+
+  return {
+    deckId: "deck-1",
+    simulationId: "simulation-1",
+    targetLlmRunId: "target-run-1",
+    targetRunPhase,
+    turnNumber: targetRunPhase === "turn" ? 1 : null,
+    status: "completed",
+    failureMessage: null,
+    finalOutputText,
+    openingHandIsValid: targetRunPhase === "opening_hand" ? true : null,
+    gameState: targetRunPhase === "turn" ? createTurnGameState() : null,
+    turnActions: targetRunPhase === "turn" ? createTurnActions() : null,
+    ...overrides,
+  }
 }
 
 function createTurnGameState({

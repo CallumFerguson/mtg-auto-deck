@@ -1,5 +1,10 @@
 import { queryDatabase, withDatabaseTransaction } from "./db.js"
 import type { LlmProcessingMode } from "./simulations-postgres.js"
+import type {
+  BenchmarkEvaluationLatestEvaluationSnapshot,
+  BenchmarkEvaluationLatestRunSnapshot,
+  BenchmarkEvaluationRunPhase,
+} from "./benchmark-evaluations.js"
 
 export const MAX_BENCHMARK_SIMULATIONS_PER_DECK = 100
 
@@ -422,6 +427,164 @@ export async function listBenchmarkRunSimulationsForAdmin(
   }))
 }
 
+export async function listBenchmarkEvaluationLatestRunsForAdmin(
+  benchmarkRunId: string,
+  adminUserId: string
+): Promise<BenchmarkEvaluationLatestRunSnapshot[] | null> {
+  const benchmarkResult = await queryDatabase(
+    `
+      SELECT id
+      FROM benchmark_runs
+      WHERE id = $1
+        AND created_by_admin_user_id = $2
+    `,
+    [benchmarkRunId, adminUserId]
+  )
+
+  if (benchmarkResult.rowCount === 0) {
+    return null
+  }
+
+  const result = await queryDatabase<{
+    deck_id: string
+    simulation_id: string
+    target_llm_run_id: string
+    target_run_phase: BenchmarkEvaluationRunPhase
+    turn_number: number | null
+    status: BenchmarkEvaluationLatestRunSnapshot["status"]
+    failure_message: string | null
+    final_output_text: string | null
+    opening_hand_is_valid: boolean | null
+    game_state: unknown | null
+    turn_actions: unknown | null
+  }>(
+    `
+      WITH latest_opening_hand_run AS (
+        SELECT DISTINCT ON (opening_run.simulation_id)
+          benchmark_simulation.deck_id,
+          opening_run.simulation_id,
+          opening_run.llm_run_id AS target_llm_run_id,
+          'opening_hand'::text AS target_run_phase,
+          NULL::integer AS turn_number,
+          llm_run.status,
+          llm_run.failure_message,
+          llm_run.final_output_text,
+          opening_run.opening_hand_is_valid,
+          NULL::jsonb AS game_state,
+          NULL::jsonb AS turn_actions
+        FROM benchmark_run_simulations benchmark_simulation
+        JOIN simulations simulation
+          ON simulation.id = benchmark_simulation.simulation_id
+        JOIN simulation_opening_hand_llm_runs opening_run
+          ON opening_run.simulation_id = benchmark_simulation.simulation_id
+        JOIN llm_runs llm_run
+          ON llm_run.id = opening_run.llm_run_id
+        WHERE benchmark_simulation.benchmark_run_id = $1
+          AND simulation.starting_hand_id IS NULL
+        ORDER BY
+          opening_run.simulation_id ASC,
+          opening_run.attempt_number DESC,
+          opening_run.created_at DESC,
+          opening_run.llm_run_id DESC
+      ),
+      latest_turn_run AS (
+        SELECT DISTINCT ON (turn_run.simulation_id, turn_run.turn_number)
+          benchmark_simulation.deck_id,
+          turn_run.simulation_id,
+          turn_run.llm_run_id AS target_llm_run_id,
+          'turn'::text AS target_run_phase,
+          turn_run.turn_number,
+          llm_run.status,
+          llm_run.failure_message,
+          llm_run.final_output_text,
+          NULL::boolean AS opening_hand_is_valid,
+          turn_run.game_state,
+          turn_run.turn_actions
+        FROM benchmark_run_simulations benchmark_simulation
+        JOIN simulation_turn_llm_runs turn_run
+          ON turn_run.simulation_id = benchmark_simulation.simulation_id
+        JOIN llm_runs llm_run
+          ON llm_run.id = turn_run.llm_run_id
+        WHERE benchmark_simulation.benchmark_run_id = $1
+          AND turn_run.outdated = false
+        ORDER BY
+          turn_run.simulation_id ASC,
+          turn_run.turn_number ASC,
+          turn_run.attempt_number DESC,
+          turn_run.created_at DESC,
+          turn_run.llm_run_id DESC
+      )
+      SELECT *
+      FROM latest_opening_hand_run
+      UNION ALL
+      SELECT *
+      FROM latest_turn_run
+      ORDER BY deck_id ASC, simulation_id ASC, target_run_phase ASC, turn_number ASC NULLS FIRST
+    `,
+    [benchmarkRunId]
+  )
+
+  return result.rows.map((row) => ({
+    deckId: row.deck_id,
+    simulationId: row.simulation_id,
+    targetLlmRunId: row.target_llm_run_id,
+    targetRunPhase: row.target_run_phase,
+    turnNumber: row.turn_number,
+    status: row.status,
+    failureMessage: row.failure_message,
+    finalOutputText: row.final_output_text,
+    openingHandIsValid: row.opening_hand_is_valid,
+    gameState: row.game_state,
+    turnActions: row.turn_actions,
+  }))
+}
+
+export async function listLatestBenchmarkEvaluationSnapshotsForTargets(
+  targetLlmRunIds: readonly string[]
+): Promise<BenchmarkEvaluationLatestEvaluationSnapshot[]> {
+  if (targetLlmRunIds.length === 0) {
+    return []
+  }
+
+  const result = await queryDatabase<{
+    target_llm_run_id: string
+    attempt_number: number
+    status: BenchmarkEvaluationLatestEvaluationSnapshot["status"]
+    legal_pass: boolean | null
+    strategic_pass: boolean | null
+    simulation_quality_score: string | number | null
+  }>(
+    `
+      SELECT DISTINCT ON (evaluation.target_llm_run_id)
+        evaluation.target_llm_run_id,
+        evaluation.attempt_number,
+        llm_run.status,
+        evaluation.legal_pass,
+        evaluation.strategic_pass,
+        evaluation.simulation_quality_score
+      FROM simulation_run_evaluations evaluation
+      JOIN llm_runs llm_run
+        ON llm_run.id = evaluation.llm_run_id
+      WHERE evaluation.target_llm_run_id = ANY($1::uuid[])
+      ORDER BY
+        evaluation.target_llm_run_id ASC,
+        evaluation.attempt_number DESC,
+        evaluation.created_at DESC,
+        evaluation.id DESC
+    `,
+    [targetLlmRunIds]
+  )
+
+  return result.rows.map((row) => ({
+    targetLlmRunId: row.target_llm_run_id,
+    attemptNumber: row.attempt_number,
+    status: row.status,
+    legalPass: row.legal_pass,
+    strategicPass: row.strategic_pass,
+    simulationQualityScore: toOptionalNumber(row.simulation_quality_score),
+  }))
+}
+
 export async function markBenchmarkRunFailed(
   benchmarkRunId: string,
   failureMessage: string
@@ -558,6 +721,10 @@ function parseBenchmarkDecks(value: unknown): AdminBenchmarkDeck[] {
 
 function toInteger(value: string | number) {
   return Math.trunc(toNumber(value))
+}
+
+function toOptionalNumber(value: string | number | null) {
+  return value === null ? null : toNumber(value)
 }
 
 function toNumber(value: string | number) {
