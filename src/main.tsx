@@ -4,6 +4,7 @@ import { BrowserRouter } from "react-router-dom"
 
 import "mana-font/css/mana.css"
 import "./index.css"
+import { ModalInteractionLock } from "@/components/ModalInteractionLock.tsx"
 import { ThemeProvider } from "@/components/theme-provider.tsx"
 
 const root = createRoot(document.getElementById("root")!)
@@ -17,6 +18,7 @@ if (
   root.render(
     <StrictMode>
       <ThemeProvider>
+        <ModalInteractionLock />
         <PublicSimulationApp />
       </ThemeProvider>
     </StrictMode>
@@ -28,6 +30,7 @@ if (
     <StrictMode>
       <BrowserRouter>
         <ThemeProvider>
+          <ModalInteractionLock />
           <App />
         </ThemeProvider>
       </BrowserRouter>

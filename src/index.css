@@ -64,6 +64,12 @@
     color-scheme: dark;
   }
 
+  html.modal-interaction-locked,
+  body.modal-interaction-locked {
+    overflow: hidden;
+    overscroll-behavior: contain;
+  }
+
   body {
     @apply min-h-svh bg-background text-foreground antialiased;
   }
