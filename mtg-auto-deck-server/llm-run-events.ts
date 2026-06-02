@@ -108,6 +108,7 @@ export type SimulationRunEvaluationCompletion = {
   legalPass: boolean
   strategicPass: boolean
   simulationQualityScore: number
+  simulationQualityScoreReasoning: string | null
   illegalActions: string[]
   strategicMistakes: string[]
   parsedOutput: Record<string, unknown>
@@ -134,6 +135,8 @@ export function parseSimulationRunEvaluationCompletionFromResponseText(
   const legalPass = responseRecord.legalPass
   const strategicPass = responseRecord.strategicPass
   const simulationQualityScore = responseRecord.simulationQualityScore
+  const simulationQualityScoreReasoning =
+    responseRecord.simulationQualityScoreReasoning
   const illegalActions = responseRecord.illegalActions
   const strategicMistakes = responseRecord.strategicMistakes
 
@@ -162,6 +165,29 @@ export function parseSimulationRunEvaluationCompletionFromResponseText(
     )
   }
 
+  const normalizedSimulationQualityScoreReasoning =
+    simulationQualityScoreReasoning === undefined ||
+    simulationQualityScoreReasoning === null
+      ? null
+      : typeof simulationQualityScoreReasoning === "string"
+        ? simulationQualityScoreReasoning.trim() || null
+        : undefined
+
+  if (normalizedSimulationQualityScoreReasoning === undefined) {
+    throw new Error(
+      "Evaluation LLM response did not include valid simulationQualityScoreReasoning."
+    )
+  }
+
+  if (
+    roundEvaluationScore(simulationQualityScore) < 10 &&
+    normalizedSimulationQualityScoreReasoning === null
+  ) {
+    throw new Error(
+      "Evaluation LLM response must explain simulationQualityScoreReasoning when simulationQualityScore is less than 10."
+    )
+  }
+
   if (!isStringArray(strategicMistakes)) {
     throw new Error(
       "Evaluation LLM response did not include valid strategicMistakes."
@@ -172,6 +198,7 @@ export function parseSimulationRunEvaluationCompletionFromResponseText(
     legalPass,
     strategicPass,
     simulationQualityScore: roundEvaluationScore(simulationQualityScore),
+    simulationQualityScoreReasoning: normalizedSimulationQualityScoreReasoning,
     illegalActions,
     strategicMistakes,
     parsedOutput: responseRecord,

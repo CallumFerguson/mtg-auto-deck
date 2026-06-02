@@ -119,12 +119,12 @@ export function SimulationRunEvaluationModal({
       return
     }
 
-    const timeoutId = window.setTimeout(() => {
+    const intervalId = window.setInterval(() => {
       void loadEvaluations()
-    }, 3000)
+    }, 1000)
 
     return () => {
-      window.clearTimeout(timeoutId)
+      window.clearInterval(intervalId)
     }
   }, [hasActiveEvaluation, loadEvaluations])
 
@@ -181,7 +181,14 @@ export function SimulationRunEvaluationModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 py-6 backdrop-blur-sm">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 py-6 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose()
+        }
+      }}
+    >
       <section
         aria-labelledby="simulation-run-evaluation-title"
         className="flex max-h-[calc(100svh-3rem)] w-full max-w-3xl flex-col rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
@@ -442,6 +449,10 @@ function EvaluationResultCard({
               </p>
             </div>
           </div>
+          <EvaluationTextValue
+            label="Quality score reasoning"
+            value={evaluation.simulationQualityScoreReasoning}
+          />
           <EvaluationIssueList
             label="Illegal actions"
             values={evaluation.illegalActions}
@@ -525,6 +536,23 @@ function EvaluationPassBadge({
   )
 }
 
+function EvaluationTextValue({
+  label,
+  value,
+}: {
+  label: string
+  value: string | null
+}) {
+  return (
+    <div className="grid gap-1 rounded-md border border-border bg-black/20 px-3 py-2">
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      <p className="text-sm break-words text-foreground">
+        {value ?? "None"}
+      </p>
+    </div>
+  )
+}
+
 function EvaluationIssueList({
   label,
   values,
@@ -551,6 +579,10 @@ function EvaluationIssueList({
 }
 
 function formatEvaluationStatus(status: string) {
+  if (status === "streaming") {
+    return "Running"
+  }
+
   if (status === "batch_pending") {
     return "Waiting for batch"
   }

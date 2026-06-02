@@ -4242,6 +4242,8 @@ async function reconcileOpenAiBatchOutputLine({
         llmRunId: item.llmRunId,
         rawResponse: responseBody,
         simulationQualityScore: parsedEvaluation.simulationQualityScore,
+        simulationQualityScoreReasoning:
+          parsedEvaluation.simulationQualityScoreReasoning,
         strategicMistakes: parsedEvaluation.strategicMistakes,
         strategicPass: parsedEvaluation.strategicPass,
         usage,
@@ -5988,6 +5990,8 @@ async function runEvaluationLlmRun({
       llmRunId,
       rawResponse: responseResult.rawResponse,
       simulationQualityScore: parsedEvaluation.simulationQualityScore,
+      simulationQualityScoreReasoning:
+        parsedEvaluation.simulationQualityScoreReasoning,
       strategicMistakes: parsedEvaluation.strategicMistakes,
       strategicPass: parsedEvaluation.strategicPass,
       usage: responseResult.usage,

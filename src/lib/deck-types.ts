@@ -203,6 +203,7 @@ export type SimulationRunEvaluation = {
   legalPass: boolean | null
   strategicPass: boolean | null
   simulationQualityScore: number | null
+  simulationQualityScoreReasoning: string | null
   illegalActions: string[]
   strategicMistakes: string[]
   createdAt: string

@@ -254,6 +254,7 @@ export type SimulationRunEvaluation = {
   legalPass: boolean | null
   strategicPass: boolean | null
   simulationQualityScore: number | null
+  simulationQualityScoreReasoning: string | null
   illegalActions: string[]
   strategicMistakes: string[]
   createdAt: string
@@ -1155,6 +1156,7 @@ export async function ensureSimulationsSchema() {
       legal_pass boolean,
       strategic_pass boolean,
       simulation_quality_score numeric(3,1),
+      simulation_quality_score_reasoning text,
       illegal_actions jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(illegal_actions) = 'array'),
       strategic_mistakes jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(strategic_mistakes) = 'array'),
 
@@ -1173,6 +1175,10 @@ export async function ensureSimulationsSchema() {
           )
         )
     )
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulation_run_evaluations
+    ADD COLUMN IF NOT EXISTS simulation_quality_score_reasoning text
   `)
   await queryDatabase(`
     ALTER TABLE simulation_run_evaluations
@@ -4533,6 +4539,7 @@ export async function completeSimulationRunEvaluation({
   legalPass,
   llmRunId,
   rawResponse,
+  simulationQualityScoreReasoning,
   simulationQualityScore,
   strategicMistakes,
   strategicPass,
@@ -4543,6 +4550,7 @@ export async function completeSimulationRunEvaluation({
   legalPass: boolean
   strategicPass: boolean
   simulationQualityScore: number
+  simulationQualityScoreReasoning: string | null
   illegalActions: readonly string[]
   strategicMistakes: readonly string[]
   rawResponse: unknown
@@ -4603,8 +4611,9 @@ export async function completeSimulationRunEvaluation({
         SET legal_pass = $2,
             strategic_pass = $3,
             simulation_quality_score = $4,
-            illegal_actions = $5::jsonb,
-            strategic_mistakes = $6::jsonb
+            simulation_quality_score_reasoning = $5,
+            illegal_actions = $6::jsonb,
+            strategic_mistakes = $7::jsonb
         WHERE llm_run_id = $1
       `,
       [
@@ -4612,6 +4621,7 @@ export async function completeSimulationRunEvaluation({
         legalPass,
         strategicPass,
         simulationQualityScore.toFixed(1),
+        simulationQualityScoreReasoning,
         JSON.stringify(illegalActions),
         JSON.stringify(strategicMistakes),
       ]
@@ -4664,6 +4674,7 @@ export async function listSimulationRunEvaluations({
         evaluation.legal_pass,
         evaluation.strategic_pass,
         evaluation.simulation_quality_score,
+        evaluation.simulation_quality_score_reasoning,
         evaluation.illegal_actions,
         evaluation.strategic_mistakes,
         llm_run.llm_model_preset_id,
@@ -4843,6 +4854,7 @@ async function getSimulationRunEvaluationByLlmRunId(llmRunId: string) {
         evaluation.legal_pass,
         evaluation.strategic_pass,
         evaluation.simulation_quality_score,
+        evaluation.simulation_quality_score_reasoning,
         evaluation.illegal_actions,
         evaluation.strategic_mistakes,
         llm_run.llm_model_preset_id,
@@ -5899,6 +5911,7 @@ type SimulationRunEvaluationRow = {
   legal_pass: boolean | null
   strategic_pass: boolean | null
   simulation_quality_score: string | number | null
+  simulation_quality_score_reasoning: string | null
   illegal_actions: unknown
   strategic_mistakes: unknown
   created_at: Date
@@ -6077,6 +6090,8 @@ function mapSimulationRunEvaluationRow(
     legalPass: row.legal_pass,
     strategicPass: row.strategic_pass,
     simulationQualityScore: toOptionalNumber(row.simulation_quality_score),
+    simulationQualityScoreReasoning:
+      row.simulation_quality_score_reasoning || null,
     illegalActions: parseStringArray(row.illegal_actions),
     strategicMistakes: parseStringArray(row.strategic_mistakes),
     createdAt: row.created_at.toISOString(),

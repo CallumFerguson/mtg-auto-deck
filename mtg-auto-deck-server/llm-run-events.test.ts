@@ -158,6 +158,8 @@ test("parses completed simulation run evaluation JSON", () => {
         legalPass: false,
         strategicPass: true,
         simulationQualityScore: 7.64,
+        simulationQualityScoreReasoning:
+          "The run missed a required library tool interaction.",
         illegalActions: ["Drew without a tool."],
         strategicMistakes: [],
       })
@@ -166,12 +168,16 @@ test("parses completed simulation run evaluation JSON", () => {
       legalPass: false,
       strategicPass: true,
       simulationQualityScore: 7.6,
+      simulationQualityScoreReasoning:
+        "The run missed a required library tool interaction.",
       illegalActions: ["Drew without a tool."],
       strategicMistakes: [],
       parsedOutput: {
         legalPass: false,
         strategicPass: true,
         simulationQualityScore: 7.64,
+        simulationQualityScoreReasoning:
+          "The run missed a required library tool interaction.",
         illegalActions: ["Drew without a tool."],
         strategicMistakes: [],
       },
@@ -186,6 +192,7 @@ test("parses simulation run evaluation score bounds", () => {
         legalPass: true,
         strategicPass: true,
         simulationQualityScore: 0,
+        simulationQualityScoreReasoning: "The run was unusable.",
         illegalActions: [],
         strategicMistakes: [],
       })
@@ -198,6 +205,7 @@ test("parses simulation run evaluation score bounds", () => {
         legalPass: true,
         strategicPass: true,
         simulationQualityScore: 10,
+        simulationQualityScoreReasoning: null,
         illegalActions: [],
         strategicMistakes: [],
       })
@@ -214,6 +222,7 @@ test("rejects invalid completed simulation run evaluation JSON", () => {
           legalPass: "yes",
           strategicPass: true,
           simulationQualityScore: 8.5,
+          simulationQualityScoreReasoning: "Minor issues.",
           illegalActions: [],
           strategicMistakes: [],
         })
@@ -228,6 +237,7 @@ test("rejects invalid completed simulation run evaluation JSON", () => {
           legalPass: true,
           strategicPass: null,
           simulationQualityScore: 8.5,
+          simulationQualityScoreReasoning: "Minor issues.",
           illegalActions: [],
           strategicMistakes: [],
         })
@@ -242,6 +252,7 @@ test("rejects invalid completed simulation run evaluation JSON", () => {
           legalPass: true,
           strategicPass: true,
           simulationQualityScore: -0.1,
+          simulationQualityScoreReasoning: "Below zero.",
           illegalActions: [],
           strategicMistakes: [],
         })
@@ -256,6 +267,7 @@ test("rejects invalid completed simulation run evaluation JSON", () => {
           legalPass: true,
           strategicPass: true,
           simulationQualityScore: 11,
+          simulationQualityScoreReasoning: null,
           illegalActions: [],
           strategicMistakes: [],
         })
@@ -270,6 +282,7 @@ test("rejects invalid completed simulation run evaluation JSON", () => {
           legalPass: true,
           strategicPass: true,
           simulationQualityScore: 9.5,
+          simulationQualityScoreReasoning: "Minor issues.",
           illegalActions: [1],
           strategicMistakes: [],
         })
@@ -284,11 +297,42 @@ test("rejects invalid completed simulation run evaluation JSON", () => {
           legalPass: true,
           strategicPass: true,
           simulationQualityScore: 9.5,
+          simulationQualityScoreReasoning: "Minor issues.",
           illegalActions: [],
           strategicMistakes: [false],
         })
       ),
     /strategicMistakes/
+  )
+
+  assert.throws(
+    () =>
+      parseSimulationRunEvaluationCompletionFromResponseText(
+        JSON.stringify({
+          legalPass: true,
+          strategicPass: true,
+          simulationQualityScore: 9.5,
+          simulationQualityScoreReasoning: null,
+          illegalActions: [],
+          strategicMistakes: [],
+        })
+      ),
+    /simulationQualityScoreReasoning/
+  )
+
+  assert.throws(
+    () =>
+      parseSimulationRunEvaluationCompletionFromResponseText(
+        JSON.stringify({
+          legalPass: true,
+          strategicPass: true,
+          simulationQualityScore: 10,
+          simulationQualityScoreReasoning: ["perfect"],
+          illegalActions: [],
+          strategicMistakes: [],
+        })
+      ),
+    /simulationQualityScoreReasoning/
   )
 })
 

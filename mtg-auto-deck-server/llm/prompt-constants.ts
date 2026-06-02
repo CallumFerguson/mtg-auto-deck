@@ -84,11 +84,13 @@ Output must be exactly this JSON shape:
   "strategicMistakes": [],
   "legalPass": true,
   "strategicPass": true,
-  "simulationQualityScore": 8.5
+  "simulationQualityScore": 8.5,
+  "simulationQualityScoreReasoning": "Points were taken off because ..."
 }
 
 legalPass and strategicPass must be booleans.
 simulationQualityScore must be a number from 0 through 10, with one decimal place.
+simulationQualityScoreReasoning must be null or a string. If simulationQualityScore is less than 10, it must explain why points were taken off. If simulationQualityScore is 10, use null unless there is useful context.
 illegalActions and strategicMistakes must be arrays of strings.
 Return only the JSON object.
 The JSON examples are formatted for readability. Your final response should be a minified JSON object.
@@ -114,11 +116,13 @@ Output must be exactly this JSON shape:
   "strategicMistakes": [],
   "legalPass": true,
   "strategicPass": true,
-  "simulationQualityScore": 8.5
+  "simulationQualityScore": 8.5,
+  "simulationQualityScoreReasoning": "Points were taken off because ..."
 }
 
 legalPass and strategicPass must be booleans.
 simulationQualityScore must be a number from 0 through 10, with one decimal place.
+simulationQualityScoreReasoning must be null or a string. If simulationQualityScore is less than 10, it must explain why points were taken off. If simulationQualityScore is 10, use null unless there is useful context.
 illegalActions and strategicMistakes must be arrays of strings.
 Return only the JSON object.
 The JSON examples are formatted for readability. Your final response should be a minified JSON object.
