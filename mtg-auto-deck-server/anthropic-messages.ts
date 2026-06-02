@@ -14,9 +14,9 @@ type AnthropicReasoningEffort = Extract<
   "low" | "medium" | "high" | "xhigh" | "max"
 >
 
-export type AnthropicRequestPayload = ReturnType<
-  typeof buildAnthropicRequestPayload
->
+export type AnthropicRequestPayload =
+  | ReturnType<typeof buildAnthropicRequestPayload>
+  | ReturnType<typeof buildAnthropicTextRequestPayload>
 
 export function buildAnthropicRequestPayload({
   maxOutputTokens,
@@ -71,6 +71,43 @@ export function buildAnthropicRequestPayload({
         cache_control: ANTHROPIC_CACHE_CONTROL_5M,
       },
     ],
+  }
+}
+
+export function buildAnthropicTextRequestPayload({
+  maxOutputTokens,
+  model,
+  prompt,
+  reasoningEffort,
+  reasoningSummariesEnabled,
+}: {
+  maxOutputTokens: number
+  model: string
+  prompt: StructuredSimulationPrompt
+  reasoningEffort: ReasoningEffort
+  reasoningSummariesEnabled: boolean
+}) {
+  return {
+    providerType: "anthropic" as const,
+    prompt,
+    max_tokens: maxOutputTokens,
+    messages: [
+      {
+        role: "user" as const,
+        content: prompt.dynamicRunInput,
+      },
+    ],
+    model,
+    output_config: {
+      effort: getAnthropicReasoningEffort(reasoningEffort),
+    },
+    system: buildAnthropicSystemBlocks(prompt),
+    thinking: {
+      type: "adaptive" as const,
+      display: reasoningSummariesEnabled
+        ? ("summarized" as const)
+        : ("omitted" as const),
+    },
   }
 }
 

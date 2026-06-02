@@ -97,6 +97,12 @@ export type TurnSimulationAnthropicRunConfig = AnthropicRunConfig & {
   turnSimulationMcpPublicUrl: string
 }
 
+export type EvaluationLlmRunConfig =
+  | OpenAiRunConfig
+  | AnthropicRunConfig
+  | OpenRouterRunConfig
+  | LlamaCppRunConfig
+
 export type OpeningHandLlmRunConfig =
   | OpeningHandOpenAiRunConfig
   | OpeningHandAnthropicRunConfig
@@ -118,6 +124,12 @@ export type ResolvedOpeningHandLlmRunConfig =
 export type ResolvedTurnSimulationLlmRunConfig =
   | TurnSimulationOpenAiRunConfig
   | TurnSimulationAnthropicRunConfig
+  | OpenRouterRunConfig
+  | ResolvedLlamaCppRunConfig
+
+export type ResolvedEvaluationLlmRunConfig =
+  | OpenAiRunConfig
+  | AnthropicRunConfig
   | OpenRouterRunConfig
   | ResolvedLlamaCppRunConfig
 
@@ -214,6 +226,14 @@ export function getTurnSimulationLlmRunConfig(
   }
 
   return config
+}
+
+export function getEvaluationLlmRunConfig(
+  preset: LlmModelPresetRunConfig,
+  environment: Environment = process.env,
+  serviceTierOptions: LlmRunServiceTierOptions = {}
+): EvaluationLlmRunConfig {
+  return getLlmRunConfig(preset, environment, serviceTierOptions)
 }
 
 export function getLlmRunQueueConfig(

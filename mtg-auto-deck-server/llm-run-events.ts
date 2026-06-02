@@ -104,6 +104,80 @@ export function parseTurnSimulationCompletionFromResponseText(
   }
 }
 
+export type SimulationRunEvaluationCompletion = {
+  legalPass: boolean
+  strategicPass: boolean
+  simulationQualityScore: number
+  illegalActions: string[]
+  strategicMistakes: string[]
+  parsedOutput: Record<string, unknown>
+}
+
+export function parseSimulationRunEvaluationCompletionFromResponseText(
+  responseText: string
+): SimulationRunEvaluationCompletion {
+  if (!responseText.trim()) {
+    throw new Error("Evaluation LLM completed response was empty.")
+  }
+
+  let parsedResponse: unknown
+
+  try {
+    parsedResponse = parseJsonWithLastObjectFallback(responseText)
+  } catch (error) {
+    throw new Error("Evaluation LLM completed response was not valid JSON.", {
+      cause: error,
+    })
+  }
+
+  const responseRecord = asRecord(parsedResponse)
+  const legalPass = responseRecord.legalPass
+  const strategicPass = responseRecord.strategicPass
+  const simulationQualityScore = responseRecord.simulationQualityScore
+  const illegalActions = responseRecord.illegalActions
+  const strategicMistakes = responseRecord.strategicMistakes
+
+  if (typeof legalPass !== "boolean") {
+    throw new Error("Evaluation LLM response did not include legalPass.")
+  }
+
+  if (typeof strategicPass !== "boolean") {
+    throw new Error("Evaluation LLM response did not include strategicPass.")
+  }
+
+  if (
+    typeof simulationQualityScore !== "number" ||
+    !Number.isFinite(simulationQualityScore) ||
+    simulationQualityScore < 0 ||
+    simulationQualityScore > 10
+  ) {
+    throw new Error(
+      "Evaluation LLM response did not include a valid simulationQualityScore."
+    )
+  }
+
+  if (!isStringArray(illegalActions)) {
+    throw new Error(
+      "Evaluation LLM response did not include valid illegalActions."
+    )
+  }
+
+  if (!isStringArray(strategicMistakes)) {
+    throw new Error(
+      "Evaluation LLM response did not include valid strategicMistakes."
+    )
+  }
+
+  return {
+    legalPass,
+    strategicPass,
+    simulationQualityScore: roundEvaluationScore(simulationQualityScore),
+    illegalActions,
+    strategicMistakes,
+    parsedOutput: responseRecord,
+  }
+}
+
 const TURN_ACTION_PHASE_KEYS = [
   "untap",
   "upkeep",
@@ -134,6 +208,14 @@ function isTurnActionsObject(
       )
     })
   )
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string")
+}
+
+function roundEvaluationScore(value: number) {
+  return Math.round(value * 10) / 10
 }
 
 function assertSuccessfulSimulationOutputErrorIsNull(

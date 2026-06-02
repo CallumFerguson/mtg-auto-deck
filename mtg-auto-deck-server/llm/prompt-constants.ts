@@ -64,6 +64,66 @@ The JSON examples are formatted for readability. Your final response should be a
 Before final response, verify that you drew only once initially, did not draw after mulliganing, finished required bottoming, and that keptHand matches the final hand exactly.
 `
 
+export const EVALUATE_OPENING_HAND_PROMPT = `
+You are evaluating an AI-generated Commander / EDH opening hand simulation.
+
+Your job is to audit the target run for legality and only the most obvious strategic mistakes. Use the card reference and the recorded tool calls as the source of truth. Do not invent hidden information, do not excuse illegal tool usage, and do not penalize reasonable strategic choices that could be argued either way.
+
+Legality:
+- Check whether the run followed the opening-hand and Commander mulligan rules.
+- Check whether tool calls are coherent with the final kept hand, mulligan count, bottomed cards, and library state.
+- Mark legalPass false if the run contains an illegal action, invalid tool sequence, impossible card movement, or a final output that contradicts the recorded tool results.
+
+Strategy:
+- Mark strategicPass false only for very obvious strategic mistakes that could not reasonably be defended.
+- Do not mark close mulligan decisions, preference-based bottoming, or debatable risk tolerance as failures.
+
+Output must be exactly this JSON shape:
+{
+  "illegalActions": [],
+  "strategicMistakes": [],
+  "legalPass": true,
+  "strategicPass": true,
+  "simulationQualityScore": 8.5
+}
+
+legalPass and strategicPass must be booleans.
+simulationQualityScore must be a number from 0 through 10, with one decimal place.
+illegalActions and strategicMistakes must be arrays of strings.
+Return only the JSON object.
+The JSON examples are formatted for readability. Your final response should be a minified JSON object.
+`
+
+export const EVALUATE_TURN_PROMPT = `
+You are evaluating an AI-generated Commander / EDH turn simulation.
+
+Your job is to audit the target run for legality and only the most obvious strategic mistakes. Use the card reference, the previous/end game state, the turn actions, and the recorded tool calls as the source of truth. Do not invent hidden information, do not excuse illegal tool usage, and do not penalize reasonable strategic choices that could be argued either way.
+
+Legality:
+- Check mana production and spending, timing, targets, zones, triggers, combat, state-based consequences, land plays, and cleanup.
+- Check whether every required library/randomizer interaction used the appropriate tool and whether the final game state matches the actions and tool outputs.
+- Mark legalPass false if the run contains an illegal action, impossible card movement, invalid tool sequence, or a final output that contradicts the recorded tool results.
+
+Strategy:
+- Mark strategicPass false only for very obvious strategic mistakes that could not reasonably be defended.
+- Do not mark merely suboptimal sequencing, preference-based play patterns, or debatable risk tolerance as failures.
+
+Output must be exactly this JSON shape:
+{
+  "illegalActions": [],
+  "strategicMistakes": [],
+  "legalPass": true,
+  "strategicPass": true,
+  "simulationQualityScore": 8.5
+}
+
+legalPass and strategicPass must be booleans.
+simulationQualityScore must be a number from 0 through 10, with one decimal place.
+illegalActions and strategicMistakes must be arrays of strings.
+Return only the JSON object.
+The JSON examples are formatted for readability. Your final response should be a minified JSON object.
+`
+
 const SIMULATE_TURN_PROMPT = `
 You are an expert Magic: The Gathering player goldfishing a Commander deck.
 

@@ -16,6 +16,7 @@ import { useNavigate } from "react-router-dom"
 import tapIconUrl from "mana-font/svg/tap.svg"
 import {
   Check,
+  ClipboardCheck,
   Dices,
   Eye,
   EyeOff,
@@ -125,6 +126,7 @@ import {
   isActiveLlmRunStatus,
 } from "./deck-simulation/simulationRunFormatting"
 import { SimulationDetailsModal } from "./deck-simulation/SimulationDetailsModal"
+import { SimulationRunEvaluationModal } from "./deck-simulation/SimulationRunEvaluationModal"
 import {
   FlexServiceTierRequiredModal,
   FlexServiceTierSwitch,
@@ -798,6 +800,7 @@ export function PublicSimulationPage({
             demoMode={demoMode}
             deckId={publicSimulation.deck.id}
             initialResultsInfo={publicSimulation.results}
+            isAdmin={false}
             isLoadingStartingHand={false}
             modelPresets={[]}
             onOpenDetails={() => {}}
@@ -1170,6 +1173,7 @@ export function PublicBenchmarkPage({ benchmarkId }: { benchmarkId: string }) {
                   defaultTimelineSelection="opening_hand"
                   deckId={publicSimulation.deck.id}
                   initialResultsInfo={publicSimulation.results}
+                  isAdmin={false}
                   isLoadingStartingHand={false}
                   modelPresets={[]}
                   onOpenDetails={() => {}}
@@ -2527,6 +2531,7 @@ export function DeckSimulation({
               cards={cards}
               commanders={commanders}
               deckId={deckId}
+              isAdmin={isAdmin}
               isLoadingStartingHand={isLoadingStartingHands}
               modelPresets={modelPresets}
               onOpenDetails={() =>
@@ -2755,6 +2760,7 @@ function SimulationDetails({
   demoMode = false,
   deckId,
   initialResultsInfo = null,
+  isAdmin,
   isLoadingStartingHand,
   modelPresets,
   onOpenDetails,
@@ -2778,6 +2784,7 @@ function SimulationDetails({
   demoMode?: boolean
   deckId: string
   initialResultsInfo?: SimulationResultsInfo | null
+  isAdmin: boolean
   isLoadingStartingHand: boolean
   modelPresets: LlmModelPreset[]
   onOpenDetails: () => void
@@ -2807,6 +2814,11 @@ function SimulationDetails({
   )
   const [isStartingTurnRun, setIsStartingTurnRun] = useState(false)
   const [turnRunError, setTurnRunError] = useState<string | null>(null)
+  const [evaluationRun, setEvaluationRun] = useState<{
+    llmRunId: string
+    resultKind: "opening_hand" | "turn"
+    resultLabel: string
+  } | null>(null)
   const [isStoppingSimulation, setIsStoppingSimulation] = useState(false)
   const [stopSimulationError, setStopSimulationError] = useState<string | null>(
     null
@@ -2878,6 +2890,7 @@ function SimulationDetails({
     setOpeningHandRunError(null)
     setIsStartingTurnRun(false)
     setTurnRunError(null)
+    setEvaluationRun(null)
     setIsStoppingSimulation(false)
     setStopSimulationError(null)
     setIsStoppingFutureTurns(false)
@@ -3295,76 +3308,95 @@ function SimulationDetails({
     simulation.id,
   ])
 
-  return resultsInfo ? (
-    <SimulationResultsPanel
-      canUpgradeUsage={canUpgradeUsage}
-      cards={cards}
-      commanders={commanders}
-      defaultTimelineSelection={defaultTimelineSelection}
-      demoMode={demoMode}
-      hasUsableModelPreset={selectedModelPreset !== null}
-      selectedModelPresetIsFreeTier={Boolean(selectedModelPreset?.isFreeTier)}
-      selectedModelPresetSupportsFlex={Boolean(
-        selectedModelPreset?.supportsFlex
-      )}
-      isStartingOpeningHandRun={isStartingOpeningHandRun}
-      isStartingTurnRun={isStartingTurnRun}
-      isLoadingStartingHand={isLoadingStartingHand}
-      isStoppingFutureTurns={isStoppingFutureTurns}
-      isStoppingSimulation={isStoppingSimulation}
-      onStartOpeningHandRun={() => void handleStartOpeningHandRun()}
-      onKeepResultsScrolledToBottom={keepResultsScrolledToBottom}
-      onModelPresetRequired={onOpenDetails}
-      onResultsScroll={handleResultsScroll}
-      onScrollResultsToBottomIfKept={scrollResultsToBottomIfKept}
-      onStartTurnRun={(turnNumber) => void handleStartTurnRun(turnNumber)}
-      onStopFutureTurns={() => void handleStopFutureTurns()}
-      onStopSimulation={() => void handleStopSimulation()}
-      onTimelineTurnSelected={onTimelineTurnSelected}
-      onUpgradeUsage={onUpgradeUsage}
-      openingHandRunError={openingHandRunError}
-      readOnly={readOnly}
-      requestedTimelineTurn={requestedTimelineTurn}
-      resultsError={resultsError}
-      resultsInfo={resultsInfo}
-      resultsPanelRef={resultsPanelRef}
-      showRunCost={showRunCost}
-      simulation={simulation}
-      startingHand={startingHand}
-      startingHandLoadError={startingHandLoadError}
-      stopFutureTurnsError={stopFutureTurnsError}
-      stopSimulationError={stopSimulationError}
-      turnRunError={turnRunError}
-    />
-  ) : (
-    <SimulationResultsShell gameState={null}>
-      <main
-        ref={resultsPanelRef}
-        className="simulation-scrollbar h-full min-h-0 min-w-0 flex-1 overflow-y-auto"
-        onScroll={handleResultsScroll}
-      >
-        <section className="grid w-full gap-4 p-5">
-          {resultsError ? (
-            <p
-              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-              role="alert"
-            >
-              {resultsError}
-            </p>
-          ) : null}
+  return (
+    <>
+      {resultsInfo ? (
+        <SimulationResultsPanel
+          canUpgradeUsage={canUpgradeUsage}
+          cards={cards}
+          commanders={commanders}
+          defaultTimelineSelection={defaultTimelineSelection}
+          demoMode={demoMode}
+          hasUsableModelPreset={selectedModelPreset !== null}
+          selectedModelPresetIsFreeTier={Boolean(
+            selectedModelPreset?.isFreeTier
+          )}
+          selectedModelPresetSupportsFlex={Boolean(
+            selectedModelPreset?.supportsFlex
+          )}
+          isAdmin={isAdmin}
+          isStartingOpeningHandRun={isStartingOpeningHandRun}
+          isStartingTurnRun={isStartingTurnRun}
+          isLoadingStartingHand={isLoadingStartingHand}
+          isStoppingFutureTurns={isStoppingFutureTurns}
+          isStoppingSimulation={isStoppingSimulation}
+          onEvaluateRun={setEvaluationRun}
+          onStartOpeningHandRun={() => void handleStartOpeningHandRun()}
+          onKeepResultsScrolledToBottom={keepResultsScrolledToBottom}
+          onModelPresetRequired={onOpenDetails}
+          onResultsScroll={handleResultsScroll}
+          onScrollResultsToBottomIfKept={scrollResultsToBottomIfKept}
+          onStartTurnRun={(turnNumber) => void handleStartTurnRun(turnNumber)}
+          onStopFutureTurns={() => void handleStopFutureTurns()}
+          onStopSimulation={() => void handleStopSimulation()}
+          onTimelineTurnSelected={onTimelineTurnSelected}
+          onUpgradeUsage={onUpgradeUsage}
+          openingHandRunError={openingHandRunError}
+          readOnly={readOnly}
+          requestedTimelineTurn={requestedTimelineTurn}
+          resultsError={resultsError}
+          resultsInfo={resultsInfo}
+          resultsPanelRef={resultsPanelRef}
+          showRunCost={showRunCost}
+          simulation={simulation}
+          startingHand={startingHand}
+          startingHandLoadError={startingHandLoadError}
+          stopFutureTurnsError={stopFutureTurnsError}
+          stopSimulationError={stopSimulationError}
+          turnRunError={turnRunError}
+        />
+      ) : (
+        <SimulationResultsShell gameState={null}>
+          <main
+            ref={resultsPanelRef}
+            className="simulation-scrollbar h-full min-h-0 min-w-0 flex-1 overflow-y-auto"
+            onScroll={handleResultsScroll}
+          >
+            <section className="grid w-full gap-4 p-5">
+              {resultsError ? (
+                <p
+                  className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                  role="alert"
+                >
+                  {resultsError}
+                </p>
+              ) : null}
 
-          {isLoadingResults ? (
-            <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
-              Loading simulation results...
-            </p>
-          ) : !resultsError ? (
-            <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
-              Waiting for simulation results.
-            </p>
-          ) : null}
-        </section>
-      </main>
-    </SimulationResultsShell>
+              {isLoadingResults ? (
+                <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+                  Loading simulation results...
+                </p>
+              ) : !resultsError ? (
+                <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+                  Waiting for simulation results.
+                </p>
+              ) : null}
+            </section>
+          </main>
+        </SimulationResultsShell>
+      )}
+
+      {evaluationRun ? (
+        <SimulationRunEvaluationModal
+          deckId={deckId}
+          defaultModelPresetId={simulation.llmModelPresetId}
+          modelPresets={modelPresets}
+          onClose={() => setEvaluationRun(null)}
+          run={evaluationRun}
+          simulationId={simulation.id}
+        />
+      ) : null}
+    </>
   )
 }
 
@@ -3412,12 +3444,14 @@ function SimulationResultsPanel({
   hasUsableModelPreset,
   selectedModelPresetIsFreeTier,
   selectedModelPresetSupportsFlex,
+  isAdmin,
   isStartingOpeningHandRun,
   isStartingTurnRun,
   isLoadingStartingHand,
   isStoppingFutureTurns,
   isStoppingSimulation,
   onStartOpeningHandRun,
+  onEvaluateRun,
   onKeepResultsScrolledToBottom,
   onModelPresetRequired,
   onResultsScroll,
@@ -3449,11 +3483,17 @@ function SimulationResultsPanel({
   hasUsableModelPreset: boolean
   selectedModelPresetIsFreeTier: boolean
   selectedModelPresetSupportsFlex: boolean
+  isAdmin: boolean
   isStartingOpeningHandRun: boolean
   isStartingTurnRun: boolean
   isLoadingStartingHand: boolean
   isStoppingFutureTurns: boolean
   isStoppingSimulation: boolean
+  onEvaluateRun: (run: {
+    llmRunId: string
+    resultKind: "opening_hand" | "turn"
+    resultLabel: string
+  }) => void
   onStartOpeningHandRun: () => void
   onKeepResultsScrolledToBottom: () => void
   onModelPresetRequired: () => void
@@ -3689,6 +3729,10 @@ function SimulationResultsPanel({
   const runs = [
     ...resultsInfo.openingHandLlmRuns.map((run) => ({
       ...run,
+      canEvaluate:
+        isAdmin &&
+        isSuccessfulOpeningHandRun(run) &&
+        run.failureMessage === null,
       canRerun: !readOnly && canStartOpeningHandRun && !isOpeningHandRunning,
       isActive: isActiveLlmRunStatus(run.status),
       resultKind: "opening_hand" as const,
@@ -3697,6 +3741,8 @@ function SimulationResultsPanel({
     })),
     ...resultsInfo.turnLlmRuns.map((run) => ({
       ...run,
+      canEvaluate:
+        isAdmin && isSuccessfulTurnRun(run) && run.failureMessage === null,
       canRerun:
         !readOnly &&
         typeof run.turnNumber === "number" &&
@@ -4153,7 +4199,7 @@ function SimulationResultsPanel({
       run.outdated ? "outdated" : null,
     ].filter(Boolean)
     const shouldShowRunMetadata = !run.isActive && runMetadata.length > 0
-    const shouldShowRunActions = run.canRerun
+    const shouldShowRunActions = run.canRerun || run.canEvaluate
     const emptyRunMessage = shouldShowFinishedThinkingStatus
       ? null
       : runStatusMessage
@@ -4275,6 +4321,24 @@ function SimulationResultsPanel({
               <div className="min-w-0" aria-hidden="true" />
             )}
             <div className="flex shrink-0 items-center justify-end gap-1">
+              {run.canEvaluate ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
+                  aria-label={`Evaluate ${run.resultLabel}`}
+                  title={`Evaluate ${run.resultLabel}`}
+                  onClick={() =>
+                    onEvaluateRun({
+                      llmRunId: run.llmRunId,
+                      resultKind: run.resultKind,
+                      resultLabel: run.resultLabel,
+                    })
+                  }
+                >
+                  <ClipboardCheck />
+                </Button>
+              ) : null}
               {run.canRerun ? (
                 <Button
                   type="button"

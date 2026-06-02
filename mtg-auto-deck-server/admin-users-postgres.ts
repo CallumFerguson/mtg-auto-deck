@@ -364,6 +364,10 @@ export async function deleteAdminUser(
           SELECT llm_run_id AS id
           FROM simulation_turn_llm_runs
           WHERE simulation_id IN (SELECT id FROM user_simulations)
+          UNION
+          SELECT llm_run_id AS id
+          FROM simulation_run_evaluations
+          WHERE simulation_id IN (SELECT id FROM user_simulations)
         ),
         target_llm_runs AS (
           SELECT id

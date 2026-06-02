@@ -6,6 +6,7 @@ import {
   isAbortError,
   parseOpeningHandCompletionFromResponseText,
   parseOpeningHandFromResponseText,
+  parseSimulationRunEvaluationCompletionFromResponseText,
   parseTurnSimulationCompletionFromResponseText,
   parseTurnSimulationFromResponseText,
 } from "./llm-run-events.js"
@@ -148,6 +149,147 @@ test("builds OpenRouter reasoning options with summaries when enabled", () => {
     effort: "high",
     summary: "auto",
   })
+})
+
+test("parses completed simulation run evaluation JSON", () => {
+  assert.deepEqual(
+    parseSimulationRunEvaluationCompletionFromResponseText(
+      JSON.stringify({
+        legalPass: false,
+        strategicPass: true,
+        simulationQualityScore: 7.64,
+        illegalActions: ["Drew without a tool."],
+        strategicMistakes: [],
+      })
+    ),
+    {
+      legalPass: false,
+      strategicPass: true,
+      simulationQualityScore: 7.6,
+      illegalActions: ["Drew without a tool."],
+      strategicMistakes: [],
+      parsedOutput: {
+        legalPass: false,
+        strategicPass: true,
+        simulationQualityScore: 7.64,
+        illegalActions: ["Drew without a tool."],
+        strategicMistakes: [],
+      },
+    }
+  )
+})
+
+test("parses simulation run evaluation score bounds", () => {
+  assert.equal(
+    parseSimulationRunEvaluationCompletionFromResponseText(
+      JSON.stringify({
+        legalPass: true,
+        strategicPass: true,
+        simulationQualityScore: 0,
+        illegalActions: [],
+        strategicMistakes: [],
+      })
+    ).simulationQualityScore,
+    0
+  )
+  assert.equal(
+    parseSimulationRunEvaluationCompletionFromResponseText(
+      JSON.stringify({
+        legalPass: true,
+        strategicPass: true,
+        simulationQualityScore: 10,
+        illegalActions: [],
+        strategicMistakes: [],
+      })
+    ).simulationQualityScore,
+    10
+  )
+})
+
+test("rejects invalid completed simulation run evaluation JSON", () => {
+  assert.throws(
+    () =>
+      parseSimulationRunEvaluationCompletionFromResponseText(
+        JSON.stringify({
+          legalPass: "yes",
+          strategicPass: true,
+          simulationQualityScore: 8.5,
+          illegalActions: [],
+          strategicMistakes: [],
+        })
+      ),
+    /legalPass/
+  )
+
+  assert.throws(
+    () =>
+      parseSimulationRunEvaluationCompletionFromResponseText(
+        JSON.stringify({
+          legalPass: true,
+          strategicPass: null,
+          simulationQualityScore: 8.5,
+          illegalActions: [],
+          strategicMistakes: [],
+        })
+      ),
+    /strategicPass/
+  )
+
+  assert.throws(
+    () =>
+      parseSimulationRunEvaluationCompletionFromResponseText(
+        JSON.stringify({
+          legalPass: true,
+          strategicPass: true,
+          simulationQualityScore: -0.1,
+          illegalActions: [],
+          strategicMistakes: [],
+        })
+      ),
+    /simulationQualityScore/
+  )
+
+  assert.throws(
+    () =>
+      parseSimulationRunEvaluationCompletionFromResponseText(
+        JSON.stringify({
+          legalPass: true,
+          strategicPass: true,
+          simulationQualityScore: 11,
+          illegalActions: [],
+          strategicMistakes: [],
+        })
+      ),
+    /simulationQualityScore/
+  )
+
+  assert.throws(
+    () =>
+      parseSimulationRunEvaluationCompletionFromResponseText(
+        JSON.stringify({
+          legalPass: true,
+          strategicPass: true,
+          simulationQualityScore: 9.5,
+          illegalActions: [1],
+          strategicMistakes: [],
+        })
+    ),
+    /illegalActions/
+  )
+
+  assert.throws(
+    () =>
+      parseSimulationRunEvaluationCompletionFromResponseText(
+        JSON.stringify({
+          legalPass: true,
+          strategicPass: true,
+          simulationQualityScore: 9.5,
+          illegalActions: [],
+          strategicMistakes: [false],
+        })
+      ),
+    /strategicMistakes/
+  )
 })
 
 test("builds MCP function call inserts with normalized success output", () => {

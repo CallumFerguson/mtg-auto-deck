@@ -17,6 +17,7 @@ import { z } from "zod/v4"
 import {
   assertCompletedAnthropicMessage,
   buildAnthropicRequestPayload,
+  buildAnthropicTextRequestPayload,
   getAnthropicMessageOutputText,
   normalizeAnthropicUsage,
   type AnthropicRequestPayload,
@@ -79,6 +80,7 @@ import {
 } from "./db.js"
 import {
   buildStartingHandSimulationPromptParts,
+  buildSimulationRunEvaluationPromptFromData,
   buildTurnSimulationPromptParts,
   isStructuredSimulationPrompt,
   type StructuredSimulationPrompt,
@@ -98,7 +100,9 @@ import {
   cancelStaleInFlightLlmRuns,
   claimNextQueuedLlmRun,
   completeOpeningHandLlmRun,
+  completeSimulationRunEvaluation,
   completeTurnLlmRun,
+  createSimulationRunEvaluation,
   createLlmRunMcpToken,
   createOpeningHandLlmRun,
   createSimulation,
@@ -114,6 +118,8 @@ import {
   getSimulationCreationDecision,
   getSimulationDebugInfo,
   getSimulationResultsInfo,
+  getSimulationRunEvaluationPromptData,
+  listSimulationRunEvaluations,
   getSimulationSummary,
   isLlmRunActive,
   listActiveSimulationLlmRuns,
@@ -185,6 +191,7 @@ import {
   getStringProperty,
   isAbortError,
   parseOpeningHandCompletionFromResponseText,
+  parseSimulationRunEvaluationCompletionFromResponseText,
   parseTurnSimulationCompletionFromResponseText,
 } from "./llm-run-events.js"
 import {
@@ -206,6 +213,7 @@ import {
   buildProviderReasoningOptions,
   LlmConfigurationError,
   getLlmRunQueueConfig,
+  getEvaluationLlmRunConfig,
   getOpeningHandLlmRunConfig,
   getTurnSimulationLlmRunConfig,
   llmProviderSchema,
@@ -213,10 +221,12 @@ import {
   type OpenAiRunConfig,
   type AnthropicRunConfig,
   type OpenRouterRunConfig,
+  type EvaluationLlmRunConfig,
   type OpeningHandLlmRunConfig,
   type OpeningHandAnthropicRunConfig,
   type OpeningHandOpenAiRunConfig,
   type ResolvedLlamaCppRunConfig,
+  type ResolvedEvaluationLlmRunConfig,
   type ResolvedOpeningHandLlmRunConfig,
   type ResolvedTurnSimulationLlmRunConfig,
   type TurnSimulationAnthropicRunConfig,
@@ -447,6 +457,13 @@ const adminSubscriptionTierGrantSchema = z.object({
 const createTurnLlmRunSchema = z.object({
   turnNumber: z.number().int().positive(),
 })
+const createSimulationRunEvaluationSchema = z
+  .object({
+    llmModelPresetId: z.uuid(),
+    llmProcessingMode: z.enum(["realtime", "openai_batch"]),
+    useFlexServiceTier: z.boolean().default(false),
+  })
+  .strict()
 
 type ActiveLlmRunRuntime = {
   abortController: AbortController
@@ -470,6 +487,8 @@ type ActiveLlmRunRuntime = {
   startedAt: string | null
   status: LlmRunStatus
   turnNumber?: number
+  targetLlmRunId?: string
+  targetRunPhase?: "opening_hand" | "turn"
 }
 
 type AuthenticatedUser = {
@@ -2189,6 +2208,29 @@ function buildTurnSimulationOpenAiRequestPayload(
   }
 }
 
+function buildEvaluationOpenAiRequestPayload(
+  config: OpenAiRunConfig,
+  prompt: LlmPromptInput,
+  simulationId: string,
+  targetLlmRunId: string
+) {
+  const fullPrompt = getLlmPromptFullText(prompt)
+
+  return {
+    providerType: "openai" as const,
+    model: config.model,
+    input: fullPrompt,
+    max_output_tokens: config.maxOutputTokens,
+    ...(config.serviceTier ? { service_tier: config.serviceTier } : {}),
+    metadata: {
+      simulationId,
+      phase: "evaluation",
+      targetLlmRunId,
+    },
+    reasoning: buildProviderReasoningOptions(config.reasoningEffort, false),
+  }
+}
+
 function buildOpeningHandAnthropicRequestPayload(
   config: OpeningHandAnthropicRunConfig,
   prompt: LlmPromptInput,
@@ -2226,6 +2268,19 @@ function buildTurnSimulationAnthropicRequestPayload(
     prompt: requireStructuredLlmPrompt(prompt),
     reasoningEffort: config.reasoningEffort,
     reasoningSummariesEnabled,
+  })
+}
+
+function buildEvaluationAnthropicRequestPayload(
+  config: AnthropicRunConfig,
+  prompt: LlmPromptInput
+) {
+  return buildAnthropicTextRequestPayload({
+    maxOutputTokens: config.maxOutputTokens,
+    model: config.model,
+    prompt: requireStructuredLlmPrompt(prompt),
+    reasoningEffort: config.reasoningEffort,
+    reasoningSummariesEnabled: false,
   })
 }
 
@@ -2366,6 +2421,32 @@ function buildTurnSimulationOpenRouterRequestPayload(
   }
 }
 
+function buildEvaluationOpenRouterRequestPayload(
+  config: OpenRouterRunConfig,
+  prompt: LlmPromptInput,
+  simulationId: string,
+  targetLlmRunId: string
+) {
+  const fullPrompt = getLlmPromptFullText(prompt)
+
+  return {
+    providerType: "openrouter" as const,
+    model: config.model,
+    input: fullPrompt,
+    maxOutputTokens: config.maxOutputTokens,
+    ...(config.serviceTier ? { serviceTier: config.serviceTier } : {}),
+    metadata: {
+      simulationId,
+      phase: "evaluation",
+      targetLlmRunId,
+    },
+    reasoning: buildOpenRouterReasoningOptions(config.reasoningEffort, false),
+    parallelToolCalls: false as const,
+    provider: getOpenRouterProviderPreferences(config.modelProvider),
+    stopWhenStepCount: config.stopWhenStepCount,
+  }
+}
+
 function buildTurnSimulationLlamaCppRequestPayload(
   config: ResolvedLlamaCppRunConfig,
   prompt: LlmPromptInput,
@@ -2397,6 +2478,35 @@ function buildTurnSimulationLlamaCppRequestPayload(
   }
 }
 
+function buildEvaluationLlamaCppRequestPayload(
+  config: ResolvedLlamaCppRunConfig,
+  prompt: LlmPromptInput,
+  simulationId: string,
+  targetLlmRunId: string
+): LlamaCppChatCompletionRequestPayload {
+  const fullPrompt = getLlmPromptFullText(prompt)
+
+  return {
+    providerType: "llamacpp",
+    model: config.model,
+    max_tokens: config.maxOutputTokens,
+    messages: [
+      {
+        role: "user",
+        content: fullPrompt,
+      },
+    ],
+    metadata: {
+      simulationId,
+      phase: "evaluation",
+      targetLlmRunId,
+    },
+    parallel_tool_calls: false,
+    tools: [],
+    stopWhenStepCount: config.stopWhenStepCount,
+  }
+}
+
 function getOpenRouterProviderPreferences(modelProvider: string | null) {
   if (modelProvider === null) {
     return undefined
@@ -2409,13 +2519,19 @@ function getOpenRouterProviderPreferences(modelProvider: string | null) {
 }
 
 function getLlmRunOpenRouterModelProvider(
-  config: ResolvedOpeningHandLlmRunConfig | ResolvedTurnSimulationLlmRunConfig
+  config:
+    | ResolvedEvaluationLlmRunConfig
+    | ResolvedOpeningHandLlmRunConfig
+    | ResolvedTurnSimulationLlmRunConfig
 ) {
   return config.provider === "openrouter" ? config.modelProvider : null
 }
 
 function getLlmRunServiceTier(
-  config: ResolvedOpeningHandLlmRunConfig | ResolvedTurnSimulationLlmRunConfig
+  config:
+    | ResolvedEvaluationLlmRunConfig
+    | ResolvedOpeningHandLlmRunConfig
+    | ResolvedTurnSimulationLlmRunConfig
 ) {
   return config.provider === "llamacpp" || config.provider === "anthropic"
     ? null
@@ -2440,6 +2556,7 @@ function getQueuedLlmPromptInput(run: ClaimedQueuedLlmRun): LlmPromptInput {
 
 function withCapturedLlmRunServiceTier<
   TConfig extends
+    | ResolvedEvaluationLlmRunConfig
     | ResolvedOpeningHandLlmRunConfig
     | ResolvedTurnSimulationLlmRunConfig,
 >(config: TConfig, serviceTier: string | null): TConfig {
@@ -2537,11 +2654,50 @@ function buildTurnSimulationLlmRequestPayload(
   )
 }
 
+function buildEvaluationLlmRequestPayload(
+  config: ResolvedEvaluationLlmRunConfig,
+  prompt: LlmPromptInput,
+  simulationId: string,
+  targetLlmRunId: string
+) {
+  if (config.provider === "openai") {
+    return buildEvaluationOpenAiRequestPayload(
+      config,
+      prompt,
+      simulationId,
+      targetLlmRunId
+    )
+  }
+
+  if (config.provider === "anthropic") {
+    return buildEvaluationAnthropicRequestPayload(config, prompt)
+  }
+
+  if (config.provider === "llamacpp") {
+    return buildEvaluationLlamaCppRequestPayload(
+      config,
+      prompt,
+      simulationId,
+      targetLlmRunId
+    )
+  }
+
+  return buildEvaluationOpenRouterRequestPayload(
+    config,
+    prompt,
+    simulationId,
+    targetLlmRunId
+  )
+}
+
 type OpeningHandLlmRequestPayload = ReturnType<
   typeof buildOpeningHandLlmRequestPayload
 >
 type TurnSimulationLlmRequestPayload = ReturnType<
   typeof buildTurnSimulationLlmRequestPayload
+>
+type EvaluationLlmRequestPayload = ReturnType<
+  typeof buildEvaluationLlmRequestPayload
 >
 type OpeningHandOpenRouterRequestPayload = ReturnType<
   typeof buildOpeningHandOpenRouterRequestPayload
@@ -2549,7 +2705,15 @@ type OpeningHandOpenRouterRequestPayload = ReturnType<
 type TurnSimulationOpenRouterRequestPayload = ReturnType<
   typeof buildTurnSimulationOpenRouterRequestPayload
 >
+type EvaluationOpenRouterRequestPayload = ReturnType<
+  typeof buildEvaluationOpenRouterRequestPayload
+>
+type LlmRequestPayload =
+  | EvaluationLlmRequestPayload
+  | OpeningHandLlmRequestPayload
+  | TurnSimulationLlmRequestPayload
 type LlamaCppRequestPayload =
+  | ReturnType<typeof buildEvaluationLlamaCppRequestPayload>
   | ReturnType<typeof buildOpeningHandLlamaCppRequestPayload>
   | ReturnType<typeof buildTurnSimulationLlamaCppRequestPayload>
 
@@ -2618,6 +2782,10 @@ function formatLlmRunPhase(phase: LlmRunPhase) {
     return "Turn"
   }
 
+  if (phase === "evaluation") {
+    return "Evaluation"
+  }
+
   return "Simulation"
 }
 
@@ -2628,9 +2796,17 @@ async function resolveLlmRunConfigModel(
   config: TurnSimulationLlmRunConfig
 ): Promise<ResolvedTurnSimulationLlmRunConfig>
 async function resolveLlmRunConfigModel(
-  config: OpeningHandLlmRunConfig | TurnSimulationLlmRunConfig
+  config: EvaluationLlmRunConfig
+): Promise<ResolvedEvaluationLlmRunConfig>
+async function resolveLlmRunConfigModel(
+  config:
+    | EvaluationLlmRunConfig
+    | OpeningHandLlmRunConfig
+    | TurnSimulationLlmRunConfig
 ): Promise<
-  ResolvedOpeningHandLlmRunConfig | ResolvedTurnSimulationLlmRunConfig
+  | ResolvedEvaluationLlmRunConfig
+  | ResolvedOpeningHandLlmRunConfig
+  | ResolvedTurnSimulationLlmRunConfig
 > {
   return config
 }
@@ -2895,6 +3071,149 @@ async function prepareAndStartTurnLlmRun({
     }
 
     throw error
+  }
+}
+
+async function prepareAndStartSimulationRunEvaluation({
+  deckId,
+  evaluatorUserId,
+  llmModelPresetId,
+  llmProcessingMode,
+  simulationId,
+  targetLlmRunId,
+  useFlexServiceTier,
+}: {
+  deckId: string
+  simulationId: string
+  targetLlmRunId: string
+  evaluatorUserId: string
+  llmModelPresetId: string
+  llmProcessingMode: LlmProcessingMode
+  useFlexServiceTier: boolean
+}) {
+  let createdLlmRunId: string | null = null
+
+  try {
+    const modelPreset = await getEnabledLlmModelPreset(llmModelPresetId)
+
+    if (!modelPreset) {
+      throw new SimulationValidationError(
+        "Choose an enabled model preset before starting an evaluation."
+      )
+    }
+
+    if (llmProcessingMode === "openai_batch" && modelPreset.provider !== "openai") {
+      throw new SimulationValidationError(
+        "Batch evaluations require an OpenAI model preset."
+      )
+    }
+
+    if (llmProcessingMode === "openai_batch" && useFlexServiceTier) {
+      throw new SimulationValidationError(
+        "Batch processing cannot be combined with flex processing."
+      )
+    }
+
+    if (useFlexServiceTier && !modelPreset.supportsFlex) {
+      throw new SimulationValidationError(
+        "Flex processing can only be enabled for model presets that support flex."
+      )
+    }
+
+    const promptData = await getSimulationRunEvaluationPromptData({
+      deckId,
+      simulationId,
+      targetLlmRunId,
+    })
+
+    if (!promptData) {
+      throw new SimulationValidationError("Simulation run not found.")
+    }
+
+    if (promptData.targetRunPhase === "opening_hand") {
+      parseOpeningHandCompletionFromResponseText(
+        promptData.targetRunFinalOutputText
+      )
+    } else {
+      parseTurnSimulationCompletionFromResponseText(
+        promptData.targetRunFinalOutputText
+      )
+    }
+
+    const llmConfig = await resolveLlmRunConfigModel(
+      getEvaluationLlmRunConfig(
+        getLlmModelPresetRunConfig(modelPreset),
+        process.env,
+        {
+          useFlexServiceTier,
+        }
+      )
+    )
+    const evaluation = await createSimulationRunEvaluation(deckId, {
+      simulationId,
+      targetLlmRunId,
+      evaluatorUserId,
+      llmModelPresetId: llmConfig.modelPresetId,
+      processingMode: llmProcessingMode,
+      provider: llmConfig.provider,
+      model: llmConfig.model,
+      openrouterModelProvider: getLlmRunOpenRouterModelProvider(llmConfig),
+      serviceTier: getLlmRunServiceTier(llmConfig),
+      reasoningEffort: llmConfig.reasoningEffort,
+      runtimeStreamKey: randomUUID(),
+      fullPrompt: "",
+      requestPayload: {},
+    })
+    createdLlmRunId = evaluation.llmRunId
+
+    abortSupersededEvaluationRuntimes(evaluation.cancelledRuntimeStreamKeys)
+
+    const prompt = buildSimulationRunEvaluationPromptFromData(promptData)
+    const fullPrompt = prompt.fullPrompt
+    const requestPayload = buildEvaluationLlmRequestPayload(
+      llmConfig,
+      prompt,
+      simulationId,
+      targetLlmRunId
+    )
+
+    await updateLlmRunRequestData({
+      llmRunId: evaluation.llmRunId,
+      fullPrompt,
+      requestPayload: getPersistableLlmRequestPayload(requestPayload),
+    })
+
+    if (llmProcessingMode === "realtime") {
+      if (!(await markLlmRunQueued(evaluation.llmRunId))) {
+        throw new Error("Evaluation LLM run could not be queued.")
+      }
+      nudgeLlmRunQueue()
+    } else {
+      nudgeOpenAiBatchSubmitter(getLlmRunQueueConfig())
+    }
+
+    return evaluation
+  } catch (error) {
+    if (createdLlmRunId !== null) {
+      await failLlmRun(createdLlmRunId, getErrorMessage(error)).catch(
+        (failError: unknown) => {
+          console.error("Failed to mark evaluation LLM run failed:", failError)
+        }
+      )
+    }
+
+    throw error
+  }
+}
+
+function abortSupersededEvaluationRuntimes(runtimeStreamKeys: readonly string[]) {
+  for (const runtimeStreamKey of runtimeStreamKeys) {
+    const runtime = activeLlmRunRuntimes.get(runtimeStreamKey)
+
+    if (runtime?.phase === "evaluation") {
+      runtime.status = "cancelled"
+      runtime.abortController.abort()
+    }
   }
 }
 
@@ -3416,26 +3735,40 @@ async function prepareOpenAiBatchLine(
   run: OpenAiBatchPendingRun
 ): Promise<PreparedOpenAiBatchLine> {
   const modelPreset = await getRequiredOpenAiBatchRunModelPreset(run)
-  const mcpRunToken = generateMcpRunToken(OPENAI_BATCH_MCP_RUN_TOKEN_TTL_MS)
-  await createLlmRunMcpToken({
-    deckId: run.deckId,
-    llmRunId: run.llmRunId,
-    simulationId: run.simulationId,
-    phase: run.phase,
-    tokenHash: mcpRunToken.tokenHash,
-    expiresAt: mcpRunToken.expiresAt,
-  })
+  const mcpRunToken =
+    run.phase === "evaluation"
+      ? null
+      : generateMcpRunToken(OPENAI_BATCH_MCP_RUN_TOKEN_TTL_MS)
+
+  if (mcpRunToken !== null) {
+    const mcpRunPhase =
+      run.phase === "opening_hand" ? "opening_hand" : "turn"
+
+    await createLlmRunMcpToken({
+      deckId: run.deckId,
+      llmRunId: run.llmRunId,
+      simulationId: run.simulationId,
+      phase: mcpRunPhase,
+      tokenHash: mcpRunToken.tokenHash,
+      expiresAt: mcpRunToken.expiresAt,
+    })
+  }
 
   const requestPayload =
     run.phase === "opening_hand"
       ? await buildOpenAiBatchOpeningHandRequestPayload({
           modelPreset,
-          mcpRunToken: mcpRunToken.token,
+          mcpRunToken: mcpRunToken?.token ?? "",
           run,
         })
+      : run.phase === "evaluation"
+        ? await buildOpenAiBatchEvaluationRequestPayload({
+            modelPreset,
+            run,
+          })
       : await buildOpenAiBatchTurnRequestPayload({
           modelPreset,
-          mcpRunToken: mcpRunToken.token,
+          mcpRunToken: mcpRunToken?.token ?? "",
           run,
         })
   const requestPayloadRedacted = getPersistableLlmRequestPayload(requestPayload)
@@ -3543,6 +3876,40 @@ async function buildOpenAiBatchTurnRequestPayload({
   )
 }
 
+async function buildOpenAiBatchEvaluationRequestPayload({
+  modelPreset,
+  run,
+}: {
+  modelPreset: LlmModelPreset
+  run: OpenAiBatchPendingRun
+}): Promise<OpenAiRequestPayload> {
+  if (!run.targetLlmRunId) {
+    throw new Error("Batch evaluation LLM run is missing its target run.")
+  }
+
+  const config = withCapturedLlmRunServiceTier(
+    await resolveLlmRunConfigModel(
+      getEvaluationLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
+    ),
+    run.serviceTier
+  )
+
+  if (config.provider !== "openai") {
+    throw new Error("Batch evaluation run resolved to a non-OpenAI config.")
+  }
+
+  assertOpenAiBatchRunMatchesConfig(run, config)
+
+  return requireOpenAiRequestPayload(
+    buildEvaluationLlmRequestPayload(
+      config,
+      run.fullPrompt,
+      run.simulationId,
+      run.targetLlmRunId
+    )
+  )
+}
+
 function assertOpenAiBatchRunMatchesConfig(
   run: OpenAiBatchPendingRun,
   config: OpenAiRunConfig
@@ -3630,7 +3997,7 @@ async function submitPreparedOpenAiBatchLineChunk(
     preparedLines[0].run
   )
   const config = await resolveLlmRunConfigModel(
-    getOpeningHandLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
+    getEvaluationLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
   )
 
   if (config.provider !== "openai") {
@@ -3717,7 +4084,7 @@ async function pollOpenAiBatches() {
     }
 
     const config = await resolveLlmRunConfigModel(
-      getOpeningHandLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
+      getEvaluationLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
     )
 
     if (config.provider !== "openai") {
@@ -3835,7 +4202,7 @@ async function reconcileOpenAiBatchOutputLine({
     return
   }
 
-  let completion: SimulationLlmCompletionResult
+  let completion: SimulationLlmCompletionResult | null = null
 
   try {
     assertCompletedProviderResponse(responseBody, item.phase, "OpenAI")
@@ -3854,7 +4221,7 @@ async function reconcileOpenAiBatchOutputLine({
         summary: parsedOpeningHand.summary,
         usage,
       })
-    } else {
+    } else if (item.phase === "turn") {
       const parsedTurn =
         parseTurnSimulationCompletionFromResponseText(outputText)
       completion = await completeTurnLlmRun({
@@ -3863,6 +4230,20 @@ async function reconcileOpenAiBatchOutputLine({
         llmRunId: item.llmRunId,
         rawResponse: responseBody,
         turnActions: parsedTurn.turnActions,
+        usage,
+      })
+    } else {
+      const parsedEvaluation =
+        parseSimulationRunEvaluationCompletionFromResponseText(outputText)
+      await completeSimulationRunEvaluation({
+        finalOutputText: outputText,
+        illegalActions: parsedEvaluation.illegalActions,
+        legalPass: parsedEvaluation.legalPass,
+        llmRunId: item.llmRunId,
+        rawResponse: responseBody,
+        simulationQualityScore: parsedEvaluation.simulationQualityScore,
+        strategicMistakes: parsedEvaluation.strategicMistakes,
+        strategicPass: parsedEvaluation.strategicPass,
         usage,
       })
     }
@@ -3881,15 +4262,20 @@ async function reconcileOpenAiBatchOutputLine({
     openAiBatchId,
     outputPayload: outputLine,
   })
-  await revokeLlmRunMcpToken(item.llmRunId).catch((error: unknown) => {
-    console.error("Failed to revoke completed batch MCP token:", error)
-  })
-  await publishSimulationResultsState({
-    deckId: item.deckId,
-    llmRunId: item.llmRunId,
-    simulationId: item.simulationId,
-  })
-  await handleSimulationCompletionNextStep(completion)
+  if (item.phase !== "evaluation") {
+    await revokeLlmRunMcpToken(item.llmRunId).catch((error: unknown) => {
+      console.error("Failed to revoke completed batch MCP token:", error)
+    })
+    await publishSimulationResultsState({
+      deckId: item.deckId,
+      llmRunId: item.llmRunId,
+      simulationId: item.simulationId,
+    })
+
+    if (completion !== null) {
+      await handleSimulationCompletionNextStep(completion)
+    }
+  }
 }
 
 async function reconcileOpenAiBatchErrorLine({
@@ -4089,6 +4475,42 @@ async function startClaimedQueuedLlmRun(run: ClaimedQueuedLlmRun) {
       return
     }
 
+    if (run.phase === "evaluation") {
+      if (!run.targetLlmRunId || !run.targetRunPhase) {
+        throw new Error("Queued evaluation LLM run is missing its target run.")
+      }
+
+      const config = withCapturedLlmRunServiceTier(
+        await resolveLlmRunConfigModel(
+          getEvaluationLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
+        ),
+        run.serviceTier
+      )
+
+      assertClaimedRunMatchesConfig(run, config)
+
+      if (!(await isLlmRunActive(run.llmRunId))) {
+        return
+      }
+
+      startEvaluationLlmRun({
+        attemptNumber: run.attemptNumber,
+        config,
+        createdAt: run.createdAt,
+        deckId: run.deckId,
+        fullPrompt: run.fullPrompt,
+        llmRunId: run.llmRunId,
+        llmModelPresetName: modelPreset.name,
+        prompt: getQueuedLlmPromptInput(run),
+        runtimeStreamKey: run.runtimeStreamKey,
+        simulationId: run.simulationId,
+        startedAt: run.startedAt,
+        targetLlmRunId: run.targetLlmRunId,
+        targetRunPhase: run.targetRunPhase,
+      })
+      return
+    }
+
     const config = withCapturedLlmRunServiceTier(
       await resolveLlmRunConfigModel(
         getTurnSimulationLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
@@ -4155,7 +4577,10 @@ async function getFreeTierRunPolicyFailureMessage(
 
 function assertClaimedRunMatchesConfig(
   run: ClaimedQueuedLlmRun,
-  config: ResolvedOpeningHandLlmRunConfig | ResolvedTurnSimulationLlmRunConfig
+  config:
+    | ResolvedEvaluationLlmRunConfig
+    | ResolvedOpeningHandLlmRunConfig
+    | ResolvedTurnSimulationLlmRunConfig
 ) {
   const currentOpenRouterModelProvider =
     getLlmRunOpenRouterModelProvider(config)
@@ -4187,7 +4612,10 @@ function formatQueuedRunConfig(run: ClaimedQueuedLlmRun) {
 }
 
 function formatLlmRunConfig(
-  config: ResolvedOpeningHandLlmRunConfig | ResolvedTurnSimulationLlmRunConfig
+  config:
+    | ResolvedEvaluationLlmRunConfig
+    | ResolvedOpeningHandLlmRunConfig
+    | ResolvedTurnSimulationLlmRunConfig
 ) {
   return formatLlmRunConfigParts({
     model: config.model,
@@ -4251,39 +4679,39 @@ type CompletedLlmResponseResult = {
 }
 
 type OpenAiRequestPayload =
+  | ReturnType<typeof buildEvaluationOpenAiRequestPayload>
   | ReturnType<typeof buildOpeningHandOpenAiRequestPayload>
   | ReturnType<typeof buildTurnSimulationOpenAiRequestPayload>
 type OpenRouterRequestPayload =
+  | EvaluationOpenRouterRequestPayload
   | OpeningHandOpenRouterRequestPayload
   | TurnSimulationOpenRouterRequestPayload
 
 function isOpenAiRequestPayload(
-  requestPayload: OpeningHandLlmRequestPayload | TurnSimulationLlmRequestPayload
+  requestPayload: LlmRequestPayload
 ): requestPayload is OpenAiRequestPayload {
   return asRecord(requestPayload).providerType === "openai"
 }
 
 function isOpenRouterRequestPayload(
-  requestPayload: OpeningHandLlmRequestPayload | TurnSimulationLlmRequestPayload
+  requestPayload: LlmRequestPayload
 ): requestPayload is OpenRouterRequestPayload {
   return asRecord(requestPayload).providerType === "openrouter"
 }
 
 function isAnthropicRequestPayload(
-  requestPayload: OpeningHandLlmRequestPayload | TurnSimulationLlmRequestPayload
+  requestPayload: LlmRequestPayload
 ): requestPayload is AnthropicRequestPayload {
   return asRecord(requestPayload).providerType === "anthropic"
 }
 
 function isLlamaCppRequestPayload(
-  requestPayload: OpeningHandLlmRequestPayload | TurnSimulationLlmRequestPayload
+  requestPayload: LlmRequestPayload
 ): requestPayload is LlamaCppRequestPayload {
   return asRecord(requestPayload).providerType === "llamacpp"
 }
 
-function requireOpenAiRequestPayload(
-  requestPayload: OpeningHandLlmRequestPayload | TurnSimulationLlmRequestPayload
-) {
+function requireOpenAiRequestPayload(requestPayload: LlmRequestPayload) {
   if (!isOpenAiRequestPayload(requestPayload)) {
     throw new Error("LLM run config and request payload provider mismatch.")
   }
@@ -4291,9 +4719,7 @@ function requireOpenAiRequestPayload(
   return requestPayload
 }
 
-function requireOpenRouterRequestPayload(
-  requestPayload: OpeningHandLlmRequestPayload | TurnSimulationLlmRequestPayload
-) {
+function requireOpenRouterRequestPayload(requestPayload: LlmRequestPayload) {
   if (!isOpenRouterRequestPayload(requestPayload)) {
     throw new Error("LLM run config and request payload provider mismatch.")
   }
@@ -4301,9 +4727,7 @@ function requireOpenRouterRequestPayload(
   return requestPayload
 }
 
-function requireAnthropicRequestPayload(
-  requestPayload: OpeningHandLlmRequestPayload | TurnSimulationLlmRequestPayload
-) {
+function requireAnthropicRequestPayload(requestPayload: LlmRequestPayload) {
   if (!isAnthropicRequestPayload(requestPayload)) {
     throw new Error("LLM run config and request payload provider mismatch.")
   }
@@ -4311,9 +4735,7 @@ function requireAnthropicRequestPayload(
   return requestPayload
 }
 
-function requireLlamaCppRequestPayload(
-  requestPayload: OpeningHandLlmRequestPayload | TurnSimulationLlmRequestPayload
-) {
+function requireLlamaCppRequestPayload(requestPayload: LlmRequestPayload) {
   if (!isLlamaCppRequestPayload(requestPayload)) {
     throw new Error("LLM run config and request payload provider mismatch.")
   }
@@ -5394,6 +5816,217 @@ function startOpeningHandLlmRun({
     simulationId,
     startedAt,
   })
+}
+
+function startEvaluationLlmRun({
+  attemptNumber,
+  config,
+  createdAt,
+  deckId,
+  fullPrompt,
+  llmRunId,
+  llmModelPresetName,
+  prompt,
+  runtimeStreamKey,
+  simulationId,
+  startedAt,
+  targetLlmRunId,
+  targetRunPhase,
+}: {
+  attemptNumber: number
+  config: ResolvedEvaluationLlmRunConfig
+  createdAt: string
+  deckId: string
+  fullPrompt: string
+  llmRunId: string
+  llmModelPresetName: string | null
+  prompt: LlmPromptInput
+  runtimeStreamKey: string
+  simulationId: string
+  startedAt: string
+  targetLlmRunId: string
+  targetRunPhase: "opening_hand" | "turn"
+}) {
+  void runEvaluationLlmRun({
+    attemptNumber,
+    config,
+    createdAt,
+    deckId,
+    fullPrompt,
+    llmRunId,
+    llmModelPresetName,
+    prompt,
+    runtimeStreamKey,
+    simulationId,
+    startedAt,
+    targetLlmRunId,
+    targetRunPhase,
+  })
+}
+
+async function runEvaluationLlmRun({
+  attemptNumber,
+  config,
+  createdAt,
+  deckId,
+  fullPrompt,
+  llmRunId,
+  llmModelPresetName,
+  prompt,
+  runtimeStreamKey,
+  simulationId,
+  startedAt,
+  targetLlmRunId,
+  targetRunPhase,
+}: {
+  attemptNumber: number
+  config: ResolvedEvaluationLlmRunConfig
+  createdAt: string
+  deckId: string
+  fullPrompt: string
+  llmRunId: string
+  llmModelPresetName: string | null
+  prompt: LlmPromptInput
+  runtimeStreamKey: string
+  simulationId: string
+  startedAt: string
+  targetLlmRunId: string
+  targetRunPhase: "opening_hand" | "turn"
+}) {
+  const completion = createRuntimeCompletion()
+  const runtime: ActiveLlmRunRuntime = {
+    abortController: new AbortController(),
+    attemptNumber,
+    completionPromise: completion.completionPromise,
+    createdAt,
+    deckId,
+    llmRunId,
+    llmModelPresetId: config.modelPresetId,
+    llmModelPresetName,
+    processingMode: "realtime",
+    model: config.model,
+    fullPrompt,
+    phase: "evaluation",
+    provider: config.provider,
+    reasoningEffort: config.reasoningEffort,
+    serviceTier: getLlmRunServiceTier(config),
+    resolveCompletion: completion.resolveCompletion,
+    runtimeStreamKey,
+    simulationId,
+    startedAt,
+    status: "streaming",
+    targetLlmRunId,
+    targetRunPhase,
+  }
+
+  activeLlmRunRuntimes.set(runtimeStreamKey, runtime)
+  let responseResult: CompletedLlmResponseResult | null = null
+
+  try {
+    throwIfRuntimeAborted(runtime.abortController.signal)
+    const requestPayload = buildEvaluationLlmRequestPayload(
+      config,
+      prompt,
+      simulationId,
+      targetLlmRunId
+    )
+
+    await updateLlmRunRequestData({
+      llmRunId,
+      fullPrompt,
+      requestPayload: getPersistableLlmRequestPayload(requestPayload),
+    })
+    throwIfRuntimeAborted(runtime.abortController.signal)
+
+    responseResult =
+      config.provider === "openai"
+        ? await collectOpenAiLlmResponse({
+            config,
+            llmRunId,
+            phase: "evaluation",
+            requestPayload: requireOpenAiRequestPayload(requestPayload),
+            runtime,
+          })
+        : config.provider === "anthropic"
+          ? await collectAnthropicLlmResponse({
+              config,
+              llmRunId,
+              phase: "evaluation",
+              requestPayload: requireAnthropicRequestPayload(requestPayload),
+              runtime,
+            })
+          : config.provider === "openrouter"
+            ? await collectOpenRouterLlmResponse({
+                config,
+                llmRunId,
+                phase: "evaluation",
+                requestPayload: requireOpenRouterRequestPayload(requestPayload),
+                runtime,
+                toolDefinitions: [],
+              })
+            : await collectLlamaCppLlmResponse({
+                config,
+                llmRunId,
+                phase: "evaluation",
+                requestPayload: requireLlamaCppRequestPayload(requestPayload),
+                runtime,
+                toolDefinitions: [],
+              })
+
+    throwIfRuntimeAborted(runtime.abortController.signal)
+    const parsedEvaluation =
+      parseSimulationRunEvaluationCompletionFromResponseText(
+        responseResult.outputText
+      )
+
+    throwIfRuntimeAborted(runtime.abortController.signal)
+
+    await completeSimulationRunEvaluation({
+      finalOutputText: responseResult.outputText,
+      illegalActions: parsedEvaluation.illegalActions,
+      legalPass: parsedEvaluation.legalPass,
+      llmRunId,
+      rawResponse: responseResult.rawResponse,
+      simulationQualityScore: parsedEvaluation.simulationQualityScore,
+      strategicMistakes: parsedEvaluation.strategicMistakes,
+      strategicPass: parsedEvaluation.strategicPass,
+      usage: responseResult.usage,
+    })
+    runtime.status = "completed"
+  } catch (error) {
+    if (isAbortError(error) || runtime.abortController.signal.aborted) {
+      logLlmApiCallCancelled({
+        llmRunId,
+        phase: "evaluation",
+        provider: config.provider,
+      })
+      await cancelLlmRun(
+        llmRunId,
+        "Evaluation LLM run was cancelled.",
+        responseResult?.outputText
+      )
+      runtime.status = "cancelled"
+      return
+    }
+
+    logLlmApiCallStoppedWithError({
+      error,
+      llmRunId,
+      phase: "evaluation",
+      provider: config.provider,
+    })
+    console.error("Evaluation LLM run failed:", error)
+    await failLlmRun(
+      llmRunId,
+      getErrorMessage(error),
+      responseResult?.outputText
+    )
+    runtime.status = "failed"
+  } finally {
+    activeLlmRunRuntimes.delete(runtimeStreamKey)
+    runtime.resolveCompletion()
+    nudgeLlmRunQueue()
+  }
 }
 
 async function runOpeningHandLlmRun({
@@ -7131,6 +7764,107 @@ async function main() {
         console.error("Failed to start turn LLM run:", error)
         res.status(500).json({
           error: "Failed to start turn LLM run.",
+        })
+      }
+    }
+  )
+
+  app.get(
+    "/decks/:deckId/simulations/:simulationId/runs/:llmRunId/evaluations",
+    async (req: Request, res: Response) => {
+      const adminUser = requireAdminUser(req, res)
+
+      if (!adminUser) {
+        return
+      }
+
+      const deckId = String(req.params.deckId)
+      const simulationId = String(req.params.simulationId)
+      const targetLlmRunId = String(req.params.llmRunId)
+
+      try {
+        res.status(200).json({
+          evaluations: await listSimulationRunEvaluations({
+            deckId,
+            simulationId,
+            targetLlmRunId,
+          }),
+        })
+      } catch (error) {
+        if (error instanceof SimulationValidationError) {
+          res.status(404).json({
+            error: error.message,
+          })
+          return
+        }
+
+        console.error("Failed to list simulation run evaluations:", error)
+        res.status(500).json({
+          error: "Failed to list simulation run evaluations.",
+        })
+      }
+    }
+  )
+
+  app.post(
+    "/decks/:deckId/simulations/:simulationId/runs/:llmRunId/evaluations",
+    async (req: Request, res: Response) => {
+      const adminUser = requireAdminUser(req, res)
+
+      if (!adminUser) {
+        return
+      }
+
+      const deckId = String(req.params.deckId)
+      const simulationId = String(req.params.simulationId)
+      const targetLlmRunId = String(req.params.llmRunId)
+      const parsedBody = createSimulationRunEvaluationSchema.safeParse(req.body)
+
+      if (!parsedBody.success) {
+        res.status(400).json({
+          error: parsedBody.error.message,
+        })
+        return
+      }
+
+      try {
+        const evaluation = await prepareAndStartSimulationRunEvaluation({
+          deckId,
+          evaluatorUserId: adminUser.id,
+          llmModelPresetId: parsedBody.data.llmModelPresetId,
+          llmProcessingMode: parsedBody.data.llmProcessingMode,
+          simulationId,
+          targetLlmRunId,
+          useFlexServiceTier: parsedBody.data.useFlexServiceTier,
+        })
+        const evaluations = await listSimulationRunEvaluations({
+          deckId,
+          simulationId,
+          targetLlmRunId,
+        })
+        const persistedEvaluation =
+          evaluations.find(
+            (candidate) => candidate.llmRunId === evaluation.llmRunId
+          ) ?? evaluations[evaluations.length - 1]
+
+        res.status(201).json({
+          evaluation: persistedEvaluation,
+          evaluations,
+        })
+      } catch (error) {
+        if (
+          error instanceof SimulationValidationError ||
+          error instanceof LlmConfigurationError
+        ) {
+          res.status(400).json({
+            error: error.message,
+          })
+          return
+        }
+
+        console.error("Failed to start simulation run evaluation:", error)
+        res.status(500).json({
+          error: "Failed to start simulation run evaluation.",
         })
       }
     }

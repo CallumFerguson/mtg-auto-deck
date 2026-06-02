@@ -182,6 +182,45 @@ export type SimulationDebugResponse = {
   debug: SimulationDebugInfo
 }
 
+export type SimulationRunEvaluation = {
+  id: string
+  simulationId: string
+  targetLlmRunId: string
+  targetRunPhase: "opening_hand" | "turn"
+  llmRunId: string
+  llmModelPresetId: string | null
+  llmModelPresetName: string | null
+  processingMode: LlmProcessingMode
+  provider: string
+  model: string
+  estimatedPriceCents: string | null
+  reasoningEffort: string | null
+  serviceTier: string | null
+  status: string
+  runtimeStreamKey: string | null
+  attemptNumber: number
+  failureMessage: string | null
+  legalPass: boolean | null
+  strategicPass: boolean | null
+  simulationQualityScore: number | null
+  illegalActions: string[]
+  strategicMistakes: string[]
+  createdAt: string
+  startedAt: string | null
+  completedAt: string | null
+  failedAt: string | null
+  cancelledAt: string | null
+}
+
+export type SimulationRunEvaluationsResponse = {
+  evaluations: SimulationRunEvaluation[]
+}
+
+export type CreateSimulationRunEvaluationResponse = {
+  evaluation: SimulationRunEvaluation
+  evaluations: SimulationRunEvaluation[]
+}
+
 export type SimulationResultsInfo = {
   simulationId: string
   openingHandLlmRunCount: number
