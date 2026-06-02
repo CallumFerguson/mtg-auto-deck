@@ -33,6 +33,7 @@ export type BenchmarkEvaluationTargetRun = {
   simulationId: string
   targetLlmRunId: string
   targetRunPhase: BenchmarkEvaluationRunPhase
+  turnNumber: number | null
 }
 
 export type BenchmarkEvaluationLatestEvaluationSnapshot = {
@@ -42,6 +43,25 @@ export type BenchmarkEvaluationLatestEvaluationSnapshot = {
   legalPass: boolean | null
   strategicPass: boolean | null
   simulationQualityScore: number | null
+  simulationQualityScoreReasoning: string | null
+  illegalActions: string[]
+  strategicMistakes: string[]
+  costUsd: number | null
+}
+
+export type BenchmarkEvaluationAttentionResult = {
+  deckId: string
+  simulationId: string
+  targetLlmRunId: string
+  targetRunPhase: BenchmarkEvaluationRunPhase
+  turnNumber: number | null
+  attemptNumber: number
+  legalPass: boolean | null
+  strategicPass: boolean | null
+  simulationQualityScore: number | null
+  simulationQualityScoreReasoning: string | null
+  illegalActions: string[]
+  strategicMistakes: string[]
 }
 
 export type BenchmarkEvaluationSummary = {
@@ -54,6 +74,8 @@ export type BenchmarkEvaluationSummary = {
   legalFailCount: number
   strategicPassCount: number
   strategicFailCount: number
+  totalEvaluationCostUsd: number
+  attentionResults: BenchmarkEvaluationAttentionResult[]
 }
 
 export function getEligibleBenchmarkEvaluationTargetRuns(
@@ -68,6 +90,7 @@ export function getEligibleBenchmarkEvaluationTargetRuns(
         simulationId: run.simulationId,
         targetLlmRunId: run.targetLlmRunId,
         targetRunPhase: run.targetRunPhase,
+        turnNumber: run.turnNumber,
       })
     }
   }
@@ -86,6 +109,9 @@ export function buildBenchmarkEvaluationSummary({
   targetRuns: readonly BenchmarkEvaluationTargetRun[]
 }): BenchmarkEvaluationSummary {
   const targetRunIds = new Set(targetRuns.map((run) => run.targetLlmRunId))
+  const targetRunById = new Map(
+    targetRuns.map((run) => [run.targetLlmRunId, run])
+  )
   const latestEvaluationByTargetRunId = new Map<
     string,
     BenchmarkEvaluationLatestEvaluationSnapshot
@@ -127,6 +153,39 @@ export function buildBenchmarkEvaluationSummary({
             0
           ) / scoredEvaluations.length
         )
+  const totalEvaluationCostUsd = roundBenchmarkCost(
+    latestTargetEvaluations.reduce(
+      (sum, evaluation) => sum + (evaluation.costUsd ?? 0),
+      0
+    )
+  )
+  const attentionResults = latestTargetEvaluations
+    .filter(isBenchmarkEvaluationAttentionResult)
+    .flatMap((evaluation) => {
+      const targetRun = targetRunById.get(evaluation.targetLlmRunId)
+
+      if (!targetRun) {
+        return []
+      }
+
+      return [
+        {
+          deckId: targetRun.deckId,
+          simulationId: targetRun.simulationId,
+          targetLlmRunId: targetRun.targetLlmRunId,
+          targetRunPhase: targetRun.targetRunPhase,
+          turnNumber: targetRun.turnNumber,
+          attemptNumber: evaluation.attemptNumber,
+          legalPass: evaluation.legalPass,
+          strategicPass: evaluation.strategicPass,
+          simulationQualityScore: evaluation.simulationQualityScore,
+          simulationQualityScoreReasoning:
+            evaluation.simulationQualityScoreReasoning,
+          illegalActions: evaluation.illegalActions,
+          strategicMistakes: evaluation.strategicMistakes,
+        },
+      ]
+    })
 
   return {
     targetRunCount: targetRuns.length,
@@ -148,7 +207,25 @@ export function buildBenchmarkEvaluationSummary({
     strategicFailCount: completedEvaluations.filter(
       (evaluation) => evaluation.strategicPass === false
     ).length,
+    totalEvaluationCostUsd,
+    attentionResults,
   }
+}
+
+function isBenchmarkEvaluationAttentionResult(
+  evaluation: BenchmarkEvaluationLatestEvaluationSnapshot
+) {
+  if (evaluation.status !== "completed") {
+    return false
+  }
+
+  return (
+    evaluation.legalPass === false ||
+    evaluation.strategicPass === false ||
+    evaluation.illegalActions.length > 0 ||
+    evaluation.strategicMistakes.length > 0 ||
+    evaluation.simulationQualityScore !== 10
+  )
 }
 
 function isEligibleBenchmarkEvaluationTargetRun(
@@ -193,4 +270,8 @@ function isJsonObject(value: unknown) {
 
 function roundBenchmarkAverageScore(score: number) {
   return Math.round(score * 10) / 10
+}
+
+function roundBenchmarkCost(costUsd: number) {
+  return Math.round(costUsd * 1_000_000_000) / 1_000_000_000
 }

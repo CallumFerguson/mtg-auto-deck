@@ -9,6 +9,7 @@ import {
   BarChart3,
   BrainCircuit,
   CheckCircle2,
+  ExternalLink,
   LoaderCircle,
   RefreshCw,
   X,
@@ -20,6 +21,7 @@ import { API_BASE_URL, apiFetch } from "@/lib/api"
 import { readApiError } from "@/lib/api-error"
 import type {
   AdminBenchmark,
+  AdminBenchmarkEvaluationAttentionResult,
   AdminBenchmarkEvaluationSummary,
   AdminBenchmarkEvaluationsResponse,
   StartAdminBenchmarkEvaluationsResponse,
@@ -29,6 +31,7 @@ import {
   getLlmModelPresetLabel,
   type LlmModelPreset,
 } from "@/lib/llm-model-preset-types"
+import { getDeckSimulationPath } from "@/lib/navigation"
 import { FlexServiceTierSwitch } from "../deck-simulation/SimulationSetupControls"
 
 type BenchmarkEvaluationProcessingChoice = "realtime" | "flex" | "openai_batch"
@@ -358,7 +361,12 @@ export function BenchmarkEvaluationModal({
                   Loading evaluations...
                 </p>
               ) : summary ? (
-                <BenchmarkEvaluationSummaryGrid summary={summary} />
+                <div className="grid gap-4">
+                  <BenchmarkEvaluationSummaryGrid summary={summary} />
+                  <BenchmarkEvaluationAttentionResults
+                    results={summary.attentionResults}
+                  />
+                </div>
               ) : null}
             </section>
           </div>
@@ -428,6 +436,10 @@ function BenchmarkEvaluationSummaryGrid({
         }
         icon={<BarChart3 className="size-4" aria-hidden />}
       />
+      <BenchmarkEvaluationMetric
+        label="Total cost"
+        value={formatBenchmarkEvaluationCost(summary.totalEvaluationCostUsd)}
+      />
       <BenchmarkEvaluationPassFailMetric
         failCount={summary.legalFailCount}
         label="Legal"
@@ -440,6 +452,194 @@ function BenchmarkEvaluationSummaryGrid({
       />
     </div>
   )
+}
+
+function BenchmarkEvaluationAttentionResults({
+  results,
+}: {
+  results: AdminBenchmarkEvaluationAttentionResult[]
+}) {
+  return (
+    <div className="grid gap-3">
+      <div className="flex items-center justify-between gap-3">
+        <h4 className="text-sm font-semibold text-foreground">
+          Attention results
+        </h4>
+        <span className="text-xs text-muted-foreground">
+          {results.length} {results.length === 1 ? "result" : "results"}
+        </span>
+      </div>
+      {results.length === 0 ? (
+        <p className="rounded-md border border-border bg-black/20 px-3 py-3 text-sm text-muted-foreground">
+          No latest evaluations need attention.
+        </p>
+      ) : (
+        <div className="grid gap-3">
+          {results.map((result) => (
+            <BenchmarkEvaluationAttentionResultCard
+              key={`${result.targetLlmRunId}-${result.attemptNumber}`}
+              result={result}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function BenchmarkEvaluationAttentionResultCard({
+  result,
+}: {
+  result: AdminBenchmarkEvaluationAttentionResult
+}) {
+  return (
+    <article className="grid gap-3 rounded-md border border-border bg-background/35 px-4 py-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-foreground">
+            {getBenchmarkEvaluationRunLabel(result)}
+          </p>
+          <p className="mt-1 text-xs break-words text-muted-foreground">
+            Evaluation {result.attemptNumber}
+          </p>
+        </div>
+        <a
+          className="inline-flex w-fit items-center gap-1 rounded-md border border-sky-300/35 bg-sky-400/10 px-2.5 py-1.5 text-xs font-medium text-sky-100 transition-colors hover:bg-sky-400/20"
+          href={getBenchmarkEvaluationSimulationHref(result)}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Open simulation
+          <ExternalLink className="size-3.5" aria-hidden />
+        </a>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-3">
+        <BenchmarkEvaluationPassBadge label="Legal" value={result.legalPass} />
+        <BenchmarkEvaluationPassBadge
+          label="Strategic"
+          value={result.strategicPass}
+        />
+        <div className="rounded-md border border-border bg-black/20 px-3 py-2">
+          <p className="text-xs text-muted-foreground">Quality</p>
+          <p className="mt-1 text-lg font-semibold text-foreground">
+            {result.simulationQualityScore?.toFixed(1) ?? "-"} / 10
+          </p>
+        </div>
+      </div>
+
+      <BenchmarkEvaluationTextValue
+        label="Quality score reasoning"
+        value={result.simulationQualityScoreReasoning}
+      />
+      <BenchmarkEvaluationIssueList
+        label="Illegal actions"
+        values={result.illegalActions}
+      />
+      <BenchmarkEvaluationIssueList
+        label="Strategic mistakes"
+        values={result.strategicMistakes}
+      />
+    </article>
+  )
+}
+
+function BenchmarkEvaluationPassBadge({
+  label,
+  value,
+}: {
+  label: string
+  value: boolean | null
+}) {
+  return (
+    <div
+      className={`rounded-md border px-3 py-2 ${
+        value
+          ? "border-emerald-300/35 bg-emerald-400/10"
+          : "border-destructive/40 bg-destructive/10"
+      }`}
+    >
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p
+        className={`mt-1 flex items-center gap-1 text-sm font-semibold ${
+          value ? "text-emerald-100" : "text-destructive"
+        }`}
+      >
+        {value ? (
+          <CheckCircle2 className="size-4" aria-hidden />
+        ) : (
+          <XCircle className="size-4" aria-hidden />
+        )}
+        {value ? "Pass" : "Fail"}
+      </p>
+    </div>
+  )
+}
+
+function BenchmarkEvaluationTextValue({
+  label,
+  value,
+}: {
+  label: string
+  value: string | null
+}) {
+  return (
+    <div className="grid gap-1 rounded-md border border-border bg-black/20 px-3 py-2">
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      <p className="text-sm break-words text-foreground">{value ?? "None"}</p>
+    </div>
+  )
+}
+
+function BenchmarkEvaluationIssueList({
+  label,
+  values,
+}: {
+  label: string
+  values: string[]
+}) {
+  return (
+    <div className="grid gap-1 rounded-md border border-border bg-black/20 px-3 py-2">
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      {values.length === 0 ? (
+        <p className="text-sm text-foreground">None</p>
+      ) : (
+        <ul className="grid gap-1 text-sm text-foreground">
+          {values.map((value, index) => (
+            <li key={`${label}-${index}`} className="break-words">
+              {value}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function getBenchmarkEvaluationRunLabel(
+  result: AdminBenchmarkEvaluationAttentionResult
+) {
+  if (result.targetRunPhase === "opening_hand") {
+    return "Opening hand"
+  }
+
+  return typeof result.turnNumber === "number"
+    ? `Turn ${result.turnNumber}`
+    : "Turn"
+}
+
+function getBenchmarkEvaluationSimulationHref(
+  result: AdminBenchmarkEvaluationAttentionResult
+) {
+  return getDeckSimulationPath(
+    result.deckId,
+    result.simulationId,
+    result.targetRunPhase === "opening_hand" ? 0 : result.turnNumber
+  )
+}
+
+function formatBenchmarkEvaluationCost(value: number) {
+  return `$${(Number.isFinite(value) ? value : 0).toFixed(2)}`
 }
 
 function BenchmarkEvaluationMetric({

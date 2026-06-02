@@ -85,6 +85,23 @@ export type AdminBenchmarkEvaluationSummary = {
   legalFailCount: number
   strategicPassCount: number
   strategicFailCount: number
+  totalEvaluationCostUsd: number
+  attentionResults: AdminBenchmarkEvaluationAttentionResult[]
+}
+
+export type AdminBenchmarkEvaluationAttentionResult = {
+  deckId: string
+  simulationId: string
+  targetLlmRunId: string
+  targetRunPhase: "opening_hand" | "turn"
+  turnNumber: number | null
+  attemptNumber: number
+  legalPass: boolean | null
+  strategicPass: boolean | null
+  simulationQualityScore: number | null
+  simulationQualityScoreReasoning: string | null
+  illegalActions: string[]
+  strategicMistakes: string[]
 }
 
 export type AdminBenchmarkEvaluationsResponse = {

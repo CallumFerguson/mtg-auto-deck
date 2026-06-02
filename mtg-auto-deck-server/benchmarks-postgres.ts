@@ -553,6 +553,10 @@ export async function listLatestBenchmarkEvaluationSnapshotsForTargets(
     legal_pass: boolean | null
     strategic_pass: boolean | null
     simulation_quality_score: string | number | null
+    simulation_quality_score_reasoning: string | null
+    illegal_actions: unknown
+    strategic_mistakes: unknown
+    cost_usd: string | number | null
   }>(
     `
       SELECT DISTINCT ON (evaluation.target_llm_run_id)
@@ -561,7 +565,11 @@ export async function listLatestBenchmarkEvaluationSnapshotsForTargets(
         llm_run.status,
         evaluation.legal_pass,
         evaluation.strategic_pass,
-        evaluation.simulation_quality_score
+        evaluation.simulation_quality_score,
+        evaluation.simulation_quality_score_reasoning,
+        evaluation.illegal_actions,
+        evaluation.strategic_mistakes,
+        COALESCE(llm_run.openrouter_reported_cost_usd, llm_run.estimated_cost_usd) AS cost_usd
       FROM simulation_run_evaluations evaluation
       JOIN llm_runs llm_run
         ON llm_run.id = evaluation.llm_run_id
@@ -582,6 +590,13 @@ export async function listLatestBenchmarkEvaluationSnapshotsForTargets(
     legalPass: row.legal_pass,
     strategicPass: row.strategic_pass,
     simulationQualityScore: toOptionalNumber(row.simulation_quality_score),
+    simulationQualityScoreReasoning:
+      row.simulation_quality_score_reasoning || null,
+    illegalActions: parseBenchmarkEvaluationStringArray(row.illegal_actions),
+    strategicMistakes: parseBenchmarkEvaluationStringArray(
+      row.strategic_mistakes
+    ),
+    costUsd: toOptionalNumber(row.cost_usd),
   }))
 }
 
@@ -717,6 +732,14 @@ function parseBenchmarkDecks(value: unknown): AdminBenchmarkDeck[] {
 
     return id && name ? [{ id, name }] : []
   })
+}
+
+function parseBenchmarkEvaluationStringArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.filter((item): item is string => typeof item === "string")
 }
 
 function toInteger(value: string | number) {
