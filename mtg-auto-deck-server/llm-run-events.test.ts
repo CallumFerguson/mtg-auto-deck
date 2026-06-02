@@ -105,7 +105,11 @@ import {
   getUsageLimitWindowBounds,
   roundUsageRemainingPercent,
 } from "./usage-limits-postgres.js"
-import { buildListAdminUsersQuery } from "./admin-users-postgres.js"
+import {
+  buildDeleteUserEmailVerificationOtpQuery,
+  buildListAdminUsersQuery,
+  buildUpdateAdminUserEmailVerificationQuery,
+} from "./admin-users-postgres.js"
 import {
   buildUserBillingTierSummaryQuery,
   toUserBillingTierSummary,
@@ -1162,6 +1166,41 @@ test("builds admin user LLM cost aggregate query", () => {
     normalizedSql,
     /COALESCE\(active_stripe_tiers\.stripe_tier, 'free'\) AS "stripeTier"/
   )
+})
+
+test("builds admin user email verification update query", () => {
+  const verifyQuery = buildUpdateAdminUserEmailVerificationQuery({
+    emailVerified: true,
+    userId: "user-1",
+  })
+  const unverifyQuery = buildUpdateAdminUserEmailVerificationQuery({
+    emailVerified: false,
+    userId: "user-1",
+  })
+  const normalizedSql = verifyQuery.text.replace(/\s+/g, " ")
+
+  assert.deepEqual(verifyQuery.values, ["user-1", true])
+  assert.deepEqual(unverifyQuery.values, ["user-1", false])
+  assert.match(normalizedSql, /UPDATE "user"/)
+  assert.match(normalizedSql, /"emailVerified" = \$2/)
+  assert.match(normalizedSql, /"updatedAt" = NOW\(\)/)
+  assert.match(normalizedSql, /WHERE id = \$1/)
+  assert.match(normalizedSql, /RETURNING id, email/)
+  assert.match(normalizedSql, /"emailVerified" AS "emailVerified"/)
+  assert.match(normalizedSql, /"updatedAt" AS "updatedAt"/)
+})
+
+test("builds admin user email verification OTP cleanup query", () => {
+  const query = buildDeleteUserEmailVerificationOtpQuery(
+    "  User.Name+Tag@Example.COM "
+  )
+  const normalizedSql = query.text.replace(/\s+/g, " ")
+
+  assert.deepEqual(query.values, [
+    "email-verification-otp-user.name+tag@example.com",
+  ])
+  assert.match(normalizedSql, /DELETE FROM verification/)
+  assert.match(normalizedSql, /WHERE identifier = \$1/)
 })
 
 test("builds billing tier summary query with active admin grants", () => {

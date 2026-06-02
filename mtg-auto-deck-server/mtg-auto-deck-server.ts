@@ -66,6 +66,7 @@ import {
   listActiveAdminUserSimulations,
   listAdminUsers,
   promoteAdminUserByEmail,
+  updateAdminUserEmailVerification,
 } from "./admin-users-postgres.js"
 import {
   createLlmModelPreset,
@@ -462,6 +463,11 @@ const adminSubscriptionTierGrantSchema = z.object({
   days: z.number().int().min(1).max(3650),
   tier: z.string().trim().refine(isAdminGrantBillingTier),
 })
+const adminUserEmailVerificationSchema = z
+  .object({
+    emailVerified: z.boolean(),
+  })
+  .strict()
 const createTurnLlmRunSchema = z.object({
   turnNumber: z.number().int().positive(),
 })
@@ -6913,6 +6919,56 @@ async function main() {
       })
     }
   })
+
+  app.patch(
+    "/admin/users/:userId/email-verification",
+    async (req: Request, res: Response) => {
+      const adminUser = requireAdminUser(req, res)
+
+      if (!adminUser) {
+        return
+      }
+
+      const userId = String(req.params.userId).trim()
+
+      if (!userId) {
+        res.status(400).json({
+          error: "User ID is required.",
+        })
+        return
+      }
+
+      const parsedBody = adminUserEmailVerificationSchema.safeParse(req.body)
+
+      if (!parsedBody.success) {
+        res.status(400).json({
+          error: "emailVerified must be a boolean.",
+        })
+        return
+      }
+
+      try {
+        const updatedUser = await updateAdminUserEmailVerification({
+          emailVerified: parsedBody.data.emailVerified,
+          userId,
+        })
+
+        if (!updatedUser) {
+          res.status(404).json({
+            error: "User not found.",
+          })
+          return
+        }
+
+        res.status(200).json(updatedUser)
+      } catch (error) {
+        console.error("Failed to update user email verification:", error)
+        res.status(500).json({
+          error: "User email verification could not be updated.",
+        })
+      }
+    }
+  )
 
   app.put(
     "/admin/users/:userId/admin-tier-grant",

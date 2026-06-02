@@ -39,6 +39,13 @@ export type AdminUserDeletionResult = {
   deletedUserId: string
 }
 
+export type AdminUserEmailVerificationUpdate = {
+  email: string
+  emailVerified: boolean
+  id: string
+  updatedAt: string
+}
+
 export type AdminUserRolePromotionResult = {
   email: string
   id: string
@@ -76,6 +83,13 @@ type AdminUserDeletionTargetRow = {
   id: string
 }
 
+type AdminUserEmailVerificationUpdateRow = {
+  email: string
+  emailVerified: boolean
+  id: string
+  updatedAt: Date
+}
+
 type AdminUserSimulationRow = {
   deck_id: string
   simulation_id: string
@@ -96,6 +110,39 @@ export async function listAdminUsers() {
   const result = await queryDatabase<AdminUserRow>(query.text, query.values)
 
   return result.rows.map(toAdminUserSummary)
+}
+
+export async function updateAdminUserEmailVerification({
+  emailVerified,
+  userId,
+}: {
+  emailVerified: boolean
+  userId: string
+}): Promise<AdminUserEmailVerificationUpdate | null> {
+  return withDatabaseTransaction(async (client) => {
+    const query = buildUpdateAdminUserEmailVerificationQuery({
+      emailVerified,
+      userId,
+    })
+    const result = await client.query<AdminUserEmailVerificationUpdateRow>(
+      query.text,
+      query.values
+    )
+    const user = result.rows[0]
+
+    if (!user) {
+      return null
+    }
+
+    await deleteUserEmailVerificationOtp(client, user.email)
+
+    return {
+      email: user.email,
+      emailVerified: user.emailVerified,
+      id: user.id,
+      updatedAt: formatDate(user.updatedAt) ?? "",
+    }
+  })
 }
 
 export function getConfiguredAutoAdminEmail() {
@@ -275,6 +322,39 @@ export function buildListAdminUsersQuery(now: Date) {
         lower(app_user.email) ASC
     `,
     values: [recentStartedAt, ACTIVE_BILLING_SUBSCRIPTION_STATUSES, now],
+  }
+}
+
+export function buildUpdateAdminUserEmailVerificationQuery({
+  emailVerified,
+  userId,
+}: {
+  emailVerified: boolean
+  userId: string
+}) {
+  return {
+    text: `
+      UPDATE "user"
+      SET "emailVerified" = $2,
+          "updatedAt" = NOW()
+      WHERE id = $1
+      RETURNING
+        id,
+        email,
+        "emailVerified" AS "emailVerified",
+        "updatedAt" AS "updatedAt"
+    `,
+    values: [userId, emailVerified],
+  }
+}
+
+export function buildDeleteUserEmailVerificationOtpQuery(email: string) {
+  return {
+    text: `
+      DELETE FROM verification
+      WHERE identifier = $1
+    `,
+    values: [`email-verification-otp-${email.trim().toLowerCase()}`],
   }
 }
 
@@ -487,6 +567,21 @@ async function deleteUserVerificationValues(
       `change-email-otp-%-${escapeSqlLikePattern(normalizedEmail)}`,
     ]
   )
+}
+
+async function deleteUserEmailVerificationOtp(
+  client: Parameters<Parameters<typeof withDatabaseTransaction>[0]>[0],
+  email: string
+) {
+  const normalizedEmail = email.trim().toLowerCase()
+
+  if (!normalizedEmail) {
+    return
+  }
+
+  const query = buildDeleteUserEmailVerificationOtpQuery(normalizedEmail)
+
+  await client.query(query.text, query.values)
 }
 
 async function deleteUserImpersonationSessions(

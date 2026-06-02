@@ -48,6 +48,7 @@ import type {
   AdminBenchmark,
   AdminBenchmarksResponse,
   AdminUser,
+  AdminUserEmailVerificationResponse,
   AdminUsersResponse,
   CreateAdminBenchmarkResponse,
   StopAdminBenchmarkResponse,
@@ -429,14 +430,21 @@ function AdminUsersSection({
   const [userToDelete, setUserToDelete] = useState<AdminUser | null>(null)
   const [userToDemote, setUserToDemote] = useState<AdminUser | null>(null)
   const [userToPromote, setUserToPromote] = useState<AdminUser | null>(null)
+  const [userToUpdateEmailVerification, setUserToUpdateEmailVerification] =
+    useState<AdminUser | null>(null)
   const [adminTierGrantError, setAdminTierGrantError] = useState<string | null>(
     null
   )
   const [deleteUserError, setDeleteUserError] = useState<string | null>(null)
   const [demoteUserError, setDemoteUserError] = useState<string | null>(null)
+  const [emailVerificationError, setEmailVerificationError] = useState<
+    string | null
+  >(null)
   const [promoteUserError, setPromoteUserError] = useState<string | null>(null)
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null)
   const [demotingUserId, setDemotingUserId] = useState<string | null>(null)
+  const [updatingEmailVerificationUserId, setUpdatingEmailVerificationUserId] =
+    useState<string | null>(null)
   const [promotingUserId, setPromotingUserId] = useState<string | null>(null)
   const [savingAdminTierGrantUserId, setSavingAdminTierGrantUserId] = useState<
     string | null
@@ -455,6 +463,7 @@ function AdminUsersSection({
     setLoadError(null)
     setAdminTierGrantError(null)
     setDemoteUserError(null)
+    setEmailVerificationError(null)
     setImpersonateUserError(null)
     setPromoteUserError(null)
 
@@ -599,6 +608,68 @@ function AdminUsersSection({
       setPromoteUserError(`Could not promote ${userToPromote.email}.`)
     } finally {
       setPromotingUserId(null)
+    }
+  }
+
+  async function handleUpdateEmailVerification() {
+    if (!userToUpdateEmailVerification) {
+      return
+    }
+
+    const targetEmailVerified = !userToUpdateEmailVerification.emailVerified
+    const fallbackMessage = targetEmailVerified
+      ? `Could not verify ${userToUpdateEmailVerification.email}.`
+      : `Could not unverify ${userToUpdateEmailVerification.email}.`
+
+    setUpdatingEmailVerificationUserId(userToUpdateEmailVerification.id)
+    setEmailVerificationError(null)
+
+    try {
+      const response = await apiFetch(
+        `${API_BASE_URL}/admin/users/${encodeURIComponent(
+          userToUpdateEmailVerification.id
+        )}/email-verification`,
+        {
+          body: JSON.stringify({
+            emailVerified: targetEmailVerified,
+          }),
+          headers: {
+            "Content-Type": "application/json",
+          },
+          method: "PATCH",
+        }
+      )
+
+      if (!response.ok) {
+        setEmailVerificationError(await readApiError(response, fallbackMessage))
+        return
+      }
+
+      const updatedUser =
+        (await response.json()) as AdminUserEmailVerificationResponse
+
+      setUsers((currentUsers) =>
+        currentUsers.map((user) =>
+          user.id === updatedUser.id
+            ? {
+                ...user,
+                email: updatedUser.email,
+                emailVerified: updatedUser.emailVerified,
+                updatedAt: updatedUser.updatedAt,
+              }
+            : user
+        )
+      )
+      setUserToUpdateEmailVerification(null)
+
+      if (updatedUser.id === currentUserId && !updatedUser.emailVerified) {
+        await onSessionChanged()
+        navigate("/verify-email")
+      }
+    } catch {
+      setEmailVerificationError(fallbackMessage)
+    } finally {
+      setUpdatingEmailVerificationUserId(null)
     }
   }
 
@@ -873,6 +944,9 @@ function AdminUsersSection({
                         }
                         savingAdminTierGrantUserId={savingAdminTierGrantUserId}
                         setOpenUserMenuId={setOpenUserMenuId}
+                        updatingEmailVerificationUserId={
+                          updatingEmailVerificationUserId
+                        }
                         user={user}
                         onDeleteUser={(selectedUser) => {
                           setDeleteUserError(null)
@@ -892,6 +966,10 @@ function AdminUsersSection({
                         onPromoteUser={(selectedUser) => {
                           setPromoteUserError(null)
                           setUserToPromote(selectedUser)
+                        }}
+                        onUpdateEmailVerification={(selectedUser) => {
+                          setEmailVerificationError(null)
+                          setUserToUpdateEmailVerification(selectedUser)
                         }}
                       />
                     </TableCell>
@@ -931,6 +1009,9 @@ function AdminUsersSection({
                       }
                       savingAdminTierGrantUserId={savingAdminTierGrantUserId}
                       setOpenUserMenuId={setOpenUserMenuId}
+                      updatingEmailVerificationUserId={
+                        updatingEmailVerificationUserId
+                      }
                       user={user}
                       onDeleteUser={(selectedUser) => {
                         setDeleteUserError(null)
@@ -950,6 +1031,10 @@ function AdminUsersSection({
                       onPromoteUser={(selectedUser) => {
                         setPromoteUserError(null)
                         setUserToPromote(selectedUser)
+                      }}
+                      onUpdateEmailVerification={(selectedUser) => {
+                        setEmailVerificationError(null)
+                        setUserToUpdateEmailVerification(selectedUser)
                       }}
                     />
                   </div>
@@ -1030,6 +1115,23 @@ function AdminUsersSection({
             setPromoteUserError(null)
           }}
           onConfirm={() => void handlePromoteUser()}
+        />
+      ) : null}
+
+      {userToUpdateEmailVerification ? (
+        <UpdateEmailVerificationModal
+          currentUserId={currentUserId}
+          error={emailVerificationError}
+          isUpdating={
+            updatingEmailVerificationUserId ===
+            userToUpdateEmailVerification.id
+          }
+          user={userToUpdateEmailVerification}
+          onClose={() => {
+            setUserToUpdateEmailVerification(null)
+            setEmailVerificationError(null)
+          }}
+          onConfirm={() => void handleUpdateEmailVerification()}
         />
       ) : null}
     </section>
@@ -3395,11 +3497,13 @@ function AdminUserActionsMenu({
   onImpersonateUser,
   onManageAdminTier,
   onPromoteUser,
+  onUpdateEmailVerification,
   openUserMenuId,
   promotingUserId,
   revokingAdminTierGrantUserId,
   savingAdminTierGrantUserId,
   setOpenUserMenuId,
+  updatingEmailVerificationUserId,
   user,
 }: {
   currentUserId: string
@@ -3412,11 +3516,13 @@ function AdminUserActionsMenu({
   onImpersonateUser: (user: AdminUser) => void
   onManageAdminTier: (user: AdminUser) => void
   onPromoteUser: (user: AdminUser) => void
+  onUpdateEmailVerification: (user: AdminUser) => void
   openUserMenuId: string | null
   promotingUserId: string | null
   revokingAdminTierGrantUserId: string | null
   savingAdminTierGrantUserId: string | null
   setOpenUserMenuId: Dispatch<SetStateAction<string | null>>
+  updatingEmailVerificationUserId: string | null
   user: AdminUser
 }) {
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -3429,6 +3535,8 @@ function AdminUserActionsMenu({
   const isDemotingUser = demotingUserId === user.id
   const isImpersonatingUser = impersonatingUserId === user.id
   const isPromotingUser = promotingUserId === user.id
+  const isUpdatingEmailVerification =
+    updatingEmailVerificationUserId === user.id
   const isManagingAdminTier =
     savingAdminTierGrantUserId === user.id ||
     revokingAdminTierGrantUserId === user.id
@@ -3441,7 +3549,8 @@ function AdminUserActionsMenu({
     isDemotingUser ||
     isImpersonatingUser ||
     isManagingAdminTier ||
-    isPromotingUser
+    isPromotingUser ||
+    isUpdatingEmailVerification
 
   const updateMenuPosition = useCallback(() => {
     const trigger = triggerRef.current
@@ -3621,6 +3730,31 @@ function AdminUserActionsMenu({
                 >
                   <Star data-icon="inline-start" />
                   {isManagingAdminTier ? "Saving tier..." : "Manage admin tier"}
+                </button>
+                <button
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors focus:outline-none disabled:cursor-not-allowed disabled:opacity-70 ${
+                    user.emailVerified
+                      ? "text-amber-100 hover:bg-amber-400/10 hover:text-amber-100 focus:bg-amber-400/10"
+                      : "text-emerald-100 hover:bg-emerald-400/10 hover:text-emerald-100 focus:bg-emerald-400/10"
+                  }`}
+                  type="button"
+                  role="menuitem"
+                  disabled={isWorking}
+                  onClick={() => {
+                    setOpenUserMenuId(null)
+                    onUpdateEmailVerification(user)
+                  }}
+                >
+                  {user.emailVerified ? (
+                    <CircleOff data-icon="inline-start" />
+                  ) : (
+                    <CheckCircle2 data-icon="inline-start" />
+                  )}
+                  {isUpdatingEmailVerification
+                    ? "Updating..."
+                    : user.emailVerified
+                      ? "Unverify email"
+                      : "Verify email"}
                 </button>
                 {canPromote ? (
                   <button
@@ -4141,6 +4275,132 @@ function PromoteAdminUserModal({
             <Button type="button" onClick={onConfirm} disabled={isPromoting}>
               <ShieldCheck data-icon="inline-start" />
               {isPromoting ? "Promoting..." : "Promote user"}
+            </Button>
+          </div>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function UpdateEmailVerificationModal({
+  currentUserId,
+  error,
+  isUpdating,
+  onClose,
+  onConfirm,
+  user,
+}: {
+  currentUserId: string
+  error: string | null
+  isUpdating: boolean
+  onClose: () => void
+  onConfirm: () => void
+  user: AdminUser
+}) {
+  const isVerifying = !user.emailVerified
+  const isCurrentUser = user.id === currentUserId
+  const title = isVerifying ? "Verify email" : "Unverify email"
+  const actionLabel = isVerifying ? "Verify email" : "Unverify email"
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 py-6 backdrop-blur-sm"
+      role="presentation"
+      onMouseDown={isUpdating ? undefined : onClose}
+    >
+      <section
+        aria-labelledby="email-verification-title"
+        className="w-full max-w-md rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
+        role="alertdialog"
+        aria-modal="true"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-3">
+              <div
+                className={`flex size-9 shrink-0 items-center justify-center rounded-lg border ${
+                  isVerifying
+                    ? "border-emerald-300/30 bg-emerald-400/10 text-emerald-200"
+                    : "border-amber-300/35 bg-amber-400/10 text-amber-200"
+                }`}
+              >
+                {isVerifying ? (
+                  <CheckCircle2 className="size-4" aria-hidden="true" />
+                ) : (
+                  <CircleOff className="size-4" aria-hidden="true" />
+                )}
+              </div>
+              <h2
+                id="email-verification-title"
+                className="text-xl font-semibold"
+              >
+                {title}
+              </h2>
+            </div>
+            <p className="text-sm break-words text-muted-foreground">
+              {user.email}
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Close"
+            title="Close"
+            onClick={onClose}
+            disabled={isUpdating}
+          >
+            <X />
+          </Button>
+        </header>
+
+        <div className="grid gap-4 px-5 py-5">
+          <p
+            className={`rounded-md border px-3 py-2 text-sm leading-6 ${
+              isVerifying
+                ? "border-emerald-300/30 bg-emerald-400/10 text-emerald-100"
+                : "border-amber-300/35 bg-amber-400/10 text-amber-100"
+            }`}
+          >
+            {isVerifying
+              ? "This will mark the account email as verified and clear any pending verification code."
+              : isCurrentUser
+                ? "This will mark your email as unverified. You will be sent back to email verification after the change."
+                : "This will mark the account email as unverified. Existing sessions are not revoked."}
+          </p>
+
+          {error ? (
+            <p
+              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              role="alert"
+            >
+              {error}
+            </p>
+          ) : null}
+
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onClose}
+              disabled={isUpdating}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant={isVerifying ? "default" : "destructive"}
+              onClick={onConfirm}
+              disabled={isUpdating}
+            >
+              {isVerifying ? (
+                <CheckCircle2 data-icon="inline-start" />
+              ) : (
+                <CircleOff data-icon="inline-start" />
+              )}
+              {isUpdating ? "Updating..." : actionLabel}
             </Button>
           </div>
         </div>

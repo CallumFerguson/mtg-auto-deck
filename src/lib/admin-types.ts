@@ -29,6 +29,13 @@ export type AdminUsersResponse = {
   totalLlmRunCostUsd: number
 }
 
+export type AdminUserEmailVerificationResponse = {
+  id: string
+  email: string
+  emailVerified: boolean
+  updatedAt: string
+}
+
 export type AdminBenchmarkStatus =
   | "running"
   | "stopped"
