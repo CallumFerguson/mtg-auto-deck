@@ -2819,6 +2819,18 @@ test("summarizes latest benchmark evaluations only", () => {
       latestEvaluations: [
         {
           attemptNumber: 1,
+          costUsd: 0.02,
+          illegalActions: ["Cast a spell without enough mana."],
+          legalPass: true,
+          simulationQualityScore: 10,
+          simulationQualityScoreReasoning: null,
+          status: "completed",
+          strategicPass: true,
+          strategicMistakes: [],
+          targetLlmRunId: "target-3",
+        },
+        {
+          attemptNumber: 1,
           costUsd: 0.01,
           illegalActions: [],
           legalPass: true,
@@ -2852,18 +2864,6 @@ test("summarizes latest benchmark evaluations only", () => {
           strategicPass: null,
           strategicMistakes: [],
           targetLlmRunId: "target-2",
-        },
-        {
-          attemptNumber: 1,
-          costUsd: 0.02,
-          illegalActions: ["Cast a spell without enough mana."],
-          legalPass: true,
-          simulationQualityScore: 10,
-          simulationQualityScoreReasoning: null,
-          status: "completed",
-          strategicPass: true,
-          strategicMistakes: [],
-          targetLlmRunId: "target-3",
         },
         {
           attemptNumber: 10,

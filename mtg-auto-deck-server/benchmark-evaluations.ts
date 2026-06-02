@@ -186,6 +186,7 @@ export function buildBenchmarkEvaluationSummary({
         },
       ]
     })
+    .sort(compareBenchmarkEvaluationAttentionResults)
 
   return {
     targetRunCount: targetRuns.length,
@@ -226,6 +227,28 @@ function isBenchmarkEvaluationAttentionResult(
     evaluation.strategicMistakes.length > 0 ||
     evaluation.simulationQualityScore !== 10
   )
+}
+
+function compareBenchmarkEvaluationAttentionResults(
+  first: BenchmarkEvaluationAttentionResult,
+  second: BenchmarkEvaluationAttentionResult
+) {
+  if (
+    first.simulationQualityScore === null &&
+    second.simulationQualityScore === null
+  ) {
+    return 0
+  }
+
+  if (first.simulationQualityScore === null) {
+    return 1
+  }
+
+  if (second.simulationQualityScore === null) {
+    return -1
+  }
+
+  return first.simulationQualityScore - second.simulationQualityScore
 }
 
 function isEligibleBenchmarkEvaluationTargetRun(
