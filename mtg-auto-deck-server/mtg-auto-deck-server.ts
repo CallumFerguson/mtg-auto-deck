@@ -3197,8 +3197,6 @@ async function prepareAndStartSimulationRunEvaluation({
         throw new Error("Evaluation LLM run could not be queued.")
       }
       nudgeLlmRunQueue()
-    } else {
-      nudgeOpenAiBatchSubmitter(getLlmRunQueueConfig())
     }
 
     return evaluation
@@ -3582,9 +3580,6 @@ function startOpenAiBatchWorkers(config: LlmRunQueueConfig) {
       OPENAI_BATCH_POLL_INTERVAL_MS
     )
   }
-
-  nudgeOpenAiBatchSubmitter(config)
-  nudgeOpenAiBatchPoller()
 }
 
 function stopOpenAiBatchWorkers() {
