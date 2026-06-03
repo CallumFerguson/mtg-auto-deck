@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import {
   ModelReportedSimulationError,
+  SIMULATION_QUALITY_REASONING_REQUIRED_MESSAGE,
   getCompletedResponseOutputText,
   getLlmRunFailureMessage,
   isAbortError,
@@ -290,6 +291,38 @@ test("parses simulation run evaluation score bounds", () => {
   )
 })
 
+test("parses simulation run evaluation outputs when low-score reasoning is missing", () => {
+  assert.deepEqual(
+    parseSimulationRunEvaluationCompletionFromResponseText(
+      JSON.stringify({
+        legalPass: true,
+        strategicPass: true,
+        simulationQualityScore: 9.5,
+        simulationQualityScoreReasoning: null,
+        illegalActions: [],
+        strategicMistakes: [],
+      })
+    ),
+    {
+      legalPass: true,
+      strategicPass: true,
+      simulationQualityScore: 9.5,
+      simulationQualityScoreReasoning: null,
+      illegalActions: [],
+      strategicMistakes: [],
+      parsedOutput: {
+        legalPass: true,
+        strategicPass: true,
+        simulationQualityScore: 9.5,
+        simulationQualityScoreReasoning: null,
+        illegalActions: [],
+        strategicMistakes: [],
+      },
+      resultFailureMessage: SIMULATION_QUALITY_REASONING_REQUIRED_MESSAGE,
+    }
+  )
+})
+
 test("rejects invalid completed simulation run evaluation JSON", () => {
   assert.throws(
     () =>
@@ -379,21 +412,6 @@ test("rejects invalid completed simulation run evaluation JSON", () => {
         })
       ),
     /strategicMistakes/
-  )
-
-  assert.throws(
-    () =>
-      parseSimulationRunEvaluationCompletionFromResponseText(
-        JSON.stringify({
-          legalPass: true,
-          strategicPass: true,
-          simulationQualityScore: 9.5,
-          simulationQualityScoreReasoning: null,
-          illegalActions: [],
-          strategicMistakes: [],
-        })
-      ),
-    /simulationQualityScoreReasoning/
   )
 
   assert.throws(

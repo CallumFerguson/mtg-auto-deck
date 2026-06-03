@@ -4659,6 +4659,93 @@ export async function completeSimulationRunEvaluation({
   rawResponse: unknown
   usage: unknown
 }): Promise<SimulationRunEvaluation> {
+  return finishSimulationRunEvaluationResultWithOutputs({
+    finalOutputText,
+    illegalActions,
+    legalPass,
+    llmRunId,
+    rawResponse,
+    resultFailureMessage: null,
+    resultStatus: "completed",
+    simulationQualityScore,
+    simulationQualityScoreReasoning,
+    strategicMistakes,
+    strategicPass,
+    usage,
+  })
+}
+
+export async function failSimulationRunEvaluationResultWithOutputs({
+  failureMessage,
+  finalOutputText,
+  illegalActions,
+  legalPass,
+  llmRunId,
+  rawResponse,
+  simulationQualityScoreReasoning,
+  simulationQualityScore,
+  strategicMistakes,
+  strategicPass,
+  usage,
+}: {
+  failureMessage: string
+  finalOutputText: string
+  llmRunId: string
+  legalPass: boolean
+  strategicPass: boolean
+  simulationQualityScore: number
+  simulationQualityScoreReasoning: string | null
+  illegalActions: readonly string[]
+  strategicMistakes: readonly string[]
+  rawResponse: unknown
+  usage: unknown
+}): Promise<SimulationRunEvaluation> {
+  return finishSimulationRunEvaluationResultWithOutputs({
+    finalOutputText,
+    illegalActions,
+    legalPass,
+    llmRunId,
+    rawResponse,
+    resultFailureMessage: failureMessage,
+    resultStatus: "failed",
+    simulationQualityScore,
+    simulationQualityScoreReasoning,
+    strategicMistakes,
+    strategicPass,
+    usage,
+  })
+}
+
+async function finishSimulationRunEvaluationResultWithOutputs({
+  finalOutputText,
+  illegalActions,
+  legalPass,
+  llmRunId,
+  rawResponse,
+  resultFailureMessage,
+  resultStatus,
+  simulationQualityScoreReasoning,
+  simulationQualityScore,
+  strategicMistakes,
+  strategicPass,
+  usage,
+}: {
+  finalOutputText: string
+  llmRunId: string
+  legalPass: boolean
+  strategicPass: boolean
+  simulationQualityScore: number
+  simulationQualityScoreReasoning: string | null
+  illegalActions: readonly string[]
+  strategicMistakes: readonly string[]
+  rawResponse: unknown
+  usage: unknown
+  resultStatus: Extract<
+    SimulationRunEvaluationResultStatus,
+    "completed" | "failed"
+  >
+  resultFailureMessage: string | null
+}): Promise<SimulationRunEvaluation> {
   await withDatabaseTransaction(async (client) => {
     const snapshotResult = await client.query<{
       simulation_id: string
@@ -4717,8 +4804,8 @@ export async function completeSimulationRunEvaluation({
             simulation_quality_score_reasoning = $5,
             illegal_actions = $6::jsonb,
             strategic_mistakes = $7::jsonb,
-            result_status = 'completed',
-            result_failure_message = NULL
+            result_status = $8,
+            result_failure_message = $9
         WHERE llm_run_id = $1
       `,
       [
@@ -4729,6 +4816,8 @@ export async function completeSimulationRunEvaluation({
         simulationQualityScoreReasoning,
         JSON.stringify(illegalActions),
         JSON.stringify(strategicMistakes),
+        resultStatus,
+        resultFailureMessage,
       ]
     )
 

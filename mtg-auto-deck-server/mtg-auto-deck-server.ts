@@ -124,6 +124,7 @@ import {
   drawStartingHand,
   ensureSimulationsSchema,
   failSimulationRunEvaluationResult,
+  failSimulationRunEvaluationResultWithOutputs,
   failLlmRun,
   getActiveLlmRunMcpTokenContext,
   getSimulationCreationDecision,
@@ -204,6 +205,7 @@ import {
   isAbortError,
   parseOpeningHandCompletionFromResponseText,
   parseSimulationRunEvaluationCompletionFromResponseText,
+  type SimulationRunEvaluationCompletion,
   parseTurnSimulationCompletionFromResponseText,
 } from "./llm-run-events.js"
 import {
@@ -4346,17 +4348,11 @@ async function reconcileOpenAiBatchOutputLine({
           outputText,
           parseSimulationRunEvaluationCompletionFromResponseText
         )
-      await completeSimulationRunEvaluation({
+      await finishParsedSimulationRunEvaluation({
         finalOutputText: outputText,
-        illegalActions: parsedEvaluation.illegalActions,
-        legalPass: parsedEvaluation.legalPass,
         llmRunId: item.llmRunId,
+        parsedEvaluation,
         rawResponse: responseBody,
-        simulationQualityScore: parsedEvaluation.simulationQualityScore,
-        simulationQualityScoreReasoning:
-          parsedEvaluation.simulationQualityScoreReasoning,
-        strategicMistakes: parsedEvaluation.strategicMistakes,
-        strategicPass: parsedEvaluation.strategicPass,
         usage,
       })
     }
@@ -4420,6 +4416,44 @@ function parseCompletedOpenAiBatchOutput<T>(
   } catch (error) {
     throw new CompletedOpenAiBatchOutputRejectedError(getErrorMessage(error))
   }
+}
+
+async function finishParsedSimulationRunEvaluation({
+  finalOutputText,
+  llmRunId,
+  parsedEvaluation,
+  rawResponse,
+  usage,
+}: {
+  finalOutputText: string
+  llmRunId: string
+  parsedEvaluation: SimulationRunEvaluationCompletion
+  rawResponse: unknown
+  usage: unknown
+}) {
+  const evaluationOutputFields = {
+    finalOutputText,
+    illegalActions: parsedEvaluation.illegalActions,
+    legalPass: parsedEvaluation.legalPass,
+    llmRunId,
+    rawResponse,
+    simulationQualityScore: parsedEvaluation.simulationQualityScore,
+    simulationQualityScoreReasoning:
+      parsedEvaluation.simulationQualityScoreReasoning,
+    strategicMistakes: parsedEvaluation.strategicMistakes,
+    strategicPass: parsedEvaluation.strategicPass,
+    usage,
+  }
+
+  if (parsedEvaluation.resultFailureMessage) {
+    await failSimulationRunEvaluationResultWithOutputs({
+      ...evaluationOutputFields,
+      failureMessage: parsedEvaluation.resultFailureMessage,
+    })
+    return
+  }
+
+  await completeSimulationRunEvaluation(evaluationOutputFields)
 }
 
 async function reconcileCompletedOpenAiBatchOutputRejection({
@@ -6196,17 +6230,11 @@ async function runEvaluationLlmRun({
 
     throwIfRuntimeAborted(runtime.abortController.signal)
 
-    await completeSimulationRunEvaluation({
+    await finishParsedSimulationRunEvaluation({
       finalOutputText: responseResult.outputText,
-      illegalActions: parsedEvaluation.illegalActions,
-      legalPass: parsedEvaluation.legalPass,
       llmRunId,
+      parsedEvaluation,
       rawResponse: responseResult.rawResponse,
-      simulationQualityScore: parsedEvaluation.simulationQualityScore,
-      simulationQualityScoreReasoning:
-        parsedEvaluation.simulationQualityScoreReasoning,
-      strategicMistakes: parsedEvaluation.strategicMistakes,
-      strategicPass: parsedEvaluation.strategicPass,
       usage: responseResult.usage,
     })
     runtime.status = "completed"

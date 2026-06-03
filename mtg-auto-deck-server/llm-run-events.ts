@@ -112,7 +112,11 @@ export type SimulationRunEvaluationCompletion = {
   illegalActions: string[]
   strategicMistakes: string[]
   parsedOutput: Record<string, unknown>
+  resultFailureMessage?: string
 }
+
+export const SIMULATION_QUALITY_REASONING_REQUIRED_MESSAGE =
+  "Evaluation LLM response must explain simulationQualityScoreReasoning when simulationQualityScore is less than 10."
 
 export function parseSimulationRunEvaluationCompletionFromResponseText(
   responseText: string
@@ -179,14 +183,14 @@ export function parseSimulationRunEvaluationCompletionFromResponseText(
     )
   }
 
-  if (
-    roundEvaluationScore(simulationQualityScore) < 10 &&
+  const roundedSimulationQualityScore = roundEvaluationScore(
+    simulationQualityScore
+  )
+  const resultFailureMessage =
+    roundedSimulationQualityScore < 10 &&
     normalizedSimulationQualityScoreReasoning === null
-  ) {
-    throw new Error(
-      "Evaluation LLM response must explain simulationQualityScoreReasoning when simulationQualityScore is less than 10."
-    )
-  }
+      ? SIMULATION_QUALITY_REASONING_REQUIRED_MESSAGE
+      : undefined
 
   if (!isStringArray(strategicMistakes)) {
     throw new Error(
@@ -197,11 +201,12 @@ export function parseSimulationRunEvaluationCompletionFromResponseText(
   return {
     legalPass,
     strategicPass,
-    simulationQualityScore: roundEvaluationScore(simulationQualityScore),
+    simulationQualityScore: roundedSimulationQualityScore,
     simulationQualityScoreReasoning: normalizedSimulationQualityScoreReasoning,
     illegalActions,
     strategicMistakes,
     parsedOutput: responseRecord,
+    ...(resultFailureMessage ? { resultFailureMessage } : {}),
   }
 }
 
