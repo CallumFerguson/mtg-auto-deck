@@ -178,6 +178,10 @@ Zone discipline:
 - Preserve durable known library information, exiled-linked cards, chosen names/modes/values, counters, attachments, copied/face-down/transformed status, and ongoing effects in gameState.
 - Do not include expired turn-only details, phase/turn counters, marked damage, or play-by-play narration in gameState.
 
+Guidelines:
+- Consider how your actions affect future turns, not only the current turn.
+- When choosing which land to play, if you have both tapped lands and untapped lands in hand, and you do not need the land’s mana this turn, consider playing a tapped land first.
+
 MANA COSTS AND MANA SYMBOLS REFERENCE
 - A number in braces means GENERIC mana, not colored mana.
   - Example: {1} means one mana of any type.
