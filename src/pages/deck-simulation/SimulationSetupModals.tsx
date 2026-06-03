@@ -876,10 +876,22 @@ export function CreateStartingHandModal({
   onSaved: (hand: StartingHand) => void
 }) {
   const [handName, setHandName] = useState("")
+  const [cardFilter, setCardFilter] = useState("")
   const [selectedCardIds, setSelectedCardIds] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const hasHandName = handName.trim().length > 0
+  const filteredCardOptions = useMemo(() => {
+    const normalizedCardFilter = cardFilter.trim().toLowerCase()
+
+    if (!normalizedCardFilter) {
+      return cardOptions
+    }
+
+    return cardOptions.filter((card) =>
+      card.name.toLowerCase().includes(normalizedCardFilter)
+    )
+  }, [cardFilter, cardOptions])
   const selectedCardIdSet = useMemo(
     () => new Set(selectedCardIds),
     [selectedCardIds]
@@ -1033,6 +1045,23 @@ export function CreateStartingHandModal({
             </label>
 
             <div className="grid gap-3">
+              <label
+                className="grid gap-2 text-sm font-medium"
+                htmlFor="starting-hand-card-filter"
+              >
+                <span>Filter cards</span>
+                <input
+                  id="starting-hand-card-filter"
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground transition outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-50"
+                  type="text"
+                  value={cardFilter}
+                  disabled={isSaving}
+                  onChange={(event) => {
+                    setCardFilter(event.target.value)
+                  }}
+                />
+              </label>
+
               <div className="flex items-center justify-between gap-3 text-sm">
                 <p
                   className={
@@ -1050,50 +1079,57 @@ export function CreateStartingHandModal({
                 ) : null}
               </div>
 
-              <div className="max-h-80 overflow-y-auto rounded-md border border-border bg-background/35 p-2">
-                <ul className="grid gap-1">
-                  {cardOptions.map((card) => {
-                    const isSelected = selectedCardIdSet.has(card.id)
-                    const isDisabled =
-                      isSaving || (!isSelected && selectedCardIds.length >= 7)
+              <div className="h-80 overflow-y-auto rounded-md border border-border bg-background/35 p-2">
+                {filteredCardOptions.length > 0 ? (
+                  <ul className="grid gap-1">
+                    {filteredCardOptions.map((card) => {
+                      const isSelected = selectedCardIdSet.has(card.id)
+                      const isDisabled =
+                        isSaving ||
+                        (!isSelected && selectedCardIds.length >= 7)
 
-                    return (
-                      <li key={card.id}>
-                        <div
-                          className={`flex min-w-0 items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
-                            isSelected
-                              ? "bg-accent text-accent-foreground"
-                              : isDisabled
-                                ? "bg-muted/15 text-muted-foreground/55"
-                                : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
-                          } ${isDisabled ? "cursor-not-allowed" : "cursor-pointer"}`}
-                          onClick={(event) =>
-                            handleCardRowClick(event, card.id, isDisabled)
-                          }
-                        >
-                          <input
-                            className="size-4 shrink-0 accent-sky-300"
-                            type="checkbox"
-                            checked={isSelected}
-                            disabled={isDisabled}
-                            aria-label={`Select ${card.name}`}
-                            onChange={() => {
-                              toggleCard(card.id)
-                              setError(null)
-                            }}
-                          />
-                          <CardPreviewPill
-                            href={card.scryfallUri}
-                            imageUrl={card.defaultImageUrl}
-                            label={card.name}
-                            title={card.name}
-                            variant={isSelected ? "selected" : "default"}
-                          />
-                        </div>
-                      </li>
-                    )
-                  })}
-                </ul>
+                      return (
+                        <li key={card.id}>
+                          <div
+                            className={`flex min-w-0 items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
+                              isSelected
+                                ? "bg-accent text-accent-foreground"
+                                : isDisabled
+                                  ? "bg-muted/15 text-muted-foreground/55"
+                                  : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+                            } ${isDisabled ? "cursor-not-allowed" : "cursor-pointer"}`}
+                            onClick={(event) =>
+                              handleCardRowClick(event, card.id, isDisabled)
+                            }
+                          >
+                            <input
+                              className="size-4 shrink-0 accent-sky-300"
+                              type="checkbox"
+                              checked={isSelected}
+                              disabled={isDisabled}
+                              aria-label={`Select ${card.name}`}
+                              onChange={() => {
+                                toggleCard(card.id)
+                                setError(null)
+                              }}
+                            />
+                            <CardPreviewPill
+                              href={card.scryfallUri}
+                              imageUrl={card.defaultImageUrl}
+                              label={card.name}
+                              title={card.name}
+                              variant={isSelected ? "selected" : "default"}
+                            />
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                ) : (
+                  <p className="px-3 py-6 text-center text-sm text-muted-foreground">
+                    No cards match that filter.
+                  </p>
+                )}
               </div>
             </div>
 
