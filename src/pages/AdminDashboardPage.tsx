@@ -1373,37 +1373,6 @@ function AdminModelPresetsSection() {
 
   return (
     <section className="min-w-0 space-y-4">
-      <div className="flex flex-col gap-3 rounded-lg border border-border bg-card/70 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0 space-y-1">
-          <div className="flex items-center gap-2">
-            <BrainCircuit
-              className="size-5 shrink-0 text-sky-300"
-              aria-hidden
-            />
-            <h2 className="text-xl font-semibold">Model presets</h2>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            {isLoading
-              ? "Loading presets..."
-              : `${presets.length} ${
-                  presets.length === 1 ? "preset" : "presets"
-                }`}
-          </p>
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => void loadPresets()}
-          disabled={isLoading}
-        >
-          <RefreshCw
-            data-icon="inline-start"
-            className={isLoading ? "animate-spin" : undefined}
-          />
-          Refresh
-        </Button>
-      </div>
-
       <div className="rounded-lg border border-border bg-card/70 p-4">
         <form
           className="grid gap-4"
@@ -1632,6 +1601,37 @@ function AdminModelPresetsSection() {
             </Button>
           </div>
         </form>
+      </div>
+
+      <div className="flex flex-col gap-3 rounded-lg border border-border bg-card/70 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 space-y-1">
+          <div className="flex items-center gap-2">
+            <BrainCircuit
+              className="size-5 shrink-0 text-sky-300"
+              aria-hidden
+            />
+            <h2 className="text-xl font-semibold">Model presets</h2>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {isLoading
+              ? "Loading presets..."
+              : `${presets.length} ${
+                  presets.length === 1 ? "preset" : "presets"
+                }`}
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => void loadPresets()}
+          disabled={isLoading}
+        >
+          <RefreshCw
+            data-icon="inline-start"
+            className={isLoading ? "animate-spin" : undefined}
+          />
+          Refresh
+        </Button>
       </div>
 
       {isLoading ? (
@@ -2237,34 +2237,6 @@ function AdminBenchmarksSection() {
 
   return (
     <section className="min-w-0 space-y-4">
-      <div className="flex flex-col gap-3 rounded-lg border border-border bg-card/70 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0 space-y-1">
-          <div className="flex items-center gap-2">
-            <BarChart3 className="size-5 shrink-0 text-sky-300" aria-hidden />
-            <h2 className="text-xl font-semibold">Benchmarks</h2>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            {isLoadingBenchmarks
-              ? "Loading benchmarks..."
-              : `${benchmarks.length} ${
-                  benchmarks.length === 1 ? "benchmark" : "benchmarks"
-                }`}
-          </p>
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => void loadBenchmarks()}
-          disabled={isLoadingBenchmarks}
-        >
-          <RefreshCw
-            data-icon="inline-start"
-            className={isLoadingBenchmarks ? "animate-spin" : undefined}
-          />
-          Refresh
-        </Button>
-      </div>
-
       <div className="rounded-lg border border-border bg-card/70 p-4">
         <form className="grid gap-4" onSubmit={handleCreateBenchmark}>
           <div className="flex items-center gap-2">
@@ -2462,6 +2434,34 @@ function AdminBenchmarksSection() {
             </Button>
           </div>
         </form>
+      </div>
+
+      <div className="flex flex-col gap-3 rounded-lg border border-border bg-card/70 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 space-y-1">
+          <div className="flex items-center gap-2">
+            <BarChart3 className="size-5 shrink-0 text-sky-300" aria-hidden />
+            <h2 className="text-xl font-semibold">Benchmarks</h2>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {isLoadingBenchmarks
+              ? "Loading benchmarks..."
+              : `${benchmarks.length} ${
+                  benchmarks.length === 1 ? "benchmark" : "benchmarks"
+                }`}
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => void loadBenchmarks()}
+          disabled={isLoadingBenchmarks}
+        >
+          <RefreshCw
+            data-icon="inline-start"
+            className={isLoadingBenchmarks ? "animate-spin" : undefined}
+          />
+          Refresh
+        </Button>
       </div>
 
       {isLoadingBenchmarks ? (
