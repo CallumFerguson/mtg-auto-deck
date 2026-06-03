@@ -1732,6 +1732,19 @@ export function DeckSimulation({
     )
   }
 
+  function navigateToDeckSimulation(
+    simulationId?: string,
+    turnNumber?: number | null
+  ) {
+    const path = getDeckSimulationPath(deckId, simulationId, turnNumber)
+    const url = new URL(path, window.location.origin)
+
+    setSelectedTimelineTurn(
+      getSimulationResultsTimelineTurnFromSearchParams(url.searchParams)
+    )
+    navigate(path)
+  }
+
   function selectCreatedStartingHand(hand: StartingHand) {
     setStartingHands((currentStartingHands) =>
       mergeStartingHandLists([hand], currentStartingHands)
@@ -2013,7 +2026,7 @@ export function DeckSimulation({
 
       setIsNewSimulationSelected(false)
       resetCreateSimulationForm()
-      navigate(getDeckSimulationPath(deckId, data.simulation.id))
+      navigateToDeckSimulation(data.simulation.id)
     } catch {
       setCreateSimulationError("Simulation could not be sent to the server.")
     } finally {
@@ -2059,7 +2072,7 @@ export function DeckSimulation({
       if (!isNewSimulationSelected && selectedSimulationId === simulationId) {
         setSelectedSimulationId("")
         setIsNewSimulationSelected(true)
-        navigate(getDeckSimulationPath(deckId))
+        navigateToDeckSimulation()
       }
     } catch {
       setDeleteSimulationError("Simulation could not be deleted.")
@@ -2091,7 +2104,7 @@ export function DeckSimulation({
                 onClick={() => {
                   setIsNewSimulationSelected(true)
                   setSelectedSimulationId("")
-                  navigate(getDeckSimulationPath(deckId))
+                  navigateToDeckSimulation()
                 }}
               >
                 <Plus className="size-4" data-icon="inline-start" />
@@ -2142,13 +2155,7 @@ export function DeckSimulation({
                         onClick={() => {
                           setSelectedSimulationId(simulation.id)
                           setIsNewSimulationSelected(false)
-                          navigate(
-                            getDeckSimulationPath(
-                              deckId,
-                              simulation.id,
-                              selectedTimelineTurn
-                            )
-                          )
+                          navigateToDeckSimulation(simulation.id)
                         }}
                       >
                         {getSimulationLabel(simulation)}
