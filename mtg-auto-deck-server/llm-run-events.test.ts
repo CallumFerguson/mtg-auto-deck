@@ -18,6 +18,7 @@ import {
   buildCancelLlmRunQuery,
   buildClaimQueuedLlmRunStartQuery,
   buildCompleteLlmRunQuery,
+  buildFailSimulationRunEvaluationResultQuery,
   buildFailQueuedLlmRunUsageLimitQuery,
   buildFailLlmRunQuery,
   buildPartialLlmRunCostSnapshotQuery,
@@ -1454,7 +1455,23 @@ test("builds completed LLM run query with exact final output text", () => {
   assert.match(normalizedSql, /'batch_submitted'/)
 })
 
-test("builds failed LLM run query with parse-failure final output text", () => {
+test("builds failed evaluation result query with failure message", () => {
+  const query = buildFailSimulationRunEvaluationResultQuery(
+    "00000000-0000-0000-0000-000000000001",
+    "Evaluation LLM completed response did not match the required schema."
+  )
+  const normalizedSql = query.text.replace(/\s+/g, " ")
+
+  assert.deepEqual(query.values, [
+    "00000000-0000-0000-0000-000000000001",
+    "Evaluation LLM completed response did not match the required schema.",
+  ])
+  assert.match(normalizedSql, /SET result_status = 'failed'/)
+  assert.match(normalizedSql, /result_failure_message = \$2/)
+  assert.match(normalizedSql, /WHERE llm_run_id = \$1/)
+})
+
+test("builds failed LLM run query with optional final output text", () => {
   const finalOutputText = '{"keptHand":'
   const query = buildFailLlmRunQuery(
     "00000000-0000-0000-0000-000000000001",

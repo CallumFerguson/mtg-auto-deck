@@ -402,8 +402,18 @@ function EvaluationResultCard({
 }: {
   evaluation: SimulationRunEvaluation
 }) {
-  const isCompleted = evaluation.status === "completed"
-  const isActive = ACTIVE_EVALUATION_STATUSES.has(evaluation.status)
+  const displayStatus =
+    evaluation.status === "completed" && evaluation.resultStatus === "failed"
+      ? "failed"
+      : evaluation.status
+  const hasCompletedResult =
+    evaluation.status === "completed" && evaluation.resultStatus === "completed"
+  const resultFailureMessage =
+    evaluation.resultStatus === "failed"
+      ? (evaluation.resultFailureMessage ?? "Evaluation result was rejected.")
+      : null
+  const failureMessage = resultFailureMessage ?? evaluation.failureMessage
+  const isActive = ACTIVE_EVALUATION_STATUSES.has(displayStatus)
   const metadata = [
     `Attempt ${evaluation.attemptNumber}`,
     evaluation.llmModelPresetName ?? evaluation.model,
@@ -427,11 +437,11 @@ function EvaluationResultCard({
         </div>
         <EvaluationStatusBadge
           isActive={isActive}
-          status={evaluation.status}
+          status={displayStatus}
         />
       </div>
 
-      {isCompleted ? (
+      {hasCompletedResult ? (
         <>
           <div className="grid gap-2 sm:grid-cols-3">
             <EvaluationPassBadge
@@ -462,9 +472,9 @@ function EvaluationResultCard({
             values={evaluation.strategicMistakes}
           />
         </>
-      ) : evaluation.failureMessage ? (
+      ) : failureMessage ? (
         <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {evaluation.failureMessage}
+          {failureMessage}
         </p>
       ) : isActive ? (
         <p className="rounded-md border border-sky-300/30 bg-sky-400/10 px-3 py-2 text-sm text-sky-100">

@@ -109,6 +109,7 @@ import {
   cancelStaleInFlightLlmRuns,
   claimNextQueuedLlmRun,
   completeOpeningHandLlmRun,
+  completeRawLlmRun,
   completeSimulationRunEvaluation,
   completeTurnLlmRun,
   createSimulationRunEvaluation,
@@ -122,6 +123,7 @@ import {
   drawCardsFromTop,
   drawStartingHand,
   ensureSimulationsSchema,
+  failSimulationRunEvaluationResult,
   failLlmRun,
   getActiveLlmRunMcpTokenContext,
   getSimulationCreationDecision,
@@ -4289,17 +4291,33 @@ async function reconcileOpenAiBatchOutputLine({
     return
   }
 
-  let completion: SimulationLlmCompletionResult | null = null
+  let outputText: string
+  let usage: unknown
 
   try {
     assertCompletedProviderResponse(responseBody, item.phase, "OpenAI")
-    const outputText = getCompletedResponseOutputText(responseBody)
+    outputText = getCompletedResponseOutputText(responseBody)
     const responseBodyRecord = asRecord(responseBody)
-    const usage = responseBodyRecord.usage ?? {}
+    usage = responseBodyRecord.usage ?? {}
+  } catch (error) {
+    await reconcileOpenAiBatchItemFailure({
+      errorPayload: outputLine,
+      failureMessage: getErrorMessage(error),
+      item,
+      openAiBatchId,
+    })
+    return
+  }
 
+  let completion: SimulationLlmCompletionResult | null = null
+
+  try {
     if (item.phase === "opening_hand") {
       const parsedOpeningHand =
-        parseOpeningHandCompletionFromResponseText(outputText)
+        parseCompletedOpenAiBatchOutput(
+          outputText,
+          parseOpeningHandCompletionFromResponseText
+        )
       completion = await completeOpeningHandLlmRun({
         finalOutputText: outputText,
         llmRunId: item.llmRunId,
@@ -4310,7 +4328,10 @@ async function reconcileOpenAiBatchOutputLine({
       })
     } else if (item.phase === "turn") {
       const parsedTurn =
-        parseTurnSimulationCompletionFromResponseText(outputText)
+        parseCompletedOpenAiBatchOutput(
+          outputText,
+          parseTurnSimulationCompletionFromResponseText
+        )
       completion = await completeTurnLlmRun({
         finalOutputText: outputText,
         gameState: parsedTurn.gameState,
@@ -4321,7 +4342,10 @@ async function reconcileOpenAiBatchOutputLine({
       })
     } else {
       const parsedEvaluation =
-        parseSimulationRunEvaluationCompletionFromResponseText(outputText)
+        parseCompletedOpenAiBatchOutput(
+          outputText,
+          parseSimulationRunEvaluationCompletionFromResponseText
+        )
       await completeSimulationRunEvaluation({
         finalOutputText: outputText,
         illegalActions: parsedEvaluation.illegalActions,
@@ -4337,6 +4361,19 @@ async function reconcileOpenAiBatchOutputLine({
       })
     }
   } catch (error) {
+    if (error instanceof CompletedOpenAiBatchOutputRejectedError) {
+      await reconcileCompletedOpenAiBatchOutputRejection({
+        failureMessage: error.message,
+        item,
+        openAiBatchId,
+        outputLine,
+        outputText,
+        rawResponse: responseBody,
+        usage,
+      })
+      return
+    }
+
     await reconcileOpenAiBatchItemFailure({
       errorPayload: outputLine,
       failureMessage: getErrorMessage(error),
@@ -4364,6 +4401,78 @@ async function reconcileOpenAiBatchOutputLine({
     if (completion !== null) {
       await handleSimulationCompletionNextStep(completion)
     }
+  }
+}
+
+class CompletedOpenAiBatchOutputRejectedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "CompletedOpenAiBatchOutputRejectedError"
+  }
+}
+
+function parseCompletedOpenAiBatchOutput<T>(
+  outputText: string,
+  parse: (outputText: string) => T
+) {
+  try {
+    return parse(outputText)
+  } catch (error) {
+    throw new CompletedOpenAiBatchOutputRejectedError(getErrorMessage(error))
+  }
+}
+
+async function reconcileCompletedOpenAiBatchOutputRejection({
+  failureMessage,
+  item,
+  openAiBatchId,
+  outputLine,
+  outputText,
+  rawResponse,
+  usage,
+}: {
+  failureMessage: string
+  item: Awaited<ReturnType<typeof listOpenAiBatchItemsForReconcile>>[number]
+  openAiBatchId: string
+  outputLine: unknown
+  outputText: string
+  rawResponse: unknown
+  usage: unknown
+}) {
+  console.error("Completed OpenAI batch output was rejected:", {
+    customId: item.customId,
+    llmRunId: item.llmRunId,
+    phase: item.phase,
+    failureMessage,
+  })
+  await completeRawLlmRun({
+    finalOutputText: outputText,
+    llmRunId: item.llmRunId,
+    rawResponse,
+    usage,
+  })
+
+  if (item.phase === "evaluation") {
+    await failSimulationRunEvaluationResult(item.llmRunId, failureMessage)
+  } else {
+    await markSimulationFailed(item.simulationId, failureMessage)
+  }
+
+  await recordOpenAiBatchItemOutput({
+    customId: item.customId,
+    openAiBatchId,
+    outputPayload: outputLine,
+  })
+
+  if (item.phase !== "evaluation") {
+    await revokeLlmRunMcpToken(item.llmRunId).catch((error: unknown) => {
+      console.error("Failed to revoke completed batch MCP token:", error)
+    })
+    await publishSimulationResultsState({
+      deckId: item.deckId,
+      llmRunId: item.llmRunId,
+      simulationId: item.simulationId,
+    })
   }
 }
 
@@ -6063,10 +6172,27 @@ async function runEvaluationLlmRun({
               })
 
     throwIfRuntimeAborted(runtime.abortController.signal)
-    const parsedEvaluation =
-      parseSimulationRunEvaluationCompletionFromResponseText(
+    let parsedEvaluation: ReturnType<
+      typeof parseSimulationRunEvaluationCompletionFromResponseText
+    >
+
+    try {
+      parsedEvaluation = parseSimulationRunEvaluationCompletionFromResponseText(
         responseResult.outputText
       )
+    } catch (error) {
+      throwIfRuntimeAborted(runtime.abortController.signal)
+      console.error("Evaluation LLM run result was rejected:", error)
+      await completeRawLlmRun({
+        finalOutputText: responseResult.outputText,
+        llmRunId,
+        rawResponse: responseResult.rawResponse,
+        usage: responseResult.usage,
+      })
+      await failSimulationRunEvaluationResult(llmRunId, getErrorMessage(error))
+      runtime.status = "completed"
+      return
+    }
 
     throwIfRuntimeAborted(runtime.abortController.signal)
 
@@ -6255,9 +6381,33 @@ async function runOpeningHandLlmRun({
               })
 
     throwIfRuntimeAborted(runtime.abortController.signal)
-    const parsedOpeningHand = parseOpeningHandCompletionFromResponseText(
-      responseResult.outputText
-    )
+    let parsedOpeningHand: ReturnType<
+      typeof parseOpeningHandCompletionFromResponseText
+    >
+
+    try {
+      parsedOpeningHand = parseOpeningHandCompletionFromResponseText(
+        responseResult.outputText
+      )
+    } catch (error) {
+      throwIfRuntimeAborted(runtime.abortController.signal)
+      const failureMessage = getErrorMessage(error)
+      console.error("Opening-hand LLM run result was rejected:", error)
+      await completeRawLlmRun({
+        finalOutputText: responseResult.outputText,
+        llmRunId,
+        rawResponse: responseResult.rawResponse,
+        usage: responseResult.usage,
+      })
+      await markSimulationFailed(simulationId, failureMessage)
+      runtime.status = "completed"
+      await publishSimulationResultsState({
+        deckId,
+        llmRunId,
+        simulationId,
+      })
+      return
+    }
 
     throwIfRuntimeAborted(runtime.abortController.signal)
 
@@ -6511,9 +6661,33 @@ async function runTurnLlmRun({
               })
 
     throwIfRuntimeAborted(runtime.abortController.signal)
-    const parsedTurn = parseTurnSimulationCompletionFromResponseText(
-      responseResult.outputText
-    )
+    let parsedTurn: ReturnType<
+      typeof parseTurnSimulationCompletionFromResponseText
+    >
+
+    try {
+      parsedTurn = parseTurnSimulationCompletionFromResponseText(
+        responseResult.outputText
+      )
+    } catch (error) {
+      throwIfRuntimeAborted(runtime.abortController.signal)
+      const failureMessage = getErrorMessage(error)
+      console.error("Turn LLM run result was rejected:", error)
+      await completeRawLlmRun({
+        finalOutputText: responseResult.outputText,
+        llmRunId,
+        rawResponse: responseResult.rawResponse,
+        usage: responseResult.usage,
+      })
+      await markSimulationFailed(simulationId, failureMessage)
+      runtime.status = "completed"
+      await publishSimulationResultsState({
+        deckId,
+        llmRunId,
+        simulationId,
+      })
+      return
+    }
 
     throwIfRuntimeAborted(runtime.abortController.signal)
 

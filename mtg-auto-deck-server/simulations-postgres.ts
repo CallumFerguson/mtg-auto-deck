@@ -50,6 +50,11 @@ export type LlmRunStatus =
 export type LlmRunPhase = "opening_hand" | "turn" | "evaluation" | "other"
 type SimulationRunPhase = Extract<LlmRunPhase, "opening_hand" | "turn">
 
+export type SimulationRunEvaluationResultStatus =
+  | "pending"
+  | "completed"
+  | "failed"
+
 export function canApplyLateLlmRunTerminalUpdate(status: LlmRunStatus) {
   return (
     status === "pending" ||
@@ -251,6 +256,8 @@ export type SimulationRunEvaluation = {
   runtimeStreamKey: string | null
   attemptNumber: number
   failureMessage: string | null
+  resultStatus: SimulationRunEvaluationResultStatus
+  resultFailureMessage: string | null
   legalPass: boolean | null
   strategicPass: boolean | null
   simulationQualityScore: number | null
@@ -1159,6 +1166,8 @@ export async function ensureSimulationsSchema() {
       simulation_quality_score_reasoning text,
       illegal_actions jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(illegal_actions) = 'array'),
       strategic_mistakes jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(strategic_mistakes) = 'array'),
+      result_status text NOT NULL DEFAULT 'pending',
+      result_failure_message text,
 
       created_at timestamptz NOT NULL DEFAULT now(),
 
@@ -1173,12 +1182,32 @@ export async function ensureSimulationsSchema() {
             simulation_quality_score >= 0
             AND simulation_quality_score <= 10
           )
+        ),
+      CONSTRAINT simulation_run_evaluations_result_status_check
+        CHECK (
+          result_status IN ('pending', 'completed', 'failed')
         )
     )
   `)
   await queryDatabase(`
     ALTER TABLE simulation_run_evaluations
     ADD COLUMN IF NOT EXISTS simulation_quality_score_reasoning text
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulation_run_evaluations
+    ADD COLUMN IF NOT EXISTS result_status text NOT NULL DEFAULT 'pending'
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulation_run_evaluations
+    ADD COLUMN IF NOT EXISTS result_failure_message text
+  `)
+  await queryDatabase(`
+    UPDATE simulation_run_evaluations
+    SET result_status = 'completed'
+    WHERE result_status = 'pending'
+      AND legal_pass IS NOT NULL
+      AND strategic_pass IS NOT NULL
+      AND simulation_quality_score IS NOT NULL
   `)
   await queryDatabase(`
     ALTER TABLE simulation_run_evaluations
@@ -1203,6 +1232,15 @@ export async function ensureSimulationsSchema() {
           AND simulation_quality_score <= 10
         )
       )
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulation_run_evaluations
+    DROP CONSTRAINT IF EXISTS simulation_run_evaluations_result_status_check
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulation_run_evaluations
+    ADD CONSTRAINT simulation_run_evaluations_result_status_check
+      CHECK (result_status IN ('pending', 'completed', 'failed'))
   `)
   await queryDatabase(`
     UPDATE llm_runs llm_run
@@ -4533,6 +4571,71 @@ export async function completeTurnLlmRun({
   })
 }
 
+export async function completeRawLlmRun({
+  finalOutputText,
+  llmRunId,
+  rawResponse,
+  usage,
+}: {
+  finalOutputText: string
+  llmRunId: string
+  rawResponse: unknown
+  usage: unknown
+}) {
+  await withDatabaseTransaction(async (client) => {
+    const snapshotResult = await client.query<{
+      llm_run_status: LlmRunStatus
+      provider: string
+      processing_mode: LlmProcessingMode
+      service_tier: string | null
+      input_token_cost_usd_per_million: string | number | null
+      cached_input_token_cost_usd_per_million: string | number | null
+      cache_write_input_token_cost_usd_per_million: string | number | null
+      output_token_cost_usd_per_million: string | number | null
+    }>(
+      `
+        SELECT
+          llm_run.status AS llm_run_status,
+          llm_run.provider,
+          llm_run.processing_mode,
+          llm_run.service_tier,
+          preset.input_token_cost_usd_per_million,
+          preset.cached_input_token_cost_usd_per_million,
+          preset.cache_write_input_token_cost_usd_per_million,
+          preset.output_token_cost_usd_per_million
+        FROM llm_runs llm_run
+        LEFT JOIN llm_model_presets preset
+          ON preset.id = llm_run.llm_model_preset_id
+        WHERE llm_run.id = $1
+        FOR UPDATE OF llm_run
+      `,
+      [llmRunId]
+    )
+
+    if (snapshotResult.rowCount === 0) {
+      throw new SimulationValidationError("LLM run not found.")
+    }
+
+    const snapshot = snapshotResult.rows[0]
+
+    if (!canApplyLateLlmRunTerminalUpdate(snapshot.llm_run_status)) {
+      throw new SimulationValidationError("LLM run is no longer active.")
+    }
+
+    const costValues = getCompletedLlmRunCostValues(snapshot, usage)
+    const completeRunQuery = buildCompleteLlmRunQuery({
+      estimatedCostUsd: costValues.estimatedCostUsd,
+      finalOutputText,
+      llmRunId,
+      openrouterReportedCostUsd: costValues.openrouterReportedCostUsd,
+      rawResponse,
+      usage,
+    })
+
+    await client.query(completeRunQuery.text, completeRunQuery.values)
+  })
+}
+
 export async function completeSimulationRunEvaluation({
   finalOutputText,
   illegalActions,
@@ -4613,7 +4716,9 @@ export async function completeSimulationRunEvaluation({
             simulation_quality_score = $4,
             simulation_quality_score_reasoning = $5,
             illegal_actions = $6::jsonb,
-            strategic_mistakes = $7::jsonb
+            strategic_mistakes = $7::jsonb,
+            result_status = 'completed',
+            result_failure_message = NULL
         WHERE llm_run_id = $1
       `,
       [
@@ -4637,6 +4742,45 @@ export async function completeSimulationRunEvaluation({
     })
     await client.query(completeRunQuery.text, completeRunQuery.values)
   })
+
+  const evaluation = await getSimulationRunEvaluationByLlmRunId(llmRunId)
+
+  if (!evaluation) {
+    throw new SimulationValidationError("Evaluation LLM run not found.")
+  }
+
+  return evaluation
+}
+
+export function buildFailSimulationRunEvaluationResultQuery(
+  llmRunId: string,
+  failureMessage: string
+) {
+  return {
+    text: `
+      UPDATE simulation_run_evaluations
+      SET result_status = 'failed',
+          result_failure_message = $2
+      WHERE llm_run_id = $1
+      RETURNING id
+    `,
+    values: [llmRunId, failureMessage],
+  }
+}
+
+export async function failSimulationRunEvaluationResult(
+  llmRunId: string,
+  failureMessage: string
+) {
+  const query = buildFailSimulationRunEvaluationResultQuery(
+    llmRunId,
+    failureMessage
+  )
+  const result = await queryDatabase(query.text, query.values)
+
+  if (result.rowCount === 0) {
+    throw new SimulationValidationError("Evaluation LLM run not found.")
+  }
 
   const evaluation = await getSimulationRunEvaluationByLlmRunId(llmRunId)
 
@@ -4671,6 +4815,8 @@ export async function listSimulationRunEvaluations({
         evaluation.target_run_phase,
         evaluation.llm_run_id,
         evaluation.attempt_number,
+        evaluation.result_status,
+        evaluation.result_failure_message,
         evaluation.legal_pass,
         evaluation.strategic_pass,
         evaluation.simulation_quality_score,
@@ -4851,6 +4997,8 @@ async function getSimulationRunEvaluationByLlmRunId(llmRunId: string) {
         evaluation.target_run_phase,
         evaluation.llm_run_id,
         evaluation.attempt_number,
+        evaluation.result_status,
+        evaluation.result_failure_message,
         evaluation.legal_pass,
         evaluation.strategic_pass,
         evaluation.simulation_quality_score,
@@ -5908,6 +6056,8 @@ type SimulationRunEvaluationRow = {
   runtime_stream_key: string | null
   attempt_number: number
   failure_message: string | null
+  result_status: SimulationRunEvaluationResultStatus
+  result_failure_message: string | null
   legal_pass: boolean | null
   strategic_pass: boolean | null
   simulation_quality_score: string | number | null
@@ -6087,6 +6237,8 @@ function mapSimulationRunEvaluationRow(
     runtimeStreamKey: row.runtime_stream_key,
     attemptNumber: row.attempt_number,
     failureMessage: row.failure_message,
+    resultStatus: row.result_status,
+    resultFailureMessage: row.result_failure_message,
     legalPass: row.legal_pass,
     strategicPass: row.strategic_pass,
     simulationQualityScore: toOptionalNumber(row.simulation_quality_score),

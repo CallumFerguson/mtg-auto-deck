@@ -182,6 +182,11 @@ export type SimulationDebugResponse = {
   debug: SimulationDebugInfo
 }
 
+export type SimulationRunEvaluationResultStatus =
+  | "pending"
+  | "completed"
+  | "failed"
+
 export type SimulationRunEvaluation = {
   id: string
   simulationId: string
@@ -199,6 +204,8 @@ export type SimulationRunEvaluation = {
   status: string
   runtimeStreamKey: string | null
   attemptNumber: number
+  resultStatus: SimulationRunEvaluationResultStatus
+  resultFailureMessage: string | null
   failureMessage: string | null
   legalPass: boolean | null
   strategicPass: boolean | null
