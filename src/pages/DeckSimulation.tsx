@@ -6797,6 +6797,12 @@ function SimulationGameStateZoneObjectView({
   const imageUrl = href ? resolvedCard?.defaultImageUrl?.trim() || null : null
   const shouldShowTapOverlay = visualTapState !== "untapped"
   const title = getSimulationGameStateZoneObjectTitle(object)
+  const fallbackClassName = [
+    "flex aspect-[488/680] w-full flex-col items-center justify-center gap-1 overflow-hidden bg-gradient-to-b from-sky-950/35 to-black/50 px-2 py-2 text-center break-words text-sky-50",
+    object.quantity > 1 ? "pt-5" : null,
+  ]
+    .filter(Boolean)
+    .join(" ")
 
   useEffect(() => {
     if (previousIsTappedRef.current === isTapped) {
@@ -6837,8 +6843,15 @@ function SimulationGameStateZoneObjectView({
           loading="lazy"
         />
       ) : (
-        <span className="flex aspect-[488/680] w-full items-center justify-center bg-gradient-to-b from-sky-950/35 to-black/50 px-2 text-center text-xs leading-4 font-semibold break-words text-sky-50">
-          {object.name}
+        <span className={fallbackClassName}>
+          <span className="max-w-full text-xs leading-4 font-semibold">
+            {object.name}
+          </span>
+          {object.notes ? (
+            <span className="max-h-[4.4rem] max-w-full overflow-hidden text-[0.58rem] leading-[0.72rem] font-medium text-sky-100/75">
+              {object.notes}
+            </span>
+          ) : null}
         </span>
       )}
       {object.quantity > 1 ? (
