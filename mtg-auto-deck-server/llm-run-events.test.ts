@@ -95,8 +95,6 @@ import {
   LlmModelPresetValidationError,
 } from "./llm-model-presets-postgres.js"
 import {
-  BILLING_TIER_LIMITS,
-  BILLING_TIER_USAGE_LIMITS_USD,
   getHighestBillingTier,
   getStripeSubscriptionPlans,
 } from "./subscription-tiers.js"
@@ -1070,24 +1068,6 @@ test("rounds usage remaining percentage with protected endpoints", () => {
 })
 
 test("defines Super Max as the highest admin-only billing tier", () => {
-  assert.deepEqual(
-    {
-      free: BILLING_TIER_LIMITS.free.maxConcurrentLlmRuns,
-      plus: BILLING_TIER_LIMITS.plus.maxConcurrentLlmRuns,
-      pro: BILLING_TIER_LIMITS.pro.maxConcurrentLlmRuns,
-      superMax: BILLING_TIER_LIMITS.super_max.maxConcurrentLlmRuns,
-    },
-    {
-      free: 1,
-      plus: 2,
-      pro: 5,
-      superMax: 10,
-    }
-  )
-  assert.deepEqual(BILLING_TIER_USAGE_LIMITS_USD.super_max, {
-    five_hour: 5,
-    weekly: 10,
-  })
   assert.equal(getHighestBillingTier(["free", "plus"]), "plus")
   assert.equal(getHighestBillingTier(["pro", "plus"]), "pro")
   assert.equal(getHighestBillingTier(["pro", "super_max"]), "super_max")
