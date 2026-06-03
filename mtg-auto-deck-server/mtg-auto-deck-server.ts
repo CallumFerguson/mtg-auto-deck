@@ -275,6 +275,10 @@ import {
   importArchidektDeck,
 } from "./archidekt-import.js"
 import { createJsonZipArchive } from "./zip.js"
+import {
+  buildAllowedHostnames,
+  SERVER_ALLOWED_HOSTNAMES_ENVIRONMENT_VARIABLE,
+} from "./host-validation.js"
 
 const DEFAULT_HOST = "127.0.0.1"
 const DEFAULT_PORT = 3001
@@ -313,7 +317,6 @@ const LOOPBACK_ALLOWED_ORIGINS = [
   "http://127.0.0.1:5173",
   "http://[::1]:5173",
 ]
-const LOOPBACK_ALLOWED_HOSTNAMES = ["localhost", "127.0.0.1", "[::1]"]
 const DEFAULT_ALLOWED_HEADERS = [
   "Content-Type",
   "Accept",
@@ -9225,29 +9228,15 @@ function getAllowedCorsOrigins() {
 }
 
 function getAllowedHostnames() {
-  return Array.from(
-    new Set([
-      ...LOOPBACK_ALLOWED_HOSTNAMES,
-      getHostnameFromUrl(
-        getRequiredServerEnvironmentVariable("BETTER_AUTH_URL"),
-        "BETTER_AUTH_URL"
-      ),
-    ])
-  )
+  return buildAllowedHostnames({
+    betterAuthUrl: getRequiredServerEnvironmentVariable("BETTER_AUTH_URL"),
+    serverAllowedHostnames:
+      process.env[SERVER_ALLOWED_HOSTNAMES_ENVIRONMENT_VARIABLE],
+  })
 }
 
 function normalizeOrigin(url: string) {
   return new URL(url.trim()).origin
-}
-
-function getHostnameFromUrl(url: string, environmentVariable: string) {
-  try {
-    return new URL(url.trim()).hostname
-  } catch {
-    throw new Error(
-      `${environmentVariable} must be a valid absolute URL for host validation.`
-    )
-  }
 }
 
 function getRequiredServerEnvironmentVariable(environmentVariable: string) {

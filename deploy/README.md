@@ -137,9 +137,20 @@ Postgres                 -> same Droplet, localhost only
 
    BETTER_AUTH_URL=https://api.example.com
    APP_PUBLIC_URL=https://app.example.com
+   SERVER_ALLOWED_HOSTNAMES=
 
    OPENING_HAND_MCP_PUBLIC_URL=https://api.example.com/mcp/opening-hand
    TURN_SIMULATION_MCP_PUBLIC_URL=https://api.example.com/mcp/turn-simulation
+   ```
+
+   `SERVER_ALLOWED_HOSTNAMES` is an optional comma-separated allowlist for
+   incoming request `Host` headers. Leave it empty for normal deployments where
+   the API hostname matches `BETTER_AUTH_URL`. Set it for additional API
+   hostnames, such as Cloudflare Tunnel preview domains. Use bare hostnames
+   only; no schemes, ports, paths, or wildcards:
+
+   ```env
+   SERVER_ALLOWED_HOSTNAMES=dev-api.example.com
    ```
 
    This snippet only shows the deployment-specific values. Fill in every other
