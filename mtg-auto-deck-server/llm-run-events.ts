@@ -457,6 +457,39 @@ export function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error)
 }
 
+export function getLlmRunFailureMessage({
+  error,
+  provider,
+  serviceTier,
+}: {
+  error: unknown
+  provider: string
+  serviceTier: string | null
+}) {
+  const errorMessage = getErrorMessage(error)
+
+  if (provider !== "openai" || !isOpenAiRateLimitError(error)) {
+    return errorMessage
+  }
+
+  const providerMessage = `OpenAI returned error: "${errorMessage}"`
+
+  return serviceTier === "flex"
+    ? `${providerMessage} Disable flex processing to reduce the chance of getting this error.`
+    : providerMessage
+}
+
+function isOpenAiRateLimitError(error: unknown) {
+  const errorRecord = asRecord(error)
+  const nestedErrorRecord = asRecord(errorRecord.error)
+  const status = errorRecord.status
+  const code =
+    getStringProperty(errorRecord, "code") ??
+    getStringProperty(nestedErrorRecord, "code")
+
+  return status === 429 || code === "rate_limit_exceeded"
+}
+
 function getOutputTextParts(content: unknown[]) {
   return content.flatMap((part) => {
     const partRecord = asRecord(part)

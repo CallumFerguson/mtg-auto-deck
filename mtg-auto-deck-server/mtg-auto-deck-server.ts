@@ -197,6 +197,7 @@ import {
   asRecord,
   getCompletedResponseOutputText,
   getErrorMessage,
+  getLlmRunFailureMessage,
   getStringProperty,
   isAbortError,
   parseOpeningHandCompletionFromResponseText,
@@ -6108,7 +6109,11 @@ async function runEvaluationLlmRun({
     console.error("Evaluation LLM run failed:", error)
     await failLlmRun(
       llmRunId,
-      getErrorMessage(error),
+      getLlmRunFailureMessage({
+        error,
+        provider: config.provider,
+        serviceTier: getLlmRunServiceTier(config),
+      }),
       responseResult?.outputText
     )
     runtime.status = "failed"
@@ -6302,7 +6307,11 @@ async function runOpeningHandLlmRun({
     console.error("Opening-hand LLM run failed:", error)
     await failLlmRun(
       llmRunId,
-      getErrorMessage(error),
+      getLlmRunFailureMessage({
+        error,
+        provider: config.provider,
+        serviceTier: getLlmRunServiceTier(config),
+      }),
       responseResult?.outputText
     )
     runtime.status = "failed"
@@ -6554,7 +6563,11 @@ async function runTurnLlmRun({
     console.error("Turn LLM run failed:", error)
     await failLlmRun(
       llmRunId,
-      getErrorMessage(error),
+      getLlmRunFailureMessage({
+        error,
+        provider: config.provider,
+        serviceTier: getLlmRunServiceTier(config),
+      }),
       responseResult?.outputText
     )
     runtime.status = "failed"
