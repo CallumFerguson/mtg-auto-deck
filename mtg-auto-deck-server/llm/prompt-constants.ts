@@ -105,6 +105,8 @@ Your job is to audit the target run for legality and only the most obvious strat
 
 Legality:
 - Check mana production and spending, timing, targets, zones, triggers, combat, state-based consequences, land plays, and cleanup.
+- Check token handling, including that tokens only exist on the battlefield in final gameState and cease to exist when they leave the battlefield.
+- Check quantity handling, including that quantity greater than 1 is used only for identical tokens and never for non-token cards.
 - Check whether every required library/randomizer interaction used the appropriate tool and whether the final game state matches the actions and tool outputs.
 - Mark legalPass false if the run contains an illegal action, impossible card movement, invalid tool sequence, or a final output that contradicts the recorded tool results.
 
@@ -171,10 +173,12 @@ Commander rules:
 - Preserve commander tax and commander damage in the final game state when relevant.
 
 Zone discipline:
-- A card must exist in exactly one zone unless a rule says otherwise.
-- Reconcile every card that moved this turn before final output.
+- A non-token card must exist in exactly one zone unless a rule says otherwise.
+- Reconcile every card and token that moved this turn before final output.
 - Played lands must be on the battlefield and absent from hand.
 - Cast nonpermanent spells must be absent from hand and battlefield after resolving unless moved elsewhere by an effect.
+- Tokens only exist on the battlefield in final gameState. If a token is sacrificed, destroyed, exiled, bounced, shuffled, returned to hand, or otherwise leaves the battlefield, log the action and omit it from final gameState zones.
+- Never put tokens in the library, hand, command zone, graveyard, or exile in final gameState. Do not use library tools to create, remove, or move tokens.
 - Preserve durable known library information, exiled-linked cards, chosen names/modes/values, counters, attachments, copied/face-down/transformed status, and ongoing effects in gameState.
 - Do not include expired turn-only details, phase/turn counters, marked damage, or play-by-play narration in gameState.
 
@@ -261,14 +265,23 @@ turnActions should each be an array of strings describing any actions that took 
 - Actions include draws, land plays, mana generation, spells/abilities, trigger resolutions, attacks, combat damage, important zone changes, etc.
 - For the untap step you can summarize, for example, "untap everything", or if there is an exception, for example, "remove stun counter from *card name* and untap everything else", etc.
 - Log the mana-generation action before the mana-spending action. Use brace notation such as {G}, {1}, {C}, {1}{G}; spending logs must state the mana spent.
-- Use full card names when referencing any cards, and surround the card name with asterisk like *card name*
+- Use full card or token names when referencing any cards or tokens, and surround the name with asterisks like *card name* or *Treasure token*.
 
-Each zone should be an array of cards where each card is the following JSON shape:
+Each zone should be an array of zone objects where each object is the following JSON shape:
 {
-  "name": "exact card name",
+  "name": "exact card name or clear token name",
+  "isToken": false | true,
+  "quantity": 1,
   "tapped": null | true | false,
-  "notes": null | "an other relevant information about the card. for example if it has counters, if the card can be played from exile, etc."
+  "notes": null | "other relevant information about the object. for example if it has counters, token type and abilities, if the card can be played from exile, etc."
 }
+
+Zone object rules:
+- Every zone object must include isToken and quantity.
+- Non-token cards and permanents must use isToken: false and quantity: 1.
+- Only tokens may use quantity greater than 1.
+- Use quantity greater than 1 only for identical tokens. Split token objects when tapped status, counters, attachments, copied state, abilities, power/toughness, colors, types, or notes differ.
+- For non-token cards, name must be the exact card name from the card reference. For tokens, name should clearly identify the token, such as "Treasure token", "Food token", or "1/1 white Soldier creature token".
 
 Unrecoverable error:
 If an already-made tool call makes the run impossible to complete accurately, stop immediately. Do not call more tools. Return exactly:

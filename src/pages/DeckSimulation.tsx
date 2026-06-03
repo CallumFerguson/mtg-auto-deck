@@ -77,6 +77,14 @@ import {
   getSimulationRunLibraryCardCount,
 } from "@/lib/simulation-game-state-library"
 import {
+  GAME_STATE_ZONE_ORDER,
+  getSimulationGameStateZoneLabel,
+  getSimulationGameStateZoneObjectTitle,
+  getSimulationGameStateZones,
+  type SimulationGameStateZone,
+  type SimulationGameStateZoneObject,
+} from "@/lib/simulation-game-state-zones"
+import {
   getSimulationFinalParsedOutput,
   hasTurnActions,
   type ParsedSimulationFinalOutput,
@@ -6040,22 +6048,8 @@ function getFinishedSimulationRunStatusLabel({
 const simulationResultSummaryMarkdownClassName =
   "min-w-0 space-y-2 text-sm leading-6 break-words text-muted-foreground [&_a]:text-sky-300 [&_a]:underline [&_code]:rounded-sm [&_code]:bg-muted/45 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-sky-100 [&_ol]:list-decimal [&_ol]:pl-5 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-black/30 [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_strong]:text-foreground/90 [&_ul]:list-disc [&_ul]:pl-5"
 
-type SimulationGameStateZoneCard = {
-  index: number
-  name: string
-  notes: string | null
-  tapped: boolean | null
-  zoneKey: string
-}
-
-type SimulationGameStateZone = {
-  cards: SimulationGameStateZoneCard[]
-  key: string
-  label: string
-}
-
-type SimulationGameStateZoneCardPresenceItem = {
-  card: SimulationGameStateZoneCard
+type SimulationGameStateZoneObjectPresenceItem = {
+  object: SimulationGameStateZoneObject
   isEntering: boolean
   isEnteringPlaceholder: boolean
   isExiting: boolean
@@ -6067,27 +6061,11 @@ type SimulationGameStateDisplay = {
   libraryCardCount: number | null
 }
 
-const GAME_STATE_ZONE_ORDER = [
-  "battlefield",
-  "hand",
-  "command",
-  "graveyard",
-  "exile",
-] as const
-
-const GAME_STATE_ZONE_LABELS: Record<string, string> = {
-  battlefield: "Battlefield",
-  command: "Command",
-  exile: "Exile",
-  graveyard: "Graveyard",
-  hand: "Hand",
-}
-
-const SIMULATION_GAME_STATE_CARD_ENTER_ANIMATION_MS = 250
-const SIMULATION_GAME_STATE_CARD_EXIT_ANIMATION_MS = 250
-const SIMULATION_GAME_STATE_CARD_MOVE_ANIMATION_MS = 250
-const SIMULATION_GAME_STATE_CARD_TAP_ANIMATION_MS = 250
-const SIMULATION_GAME_STATE_CARD_SETTLE_FALLBACK_BUFFER_MS = 50
+const SIMULATION_GAME_STATE_OBJECT_ENTER_ANIMATION_MS = 250
+const SIMULATION_GAME_STATE_OBJECT_EXIT_ANIMATION_MS = 250
+const SIMULATION_GAME_STATE_OBJECT_MOVE_ANIMATION_MS = 250
+const SIMULATION_GAME_STATE_OBJECT_TAP_ANIMATION_MS = 250
+const SIMULATION_GAME_STATE_OBJECT_SETTLE_FALLBACK_BUFFER_MS = 50
 
 function SimulationFinalOutputBlock({
   cardLookup,
@@ -6250,48 +6228,48 @@ function SimulationGameStateZonesBlock({
   skipAnimationKey: number
 }) {
   const zones = getSimulationGameStateZones(gameState)
-  const syncSignature = getSimulationGameStateZonesCardsSignature(zones)
+  const syncSignature = getSimulationGameStateZonesObjectsSignature(zones)
   const lastSettledSyncSignatureRef = useRef(syncSignature)
   const lastHandledSkipAnimationKeyRef = useRef(skipAnimationKey)
   const latestAnimationTargetRef = useRef({ zones })
   const gameStateElementRef = useRef<HTMLElement | null>(null)
-  const cardLayoutElementsRef = useRef(new Map<string, HTMLDivElement>())
+  const objectLayoutElementsRef = useRef(new Map<string, HTMLDivElement>())
   const previousGameStateWidthRef = useRef<number | null>(null)
-  const previousCardLayoutRectsRef = useRef(new Map<string, DOMRect>())
+  const previousObjectLayoutRectsRef = useRef(new Map<string, DOMRect>())
   const shouldSkipNextPositionAnimationRef = useRef(false)
-  const [visibleCards, setVisibleCards] = useState<
-    SimulationGameStateZoneCardPresenceItem[]
+  const [visibleObjects, setVisibleObjects] = useState<
+    SimulationGameStateZoneObjectPresenceItem[]
   >(() =>
-    getSimulationGameStateZoneCardPresenceItems({
+    getSimulationGameStateZoneObjectPresenceItems({
       isExiting: false,
       zones,
     })
   )
-  const visibleCardsRef = useRef(visibleCards)
-  const readCurrentCardLayoutRects = useCallback(() => {
+  const visibleObjectsRef = useRef(visibleObjects)
+  const readCurrentObjectLayoutRects = useCallback(() => {
     const nextRects = new Map<string, DOMRect>()
 
-    for (const [cardKey, element] of cardLayoutElementsRef.current) {
-      nextRects.set(cardKey, element.getBoundingClientRect())
+    for (const [objectKey, element] of objectLayoutElementsRef.current) {
+      nextRects.set(objectKey, element.getBoundingClientRect())
     }
 
     return nextRects
   }, [])
-  const handleCardLayoutElementChange = useCallback(
-    (cardKey: string, element: HTMLDivElement | null) => {
+  const handleObjectLayoutElementChange = useCallback(
+    (objectKey: string, element: HTMLDivElement | null) => {
       if (element) {
-        cardLayoutElementsRef.current.set(cardKey, element)
+        objectLayoutElementsRef.current.set(objectKey, element)
         return
       }
 
-      cardLayoutElementsRef.current.delete(cardKey)
+      objectLayoutElementsRef.current.delete(objectKey)
     },
     []
   )
 
   useEffect(() => {
-    visibleCardsRef.current = visibleCards
-  }, [visibleCards])
+    visibleObjectsRef.current = visibleObjects
+  }, [visibleObjects])
 
   useEffect(() => {
     latestAnimationTargetRef.current = { zones }
@@ -6303,16 +6281,16 @@ function SimulationGameStateZonesBlock({
     }
 
     lastHandledSkipAnimationKeyRef.current = skipAnimationKey
-    const nextItems = getSimulationGameStateZoneCardPresenceItems({
+    const nextItems = getSimulationGameStateZoneObjectPresenceItems({
       isExiting: false,
       zones,
     })
 
     lastSettledSyncSignatureRef.current = syncSignature
-    visibleCardsRef.current = nextItems
+    visibleObjectsRef.current = nextItems
     shouldSkipNextPositionAnimationRef.current = true
-    previousCardLayoutRectsRef.current = new Map()
-    setVisibleCards(nextItems)
+    previousObjectLayoutRectsRef.current = new Map()
+    setVisibleObjects(nextItems)
   }, [skipAnimationKey, syncSignature, zones])
 
   useEffect(() => {
@@ -6327,14 +6305,14 @@ function SimulationGameStateZonesBlock({
 
     let refreshFrameId: number | null = null
 
-    const refreshCardLayoutBaseline = () => {
+    const refreshObjectLayoutBaseline = () => {
       if (refreshFrameId !== null) {
         window.cancelAnimationFrame(refreshFrameId)
       }
 
       refreshFrameId = window.requestAnimationFrame(() => {
         refreshFrameId = null
-        previousCardLayoutRectsRef.current = readCurrentCardLayoutRects()
+        previousObjectLayoutRectsRef.current = readCurrentObjectLayoutRects()
         shouldSkipNextPositionAnimationRef.current = false
       })
     }
@@ -6348,7 +6326,7 @@ function SimulationGameStateZonesBlock({
       }
 
       shouldSkipNextPositionAnimationRef.current = true
-      refreshCardLayoutBaseline()
+      refreshObjectLayoutBaseline()
     }
 
     const resizeObserver = new ResizeObserver((entries) => {
@@ -6376,19 +6354,19 @@ function SimulationGameStateZonesBlock({
         window.cancelAnimationFrame(refreshFrameId)
       }
     }
-  }, [readCurrentCardLayoutRects])
+  }, [readCurrentObjectLayoutRects])
 
   useEffect(() => {
     const { zones: targetZones } = latestAnimationTargetRef.current
-    const nextItems = getSimulationGameStateZoneCardPresenceItems({
+    const nextItems = getSimulationGameStateZoneObjectPresenceItems({
       isExiting: false,
       zones: targetZones,
     })
 
     if (
       lastSettledSyncSignatureRef.current === syncSignature &&
-      areSimulationGameStateZoneCardPresenceItemsSettled({
-        currentItems: visibleCardsRef.current,
+      areSimulationGameStateZoneObjectPresenceItemsSettled({
+        currentItems: visibleObjectsRef.current,
         nextItems,
       })
     ) {
@@ -6402,11 +6380,11 @@ function SimulationGameStateZonesBlock({
     let settleTimeoutId: number | null = null
     let didSettle = false
 
-    const setVisibleCardsSnapshot = (
-      nextVisibleCards: SimulationGameStateZoneCardPresenceItem[]
+    const setVisibleObjectsSnapshot = (
+      nextVisibleObjects: SimulationGameStateZoneObjectPresenceItem[]
     ) => {
-      visibleCardsRef.current = nextVisibleCards
-      setVisibleCards(nextVisibleCards)
+      visibleObjectsRef.current = nextVisibleObjects
+      setVisibleObjects(nextVisibleObjects)
     }
 
     const settleToTargetState = () => {
@@ -6416,42 +6394,45 @@ function SimulationGameStateZonesBlock({
 
       didSettle = true
       lastSettledSyncSignatureRef.current = syncSignature
-      setVisibleCardsSnapshot(nextItems)
+      setVisibleObjectsSnapshot(nextItems)
     }
 
     syncTimeoutId = window.setTimeout(() => {
-      const currentCards = visibleCardsRef.current
-      const currentActiveCardKeys = new Set(
-        currentCards
-          .filter((card) => !card.isExiting && !card.isEnteringPlaceholder)
-          .map((card) => card.key)
+      const currentObjects = visibleObjectsRef.current
+      const currentActiveObjectKeys = new Set(
+        currentObjects
+          .filter(
+            (object) => !object.isExiting && !object.isEnteringPlaceholder
+          )
+          .map((object) => object.key)
       )
-      const nextCardKeys = new Set(nextItems.map((card) => card.key))
-      const enteringCardKeys = new Set(
+      const nextObjectKeys = new Set(nextItems.map((object) => object.key))
+      const enteringObjectKeys = new Set(
         nextItems
-          .filter((item) => !currentActiveCardKeys.has(item.key))
+          .filter((item) => !currentActiveObjectKeys.has(item.key))
           .map((item) => item.key)
       )
-      const hasExitingCards = currentCards.some(
-        (card) => !card.isEnteringPlaceholder && !nextCardKeys.has(card.key)
+      const hasExitingObjects = currentObjects.some(
+        (object) =>
+          !object.isEnteringPlaceholder && !nextObjectKeys.has(object.key)
       )
-      const hasEnteringCards = enteringCardKeys.size > 0
+      const hasEnteringObjects = enteringObjectKeys.size > 0
 
       const startEnterPhase = () => {
         if (didSettle) {
           return
         }
 
-        setVisibleCardsSnapshot(
-          getSimulationGameStateZoneCardEnterPhaseItems({
-            enteringCardKeys,
+        setVisibleObjectsSnapshot(
+          getSimulationGameStateZoneObjectEnterPhaseItems({
+            enteringObjectKeys,
             nextItems,
           })
         )
 
         settleEnteredTimeoutId = window.setTimeout(
           settleToTargetState,
-          SIMULATION_GAME_STATE_CARD_ENTER_ANIMATION_MS
+          SIMULATION_GAME_STATE_OBJECT_ENTER_ANIMATION_MS
         )
       }
 
@@ -6460,53 +6441,53 @@ function SimulationGameStateZonesBlock({
           return
         }
 
-        const movePhaseItems = getSimulationGameStateZoneCardMovePhaseItems({
-          enteringCardKeys,
+        const movePhaseItems = getSimulationGameStateZoneObjectMovePhaseItems({
+          enteringObjectKeys,
           nextItems,
         })
 
-        setVisibleCardsSnapshot(movePhaseItems)
+        setVisibleObjectsSnapshot(movePhaseItems)
 
-        if (!hasEnteringCards) {
+        if (!hasEnteringObjects) {
           settleToTargetState()
           return
         }
 
         enterPhaseTimeoutId = window.setTimeout(
           startEnterPhase,
-          SIMULATION_GAME_STATE_CARD_MOVE_ANIMATION_MS
+          SIMULATION_GAME_STATE_OBJECT_MOVE_ANIMATION_MS
         )
       }
 
-      if (!hasExitingCards && !hasEnteringCards) {
+      if (!hasExitingObjects && !hasEnteringObjects) {
         settleToTargetState()
         return
       }
 
       settleTimeoutId = window.setTimeout(
         settleToTargetState,
-        getSimulationGameStateCardSettleFallbackDelay({
-          hasEnteringCards,
-          hasExitingCards,
+        getSimulationGameStateObjectSettleFallbackDelay({
+          hasEnteringObjects,
+          hasExitingObjects,
         })
       )
 
-      if (hasExitingCards) {
-        setVisibleCardsSnapshot(
-          getSimulationGameStateZoneCardExitPhaseItems({
-            currentCards,
+      if (hasExitingObjects) {
+        setVisibleObjectsSnapshot(
+          getSimulationGameStateZoneObjectExitPhaseItems({
+            currentObjects,
             nextItems,
           })
         )
 
         moveTimeoutId = window.setTimeout(
           startMovePhase,
-          SIMULATION_GAME_STATE_CARD_EXIT_ANIMATION_MS
+          SIMULATION_GAME_STATE_OBJECT_EXIT_ANIMATION_MS
         )
         return
       }
 
-      if (hasEnteringCards) {
+      if (hasEnteringObjects) {
         startMovePhase()
       }
     }, 0)
@@ -6531,22 +6512,26 @@ function SimulationGameStateZonesBlock({
   }, [syncSignature])
 
   useLayoutEffect(() => {
-    const nextRects = readCurrentCardLayoutRects()
+    const nextRects = readCurrentObjectLayoutRects()
 
     if (shouldSkipNextPositionAnimationRef.current) {
-      previousCardLayoutRectsRef.current = nextRects
+      previousObjectLayoutRectsRef.current = nextRects
       shouldSkipNextPositionAnimationRef.current = false
       return
     }
 
-    for (const card of visibleCards) {
-      if (card.isEntering || card.isExiting || card.isEnteringPlaceholder) {
+    for (const object of visibleObjects) {
+      if (
+        object.isEntering ||
+        object.isExiting ||
+        object.isEnteringPlaceholder
+      ) {
         continue
       }
 
-      const element = cardLayoutElementsRef.current.get(card.key)
-      const previousRect = previousCardLayoutRectsRef.current.get(card.key)
-      const nextRect = nextRects.get(card.key)
+      const element = objectLayoutElementsRef.current.get(object.key)
+      const previousRect = previousObjectLayoutRectsRef.current.get(object.key)
+      const nextRect = nextRects.get(object.key)
 
       if (!element || !previousRect || !nextRect) {
         continue
@@ -6568,13 +6553,13 @@ function SimulationGameStateZonesBlock({
       })
     }
 
-    previousCardLayoutRectsRef.current = nextRects
-  }, [readCurrentCardLayoutRects, visibleCards])
+    previousObjectLayoutRectsRef.current = nextRects
+  }, [readCurrentObjectLayoutRects, visibleObjects])
 
-  const visibleCardsByZone =
-    getSimulationGameStateZoneCardPresenceItemsByZone(visibleCards)
+  const visibleObjectsByZone =
+    getSimulationGameStateZoneObjectPresenceItemsByZone(visibleObjects)
   const renderZones = getSimulationGameStateRenderZones({
-    visibleCards,
+    visibleObjects,
     zones,
   })
   const commandZone = renderZones.find((zone) => zone.key === "command") ?? null
@@ -6604,8 +6589,8 @@ function SimulationGameStateZonesBlock({
         <SimulationGameStateZoneBlock
           key={zone.key}
           cardLookup={cardLookup}
-          onCardLayoutElementChange={handleCardLayoutElementChange}
-          visibleCards={visibleCardsByZone.get(zone.key) ?? []}
+          onObjectLayoutElementChange={handleObjectLayoutElementChange}
+          visibleObjects={visibleObjectsByZone.get(zone.key) ?? []}
           zone={zone}
         />
       ))}
@@ -6620,8 +6605,8 @@ function SimulationGameStateZonesBlock({
             <SimulationGameStateZoneBlock
               isCompact={true}
               cardLookup={cardLookup}
-              onCardLayoutElementChange={handleCardLayoutElementChange}
-              visibleCards={visibleCardsByZone.get(commandZone.key) ?? []}
+              onObjectLayoutElementChange={handleObjectLayoutElementChange}
+              visibleObjects={visibleObjectsByZone.get(commandZone.key) ?? []}
               zone={commandZone}
             />
           ) : null}
@@ -6631,8 +6616,8 @@ function SimulationGameStateZonesBlock({
         <SimulationGameStateZoneBlock
           key={zone.key}
           cardLookup={cardLookup}
-          onCardLayoutElementChange={handleCardLayoutElementChange}
-          visibleCards={visibleCardsByZone.get(zone.key) ?? []}
+          onObjectLayoutElementChange={handleObjectLayoutElementChange}
+          visibleObjects={visibleObjectsByZone.get(zone.key) ?? []}
           zone={zone}
         />
       ))}
@@ -6659,17 +6644,17 @@ function getLibraryCommandRowInsertIndex(
 function SimulationGameStateZoneBlock({
   cardLookup,
   isCompact = false,
-  onCardLayoutElementChange,
-  visibleCards,
+  onObjectLayoutElementChange,
+  visibleObjects,
   zone,
 }: {
   cardLookup: SimulationCardLookup
   isCompact?: boolean
-  onCardLayoutElementChange: (
-    cardKey: string,
+  onObjectLayoutElementChange: (
+    objectKey: string,
     element: HTMLDivElement | null
   ) => void
-  visibleCards: SimulationGameStateZoneCardPresenceItem[]
+  visibleObjects: SimulationGameStateZoneObjectPresenceItem[]
   zone: SimulationGameStateZone
 }) {
   return (
@@ -6677,11 +6662,11 @@ function SimulationGameStateZoneBlock({
       <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
         {zone.label}
       </p>
-      <SimulationGameStateZoneCardGrid
+      <SimulationGameStateZoneObjectGrid
         cardLookup={cardLookup}
         isCompact={isCompact}
-        onCardLayoutElementChange={onCardLayoutElementChange}
-        visibleCards={visibleCards}
+        onObjectLayoutElementChange={onObjectLayoutElementChange}
+        visibleObjects={visibleObjects}
       />
     </div>
   )
@@ -6715,19 +6700,19 @@ function SimulationGameStateLibraryZone({
   )
 }
 
-function SimulationGameStateZoneCardGrid({
+function SimulationGameStateZoneObjectGrid({
   cardLookup,
   isCompact = false,
-  onCardLayoutElementChange,
-  visibleCards,
+  onObjectLayoutElementChange,
+  visibleObjects,
 }: {
   cardLookup: SimulationCardLookup
   isCompact?: boolean
-  onCardLayoutElementChange: (
-    cardKey: string,
+  onObjectLayoutElementChange: (
+    objectKey: string,
     element: HTMLDivElement | null
   ) => void
-  visibleCards: SimulationGameStateZoneCardPresenceItem[]
+  visibleObjects: SimulationGameStateZoneObjectPresenceItem[]
 }) {
   return (
     <div
@@ -6737,31 +6722,31 @@ function SimulationGameStateZoneCardGrid({
           : "mt-2 grid min-w-0 grid-cols-[repeat(auto-fill,minmax(5.5rem,1fr))] gap-3 sm:grid-cols-[repeat(auto-fill,minmax(6.25rem,1fr))] 2xl:grid-cols-[repeat(auto-fill,minmax(7rem,1fr))]"
       }
     >
-      {visibleCards.length === 0 ? (
+      {visibleObjects.length === 0 ? (
         <SimulationGameStateEmptyCardPlaceholder />
       ) : (
-        visibleCards.map((card) => (
+        visibleObjects.map((item) => (
           <div
-            key={card.key}
+            key={item.key}
             ref={(element) => {
-              onCardLayoutElementChange(card.key, element)
+              onObjectLayoutElementChange(item.key, element)
             }}
             className="simulation-game-state-card-layout"
           >
-            {card.isEnteringPlaceholder ? (
+            {item.isEnteringPlaceholder ? (
               <SimulationGameStateEnteringCardPlaceholder />
             ) : (
               <div
                 className={
-                  card.isExiting
+                  item.isExiting
                     ? "simulation-game-state-card-presence simulation-game-state-card-exit"
-                    : card.isEntering
+                    : item.isEntering
                       ? "simulation-game-state-card-presence simulation-game-state-card-enter"
                       : "simulation-game-state-card-presence"
                 }
               >
-                <SimulationGameStateZoneCardView
-                  card={card.card}
+                <SimulationGameStateZoneObjectView
+                  object={item.object}
                   cardLookup={cardLookup}
                 />
               </div>
@@ -6793,23 +6778,25 @@ function SimulationGameStateEnteringCardPlaceholder() {
   )
 }
 
-function SimulationGameStateZoneCardView({
-  card,
+function SimulationGameStateZoneObjectView({
+  object,
   cardLookup,
 }: {
-  card: SimulationGameStateZoneCard
+  object: SimulationGameStateZoneObject
   cardLookup: SimulationCardLookup
 }) {
-  const isTapped = card.tapped === true
+  const isTapped = object.tapped === true
   const previousIsTappedRef = useRef(isTapped)
   const [visualTapState, setVisualTapState] = useState<
     "tapped" | "untapping" | "untapped"
   >(() => (isTapped ? "tapped" : "untapped"))
-  const resolvedCard = resolveSimulationCard(cardLookup, card.name)
+  const resolvedCard = object.isToken
+    ? null
+    : resolveSimulationCard(cardLookup, object.name)
   const href = resolvedCard?.scryfallUri.trim() || null
   const imageUrl = href ? resolvedCard?.defaultImageUrl?.trim() || null : null
   const shouldShowTapOverlay = visualTapState !== "untapped"
-  const title = getSimulationGameStateZoneCardTitle(card)
+  const title = getSimulationGameStateZoneObjectTitle(object)
 
   useEffect(() => {
     if (previousIsTappedRef.current === isTapped) {
@@ -6829,7 +6816,7 @@ function SimulationGameStateZoneCardView({
 
       finishUntapTimeoutId = window.setTimeout(() => {
         setVisualTapState("untapped")
-      }, SIMULATION_GAME_STATE_CARD_TAP_ANIMATION_MS)
+      }, SIMULATION_GAME_STATE_OBJECT_TAP_ANIMATION_MS)
     }, 0)
 
     return () => {
@@ -6846,14 +6833,22 @@ function SimulationGameStateZoneCardView({
         <img
           className="block aspect-[488/680] w-full object-cover"
           src={imageUrl}
-          alt={card.name}
+          alt={object.name}
           loading="lazy"
         />
       ) : (
         <span className="flex aspect-[488/680] w-full items-center justify-center bg-gradient-to-b from-sky-950/35 to-black/50 px-2 text-center text-xs leading-4 font-semibold break-words text-sky-50">
-          {card.name}
+          {object.name}
         </span>
       )}
+      {object.quantity > 1 ? (
+        <span
+          className="pointer-events-none absolute top-1 right-1 z-20 rounded border border-sky-300/40 bg-slate-950/90 px-1.5 py-0.5 text-[0.65rem] leading-none font-bold text-sky-50 shadow-md shadow-black/45"
+          aria-hidden="true"
+        >
+          x{object.quantity}
+        </span>
+      ) : null}
       {shouldShowTapOverlay ? (
         <>
           <span
@@ -6914,29 +6909,29 @@ function SimulationGameStateZoneCardView({
   )
 }
 
-function getSimulationGameStateCardSettleFallbackDelay({
-  hasEnteringCards,
-  hasExitingCards,
+function getSimulationGameStateObjectSettleFallbackDelay({
+  hasEnteringObjects,
+  hasExitingObjects,
 }: {
-  hasEnteringCards: boolean
-  hasExitingCards: boolean
+  hasEnteringObjects: boolean
+  hasExitingObjects: boolean
 }) {
   return (
-    (hasExitingCards ? SIMULATION_GAME_STATE_CARD_EXIT_ANIMATION_MS : 0) +
-    (hasEnteringCards
-      ? SIMULATION_GAME_STATE_CARD_MOVE_ANIMATION_MS +
-        SIMULATION_GAME_STATE_CARD_ENTER_ANIMATION_MS
+    (hasExitingObjects ? SIMULATION_GAME_STATE_OBJECT_EXIT_ANIMATION_MS : 0) +
+    (hasEnteringObjects
+      ? SIMULATION_GAME_STATE_OBJECT_MOVE_ANIMATION_MS +
+        SIMULATION_GAME_STATE_OBJECT_ENTER_ANIMATION_MS
       : 0) +
-    SIMULATION_GAME_STATE_CARD_SETTLE_FALLBACK_BUFFER_MS
+    SIMULATION_GAME_STATE_OBJECT_SETTLE_FALLBACK_BUFFER_MS
   )
 }
 
-function areSimulationGameStateZoneCardPresenceItemsSettled({
+function areSimulationGameStateZoneObjectPresenceItemsSettled({
   currentItems,
   nextItems,
 }: {
-  currentItems: readonly SimulationGameStateZoneCardPresenceItem[]
-  nextItems: readonly SimulationGameStateZoneCardPresenceItem[]
+  currentItems: readonly SimulationGameStateZoneObjectPresenceItem[]
+  nextItems: readonly SimulationGameStateZoneObjectPresenceItem[]
 }) {
   if (currentItems.length !== nextItems.length) {
     return false
@@ -6950,84 +6945,87 @@ function areSimulationGameStateZoneCardPresenceItemsSettled({
       !currentItem.isEntering &&
       !currentItem.isEnteringPlaceholder &&
       !currentItem.isExiting &&
-      getSimulationGameStateZoneCardPresenceItemSignature(currentItem) ===
-        getSimulationGameStateZoneCardPresenceItemSignature(nextItem)
+      getSimulationGameStateZoneObjectPresenceItemSignature(currentItem) ===
+        getSimulationGameStateZoneObjectPresenceItemSignature(nextItem)
     )
   })
 }
 
-function getSimulationGameStateZoneCardPresenceItemSignature(
-  item: SimulationGameStateZoneCardPresenceItem
+function getSimulationGameStateZoneObjectPresenceItemSignature(
+  item: SimulationGameStateZoneObjectPresenceItem
 ) {
   return [
     item.key,
-    item.card.zoneKey,
-    String(item.card.index),
-    item.card.name,
-    String(item.card.tapped),
-    item.card.notes ?? "",
+    item.object.zoneKey,
+    String(item.object.index),
+    item.object.name,
+    String(item.object.isToken),
+    String(item.object.quantity),
+    String(item.object.tapped),
+    item.object.notes ?? "",
   ].join("\u001f")
 }
 
-function getSimulationGameStateZoneCardPresenceItems({
+function getSimulationGameStateZoneObjectPresenceItems({
   isExiting,
   zones,
 }: {
   isExiting: boolean
   zones: readonly SimulationGameStateZone[]
-}): SimulationGameStateZoneCardPresenceItem[] {
-  const cardNameCounts = new Map<string, number>()
+}): SimulationGameStateZoneObjectPresenceItem[] {
+  const objectIdentityCounts = new Map<string, number>()
 
   return zones.flatMap((zone) =>
-    zone.cards.map((card) => {
-      const cardNameKey = getSimulationGameStateZoneCardNameKey(card)
-      const copyIndex = cardNameCounts.get(cardNameKey) ?? 0
+    zone.objects.map((object) => {
+      const objectIdentityKey =
+        getSimulationGameStateZoneObjectIdentityKey(object)
+      const copyIndex = objectIdentityCounts.get(objectIdentityKey) ?? 0
 
-      cardNameCounts.set(cardNameKey, copyIndex + 1)
+      objectIdentityCounts.set(objectIdentityKey, copyIndex + 1)
 
       return {
-        card,
+        object,
         isEntering: false,
         isEnteringPlaceholder: false,
         isExiting,
-        key: getSimulationGameStateZoneCardKey(card, copyIndex),
+        key: getSimulationGameStateZoneObjectKey(object, copyIndex),
       }
     })
   )
 }
 
-function getSimulationGameStateZoneCardPresenceItemsByZone(
-  items: readonly SimulationGameStateZoneCardPresenceItem[]
+function getSimulationGameStateZoneObjectPresenceItemsByZone(
+  items: readonly SimulationGameStateZoneObjectPresenceItem[]
 ) {
   const itemsByZone = new Map<
     string,
-    SimulationGameStateZoneCardPresenceItem[]
+    SimulationGameStateZoneObjectPresenceItem[]
   >()
 
   for (const item of items) {
-    const zoneItems = itemsByZone.get(item.card.zoneKey) ?? []
+    const zoneItems = itemsByZone.get(item.object.zoneKey) ?? []
     zoneItems.push(item)
-    itemsByZone.set(item.card.zoneKey, zoneItems)
+    itemsByZone.set(item.object.zoneKey, zoneItems)
   }
 
   return itemsByZone
 }
 
 function getSimulationGameStateRenderZones({
-  visibleCards,
+  visibleObjects,
   zones,
 }: {
-  visibleCards: readonly SimulationGameStateZoneCardPresenceItem[]
+  visibleObjects: readonly SimulationGameStateZoneObjectPresenceItem[]
   zones: readonly SimulationGameStateZone[]
 }) {
   const zonesByKey = new Map(zones.map((zone) => [zone.key, zone]))
 
-  for (const item of visibleCards) {
-    if (!zonesByKey.has(item.card.zoneKey)) {
-      zonesByKey.set(item.card.zoneKey, {
-        cards: [],
-        key: item.card.zoneKey,
-        label: getSimulationGameStateZoneLabel(item.card.zoneKey),
+  for (const item of visibleObjects) {
+    if (!zonesByKey.has(item.object.zoneKey)) {
+      zonesByKey.set(item.object.zoneKey, {
+        key: item.object.zoneKey,
+        label: getSimulationGameStateZoneLabel(item.object.zoneKey),
+        objects: [],
       })
     }
   }
@@ -7047,16 +7045,16 @@ function getSimulationGameStateRenderZones({
   return orderedZoneKeys.flatMap((zoneKey) => zonesByKey.get(zoneKey) ?? [])
 }
 
-function getSimulationGameStateZoneCardExitPhaseItems({
-  currentCards,
+function getSimulationGameStateZoneObjectExitPhaseItems({
+  currentObjects,
   nextItems,
 }: {
-  currentCards: readonly SimulationGameStateZoneCardPresenceItem[]
-  nextItems: readonly SimulationGameStateZoneCardPresenceItem[]
-}): SimulationGameStateZoneCardPresenceItem[] {
+  currentObjects: readonly SimulationGameStateZoneObjectPresenceItem[]
+  nextItems: readonly SimulationGameStateZoneObjectPresenceItem[]
+}): SimulationGameStateZoneObjectPresenceItem[] {
   const nextItemsByKey = new Map(nextItems.map((item) => [item.key, item]))
 
-  return currentCards.flatMap((item) => {
+  return currentObjects.flatMap((item) => {
     const nextItem = nextItemsByKey.get(item.key)
 
     if (item.isEnteringPlaceholder) {
@@ -7066,7 +7064,7 @@ function getSimulationGameStateZoneCardExitPhaseItems({
     }
 
     if (nextItem) {
-      if (item.card.zoneKey !== nextItem.card.zoneKey) {
+      if (item.object.zoneKey !== nextItem.object.zoneKey) {
         return [
           {
             ...item,
@@ -7093,15 +7091,15 @@ function getSimulationGameStateZoneCardExitPhaseItems({
   })
 }
 
-function getSimulationGameStateZoneCardMovePhaseItems({
-  enteringCardKeys,
+function getSimulationGameStateZoneObjectMovePhaseItems({
+  enteringObjectKeys,
   nextItems,
 }: {
-  enteringCardKeys: ReadonlySet<string>
-  nextItems: readonly SimulationGameStateZoneCardPresenceItem[]
-}): SimulationGameStateZoneCardPresenceItem[] {
+  enteringObjectKeys: ReadonlySet<string>
+  nextItems: readonly SimulationGameStateZoneObjectPresenceItem[]
+}): SimulationGameStateZoneObjectPresenceItem[] {
   return nextItems.map((item) =>
-    enteringCardKeys.has(item.key)
+    enteringObjectKeys.has(item.key)
       ? {
           ...item,
           isEntering: false,
@@ -7111,15 +7109,15 @@ function getSimulationGameStateZoneCardMovePhaseItems({
   )
 }
 
-function getSimulationGameStateZoneCardEnterPhaseItems({
-  enteringCardKeys,
+function getSimulationGameStateZoneObjectEnterPhaseItems({
+  enteringObjectKeys,
   nextItems,
 }: {
-  enteringCardKeys: ReadonlySet<string>
-  nextItems: readonly SimulationGameStateZoneCardPresenceItem[]
-}): SimulationGameStateZoneCardPresenceItem[] {
+  enteringObjectKeys: ReadonlySet<string>
+  nextItems: readonly SimulationGameStateZoneObjectPresenceItem[]
+}): SimulationGameStateZoneObjectPresenceItem[] {
   return nextItems.map((item) =>
-    enteringCardKeys.has(item.key)
+    enteringObjectKeys.has(item.key)
       ? {
           ...item,
           isEntering: true,
@@ -7129,135 +7127,44 @@ function getSimulationGameStateZoneCardEnterPhaseItems({
   )
 }
 
-function getSimulationGameStateZoneCardKey(
-  card: SimulationGameStateZoneCard,
+function getSimulationGameStateZoneObjectKey(
+  object: SimulationGameStateZoneObject,
   copyIndex: number
 ) {
-  return `${getSimulationGameStateZoneCardNameKey(card)}-${copyIndex}`
+  return `${getSimulationGameStateZoneObjectIdentityKey(object)}-${copyIndex}`
 }
 
-function getSimulationGameStateZoneCardNameKey(
-  card: SimulationGameStateZoneCard
+function getSimulationGameStateZoneObjectIdentityKey(
+  object: SimulationGameStateZoneObject
 ) {
-  return card.name.trim().toLocaleLowerCase()
+  return [
+    object.name.trim().toLocaleLowerCase(),
+    String(object.isToken),
+    String(object.quantity),
+    object.notes ?? "",
+  ].join("\u001f")
 }
 
-function getSimulationGameStateZonesCardsSignature(
+function getSimulationGameStateZonesObjectsSignature(
   zones: readonly SimulationGameStateZone[]
 ) {
-  return getSimulationGameStateZoneCardPresenceItems({
+  return getSimulationGameStateZoneObjectPresenceItems({
     isExiting: false,
     zones,
   })
     .map((item) =>
       [
         item.key,
-        item.card.zoneKey,
-        String(item.card.index),
-        item.card.name,
-        String(item.card.tapped),
-        item.card.notes ?? "",
+        item.object.zoneKey,
+        String(item.object.index),
+        item.object.name,
+        String(item.object.isToken),
+        String(item.object.quantity),
+        String(item.object.tapped),
+        item.object.notes ?? "",
       ].join("\u001f")
     )
     .join("\u001e")
-}
-
-function getSimulationGameStateZones(
-  gameState: unknown
-): SimulationGameStateZone[] {
-  const gameStateRecord = getSimulationUnknownRecord(gameState)
-  const zonesRecord = getSimulationUnknownRecord(gameStateRecord?.zones)
-
-  if (!zonesRecord) {
-    return []
-  }
-
-  const zoneKeys = Object.keys(zonesRecord).filter(
-    (zoneKey) => zoneKey !== "library" && Array.isArray(zonesRecord[zoneKey])
-  )
-  const zoneKeySet = new Set(zoneKeys)
-  const orderedZoneKeys = [
-    ...GAME_STATE_ZONE_ORDER.filter((zoneKey) => zoneKeySet.has(zoneKey)),
-    ...zoneKeys.filter(
-      (zoneKey) =>
-        !GAME_STATE_ZONE_ORDER.includes(
-          zoneKey as (typeof GAME_STATE_ZONE_ORDER)[number]
-        )
-    ),
-  ]
-
-  return orderedZoneKeys.map((zoneKey) => ({
-    cards: getSimulationGameStateZoneCards(zonesRecord[zoneKey], zoneKey),
-    key: zoneKey,
-    label: getSimulationGameStateZoneLabel(zoneKey),
-  }))
-}
-
-function getSimulationGameStateZoneCards(
-  value: unknown,
-  zoneKey: string
-): SimulationGameStateZoneCard[] {
-  if (!Array.isArray(value)) {
-    return []
-  }
-
-  return value.flatMap((card, index) => {
-    const cardRecord = getSimulationUnknownRecord(card)
-
-    if (!cardRecord) {
-      return []
-    }
-
-    const name = cardRecord.name
-
-    if (typeof name !== "string" || !name.trim()) {
-      return []
-    }
-
-    const notes = cardRecord.notes
-
-    return [
-      {
-        index,
-        name: name.trim(),
-        notes: typeof notes === "string" && notes.trim() ? notes.trim() : null,
-        tapped:
-          typeof cardRecord.tapped === "boolean" ? cardRecord.tapped : null,
-        zoneKey,
-      },
-    ]
-  })
-}
-
-function getSimulationUnknownRecord(
-  value: unknown
-): Record<string, unknown> | null {
-  return hasGameState(value) ? value : null
-}
-
-function getSimulationGameStateZoneLabel(zoneKey: string) {
-  const knownLabel = GAME_STATE_ZONE_LABELS[zoneKey]
-
-  if (knownLabel) {
-    return knownLabel
-  }
-
-  return zoneKey
-    .replace(/[-_]+/g, " ")
-    .replace(/\b\w/g, (character) => character.toUpperCase())
-}
-
-function getSimulationGameStateZoneCardTitle(
-  card: SimulationGameStateZoneCard
-) {
-  const details = [
-    card.tapped === true ? "tapped" : card.tapped === false ? "untapped" : null,
-    card.notes,
-  ].filter(Boolean)
-
-  return details.length > 0
-    ? `${card.name} (${details.join(" / ")})`
-    : card.name
 }
 
 function getSimulationRunGameStateDisplay(
@@ -7325,8 +7232,8 @@ function getOpeningHandGameStateDisplay(
     gameState: {
       zones: {
         battlefield: [],
-        hand: getOpeningHandGameStateCards(handCards),
-        command: getOpeningHandGameStateCards(commandCards),
+        hand: getOpeningHandGameStateObjects(handCards),
+        command: getOpeningHandGameStateObjects(commandCards),
         graveyard: [],
         exile: [],
       },
@@ -7335,9 +7242,11 @@ function getOpeningHandGameStateDisplay(
   }
 }
 
-function getOpeningHandGameStateCards(cardNames: readonly string[]) {
+function getOpeningHandGameStateObjects(cardNames: readonly string[]) {
   return cardNames.map((cardName) => ({
     name: cardName,
+    isToken: false,
+    quantity: 1,
     notes: null,
     tapped: null,
   }))

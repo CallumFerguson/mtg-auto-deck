@@ -419,6 +419,8 @@ function buildInitialTurnGameState({
 function createInitialGameStateCard(name: string) {
   return {
     name,
+    isToken: false,
+    quantity: 1,
     tapped: null,
     notes: null,
   }

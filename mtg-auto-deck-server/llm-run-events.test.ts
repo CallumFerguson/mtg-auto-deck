@@ -395,7 +395,7 @@ test("rejects invalid completed simulation run evaluation JSON", () => {
           illegalActions: [1],
           strategicMistakes: [],
         })
-    ),
+      ),
     /illegalActions/
   )
 
@@ -1622,6 +1622,70 @@ test("builds turn prompt with optional generic rules reference", () => {
   assert.equal(minimalPrompt.includes(GENERIC_GAME_RULES_REFERENCE), false)
 })
 
+test("builds turn prompt with token-aware zone object rules", () => {
+  const prompt = buildSimulateTurnPrompt({
+    genericGameRulesReferenceEnabled: false,
+  })
+
+  assert.match(prompt, /Each zone should be an array of zone objects/)
+  assert.match(prompt, /"isToken": false \| true/)
+  assert.match(prompt, /"quantity": 1/)
+  assert.match(prompt, /Only tokens may use quantity greater than 1/)
+  assert.match(
+    prompt,
+    /Non-token cards and permanents must use isToken: false and quantity: 1/
+  )
+  assert.match(
+    prompt,
+    /Never put tokens in the library, hand, command zone, graveyard, or exile/
+  )
+  assert.match(
+    prompt,
+    /Do not use library tools to create, remove, or move tokens/
+  )
+})
+
+test("builds initial turn game state with non-token zone object metadata", () => {
+  const prompt = buildTurnSimulationPromptFromData(
+    {
+      simulationId: "simulation-1",
+      deckId: "deck-1",
+      strategyGuidelines: null,
+      commanders: [
+        createPromptCard({
+          name: "Atraxa, Praetors' Voice",
+          quantity: 1,
+          zone: "commander",
+        }),
+      ],
+      libraryCards: [
+        createPromptCard({
+          name: "Forest",
+          quantity: 1,
+          zone: "library",
+        }),
+      ],
+      library: ["Forest"],
+      startingHand: ["Forest"],
+    },
+    "00000000-0000-0000-0000-000000000003"
+  )
+
+  assert.match(
+    prompt.dynamicRunInput,
+    /"name": "Forest"[\s\S]*"isToken": false/
+  )
+  assert.match(prompt.dynamicRunInput, /"name": "Forest"[\s\S]*"quantity": 1/)
+  assert.match(
+    prompt.dynamicRunInput,
+    /"name": "Atraxa, Praetors' Voice"[\s\S]*"isToken": false/
+  )
+  assert.match(
+    prompt.dynamicRunInput,
+    /"name": "Atraxa, Praetors' Voice"[\s\S]*"quantity": 1/
+  )
+})
+
 test("builds structured opening-hand prompt parts without caching dynamic run input", () => {
   const llmRunId = "00000000-0000-0000-0000-000000000001"
   const prompt = buildStartingHandSimulationPromptFromData(
@@ -1781,7 +1845,10 @@ test("builds Anthropic payload with adaptive thinking, remote MCP, and 5m cache 
     },
   ])
   assert.equal(payload.system.length, 2)
-  assert.equal(payload.system[1].text, `${prompt.cardReference}\n\n${prompt.userGuidelines}`)
+  assert.equal(
+    payload.system[1].text,
+    `${prompt.cardReference}\n\n${prompt.userGuidelines}`
+  )
   assert.deepEqual(
     payload.system.map((block) => block.cache_control),
     [
