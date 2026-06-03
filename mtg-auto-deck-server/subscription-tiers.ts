@@ -11,7 +11,7 @@ export const BILLING_TIER_LIMITS = {
     maxConcurrentLlmRuns: 5,
   },
   super_max: {
-    maxConcurrentLlmRuns: 10,
+    maxConcurrentLlmRuns: 5,
   },
 } as const
 
@@ -33,8 +33,8 @@ export const BILLING_TIER_USAGE_LIMITS_USD = {
     weekly: 5,
   },
   super_max: {
-    five_hour: 5,
-    weekly: 10,
+    five_hour: 100,
+    weekly: 100,
   },
 } as const satisfies Record<
   BillingTier,
