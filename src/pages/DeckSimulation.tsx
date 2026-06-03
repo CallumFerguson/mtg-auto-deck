@@ -4732,7 +4732,7 @@ function SimulationResultsPanel({
         className={`pointer-events-none absolute z-40 flex items-center justify-center overflow-visible rounded-lg border text-center font-extrabold whitespace-nowrap transition-[top,left,width,height,background-color,border-color,color,box-shadow] duration-750 ease-out ${
           isCoachMark
             ? "border-sky-200 bg-sky-50 text-slate-950 shadow-2xl shadow-black/25"
-            : "border-slate-600/80 bg-slate-800 text-slate-100 shadow-[0_14px_34px_rgba(2,6,23,0.28)]"
+            : "border-transparent bg-sky-300 text-slate-950 shadow-[0_14px_34px_rgba(56,189,248,0.22)]"
         }`}
         aria-label={isCoachMark ? demoCoachMarkText : "Try demo"}
         role="note"
@@ -4789,7 +4789,7 @@ function SimulationResultsPanel({
             ref={demoStartButtonRef}
             type="button"
             size="lg"
-            className="min-h-14 border !border-slate-600/80 !bg-slate-800 !px-8 text-base font-extrabold !text-slate-100 shadow-[0_14px_34px_rgba(2,6,23,0.28)] transition-transform hover:-translate-y-px hover:!bg-slate-700 focus-visible:ring-slate-400/40 [&_svg]:size-5"
+            className="min-h-14 !bg-sky-300 !px-8 text-base font-extrabold !text-slate-950 shadow-[0_14px_34px_rgba(56,189,248,0.22)] transition-transform hover:-translate-y-px hover:!bg-sky-200 focus-visible:ring-sky-300/50 [&_svg]:size-5"
             onClick={handleStartDemo}
           >
             <Play data-icon="inline-start" />
