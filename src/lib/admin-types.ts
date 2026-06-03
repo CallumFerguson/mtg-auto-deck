@@ -87,6 +87,7 @@ export type AdminBenchmarkEvaluationSummary = {
   evaluationCount: number
   completedEvaluationCount: number
   activeEvaluationCount: number
+  failedEvaluationCount: number
   averageSimulationQualityScore: number | null
   legalPassCount: number
   legalFailCount: number

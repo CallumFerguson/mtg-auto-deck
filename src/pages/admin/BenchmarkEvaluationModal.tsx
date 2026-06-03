@@ -410,46 +410,68 @@ function BenchmarkEvaluationSummaryGrid({
   summary: AdminBenchmarkEvaluationSummary
 }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      <BenchmarkEvaluationMetric
-        label="Eligible target runs"
-        value={summary.targetRunCount}
-      />
-      <BenchmarkEvaluationMetric
-        label="Evaluations found"
-        value={summary.evaluationCount}
-      />
-      <BenchmarkEvaluationMetric
-        label="Completed"
-        value={summary.completedEvaluationCount}
-      />
-      <BenchmarkEvaluationMetric
-        label="Running"
-        value={summary.activeEvaluationCount}
-      />
-      <BenchmarkEvaluationMetric
-        label="Average quality"
-        value={
-          summary.averageSimulationQualityScore === null
-            ? "-"
-            : `${summary.averageSimulationQualityScore.toFixed(1)} / 10`
-        }
-        icon={<BarChart3 className="size-4" aria-hidden />}
-      />
-      <BenchmarkEvaluationMetric
-        label="Total cost"
-        value={formatBenchmarkEvaluationCost(summary.totalEvaluationCostUsd)}
-      />
-      <BenchmarkEvaluationPassFailMetric
-        failCount={summary.legalFailCount}
-        label="Legal"
-        passCount={summary.legalPassCount}
-      />
-      <BenchmarkEvaluationPassFailMetric
-        failCount={summary.strategicFailCount}
-        label="Strategic"
-        passCount={summary.strategicPassCount}
-      />
+    <div className="grid gap-4">
+      <section className="grid gap-2" aria-label="Evaluation runs">
+        <h4 className="text-xs font-semibold uppercase text-muted-foreground">
+          Evaluation runs
+        </h4>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <BenchmarkEvaluationMetric
+            label="Eligible target runs"
+            value={summary.targetRunCount}
+          />
+          <BenchmarkEvaluationMetric
+            label="Evaluations found"
+            value={summary.evaluationCount}
+          />
+          <BenchmarkEvaluationMetric
+            label="Completed"
+            value={summary.completedEvaluationCount}
+          />
+          <BenchmarkEvaluationMetric
+            label="Running"
+            value={summary.activeEvaluationCount}
+          />
+          <BenchmarkEvaluationMetric
+            icon={<XCircle className="size-4 text-destructive" aria-hidden />}
+            label="Failed"
+            value={summary.failedEvaluationCount}
+          />
+          <BenchmarkEvaluationMetric
+            label="Total cost"
+            value={formatBenchmarkEvaluationCost(
+              summary.totalEvaluationCostUsd
+            )}
+          />
+        </div>
+      </section>
+
+      <section className="grid gap-2" aria-label="Evaluation results">
+        <h4 className="text-xs font-semibold uppercase text-muted-foreground">
+          Evaluation results
+        </h4>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <BenchmarkEvaluationMetric
+            label="Average quality"
+            value={
+              summary.averageSimulationQualityScore === null
+                ? "-"
+                : `${summary.averageSimulationQualityScore.toFixed(1)} / 10`
+            }
+            icon={<BarChart3 className="size-4" aria-hidden />}
+          />
+          <BenchmarkEvaluationPassFailMetric
+            failCount={summary.legalFailCount}
+            label="Legal"
+            passCount={summary.legalPassCount}
+          />
+          <BenchmarkEvaluationPassFailMetric
+            failCount={summary.strategicFailCount}
+            label="Strategic"
+            passCount={summary.strategicPassCount}
+          />
+        </div>
+      </section>
     </div>
   )
 }

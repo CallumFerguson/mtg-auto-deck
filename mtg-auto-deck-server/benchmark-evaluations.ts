@@ -2,7 +2,10 @@ import {
   parseOpeningHandCompletionFromResponseText,
   parseTurnSimulationCompletionFromResponseText,
 } from "./llm-run-events.js"
-import type { LlmRunStatus } from "./simulations-postgres.js"
+import type {
+  LlmRunStatus,
+  SimulationRunEvaluationResultStatus,
+} from "./simulations-postgres.js"
 
 export const ACTIVE_BENCHMARK_EVALUATION_STATUSES = new Set<LlmRunStatus>([
   "pending",
@@ -40,6 +43,7 @@ export type BenchmarkEvaluationLatestEvaluationSnapshot = {
   targetLlmRunId: string
   attemptNumber: number
   status: LlmRunStatus
+  resultStatus: SimulationRunEvaluationResultStatus
   legalPass: boolean | null
   strategicPass: boolean | null
   simulationQualityScore: number | null
@@ -69,6 +73,7 @@ export type BenchmarkEvaluationSummary = {
   evaluationCount: number
   completedEvaluationCount: number
   activeEvaluationCount: number
+  failedEvaluationCount: number
   averageSimulationQualityScore: number | null
   legalPassCount: number
   legalFailCount: number
@@ -138,7 +143,13 @@ export function buildBenchmarkEvaluationSummary({
     latestEvaluationByTargetRunId.values()
   )
   const completedEvaluations = latestTargetEvaluations.filter(
-    (evaluation) => evaluation.status === "completed"
+    (evaluation) =>
+      evaluation.status === "completed" &&
+      evaluation.resultStatus === "completed"
+  )
+  const failedEvaluations = latestTargetEvaluations.filter(
+    (evaluation) =>
+      evaluation.status === "failed" || evaluation.resultStatus === "failed"
   )
   const scoredEvaluations = completedEvaluations.filter(
     (evaluation) => evaluation.simulationQualityScore !== null
@@ -195,6 +206,7 @@ export function buildBenchmarkEvaluationSummary({
     activeEvaluationCount: latestTargetEvaluations.filter((evaluation) =>
       ACTIVE_BENCHMARK_EVALUATION_STATUSES.has(evaluation.status)
     ).length,
+    failedEvaluationCount: failedEvaluations.length,
     averageSimulationQualityScore,
     legalPassCount: completedEvaluations.filter(
       (evaluation) => evaluation.legalPass === true
@@ -216,7 +228,10 @@ export function buildBenchmarkEvaluationSummary({
 function isBenchmarkEvaluationAttentionResult(
   evaluation: BenchmarkEvaluationLatestEvaluationSnapshot
 ) {
-  if (evaluation.status !== "completed") {
+  if (
+    evaluation.status !== "completed" ||
+    evaluation.resultStatus !== "completed"
+  ) {
     return false
   }
 

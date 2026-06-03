@@ -550,6 +550,7 @@ export async function listLatestBenchmarkEvaluationSnapshotsForTargets(
     target_llm_run_id: string
     attempt_number: number
     status: BenchmarkEvaluationLatestEvaluationSnapshot["status"]
+    result_status: BenchmarkEvaluationLatestEvaluationSnapshot["resultStatus"]
     legal_pass: boolean | null
     strategic_pass: boolean | null
     simulation_quality_score: string | number | null
@@ -563,6 +564,7 @@ export async function listLatestBenchmarkEvaluationSnapshotsForTargets(
         evaluation.target_llm_run_id,
         evaluation.attempt_number,
         llm_run.status,
+        evaluation.result_status,
         evaluation.legal_pass,
         evaluation.strategic_pass,
         evaluation.simulation_quality_score,
@@ -587,6 +589,7 @@ export async function listLatestBenchmarkEvaluationSnapshotsForTargets(
     targetLlmRunId: row.target_llm_run_id,
     attemptNumber: row.attempt_number,
     status: row.status,
+    resultStatus: row.result_status,
     legalPass: row.legal_pass,
     strategicPass: row.strategic_pass,
     simulationQualityScore: toOptionalNumber(row.simulation_quality_score),
