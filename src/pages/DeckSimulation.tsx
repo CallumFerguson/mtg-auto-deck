@@ -47,6 +47,7 @@ import { useOptionalBillingTier } from "@/lib/billing-tier-state"
 import type {
   CreateSimulationResponse,
   CreateStartingHandResponse,
+  CreateTurnLlmRunResponse,
   DeckCard,
   PublicBenchmarkExportV1,
   PublicBenchmarkMetadata,
@@ -3049,6 +3050,22 @@ function SimulationDetails({
         return
       }
 
+      const data = (await response.json()) as CreateTurnLlmRunResponse
+      const pendingTurnRun = createPendingTurnRunFromResponse({
+        response: data,
+        selectedModelPreset,
+        simulation,
+      })
+      const updatedResultsInfo = applySimulationResultsStreamEvent(
+        resultsInfoRef.current,
+        {
+          type: "llm_run_started",
+          run: pendingTurnRun,
+        }
+      )
+
+      resultsInfoRef.current = updatedResultsInfo
+      setResultsInfo(updatedResultsInfo)
       setResultsStreamRestartKey((currentKey) => currentKey + 1)
     } catch {
       setTurnRunError("Turn run could not be sent to the server.")
@@ -4027,6 +4044,14 @@ function SimulationResultsPanel({
   const selectedTimelineTurn = selectedTimelineStep
     ? getSimulationResultsTimelineStepTurn(selectedTimelineStep)
     : null
+  const isRequestedTimelineTurnStarting =
+    requestedTimelineTurn !== null &&
+    displayedTimelineSteps.some(
+      (step) =>
+        step.kind === "simulate_turn" &&
+        step.status === "starting_turn" &&
+        step.turnNumber === requestedTimelineTurn
+    )
   const selectedTimelineStepSnapshot = useMemo(
     () =>
       selectedTimelineStep
@@ -4059,6 +4084,7 @@ function SimulationResultsPanel({
       requestedTimelineTurn === selectedTimelineTurn ||
       selectedTimelineTurn === null ||
       selectedTimelineTurn === 0 ||
+      isRequestedTimelineTurnStarting ||
       requestedTimelineTurn <= selectedTimelineTurn
     ) {
       return
@@ -4068,6 +4094,7 @@ function SimulationResultsPanel({
       historyMode: "replace",
     })
   }, [
+    isRequestedTimelineTurnStarting,
     onTimelineTurnSelected,
     requestedTimelineTurn,
     selectedTimelineTurn,
@@ -4771,6 +4798,45 @@ function notifyParentDemoStarted() {
     },
     "*"
   )
+}
+
+function createPendingTurnRunFromResponse({
+  response,
+  selectedModelPreset,
+  simulation,
+}: {
+  response: CreateTurnLlmRunResponse
+  selectedModelPreset: LlmModelPreset | null
+  simulation: Simulation
+}): SimulationDebugLlmRun {
+  return {
+    llmRunId: response.llmRunId,
+    llmModelPresetId: simulation.llmModelPresetId,
+    llmModelPresetName: selectedModelPreset?.name ?? null,
+    processingMode: simulation.llmProcessingMode,
+    phase: "turn",
+    provider: selectedModelPreset?.provider ?? "",
+    model: selectedModelPreset?.model ?? "",
+    estimatedPriceCents: null,
+    reasoningEffort: selectedModelPreset?.reasoningEffort ?? null,
+    serviceTier:
+      selectedModelPreset?.supportsFlex && simulation.useFlexServiceTier
+        ? "flex"
+        : null,
+    status: response.status,
+    runtimeStreamKey: response.runtimeStreamKey,
+    attemptNumber: response.attemptNumber,
+    failureMessage: null,
+    createdAt: response.createdAt,
+    startedAt: null,
+    completedAt: null,
+    failedAt: null,
+    cancelledAt: null,
+    turnNumber: response.turnNumber,
+    librarySnapshot: null,
+    mcpFunctionCalls: [],
+    openrouterGenerations: [],
+  }
 }
 
 function getSimulationTimelineRunStepId(llmRunId: string) {

@@ -80,6 +80,16 @@ export type StopSimulationResponse = {
   cancelRequestedLlmRunIds: string[]
 }
 
+export type CreateTurnLlmRunResponse = {
+  simulationId: string
+  llmRunId: string
+  turnNumber: number
+  attemptNumber: number
+  runtimeStreamKey: string
+  status: string
+  createdAt: string
+}
+
 type OpenRouterGeneration = {
   openrouterTurnIndex: number
   generationId: string
