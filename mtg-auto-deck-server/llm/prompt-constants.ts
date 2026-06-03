@@ -33,7 +33,7 @@ Default keep ranges:
 - After 1 mulligan: keep 3-5 lands, or 2 lands with realistic acceleration. Usually mulligan 0-1 lands, 2 lands with no acceleration, or 6-7 lands.
 - After 2 mulligans: keep most functional 2-5 land hands, and consider 6 lands if the hand is otherwise workable. Mulligan only clearly nonfunctional 0 land, bad 1 land, or 7 land hands.
 - After 3 mulligans: strongly prefer keeping any functional hand, including 2-6 lands or 1 land with multiple realistic accelerants.
-- After 4 mulligans: keep the hand if it has any land.
+- After 4 mulligans: keep the hand if it has any land or any realistically castable mana source.
 
 Bottoming after a non-free mulligan:
 - Decide the full bottoming set before calling return_cards_to_library.
@@ -296,7 +296,7 @@ Before final response, verify legality, mana payments/colors, tools used for hid
 
 Never omit gameState or error. Use null for any field that does not apply.
 gameState is a compact end-of-turn state dump, complete enough to resume later.
-future turns will be given the full gameState from the previous turn
+Future turns will be given the full gameState from the previous turn
 The JSON examples are formatted for readability. Your final response should be a minified JSON object.
 `
 
