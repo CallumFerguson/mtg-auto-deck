@@ -96,6 +96,8 @@ type OpenRouterGeneration = {
   createdAt: string
 }
 
+export type SimulationRunResultStatus = "pending" | "completed" | "failed"
+
 export type SimulationMcpFunctionCall = {
   id: number
   mcpFunctionName: string
@@ -121,6 +123,8 @@ export type SimulationDebugLlmRun = {
   runtimeStreamKey: string | null
   attemptNumber: number
   failureMessage: string | null
+  resultStatus?: SimulationRunResultStatus
+  resultFailureMessage?: string | null
   createdAt: string
   startedAt: string | null
   completedAt: string | null
@@ -153,6 +157,8 @@ type SimulationDebugLlmRunMetadata = {
   runtimeStreamKey: string | null
   attemptNumber: number
   failureMessage: string | null
+  resultStatus?: SimulationRunResultStatus
+  resultFailureMessage?: string | null
   createdAt: string
   startedAt: string | null
   completedAt: string | null
@@ -193,9 +199,7 @@ export type SimulationDebugResponse = {
 }
 
 export type SimulationRunEvaluationResultStatus =
-  | "pending"
-  | "completed"
-  | "failed"
+  SimulationRunResultStatus
 
 export type SimulationRunEvaluation = {
   id: string

@@ -151,6 +151,38 @@ test("uses done results as authoritative MCP function call resync", () => {
   )
 })
 
+test("merges completed run result failure fields from stream updates", () => {
+  const currentResults = createResultsInfo({
+    turnLlmRuns: [
+      createRun({
+        llmRunId: "turn-1",
+        phase: "turn",
+        status: "streaming",
+        turnNumber: 1,
+      }),
+    ],
+  })
+
+  const updatedResults = applySimulationResultsStreamEvent(currentResults, {
+    type: "llm_run_updated",
+    run: createRun({
+      llmRunId: "turn-1",
+      phase: "turn",
+      resultFailureMessage: "Turn LLM completed response was not valid JSON.",
+      resultStatus: "failed",
+      status: "completed",
+      turnNumber: 1,
+    }),
+  })
+
+  assert.equal(updatedResults?.turnLlmRuns[0].status, "completed")
+  assert.equal(updatedResults?.turnLlmRuns[0].resultStatus, "failed")
+  assert.equal(
+    updatedResults?.turnLlmRuns[0].resultFailureMessage,
+    "Turn LLM completed response was not valid JSON."
+  )
+})
+
 test("reads opening-hand final output from run columns", () => {
   const finalOutput = getSimulationFinalParsedOutput(
     createRun({
@@ -256,6 +288,8 @@ function createRun(
     runtimeStreamKey: "runtime-key",
     attemptNumber: 1,
     failureMessage: null,
+    resultStatus: "pending",
+    resultFailureMessage: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     startedAt: "2026-01-01T00:00:01.000Z",
     completedAt: null,

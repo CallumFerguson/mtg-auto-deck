@@ -125,6 +125,7 @@ import {
   ensureSimulationsSchema,
   failSimulationRunEvaluationResult,
   failSimulationRunEvaluationResultWithOutputs,
+  failSimulationRunResultWithRawOutput,
   failLlmRun,
   getActiveLlmRunMcpTokenContext,
   getSimulationCreationDecision,
@@ -578,6 +579,8 @@ function createStreamRunFromRuntime(
     runtimeStreamKey: runtime.runtimeStreamKey,
     attemptNumber: runtime.attemptNumber,
     failureMessage: null,
+    resultStatus: "pending",
+    resultFailureMessage: null,
     createdAt: runtime.createdAt,
     startedAt: runtime.startedAt,
     completedAt: null,
@@ -4479,17 +4482,24 @@ async function reconcileCompletedOpenAiBatchOutputRejection({
     phase: item.phase,
     failureMessage,
   })
-  await completeRawLlmRun({
-    finalOutputText: outputText,
-    llmRunId: item.llmRunId,
-    rawResponse,
-    usage,
-  })
 
   if (item.phase === "evaluation") {
+    await completeRawLlmRun({
+      finalOutputText: outputText,
+      llmRunId: item.llmRunId,
+      rawResponse,
+      usage,
+    })
     await failSimulationRunEvaluationResult(item.llmRunId, failureMessage)
   } else {
-    await markSimulationFailed(item.simulationId, failureMessage)
+    await failSimulationRunResultWithRawOutput({
+      failureMessage,
+      finalOutputText: outputText,
+      llmRunId: item.llmRunId,
+      phase: item.phase,
+      rawResponse,
+      usage,
+    })
   }
 
   await recordOpenAiBatchItemOutput({
@@ -6421,13 +6431,14 @@ async function runOpeningHandLlmRun({
       throwIfRuntimeAborted(runtime.abortController.signal)
       const failureMessage = getErrorMessage(error)
       console.error("Opening-hand LLM run result was rejected:", error)
-      await completeRawLlmRun({
+      await failSimulationRunResultWithRawOutput({
+        failureMessage,
         finalOutputText: responseResult.outputText,
         llmRunId,
+        phase: "opening_hand",
         rawResponse: responseResult.rawResponse,
         usage: responseResult.usage,
       })
-      await markSimulationFailed(simulationId, failureMessage)
       runtime.status = "completed"
       await publishSimulationResultsState({
         deckId,
@@ -6701,13 +6712,14 @@ async function runTurnLlmRun({
       throwIfRuntimeAborted(runtime.abortController.signal)
       const failureMessage = getErrorMessage(error)
       console.error("Turn LLM run result was rejected:", error)
-      await completeRawLlmRun({
+      await failSimulationRunResultWithRawOutput({
+        failureMessage,
         finalOutputText: responseResult.outputText,
         llmRunId,
+        phase: "turn",
         rawResponse: responseResult.rawResponse,
         usage: responseResult.usage,
       })
-      await markSimulationFailed(simulationId, failureMessage)
       runtime.status = "completed"
       await publishSimulationResultsState({
         deckId,

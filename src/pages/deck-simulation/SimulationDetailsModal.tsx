@@ -882,6 +882,10 @@ function SimulationDebugRunGroup({
               <DebugMetadataItem label="Run ID" value={run.llmRunId} />
               <DebugMetadataItem label="Phase" value={run.phase} />
               <DebugMetadataItem label="Status" value={run.status} />
+              <DebugMetadataItem
+                label="Result status"
+                value={run.resultStatus ?? "N/A"}
+              />
               <DebugMetadataItem label="Attempt" value={run.attemptNumber} />
               {run.turnNumber !== undefined ? (
                 <DebugMetadataItem label="Turn" value={run.turnNumber} />
@@ -954,6 +958,10 @@ function SimulationDebugRunGroup({
               <DebugMetadataItem
                 label="Failure"
                 value={run.failureMessage?.trim() || "N/A"}
+              />
+              <DebugMetadataItem
+                label="Result failure"
+                value={run.resultFailureMessage?.trim() || "N/A"}
               />
               <DebugMetadataItem
                 label="OpenRouter generations"

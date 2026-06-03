@@ -388,30 +388,36 @@ function getCurrentOpeningHandRunCount(resultsInfo: SimulationResultsInfo) {
 function isCountedOpeningHandRun(
   run: SimulationResultsInfo["openingHandLlmRuns"][number]
 ) {
+  const displayStatus = getSimulationRunDisplayStatus(run)
+
   return (
     isActiveLlmRunStatus(run.status) ||
-    run.status === "failed" ||
-    run.status === "cancelled" ||
-    (run.status === "completed" && run.openingHandIsValid === true)
+    displayStatus === "failed" ||
+    displayStatus === "cancelled" ||
+    isSuccessfulOpeningHandRun(run)
   )
 }
 
 function isCountedTurnRun(run: SimulationResultsInfo["turnLlmRuns"][number]) {
+  const displayStatus = getSimulationRunDisplayStatus(run)
+
   return (
     run.outdated !== true &&
     (isActiveLlmRunStatus(run.status) ||
-      run.status === "failed" ||
-      run.status === "cancelled" ||
-      (run.status === "completed" &&
-        hasGameState(run.gameState) &&
-        hasTurnActions(run.turnActions)))
+      displayStatus === "failed" ||
+      displayStatus === "cancelled" ||
+      isSuccessfulTurnRun(run))
   )
 }
 
 function isSuccessfulOpeningHandRun(
   run: SimulationResultsInfo["openingHandLlmRuns"][number]
 ) {
-  return run.status === "completed" && run.openingHandIsValid === true
+  return (
+    run.status === "completed" &&
+    getSimulationRunResultStatus(run) === "completed" &&
+    run.openingHandIsValid === true
+  )
 }
 
 function isSuccessfulTurnRun(
@@ -419,10 +425,60 @@ function isSuccessfulTurnRun(
 ) {
   return (
     run.status === "completed" &&
+    getSimulationRunResultStatus(run) === "completed" &&
     run.outdated !== true &&
     hasGameState(run.gameState) &&
     hasTurnActions(run.turnActions)
   )
+}
+
+function getSimulationRunDisplayStatus(
+  run: Pick<
+    SimulationDebugLlmRun,
+    | "gameState"
+    | "openingHandIsValid"
+    | "phase"
+    | "resultStatus"
+    | "status"
+    | "turnActions"
+  >
+) {
+  return run.status === "completed" &&
+    getSimulationRunResultStatus(run) === "failed"
+    ? "failed"
+    : run.status
+}
+
+function getSimulationRunResultStatus(
+  run: Pick<
+    SimulationDebugLlmRun,
+    | "gameState"
+    | "openingHandIsValid"
+    | "phase"
+    | "resultStatus"
+    | "status"
+    | "turnActions"
+  >
+) {
+  if (run.resultStatus) {
+    return run.resultStatus
+  }
+
+  if (run.status !== "completed") {
+    return "pending"
+  }
+
+  if (run.phase === "opening_hand") {
+    return run.openingHandIsValid === true ? "completed" : "failed"
+  }
+
+  if (run.phase === "turn") {
+    return hasGameState(run.gameState) && hasTurnActions(run.turnActions)
+      ? "completed"
+      : "failed"
+  }
+
+  return "pending"
 }
 
 function hasGameState(value: unknown): value is Record<string, unknown> {
@@ -3766,6 +3822,7 @@ function SimulationResultsPanel({
         isSuccessfulOpeningHandRun(run) &&
         run.failureMessage === null,
       canRerun: !readOnly && canStartOpeningHandRun && !isOpeningHandRunning,
+      displayStatus: getSimulationRunDisplayStatus(run),
       isActive: isActiveLlmRunStatus(run.status),
       resultKind: "opening_hand" as const,
       resultLabel: `Opening hand attempt ${run.attemptNumber}`,
@@ -3779,6 +3836,7 @@ function SimulationResultsPanel({
         !readOnly &&
         typeof run.turnNumber === "number" &&
         !activeTurnNumbers.has(run.turnNumber),
+      displayStatus: getSimulationRunDisplayStatus(run),
       isActive: isActiveLlmRunStatus(run.status),
       resultKind: "turn" as const,
       resultLabel: `Turn ${run.turnNumber ?? "?"} attempt ${run.attemptNumber}`,
@@ -4217,7 +4275,7 @@ function SimulationResultsPanel({
         isBatchRun={run.processingMode === "openai_batch"}
         isPending={false}
         isFinishedSuccessfully={
-          run.status === "completed" && runStatusMessage === null
+          run.displayStatus === "completed" && runStatusMessage === null
         }
         isFinished={true}
         isStoppingFutureTurns={false}
@@ -4233,7 +4291,7 @@ function SimulationResultsPanel({
       />
     ) : null
     const runMetadata = [
-      run.status,
+      run.displayStatus,
       run.llmModelPresetName ?? run.model,
       showRunCost ? getLlmRunEstimatedPriceText(run) : null,
       finishedDurationText ? `took ${finishedDurationText}` : null,
@@ -4317,7 +4375,7 @@ function SimulationResultsPanel({
         ) : run.resultEntries.length === 0 &&
           directTurnActions === null &&
           finalParsedOutput === null &&
-          (run.status === "completed" ||
+          (run.displayStatus === "completed" ||
             emptyRunMessage !== null ||
             !shouldShowFinishedThinkingStatus) ? (
           <div
@@ -4842,6 +4900,8 @@ function createPendingTurnRunFromResponse({
     runtimeStreamKey: response.runtimeStreamKey,
     attemptNumber: response.attemptNumber,
     failureMessage: null,
+    resultStatus: "pending",
+    resultFailureMessage: null,
     createdAt: response.createdAt,
     startedAt: null,
     completedAt: null,
@@ -7854,12 +7914,26 @@ function getCommanderCardNames(commanders: readonly DeckCard[]) {
 function getSimulationRunStatusMessage(
   run: Pick<
     SimulationDebugLlmRun,
-    "failureMessage" | "mcpFunctionCalls" | "status"
+    | "failureMessage"
+    | "gameState"
+    | "mcpFunctionCalls"
+    | "openingHandIsValid"
+    | "phase"
+    | "resultFailureMessage"
+    | "resultStatus"
+    | "status"
+    | "turnActions"
   >
 ) {
   const messages = new Set<string>()
+  const displayStatus = getSimulationRunDisplayStatus(run)
 
-  if (run.status === "failed") {
+  if (run.status === "completed" && displayStatus === "failed") {
+    messages.add(
+      run.resultFailureMessage?.trim() ||
+        getRejectedSimulationRunResultFallbackMessage(run)
+    )
+  } else if (run.status === "failed") {
     messages.add(run.failureMessage?.trim() || "LLM run failed.")
   } else if (run.status === "cancelled") {
     messages.add(run.failureMessage?.trim() || "Run was cancelled.")
@@ -7880,6 +7954,14 @@ function getSimulationRunStatusMessage(
   }
 
   return messages.size > 0 ? Array.from(messages).join("\n") : null
+}
+
+function getRejectedSimulationRunResultFallbackMessage(
+  run: Pick<SimulationDebugLlmRun, "phase">
+) {
+  return run.phase === "opening_hand"
+    ? "Opening-hand LLM run did not produce a valid starting hand."
+    : "Turn LLM run did not produce a valid turn result."
 }
 
 function getActiveSimulationRunStatusLabel(status: string) {

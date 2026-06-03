@@ -301,7 +301,7 @@ function createRunStep(
     kind,
     label: getRunStepLabel(run, kind),
     detailLabel: `Attempt ${run.attemptNumber}`,
-    status: getRunStepStatus(run.status),
+    status: getRunStepStatus(run),
     run,
   }
 }
@@ -321,7 +321,14 @@ function getRunStepLabel(
   return `Turn ${run.turnNumber ?? "?"}`
 }
 
-function getRunStepStatus(status: string): SimulationResultsTimelineStepStatus {
+function getRunStepStatus(
+  run: SimulationDebugLlmRun
+): SimulationResultsTimelineStepStatus {
+  const status =
+    run.status === "completed" && run.resultStatus === "failed"
+      ? "failed"
+      : run.status
+
   if (
     status === "pending" ||
     status === "batch_pending" ||

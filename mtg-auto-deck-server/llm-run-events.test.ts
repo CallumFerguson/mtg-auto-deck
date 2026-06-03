@@ -20,6 +20,7 @@ import {
   buildClaimQueuedLlmRunStartQuery,
   buildCompleteLlmRunQuery,
   buildFailSimulationRunEvaluationResultQuery,
+  buildFailSimulationRunResultQuery,
   buildFailQueuedLlmRunUsageLimitQuery,
   buildFailLlmRunQuery,
   buildPartialLlmRunCostSnapshotQuery,
@@ -1467,6 +1468,35 @@ test("builds failed evaluation result query with failure message", () => {
   assert.match(normalizedSql, /SET result_status = 'failed'/)
   assert.match(normalizedSql, /result_failure_message = \$2/)
   assert.match(normalizedSql, /WHERE llm_run_id = \$1/)
+})
+
+test("builds failed opening-hand and turn result queries with failure message", () => {
+  const openingHandQuery = buildFailSimulationRunResultQuery({
+    failureMessage: "Opening-hand LLM completed response was not valid JSON.",
+    llmRunId: "00000000-0000-0000-0000-000000000001",
+    phase: "opening_hand",
+  })
+  const turnQuery = buildFailSimulationRunResultQuery({
+    failureMessage: "Turn LLM completed response was not valid JSON.",
+    llmRunId: "00000000-0000-0000-0000-000000000002",
+    phase: "turn",
+  })
+  const openingHandSql = openingHandQuery.text.replace(/\s+/g, " ")
+  const turnSql = turnQuery.text.replace(/\s+/g, " ")
+
+  assert.deepEqual(openingHandQuery.values, [
+    "00000000-0000-0000-0000-000000000001",
+    "Opening-hand LLM completed response was not valid JSON.",
+  ])
+  assert.deepEqual(turnQuery.values, [
+    "00000000-0000-0000-0000-000000000002",
+    "Turn LLM completed response was not valid JSON.",
+  ])
+  assert.match(openingHandSql, /UPDATE simulation_opening_hand_llm_runs/)
+  assert.match(turnSql, /UPDATE simulation_turn_llm_runs/)
+  assert.match(openingHandSql, /SET result_status = 'failed'/)
+  assert.match(turnSql, /result_failure_message = \$2/)
+  assert.match(turnSql, /RETURNING simulation_id/)
 })
 
 test("builds failed LLM run query with optional final output text", () => {

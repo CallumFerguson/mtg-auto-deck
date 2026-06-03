@@ -50,10 +50,11 @@ export type LlmRunStatus =
 export type LlmRunPhase = "opening_hand" | "turn" | "evaluation" | "other"
 type SimulationRunPhase = Extract<LlmRunPhase, "opening_hand" | "turn">
 
-export type SimulationRunEvaluationResultStatus =
+export type SimulationRunResultStatus =
   | "pending"
   | "completed"
   | "failed"
+export type SimulationRunEvaluationResultStatus = SimulationRunResultStatus
 
 export function canApplyLateLlmRunTerminalUpdate(status: LlmRunStatus) {
   return (
@@ -338,6 +339,8 @@ export type SimulationDebugLlmRun = {
   runtimeStreamKey: string | null
   attemptNumber: number
   failureMessage: string | null
+  resultStatus: SimulationRunResultStatus
+  resultFailureMessage: string | null
   createdAt: string
   startedAt: string | null
   completedAt: string | null
@@ -370,6 +373,8 @@ type SimulationDebugLlmRunMetadata = {
   runtimeStreamKey: string | null
   attemptNumber: number
   failureMessage: string | null
+  resultStatus: SimulationRunResultStatus
+  resultFailureMessage: string | null
   createdAt: string
   startedAt: string | null
   completedAt: string | null
@@ -408,6 +413,8 @@ export const STALE_RUNNING_SIMULATION_CANCELLATION_MESSAGE =
   "Simulation was cancelled because the server restarted before it finished."
 export const INVALID_OPENING_HAND_SIMULATION_FAILURE_MESSAGE =
   "Opening-hand LLM run did not produce a valid starting hand."
+export const INVALID_TURN_SIMULATION_FAILURE_MESSAGE =
+  "Turn LLM run did not produce a valid turn result."
 export const SIMULATION_AUTO_ADVANCE_DISABLED_MESSAGE =
   "Simulation auto-advance is disabled."
 export const SIMULATION_AUTO_ADVANCE_NOT_RUNNING_MESSAGE =
@@ -1080,6 +1087,8 @@ export async function ensureSimulationsSchema() {
       summary text,
       library_snapshot jsonb CHECK (library_snapshot IS NULL OR jsonb_typeof(library_snapshot) = 'array'),
       opening_hand_is_valid boolean NOT NULL DEFAULT false,
+      result_status text NOT NULL DEFAULT 'pending',
+      result_failure_message text,
       random_state_snapshot bigint,
       created_at timestamptz NOT NULL DEFAULT now(),
 
@@ -1096,6 +1105,47 @@ export async function ensureSimulationsSchema() {
     ADD COLUMN IF NOT EXISTS summary text
   `)
   await queryDatabase(`
+    ALTER TABLE simulation_opening_hand_llm_runs
+    ADD COLUMN IF NOT EXISTS result_status text NOT NULL DEFAULT 'pending'
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulation_opening_hand_llm_runs
+    ADD COLUMN IF NOT EXISTS result_failure_message text
+  `)
+  await queryDatabase(`
+    UPDATE simulation_opening_hand_llm_runs opening_run
+    SET result_status = 'completed',
+        result_failure_message = NULL
+    FROM llm_runs llm_run
+    WHERE llm_run.id = opening_run.llm_run_id
+      AND opening_run.result_status = 'pending'
+      AND llm_run.status = 'completed'
+      AND opening_run.opening_hand_is_valid = true
+  `)
+  await queryDatabase(
+    `
+      UPDATE simulation_opening_hand_llm_runs opening_run
+      SET result_status = 'failed',
+          result_failure_message = COALESCE(simulation.failure_message, $1)
+      FROM llm_runs llm_run, simulations simulation
+      WHERE llm_run.id = opening_run.llm_run_id
+        AND simulation.id = opening_run.simulation_id
+        AND opening_run.result_status = 'pending'
+        AND llm_run.status = 'completed'
+        AND opening_run.opening_hand_is_valid = false
+    `,
+    [INVALID_OPENING_HAND_SIMULATION_FAILURE_MESSAGE]
+  )
+  await queryDatabase(`
+    ALTER TABLE simulation_opening_hand_llm_runs
+    DROP CONSTRAINT IF EXISTS simulation_opening_hand_llm_runs_result_status_check
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulation_opening_hand_llm_runs
+    ADD CONSTRAINT simulation_opening_hand_llm_runs_result_status_check
+      CHECK (result_status IN ('pending', 'completed', 'failed'))
+  `)
+  await queryDatabase(`
     CREATE TABLE IF NOT EXISTS simulation_turn_llm_runs (
       simulation_id uuid NOT NULL REFERENCES simulations(id) ON DELETE CASCADE,
       llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
@@ -1105,6 +1155,8 @@ export async function ensureSimulationsSchema() {
       turn_actions jsonb,
       outdated boolean NOT NULL DEFAULT false,
       library_snapshot jsonb CHECK (library_snapshot IS NULL OR jsonb_typeof(library_snapshot) = 'array'),
+      result_status text NOT NULL DEFAULT 'pending',
+      result_failure_message text,
       random_state_snapshot bigint,
       created_at timestamptz NOT NULL DEFAULT now(),
 
@@ -1142,6 +1194,51 @@ export async function ensureSimulationsSchema() {
   await queryDatabase(`
     ALTER TABLE simulation_turn_llm_runs
     ADD COLUMN IF NOT EXISTS outdated boolean NOT NULL DEFAULT false
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulation_turn_llm_runs
+    ADD COLUMN IF NOT EXISTS result_status text NOT NULL DEFAULT 'pending'
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulation_turn_llm_runs
+    ADD COLUMN IF NOT EXISTS result_failure_message text
+  `)
+  await queryDatabase(`
+    UPDATE simulation_turn_llm_runs turn_run
+    SET result_status = 'completed',
+        result_failure_message = NULL
+    FROM llm_runs llm_run
+    WHERE llm_run.id = turn_run.llm_run_id
+      AND turn_run.result_status = 'pending'
+      AND llm_run.status = 'completed'
+      AND turn_run.game_state IS NOT NULL
+      AND turn_run.turn_actions IS NOT NULL
+  `)
+  await queryDatabase(
+    `
+      UPDATE simulation_turn_llm_runs turn_run
+      SET result_status = 'failed',
+          result_failure_message = COALESCE(simulation.failure_message, $1)
+      FROM llm_runs llm_run, simulations simulation
+      WHERE llm_run.id = turn_run.llm_run_id
+        AND simulation.id = turn_run.simulation_id
+        AND turn_run.result_status = 'pending'
+        AND llm_run.status = 'completed'
+        AND (
+          turn_run.game_state IS NULL
+          OR turn_run.turn_actions IS NULL
+        )
+    `,
+    [INVALID_TURN_SIMULATION_FAILURE_MESSAGE]
+  )
+  await queryDatabase(`
+    ALTER TABLE simulation_turn_llm_runs
+    DROP CONSTRAINT IF EXISTS simulation_turn_llm_runs_result_status_check
+  `)
+  await queryDatabase(`
+    ALTER TABLE simulation_turn_llm_runs
+    ADD CONSTRAINT simulation_turn_llm_runs_result_status_check
+      CHECK (result_status IN ('pending', 'completed', 'failed'))
   `)
   await queryDatabase(`
     DROP TABLE IF EXISTS simulation_turn_actions
@@ -1520,7 +1617,7 @@ const SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL = `
         llm_run.status IN ('pending', 'batch_pending', 'batch_submitted', 'streaming', 'cancel_requested', 'failed', 'cancelled')
         OR (
           llm_run.status = 'completed'
-          AND opening_run.opening_hand_is_valid = true
+          AND opening_run.result_status IN ('completed', 'failed')
         )
       )
   ) + (
@@ -1534,8 +1631,7 @@ const SIMULATION_SUMMARY_COMPLETED_RUN_COUNT_SQL = `
         llm_run.status IN ('pending', 'batch_pending', 'batch_submitted', 'streaming', 'cancel_requested', 'failed', 'cancelled')
         OR (
           llm_run.status = 'completed'
-          AND turn_run.game_state IS NOT NULL
-          AND turn_run.turn_actions IS NOT NULL
+          AND turn_run.result_status IN ('completed', 'failed')
         )
       )
   )
@@ -4396,6 +4492,12 @@ export async function completeOpeningHandLlmRun({
       mulliganCount: snapshot.mulligan_count,
       openingHand,
     })
+    const resultStatus: SimulationRunResultStatus = openingHandIsValid
+      ? "completed"
+      : "failed"
+    const resultFailureMessage = openingHandIsValid
+      ? null
+      : INVALID_OPENING_HAND_SIMULATION_FAILURE_MESSAGE
 
     await client.query(
       `
@@ -4404,7 +4506,9 @@ export async function completeOpeningHandLlmRun({
             library_snapshot = $3::jsonb,
             random_state_snapshot = $4,
             opening_hand_is_valid = $5,
-            summary = $6
+            summary = $6,
+            result_status = $7,
+            result_failure_message = $8
         WHERE llm_run_id = $1
       `,
       [
@@ -4414,6 +4518,8 @@ export async function completeOpeningHandLlmRun({
         snapshot.random_state,
         openingHandIsValid,
         summary,
+        resultStatus,
+        resultFailureMessage,
       ]
     )
 
@@ -4529,7 +4635,9 @@ export async function completeTurnLlmRun({
         SET game_state = $2::jsonb,
             turn_actions = $3::jsonb,
             library_snapshot = $4::jsonb,
-            random_state_snapshot = $5
+            random_state_snapshot = $5,
+            result_status = 'completed',
+            result_failure_message = NULL
         WHERE llm_run_id = $1
       `,
       [
@@ -4634,6 +4742,126 @@ export async function completeRawLlmRun({
 
     await client.query(completeRunQuery.text, completeRunQuery.values)
   })
+}
+
+export function buildFailSimulationRunResultQuery({
+  failureMessage,
+  llmRunId,
+  phase,
+}: {
+  llmRunId: string
+  phase: SimulationRunPhase
+  failureMessage: string
+}) {
+  const tableName = getSimulationRunResultTableName(phase)
+
+  return {
+    text: `
+      UPDATE ${tableName}
+      SET result_status = 'failed',
+          result_failure_message = $2
+      WHERE llm_run_id = $1
+      RETURNING simulation_id
+    `,
+    values: [llmRunId, failureMessage],
+  }
+}
+
+export async function failSimulationRunResultWithRawOutput({
+  failureMessage,
+  finalOutputText,
+  llmRunId,
+  phase,
+  rawResponse,
+  usage,
+}: {
+  llmRunId: string
+  phase: SimulationRunPhase
+  failureMessage: string
+  finalOutputText: string
+  rawResponse: unknown
+  usage: unknown
+}) {
+  await withDatabaseTransaction(async (client) => {
+    const tableName = getSimulationRunResultTableName(phase)
+    const snapshotResult = await client.query<{
+      simulation_id: string
+      llm_run_status: LlmRunStatus
+      provider: string
+      processing_mode: LlmProcessingMode
+      service_tier: string | null
+      input_token_cost_usd_per_million: string | number | null
+      cached_input_token_cost_usd_per_million: string | number | null
+      cache_write_input_token_cost_usd_per_million: string | number | null
+      output_token_cost_usd_per_million: string | number | null
+    }>(
+      `
+        SELECT
+          run.simulation_id,
+          llm_run.status AS llm_run_status,
+          llm_run.provider,
+          llm_run.processing_mode,
+          llm_run.service_tier,
+          preset.input_token_cost_usd_per_million,
+          preset.cached_input_token_cost_usd_per_million,
+          preset.cache_write_input_token_cost_usd_per_million,
+          preset.output_token_cost_usd_per_million
+        FROM ${tableName} run
+        JOIN llm_runs llm_run
+          ON llm_run.id = run.llm_run_id
+        LEFT JOIN llm_model_presets preset
+          ON preset.id = llm_run.llm_model_preset_id
+        WHERE run.llm_run_id = $1
+        FOR UPDATE OF llm_run
+      `,
+      [llmRunId]
+    )
+
+    if (snapshotResult.rowCount === 0) {
+      throw new SimulationValidationError(
+        `${formatSimulationRunPhaseLabel(phase)} LLM run not found.`
+      )
+    }
+
+    const snapshot = snapshotResult.rows[0]
+
+    if (!canApplyLateLlmRunTerminalUpdate(snapshot.llm_run_status)) {
+      throw new SimulationValidationError("LLM run is no longer active.")
+    }
+
+    const costValues = getCompletedLlmRunCostValues(snapshot, usage)
+    const completeRunQuery = buildCompleteLlmRunQuery({
+      estimatedCostUsd: costValues.estimatedCostUsd,
+      finalOutputText,
+      llmRunId,
+      openrouterReportedCostUsd: costValues.openrouterReportedCostUsd,
+      rawResponse,
+      usage,
+    })
+    await client.query(completeRunQuery.text, completeRunQuery.values)
+
+    const failResultQuery = buildFailSimulationRunResultQuery({
+      failureMessage,
+      llmRunId,
+      phase,
+    })
+    await client.query(failResultQuery.text, failResultQuery.values)
+    await markSimulationFailedWithClient(
+      client,
+      snapshot.simulation_id,
+      failureMessage
+    )
+  })
+}
+
+function getSimulationRunResultTableName(phase: SimulationRunPhase) {
+  return phase === "opening_hand"
+    ? "simulation_opening_hand_llm_runs"
+    : "simulation_turn_llm_runs"
+}
+
+function formatSimulationRunPhaseLabel(phase: SimulationRunPhase) {
+  return phase === "opening_hand" ? "Opening-hand" : "Turn"
 }
 
 export async function completeSimulationRunEvaluation({
@@ -5694,14 +5922,14 @@ export async function getSimulationDebugInfo(
     simulationId,
     tableName: "simulation_opening_hand_llm_runs",
     selectColumns:
-      "run.attempt_number, NULL::integer AS turn_number, NULL::boolean AS outdated, run.opening_hand_is_valid",
+      "run.attempt_number, NULL::integer AS turn_number, NULL::boolean AS outdated, run.opening_hand_is_valid, run.result_status, run.result_failure_message",
     orderBy: "run.attempt_number ASC",
   })
   const turnRuns = await getSimulationDebugLlmRunMetadata({
     simulationId,
     tableName: "simulation_turn_llm_runs",
     selectColumns:
-      "run.attempt_number, run.turn_number, run.outdated, NULL::boolean AS opening_hand_is_valid",
+      "run.attempt_number, run.turn_number, run.outdated, NULL::boolean AS opening_hand_is_valid, run.result_status, run.result_failure_message",
     orderBy: "run.turn_number ASC, run.attempt_number ASC",
   })
   return {
@@ -5751,7 +5979,7 @@ export async function getSimulationResultsInfo(
     simulationId,
     tableName: "simulation_opening_hand_llm_runs",
     selectColumns:
-      "run.attempt_number, NULL::integer AS turn_number, run.opening_hand, run.summary, NULL::jsonb AS turn_actions, NULL::jsonb AS game_state, run.library_snapshot, NULL::boolean AS outdated, run.opening_hand_is_valid",
+      "run.attempt_number, NULL::integer AS turn_number, run.opening_hand, run.summary, NULL::jsonb AS turn_actions, NULL::jsonb AS game_state, run.library_snapshot, NULL::boolean AS outdated, run.opening_hand_is_valid, run.result_status, run.result_failure_message",
     orderBy: "run.attempt_number ASC",
     additionalWhereSql: `
       run.attempt_number = (
@@ -5765,7 +5993,7 @@ export async function getSimulationResultsInfo(
     simulationId,
     tableName: "simulation_turn_llm_runs",
     selectColumns:
-      "run.attempt_number, run.turn_number, NULL::jsonb AS opening_hand, NULL::text AS summary, run.turn_actions, run.game_state, run.library_snapshot, run.outdated, NULL::boolean AS opening_hand_is_valid",
+      "run.attempt_number, run.turn_number, NULL::jsonb AS opening_hand, NULL::text AS summary, run.turn_actions, run.game_state, run.library_snapshot, run.outdated, NULL::boolean AS opening_hand_is_valid, run.result_status, run.result_failure_message",
     orderBy: "run.turn_number ASC, run.attempt_number ASC",
     additionalWhereSql: "run.outdated = false",
   })
@@ -6078,6 +6306,8 @@ type SimulationDebugLlmRunRow = {
   library_snapshot: unknown | null
   outdated: boolean | null
   opening_hand_is_valid: boolean | null
+  result_status: SimulationRunResultStatus
+  result_failure_message: string | null
 }
 
 type SimulationDebugSimulationRow = {
@@ -6124,6 +6354,8 @@ type SimulationDebugLlmRunMetadataRow = {
   turn_number: number | null
   outdated: boolean | null
   opening_hand_is_valid: boolean | null
+  result_status: SimulationRunResultStatus
+  result_failure_message: string | null
 }
 
 type SimulationRunEvaluationRow = {
@@ -6277,6 +6509,8 @@ function mapSimulationDebugLlmRunMetadataRow(
     runtimeStreamKey: row.runtime_stream_key,
     attemptNumber: row.attempt_number,
     failureMessage: row.failure_message,
+    resultStatus: row.result_status,
+    resultFailureMessage: row.result_failure_message,
     createdAt: row.created_at.toISOString(),
     startedAt: row.started_at?.toISOString() ?? null,
     completedAt: row.completed_at?.toISOString() ?? null,
@@ -6416,6 +6650,8 @@ async function getSimulationDebugLlmRuns({
         runtimeStreamKey: row.runtime_stream_key,
         attemptNumber: row.attempt_number,
         failureMessage: row.failure_message,
+        resultStatus: row.result_status,
+        resultFailureMessage: row.result_failure_message,
         createdAt: row.created_at.toISOString(),
         startedAt: row.started_at?.toISOString() ?? null,
         completedAt: row.completed_at?.toISOString() ?? null,
