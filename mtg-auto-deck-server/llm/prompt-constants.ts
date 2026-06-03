@@ -254,7 +254,8 @@ Output must be exactly this JSON shape:
 }
 
 turnActions should each be an array of strings describing any actions that took place in that phase.
-- Actions include draws, land plays, mana generation, spells/abilities, trigger resolutions, attacks, combat damage, important zone changes.
+- Actions include draws, land plays, mana generation, spells/abilities, trigger resolutions, attacks, combat damage, important zone changes, etc.
+- For the untap step you can summarize, for example, "untap everything", or if there is an exception, for example, "remove stun counter from *card name* and untap everything else", etc.
 - Log the mana-generation action before the mana-spending action. Use brace notation such as {G}, {1}, {C}, {1}{G}; spending logs must state the mana spent.
 - Use full card names when referencing any cards, and surround the card name with asterisk like *card name*
 
