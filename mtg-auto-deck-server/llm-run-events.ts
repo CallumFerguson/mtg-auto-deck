@@ -115,9 +115,6 @@ export type SimulationRunEvaluationCompletion = {
   resultFailureMessage?: string
 }
 
-export const SIMULATION_QUALITY_REASONING_REQUIRED_MESSAGE =
-  "Evaluation LLM response must explain simulationQualityScoreReasoning when simulationQualityScore is less than 10."
-
 export function parseSimulationRunEvaluationCompletionFromResponseText(
   responseText: string
 ): SimulationRunEvaluationCompletion {
@@ -186,11 +183,6 @@ export function parseSimulationRunEvaluationCompletionFromResponseText(
   const roundedSimulationQualityScore = roundEvaluationScore(
     simulationQualityScore
   )
-  const resultFailureMessage =
-    roundedSimulationQualityScore < 10 &&
-    normalizedSimulationQualityScoreReasoning === null
-      ? SIMULATION_QUALITY_REASONING_REQUIRED_MESSAGE
-      : undefined
 
   if (!isStringArray(strategicMistakes)) {
     throw new Error(
@@ -206,7 +198,6 @@ export function parseSimulationRunEvaluationCompletionFromResponseText(
     illegalActions,
     strategicMistakes,
     parsedOutput: responseRecord,
-    ...(resultFailureMessage ? { resultFailureMessage } : {}),
   }
 }
 

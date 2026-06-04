@@ -2,7 +2,6 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import {
   ModelReportedSimulationError,
-  SIMULATION_QUALITY_REASONING_REQUIRED_MESSAGE,
   getCompletedResponseOutputText,
   getLlmRunFailureMessage,
   isAbortError,
@@ -318,7 +317,6 @@ test("parses simulation run evaluation outputs when low-score reasoning is missi
         illegalActions: [],
         strategicMistakes: [],
       },
-      resultFailureMessage: SIMULATION_QUALITY_REASONING_REQUIRED_MESSAGE,
     }
   )
 })
