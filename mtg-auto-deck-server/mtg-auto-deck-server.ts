@@ -277,6 +277,7 @@ import {
   aggregateOpenRouterUsage,
   estimatePresetTokenCostUsd,
   formatUsdCostAsCentLabel,
+  getLlmTokenUsageCounts,
   getOpenRouterReportedCostUsd,
   type TokenPrice,
 } from "./llm-pricing.js"
@@ -1122,86 +1123,14 @@ function logLlmApiCallStoppedWithError({
 }
 
 function getLlmTokenUsageSummary(usage: unknown) {
-  const usageRecord = asRecord(usage)
-  const inputTokens = getNumberProperty(
-    usageRecord,
-    "input_tokens",
-    "inputTokens",
-    "prompt_tokens",
-    "promptTokens"
-  )
-  const inputDetails = asRecord(
-    usageRecord.input_tokens_details ??
-      usageRecord.inputTokensDetails ??
-      usageRecord.prompt_tokens_details ??
-      usageRecord.promptTokensDetails
-  )
-  const cacheReadInputTokens = getNumberProperty(
-    usageRecord,
-    "cache_read_input_tokens",
-    "cacheReadInputTokens"
-  )
-  const cachedInputTokens =
-    cacheReadInputTokens ??
-    (inputTokens === null
-      ? null
-      : Math.min(
-          getNumberProperty(inputDetails, "cached_tokens", "cachedTokens") ?? 0,
-          inputTokens
-        ))
-  const outputTokens = getNumberProperty(
-    usageRecord,
-    "output_tokens",
-    "outputTokens",
-    "completion_tokens",
-    "completionTokens"
-  )
-  const outputDetails = asRecord(
-    usageRecord.output_tokens_details ??
-      usageRecord.outputTokensDetails ??
-      usageRecord.completion_tokens_details ??
-      usageRecord.completionTokensDetails
-  )
-  const reasoningTokens =
-    getNumberProperty(
-      outputDetails,
-      "reasoning_tokens",
-      "reasoningTokens",
-      "thinking_tokens",
-      "thinkingTokens"
-    ) ?? 0
-  const visibleOutputTokens =
-    outputTokens === null ? null : Math.max(outputTokens - reasoningTokens, 0)
-  const totalTokens =
-    getNumberProperty(usageRecord, "total_tokens", "totalTokens") ??
-    sumTokenCounts([
-      getNumberProperty(
-        usageRecord,
-        "input_tokens",
-        "inputTokens",
-        "prompt_tokens",
-        "promptTokens"
-      ),
-      getNumberProperty(
-        usageRecord,
-        "cache_creation_input_tokens",
-        "cacheCreationInputTokens"
-      ),
-      getNumberProperty(
-        usageRecord,
-        "cache_read_input_tokens",
-        "cacheReadInputTokens"
-      ),
-      reasoningTokens,
-      visibleOutputTokens,
-    ])
+  const tokenUsage = getLlmTokenUsageCounts(usage)
 
   return {
-    input: formatTokenCount(inputTokens),
-    cachedInput: formatTokenCount(cachedInputTokens),
-    output: formatTokenCount(visibleOutputTokens),
-    reasoning: formatTokenCount(reasoningTokens),
-    total: formatTokenCount(totalTokens),
+    input: formatTokenCount(tokenUsage.inputTokens),
+    cachedInput: formatTokenCount(tokenUsage.cachedInputTokens),
+    output: formatTokenCount(tokenUsage.outputTokens),
+    reasoning: formatTokenCount(tokenUsage.reasoningTokens),
+    total: formatTokenCount(tokenUsage.totalTokens),
   }
 }
 
@@ -1238,17 +1167,6 @@ function formatProviderName(provider: string) {
   }
 
   return provider
-}
-
-function sumTokenCounts(tokenCounts: Array<number | null>) {
-  if (tokenCounts.some((tokenCount) => tokenCount === null)) {
-    return null
-  }
-
-  return tokenCounts.reduce<number>(
-    (sum, tokenCount) => sum + (tokenCount ?? 0),
-    0
-  )
 }
 
 function formatTokenCount(tokenCount: number | null) {
@@ -3200,7 +3118,10 @@ async function prepareAndStartSimulationRunEvaluation({
       )
     }
 
-    if (llmProcessingMode === "openai_batch" && modelPreset.provider !== "openai") {
+    if (
+      llmProcessingMode === "openai_batch" &&
+      modelPreset.provider !== "openai"
+    ) {
       throw new SimulationValidationError(
         "Batch evaluations require an OpenAI model preset."
       )
@@ -3313,6 +3234,21 @@ async function getAdminBenchmarkEvaluationSummary({
   summary: BenchmarkEvaluationSummary
   targetRuns: BenchmarkEvaluationTargetRun[]
 } | null> {
+  const benchmark = await getAdminBenchmark(benchmarkId, adminUserId)
+
+  if (benchmark === null) {
+    return null
+  }
+
+  const plannedSimulations = await listBenchmarkRunSimulationsForAdmin(
+    benchmarkId,
+    adminUserId
+  )
+
+  if (plannedSimulations === null) {
+    return null
+  }
+
   const latestRuns = await listBenchmarkEvaluationLatestRunsForAdmin(
     benchmarkId,
     adminUserId
@@ -3333,7 +3269,10 @@ async function getAdminBenchmarkEvaluationSummary({
     skippedRunCount,
     summary: buildBenchmarkEvaluationSummary({
       latestEvaluations,
+      latestRuns,
+      plannedSimulations,
       targetRuns,
+      turnsToSimulate: benchmark.turnsToSimulate,
     }),
     targetRuns,
   }
@@ -3360,7 +3299,10 @@ async function validateBenchmarkEvaluationModelPreset({
     throw new SimulationValidationError("Model preset not found or disabled.")
   }
 
-  if (llmProcessingMode === "openai_batch" && modelPreset.provider !== "openai") {
+  if (
+    llmProcessingMode === "openai_batch" &&
+    modelPreset.provider !== "openai"
+  ) {
     throw new SimulationValidationError(
       "Batch evaluations require an OpenAI model preset."
     )
@@ -3375,7 +3317,9 @@ async function validateBenchmarkEvaluationModelPreset({
   return modelPreset
 }
 
-function abortSupersededEvaluationRuntimes(runtimeStreamKeys: readonly string[]) {
+function abortSupersededEvaluationRuntimes(
+  runtimeStreamKeys: readonly string[]
+) {
   for (const runtimeStreamKey of runtimeStreamKeys) {
     const runtime = activeLlmRunRuntimes.get(runtimeStreamKey)
 
@@ -3651,10 +3595,7 @@ async function drainLlmRunQueue(config: LlmRunQueueConfig) {
       continue
     }
 
-    await startClaimedQueuedLlmRun(
-      claimedRun,
-      config.apiTimeoutSeconds
-    )
+    await startClaimedQueuedLlmRun(claimedRun, config.apiTimeoutSeconds)
   }
 }
 
@@ -3910,8 +3851,7 @@ async function prepareOpenAiBatchLine(
       : generateMcpRunToken(OPENAI_BATCH_MCP_RUN_TOKEN_TTL_MS)
 
   if (mcpRunToken !== null) {
-    const mcpRunPhase =
-      run.phase === "opening_hand" ? "opening_hand" : "turn"
+    const mcpRunPhase = run.phase === "opening_hand" ? "opening_hand" : "turn"
 
     await createLlmRunMcpToken({
       deckId: run.deckId,
@@ -3935,11 +3875,11 @@ async function prepareOpenAiBatchLine(
             modelPreset,
             run,
           })
-      : await buildOpenAiBatchTurnRequestPayload({
-          modelPreset,
-          mcpRunToken: mcpRunToken?.token ?? "",
-          run,
-        })
+        : await buildOpenAiBatchTurnRequestPayload({
+            modelPreset,
+            mcpRunToken: mcpRunToken?.token ?? "",
+            run,
+          })
   const requestPayloadRedacted = getPersistableLlmRequestPayload(requestPayload)
 
   await updateLlmRunRequestData({
@@ -4393,11 +4333,10 @@ async function reconcileOpenAiBatchOutputLine({
 
   try {
     if (item.phase === "opening_hand") {
-      const parsedOpeningHand =
-        parseCompletedOpenAiBatchOutput(
-          outputText,
-          parseOpeningHandCompletionFromResponseText
-        )
+      const parsedOpeningHand = parseCompletedOpenAiBatchOutput(
+        outputText,
+        parseOpeningHandCompletionFromResponseText
+      )
       completion = await completeOpeningHandLlmRun({
         finalOutputText: outputText,
         llmRunId: item.llmRunId,
@@ -4407,11 +4346,10 @@ async function reconcileOpenAiBatchOutputLine({
         usage,
       })
     } else if (item.phase === "turn") {
-      const parsedTurn =
-        parseCompletedOpenAiBatchOutput(
-          outputText,
-          parseTurnSimulationCompletionFromResponseText
-        )
+      const parsedTurn = parseCompletedOpenAiBatchOutput(
+        outputText,
+        parseTurnSimulationCompletionFromResponseText
+      )
       completion = await completeTurnLlmRun({
         finalOutputText: outputText,
         gameState: parsedTurn.gameState,
@@ -4421,11 +4359,10 @@ async function reconcileOpenAiBatchOutputLine({
         usage,
       })
     } else {
-      const parsedEvaluation =
-        parseCompletedOpenAiBatchOutput(
-          outputText,
-          parseSimulationRunEvaluationCompletionFromResponseText
-        )
+      const parsedEvaluation = parseCompletedOpenAiBatchOutput(
+        outputText,
+        parseSimulationRunEvaluationCompletionFromResponseText
+      )
       await finishParsedSimulationRunEvaluation({
         finalOutputText: outputText,
         llmRunId: item.llmRunId,
@@ -7684,15 +7621,15 @@ async function main() {
           }
         }
 
-        const refreshedSummaryResult =
-          await getAdminBenchmarkEvaluationSummary({
+        const refreshedSummaryResult = await getAdminBenchmarkEvaluationSummary(
+          {
             adminUserId: adminUser.id,
             benchmarkId,
-          })
+          }
+        )
 
         res.status(201).json({
-          summary:
-            refreshedSummaryResult?.summary ?? summaryResult.summary,
+          summary: refreshedSummaryResult?.summary ?? summaryResult.summary,
           startedEvaluationCount,
           skippedRunCount: summaryResult.skippedRunCount,
           errorCount,

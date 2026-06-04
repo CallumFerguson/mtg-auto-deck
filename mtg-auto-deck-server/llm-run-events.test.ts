@@ -43,9 +43,12 @@ import {
 } from "./simulation-stop.js"
 import { createBenchmarkSimulationSeed } from "./benchmarks-postgres.js"
 import {
+  buildBenchmarkEvaluationResultMetrics,
   buildBenchmarkEvaluationSummary,
   getEligibleBenchmarkEvaluationTargetRuns,
+  type BenchmarkEvaluationLatestEvaluationSnapshot,
   type BenchmarkEvaluationLatestRunSnapshot,
+  type BenchmarkEvaluationPlannedSimulation,
 } from "./benchmark-evaluations.js"
 import {
   callWithRuntimeAbortSignal,
@@ -65,6 +68,7 @@ import {
   formatPreferredLlmRunCostAsCents,
   formatUsdCostAsCentLabel,
   formatUsdCostAsCents,
+  getLlmTokenUsageCounts,
   getOpenRouterReportedCostUsd,
 } from "./llm-pricing.js"
 import {
@@ -3156,6 +3160,8 @@ test("summarizes latest benchmark evaluations only", () => {
   assert.deepEqual(
     buildBenchmarkEvaluationSummary({
       targetRuns,
+      plannedSimulations: [],
+      turnsToSimulate: 0,
       latestEvaluations: [
         {
           attemptNumber: 1,
@@ -3291,6 +3297,26 @@ test("summarizes latest benchmark evaluations only", () => {
       strategicPassCount: 2,
       strategicFailCount: 1,
       totalEvaluationCostUsd: 0.18,
+      resultMetrics: {
+        plannedOpeningHandCount: 0,
+        plannedTurnCount: 0,
+        attemptedTurnCount: 0,
+        completedTurnCount: 0,
+        mtgGoldfishScore: null,
+        openingHandScore: null,
+        turnScore: null,
+        completedEvaluationQualityAverage: null,
+        legalPassRate: null,
+        strategicPassRate: null,
+        completionRate: null,
+        totalRunCostUsd: 0,
+        costPerAttemptedTurn: null,
+        costPerCompletedTurn: null,
+        costPerGoldfishPoint: null,
+        reasoningTokensPerAttemptedTurn: null,
+        totalTokensPerAttemptedTurn: null,
+        decks: [],
+      },
       attentionResults: [
         {
           attemptNumber: 1,
@@ -3347,6 +3373,200 @@ test("summarizes latest benchmark evaluations only", () => {
           turnNumber: null,
         },
       ],
+    }
+  )
+})
+
+test("scores benchmark result metrics across every planned slot", () => {
+  const plannedSimulations = [
+    createBenchmarkEvaluationPlannedSimulation({
+      deckId: "deck-1",
+      deckName: "Deck One",
+      simulationId: "simulation-1",
+    }),
+  ]
+  const latestRuns = [
+    createBenchmarkEvaluationLatestRun({
+      targetLlmRunId: "opening-run",
+      targetRunPhase: "opening_hand",
+      costUsd: 0.1,
+    }),
+    createBenchmarkEvaluationLatestRun({
+      targetLlmRunId: "turn-1-run",
+      targetRunPhase: "turn",
+      turnNumber: 1,
+      costUsd: 0.2,
+      usage: {
+        input_tokens: 100,
+        output_tokens: 50,
+        output_tokens_details: {
+          reasoning_tokens: 20,
+        },
+        total_tokens: 150,
+      },
+    }),
+    createBenchmarkEvaluationLatestRun({
+      targetLlmRunId: "turn-2-run",
+      targetRunPhase: "turn",
+      turnNumber: 2,
+      status: "failed",
+      failureMessage: "Provider timed out.",
+      costUsd: 0.3,
+      usage: {
+        inputTokens: 100,
+        outputTokens: 30,
+        outputTokensDetails: {
+          reasoningTokens: 10,
+        },
+        totalTokens: 130,
+      },
+    }),
+  ]
+  const metrics = buildBenchmarkEvaluationResultMetrics({
+    latestRuns,
+    plannedSimulations,
+    turnsToSimulate: 5,
+    latestEvaluations: [
+      createBenchmarkEvaluationLatestEvaluation({
+        targetLlmRunId: "opening-run",
+        simulationQualityScore: 10,
+      }),
+      createBenchmarkEvaluationLatestEvaluation({
+        targetLlmRunId: "turn-1-run",
+        simulationQualityScore: 8,
+      }),
+    ],
+  })
+
+  assert.equal(metrics.plannedOpeningHandCount, 1)
+  assert.equal(metrics.plannedTurnCount, 5)
+  assert.equal(metrics.attemptedTurnCount, 2)
+  assert.equal(metrics.completedTurnCount, 1)
+  assert.equal(metrics.openingHandScore, 100)
+  assert.equal(metrics.turnScore, 16)
+  assert.equal(metrics.mtgGoldfishScore, 28.6)
+  assert.equal(metrics.completionRate, 20)
+  assert.equal(metrics.legalPassRate, 33.3)
+  assert.equal(metrics.strategicPassRate, 33.3)
+  assert.equal(metrics.totalRunCostUsd, 0.6)
+  assert.equal(metrics.costPerAttemptedTurn, 0.25)
+  assert.equal(metrics.costPerCompletedTurn, 0.5)
+  assert.equal(metrics.reasoningTokensPerAttemptedTurn, 15)
+  assert.equal(metrics.totalTokensPerAttemptedTurn, 140)
+  assert.equal(metrics.decks[0]?.mtgGoldfishScore, 28.6)
+})
+
+test("applies benchmark score caps and zeroes incomplete evaluations", () => {
+  const plannedSimulations = [
+    createBenchmarkEvaluationPlannedSimulation({
+      deckId: "deck-1",
+      deckName: "Deck One",
+      simulationId: "simulation-1",
+    }),
+  ]
+  const latestRuns = [
+    createBenchmarkEvaluationLatestRun({
+      targetLlmRunId: "opening-run",
+      targetRunPhase: "opening_hand",
+    }),
+    createBenchmarkEvaluationLatestRun({
+      targetLlmRunId: "turn-1-run",
+      targetRunPhase: "turn",
+      turnNumber: 1,
+    }),
+    createBenchmarkEvaluationLatestRun({
+      targetLlmRunId: "turn-2-run",
+      targetRunPhase: "turn",
+      turnNumber: 2,
+    }),
+    createBenchmarkEvaluationLatestRun({
+      targetLlmRunId: "turn-3-run",
+      targetRunPhase: "turn",
+      turnNumber: 3,
+    }),
+    createBenchmarkEvaluationLatestRun({
+      targetLlmRunId: "turn-4-run",
+      targetRunPhase: "turn",
+      turnNumber: 4,
+    }),
+  ]
+  const metrics = buildBenchmarkEvaluationResultMetrics({
+    latestRuns,
+    plannedSimulations,
+    turnsToSimulate: 4,
+    latestEvaluations: [
+      createBenchmarkEvaluationLatestEvaluation({
+        targetLlmRunId: "opening-run",
+        legalPass: false,
+        simulationQualityScore: 9,
+      }),
+      createBenchmarkEvaluationLatestEvaluation({
+        targetLlmRunId: "turn-1-run",
+        simulationQualityScore: 9,
+        strategicPass: false,
+      }),
+      createBenchmarkEvaluationLatestEvaluation({
+        targetLlmRunId: "turn-2-run",
+        simulationQualityScore: 9,
+      }),
+      createBenchmarkEvaluationLatestEvaluation({
+        targetLlmRunId: "turn-3-run",
+        status: "streaming",
+        simulationQualityScore: 10,
+      }),
+      createBenchmarkEvaluationLatestEvaluation({
+        targetLlmRunId: "turn-4-run",
+        status: "failed",
+        simulationQualityScore: 10,
+      }),
+    ],
+  })
+
+  assert.equal(metrics.openingHandScore, 40)
+  assert.equal(metrics.turnScore, 41.3)
+  assert.equal(metrics.mtgGoldfishScore, 41.1)
+  assert.equal(metrics.completedTurnCount, 4)
+  assert.equal(metrics.legalPassRate, 40)
+  assert.equal(metrics.strategicPassRate, 40)
+})
+
+test("extracts numeric LLM token usage counts across aliases", () => {
+  assert.deepEqual(
+    getLlmTokenUsageCounts({
+      input_tokens: 100,
+      input_tokens_details: {
+        cached_tokens: 25,
+      },
+      output_tokens: 40,
+      output_tokens_details: {
+        reasoning_tokens: 10,
+      },
+      total_tokens: 140,
+    }),
+    {
+      inputTokens: 100,
+      cachedInputTokens: 25,
+      outputTokens: 30,
+      reasoningTokens: 10,
+      totalTokens: 140,
+    }
+  )
+
+  assert.deepEqual(
+    getLlmTokenUsageCounts({
+      inputTokens: 50,
+      cacheReadInputTokens: 8,
+      outputTokens: 30,
+      outputTokensDetails: {
+        thinkingTokens: 12,
+      },
+    }),
+    {
+      inputTokens: 50,
+      cachedInputTokens: 8,
+      outputTokens: 18,
+      reasoningTokens: 12,
+      totalTokens: 88,
     }
   )
 })
@@ -3633,6 +3853,42 @@ function createBenchmarkEvaluationLatestRun(
     openingHandIsValid: targetRunPhase === "opening_hand" ? true : null,
     gameState: targetRunPhase === "turn" ? createTurnGameState() : null,
     turnActions: targetRunPhase === "turn" ? createTurnActions() : null,
+    usage: {},
+    costUsd: null,
+    ...overrides,
+  }
+}
+
+function createBenchmarkEvaluationLatestEvaluation(
+  overrides: Partial<BenchmarkEvaluationLatestEvaluationSnapshot> = {}
+): BenchmarkEvaluationLatestEvaluationSnapshot {
+  return {
+    targetLlmRunId: "target-run-1",
+    attemptNumber: 1,
+    status: "completed",
+    failureMessage: null,
+    resultStatus: "completed",
+    resultFailureMessage: null,
+    legalPass: true,
+    strategicPass: true,
+    simulationQualityScore: 8,
+    simulationQualityScoreReasoning: null,
+    illegalActions: [],
+    strategicMistakes: [],
+    costUsd: null,
+    ...overrides,
+  }
+}
+
+function createBenchmarkEvaluationPlannedSimulation(
+  overrides: Partial<BenchmarkEvaluationPlannedSimulation> = {}
+): BenchmarkEvaluationPlannedSimulation {
+  return {
+    deckId: "deck-1",
+    deckName: "Deck One",
+    deckIndex: 0,
+    simulationId: "simulation-1",
+    simulationIndex: 1,
     ...overrides,
   }
 }

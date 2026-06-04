@@ -23,6 +23,7 @@ import type {
   AdminBenchmark,
   AdminBenchmarkEvaluationAttentionResult,
   AdminBenchmarkEvaluationFailedResult,
+  AdminBenchmarkEvaluationResultMetrics,
   AdminBenchmarkEvaluationSummary,
   AdminBenchmarkEvaluationsResponse,
   StartAdminBenchmarkEvaluationsResponse,
@@ -367,6 +368,9 @@ export function BenchmarkEvaluationModal({
                 </p>
               ) : summary ? (
                 <div className="grid gap-4">
+                  <BenchmarkEvaluationResultMetrics
+                    resultMetrics={summary.resultMetrics}
+                  />
                   <BenchmarkEvaluationSummaryGrid summary={summary} />
                   <BenchmarkEvaluationFailedResults
                     results={summary.failedResults}
@@ -459,6 +463,165 @@ function BenchmarkEvaluationBenchmarkOverview({
         />
       </div>
     </section>
+  )
+}
+
+function BenchmarkEvaluationResultMetrics({
+  resultMetrics,
+}: {
+  resultMetrics: AdminBenchmarkEvaluationResultMetrics
+}) {
+  return (
+    <section className="grid gap-3" aria-label="Benchmark result">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h4 className="text-xs font-semibold text-muted-foreground uppercase">
+            Benchmark result
+          </h4>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {formatBenchmarkEvaluationInteger(resultMetrics.completedTurnCount)} /{" "}
+          {formatBenchmarkEvaluationInteger(resultMetrics.plannedTurnCount)}{" "}
+          planned turns completed
+        </p>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <BenchmarkEvaluationMetric
+          label="MTG Goldfish Score"
+          value={formatBenchmarkEvaluationScore(resultMetrics.mtgGoldfishScore)}
+          icon={<BarChart3 className="size-4 text-sky-300" aria-hidden />}
+        />
+        <BenchmarkEvaluationMetric
+          label="Opening score"
+          value={formatBenchmarkEvaluationScore(resultMetrics.openingHandScore)}
+        />
+        <BenchmarkEvaluationMetric
+          label="Turn score"
+          value={formatBenchmarkEvaluationScore(resultMetrics.turnScore)}
+        />
+        <BenchmarkEvaluationMetric
+          label="Completion rate"
+          value={formatBenchmarkEvaluationPercent(resultMetrics.completionRate)}
+        />
+        <BenchmarkEvaluationMetric
+          label="Legal pass rate"
+          value={formatBenchmarkEvaluationPercent(resultMetrics.legalPassRate)}
+        />
+        <BenchmarkEvaluationMetric
+          label="Strategic pass rate"
+          value={formatBenchmarkEvaluationPercent(
+            resultMetrics.strategicPassRate
+          )}
+        />
+        <BenchmarkEvaluationMetric
+          label="Run cost"
+          value={formatBenchmarkEvaluationCost(resultMetrics.totalRunCostUsd)}
+        />
+        <BenchmarkEvaluationMetric
+          label="Cost / attempted turn"
+          value={formatBenchmarkEvaluationNullableCost(
+            resultMetrics.costPerAttemptedTurn
+          )}
+        />
+        <BenchmarkEvaluationMetric
+          label="Cost / completed turn"
+          value={formatBenchmarkEvaluationNullableCost(
+            resultMetrics.costPerCompletedTurn
+          )}
+        />
+        <BenchmarkEvaluationMetric
+          label="Reasoning tokens / turn"
+          value={formatBenchmarkEvaluationTokenRate(
+            resultMetrics.reasoningTokensPerAttemptedTurn
+          )}
+          icon={<BrainCircuit className="size-4 text-sky-300" aria-hidden />}
+        />
+        <BenchmarkEvaluationMetric
+          label="Total tokens / turn"
+          value={formatBenchmarkEvaluationTokenRate(
+            resultMetrics.totalTokensPerAttemptedTurn
+          )}
+        />
+        <BenchmarkEvaluationMetric
+          label="Cost / score point"
+          value={formatBenchmarkEvaluationNullableCost(
+            resultMetrics.costPerGoldfishPoint
+          )}
+        />
+      </div>
+
+      <BenchmarkEvaluationDeckMetricsTable decks={resultMetrics.decks} />
+    </section>
+  )
+}
+
+function BenchmarkEvaluationDeckMetricsTable({
+  decks,
+}: {
+  decks: AdminBenchmarkEvaluationResultMetrics["decks"]
+}) {
+  if (decks.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="overflow-x-auto rounded-md border border-border bg-black/20">
+      <table className="min-w-[760px] text-left text-sm">
+        <thead className="border-b border-border bg-background/45 text-xs text-muted-foreground uppercase">
+          <tr>
+            <th className="px-3 py-2 font-medium">Deck</th>
+            <th className="px-3 py-2 font-medium">Score</th>
+            <th className="px-3 py-2 font-medium">Completion</th>
+            <th className="px-3 py-2 font-medium">Legal</th>
+            <th className="px-3 py-2 font-medium">Strategic</th>
+            <th className="px-3 py-2 font-medium">Cost / turn</th>
+            <th className="px-3 py-2 font-medium">Reasoning / turn</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {decks.map((deck) => (
+            <tr key={deck.deckId} className="align-top">
+              <td className="max-w-64 px-3 py-2">
+                <p className="font-medium break-words text-foreground">
+                  {deck.deckName}
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {formatBenchmarkEvaluationInteger(
+                    deck.plannedSimulationCount
+                  )}{" "}
+                  {deck.plannedSimulationCount === 1
+                    ? "simulation"
+                    : "simulations"}
+                </p>
+              </td>
+              <td className="px-3 py-2 font-medium text-foreground">
+                {formatBenchmarkEvaluationScore(deck.mtgGoldfishScore)}
+              </td>
+              <td className="px-3 py-2 text-muted-foreground">
+                {formatBenchmarkEvaluationPercent(deck.completionRate)}
+              </td>
+              <td className="px-3 py-2 text-muted-foreground">
+                {formatBenchmarkEvaluationPercent(deck.legalPassRate)}
+              </td>
+              <td className="px-3 py-2 text-muted-foreground">
+                {formatBenchmarkEvaluationPercent(deck.strategicPassRate)}
+              </td>
+              <td className="px-3 py-2 text-muted-foreground">
+                {formatBenchmarkEvaluationNullableCost(
+                  deck.costPerAttemptedTurn
+                )}
+              </td>
+              <td className="px-3 py-2 text-muted-foreground">
+                {formatBenchmarkEvaluationTokenRate(
+                  deck.reasoningTokensPerAttemptedTurn
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
@@ -579,9 +742,7 @@ function BenchmarkEvaluationFailedResults({
   return (
     <div className="grid gap-3">
       <div className="flex items-center justify-between gap-3">
-        <h4 className="text-sm font-semibold text-foreground">
-          Failed runs
-        </h4>
+        <h4 className="text-sm font-semibold text-foreground">Failed runs</h4>
         <span className="text-xs text-muted-foreground">
           {results.length} {results.length === 1 ? "run" : "runs"}
         </span>
@@ -828,13 +989,42 @@ function getBenchmarkEvaluationSimulationHref(
 }
 
 function formatBenchmarkEvaluationCost(value: number) {
-  return `$${(Number.isFinite(value) ? value : 0).toFixed(2)}`
+  if (!Number.isFinite(value) || value <= 0) {
+    return "$0.00"
+  }
+
+  if (value < 0.0001) {
+    return "<$0.0001"
+  }
+
+  return `$${value < 1 ? value.toFixed(4) : value.toFixed(2)}`
+}
+
+function formatBenchmarkEvaluationNullableCost(value: number | null) {
+  return value === null ? "-" : formatBenchmarkEvaluationCost(value)
 }
 
 function formatBenchmarkEvaluationInteger(value: number) {
   return (
     Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0
   ).toLocaleString()
+}
+
+function formatBenchmarkEvaluationScore(value: number | null) {
+  return value === null ? "-" : `${value.toFixed(1)} / 100`
+}
+
+function formatBenchmarkEvaluationPercent(value: number | null) {
+  return value === null ? "-" : `${value.toFixed(1)}%`
+}
+
+function formatBenchmarkEvaluationTokenRate(value: number | null) {
+  return value === null
+    ? "-"
+    : value.toLocaleString(undefined, {
+        maximumFractionDigits: 1,
+        minimumFractionDigits: Number.isInteger(value) ? 0 : 1,
+      })
 }
 
 function formatBenchmarkEvaluationStatus(status: string) {

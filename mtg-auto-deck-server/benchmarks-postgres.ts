@@ -1,5 +1,8 @@
 import { queryDatabase, withDatabaseTransaction } from "./db.js"
-import type { LlmProcessingMode, SimulationStatus } from "./simulations-postgres.js"
+import type {
+  LlmProcessingMode,
+  SimulationStatus,
+} from "./simulations-postgres.js"
 import type {
   BenchmarkEvaluationLatestEvaluationSnapshot,
   BenchmarkEvaluationLatestRunSnapshot,
@@ -8,11 +11,7 @@ import type {
 
 export const MAX_BENCHMARK_SIMULATIONS_PER_DECK = 100
 
-export type BenchmarkRunStatus =
-  | "running"
-  | "stopped"
-  | "completed"
-  | "failed"
+export type BenchmarkRunStatus = "running" | "stopped" | "completed" | "failed"
 
 export type AdminBenchmarkDeck = {
   id: string
@@ -498,6 +497,8 @@ export async function listBenchmarkEvaluationLatestRunsForAdmin(
     opening_hand_is_valid: boolean | null
     game_state: unknown | null
     turn_actions: unknown | null
+    usage: unknown
+    cost_usd: string | number | null
   }>(
     `
       WITH latest_opening_hand_run AS (
@@ -514,7 +515,9 @@ export async function listBenchmarkEvaluationLatestRunsForAdmin(
           llm_run.final_output_text,
           opening_run.opening_hand_is_valid,
           NULL::jsonb AS game_state,
-          NULL::jsonb AS turn_actions
+          NULL::jsonb AS turn_actions,
+          llm_run.usage,
+          COALESCE(llm_run.openrouter_reported_cost_usd, llm_run.estimated_cost_usd) AS cost_usd
         FROM benchmark_run_simulations benchmark_simulation
         JOIN simulations simulation
           ON simulation.id = benchmark_simulation.simulation_id
@@ -544,7 +547,9 @@ export async function listBenchmarkEvaluationLatestRunsForAdmin(
           llm_run.final_output_text,
           NULL::boolean AS opening_hand_is_valid,
           turn_run.game_state,
-          turn_run.turn_actions
+          turn_run.turn_actions,
+          llm_run.usage,
+          COALESCE(llm_run.openrouter_reported_cost_usd, llm_run.estimated_cost_usd) AS cost_usd
         FROM benchmark_run_simulations benchmark_simulation
         JOIN simulation_turn_llm_runs turn_run
           ON turn_run.simulation_id = benchmark_simulation.simulation_id
@@ -583,6 +588,8 @@ export async function listBenchmarkEvaluationLatestRunsForAdmin(
     openingHandIsValid: row.opening_hand_is_valid,
     gameState: row.game_state,
     turnActions: row.turn_actions,
+    usage: row.usage,
+    costUsd: toOptionalNumber(row.cost_usd),
   }))
 }
 
@@ -689,9 +696,7 @@ export async function markBenchmarkRunStopped(benchmarkRunId: string) {
   )
 }
 
-function mapAdminBenchmarkRunRow(
-  row: AdminBenchmarkRunRow
-): AdminBenchmarkRun {
+function mapAdminBenchmarkRunRow(row: AdminBenchmarkRunRow): AdminBenchmarkRun {
   const totalSimulationCount = toInteger(row.total_simulation_count)
   const pendingSimulationCount = toInteger(row.pending_simulation_count)
   const runningSimulationCount = toInteger(row.running_simulation_count)

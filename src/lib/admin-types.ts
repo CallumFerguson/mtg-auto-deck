@@ -123,8 +123,43 @@ export type AdminBenchmarkEvaluationSummary = {
   strategicPassCount: number
   strategicFailCount: number
   totalEvaluationCostUsd: number
+  resultMetrics: AdminBenchmarkEvaluationResultMetrics
   attentionResults: AdminBenchmarkEvaluationAttentionResult[]
   failedResults: AdminBenchmarkEvaluationFailedResult[]
+}
+
+export type AdminBenchmarkEvaluationResultMetrics = {
+  plannedOpeningHandCount: number
+  plannedTurnCount: number
+  attemptedTurnCount: number
+  completedTurnCount: number
+  mtgGoldfishScore: number | null
+  openingHandScore: number | null
+  turnScore: number | null
+  completedEvaluationQualityAverage: number | null
+  legalPassRate: number | null
+  strategicPassRate: number | null
+  completionRate: number | null
+  totalRunCostUsd: number
+  costPerAttemptedTurn: number | null
+  costPerCompletedTurn: number | null
+  costPerGoldfishPoint: number | null
+  reasoningTokensPerAttemptedTurn: number | null
+  totalTokensPerAttemptedTurn: number | null
+  decks: AdminBenchmarkEvaluationResultDeckMetrics[]
+}
+
+export type AdminBenchmarkEvaluationResultDeckMetrics = {
+  deckId: string
+  deckName: string
+  deckIndex: number
+  plannedSimulationCount: number
+  mtgGoldfishScore: number | null
+  completionRate: number | null
+  legalPassRate: number | null
+  strategicPassRate: number | null
+  costPerAttemptedTurn: number | null
+  reasoningTokensPerAttemptedTurn: number | null
 }
 
 export type AdminBenchmarkEvaluationAttentionResult = {

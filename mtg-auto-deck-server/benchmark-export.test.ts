@@ -167,8 +167,7 @@ test("omits result-failed opening-hand and turn runs from evaluation targets", (
         targetRunPhase: "opening_hand",
         turnNumber: null,
         resultStatus: "failed",
-        resultFailureMessage:
-          "Model reported unrecoverable simulation error.",
+        resultFailureMessage: "Model reported unrecoverable simulation error.",
         finalOutputText: createOpeningHandCompletionText(),
         openingHandIsValid: true,
       }),
@@ -176,8 +175,7 @@ test("omits result-failed opening-hand and turn runs from evaluation targets", (
         targetLlmRunId: "result-failed-turn-run",
         targetRunPhase: "turn",
         resultStatus: "failed",
-        resultFailureMessage:
-          "Model reported unrecoverable simulation error.",
+        resultFailureMessage: "Model reported unrecoverable simulation error.",
         finalOutputText: createTurnCompletionText(),
         gameState: {},
         turnActions: createTurnActions(),
@@ -731,6 +729,8 @@ function createLatestRun(
     openingHandIsValid: null,
     gameState: {},
     turnActions: {},
+    usage: {},
+    costUsd: null,
     ...overrides,
   }
 }

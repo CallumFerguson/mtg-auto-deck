@@ -5,6 +5,95 @@ export type TokenPrice = {
   outputDollarsPerMillion: number | null
 }
 
+export type LlmTokenUsageCounts = {
+  inputTokens: number | null
+  cachedInputTokens: number | null
+  outputTokens: number | null
+  reasoningTokens: number
+  totalTokens: number | null
+}
+
+export function getLlmTokenUsageCounts(usage: unknown): LlmTokenUsageCounts {
+  const usageRecord = asRecord(usage)
+  const inputTokens = getNumberProperty(
+    usageRecord,
+    "input_tokens",
+    "inputTokens",
+    "prompt_tokens",
+    "promptTokens"
+  )
+  const inputDetails = asRecord(
+    getFirstDefinedProperty(usageRecord, [
+      "input_tokens_details",
+      "inputTokensDetails",
+      "prompt_tokens_details",
+      "promptTokensDetails",
+    ])
+  )
+  const cacheReadInputTokens = getNumberProperty(
+    usageRecord,
+    "cache_read_input_tokens",
+    "cacheReadInputTokens"
+  )
+  const cachedInputTokens =
+    cacheReadInputTokens ??
+    (inputTokens === null
+      ? null
+      : Math.min(
+          getNumberProperty(inputDetails, "cached_tokens", "cachedTokens") ?? 0,
+          inputTokens
+        ))
+  const rawOutputTokens = getNumberProperty(
+    usageRecord,
+    "output_tokens",
+    "outputTokens",
+    "completion_tokens",
+    "completionTokens"
+  )
+  const outputDetails = asRecord(
+    getFirstDefinedProperty(usageRecord, [
+      "output_tokens_details",
+      "outputTokensDetails",
+      "completion_tokens_details",
+      "completionTokensDetails",
+    ])
+  )
+  const reasoningTokens =
+    getNumberProperty(
+      outputDetails,
+      "reasoning_tokens",
+      "reasoningTokens",
+      "thinking_tokens",
+      "thinkingTokens"
+    ) ?? 0
+  const outputTokens =
+    rawOutputTokens === null
+      ? null
+      : Math.max(rawOutputTokens - reasoningTokens, 0)
+  const cacheCreationInputTokens =
+    getNumberProperty(
+      usageRecord,
+      "cache_creation_input_tokens",
+      "cacheCreationInputTokens"
+    ) ?? 0
+  const totalTokens =
+    getNumberProperty(usageRecord, "total_tokens", "totalTokens") ??
+    (inputTokens === null || rawOutputTokens === null
+      ? null
+      : inputTokens +
+        cacheCreationInputTokens +
+        (cacheReadInputTokens ?? 0) +
+        rawOutputTokens)
+
+  return {
+    inputTokens,
+    cachedInputTokens,
+    outputTokens,
+    reasoningTokens,
+    totalTokens,
+  }
+}
+
 export function estimatePresetTokenCostUsd({
   tokenCosts,
   usage,
