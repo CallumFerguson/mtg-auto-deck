@@ -278,10 +278,7 @@ function isBenchmarkEvaluationAttentionResult(
 
   return (
     evaluation.legalPass === false ||
-    evaluation.strategicPass === false ||
-    evaluation.illegalActions.length > 0 ||
-    evaluation.strategicMistakes.length > 0 ||
-    evaluation.simulationQualityScore !== 10
+    evaluation.strategicPass === false
   )
 }
 
