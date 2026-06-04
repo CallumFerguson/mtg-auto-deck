@@ -12,6 +12,7 @@ export function PublicSimulationApp() {
       window.location.pathname,
       PUBLIC_BENCHMARK_PATH_PREFIX
     )
+    const bundled = shouldLoadBundledPublicData(window.location.search)
 
     if (!benchmarkId) {
       return (
@@ -21,7 +22,7 @@ export function PublicSimulationApp() {
       )
     }
 
-    return <PublicBenchmarkPage benchmarkId={benchmarkId} />
+    return <PublicBenchmarkPage benchmarkId={benchmarkId} bundled={bundled} />
   }
 
   const simulationId = getPublicSimulationIdFromPathname(
@@ -29,7 +30,7 @@ export function PublicSimulationApp() {
   )
   const demoMode = shouldEnablePublicSimulationDemoMode(window.location.search)
   const hideHeader = shouldHidePublicSimulationHeader(window.location.search)
-  const bundled = shouldLoadBundledPublicSimulation(window.location.search)
+  const bundled = shouldLoadBundledPublicData(window.location.search)
 
   if (!simulationId) {
     return (
@@ -84,7 +85,7 @@ function shouldEnablePublicSimulationDemoMode(search: string) {
   return searchParams.get("demo") === "true"
 }
 
-function shouldLoadBundledPublicSimulation(search: string) {
+function shouldLoadBundledPublicData(search: string) {
   const searchParams = new URLSearchParams(search)
 
   return searchParams.get("bundled") === "true"

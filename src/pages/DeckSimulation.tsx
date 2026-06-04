@@ -895,7 +895,13 @@ export function PublicSimulationPage({
   )
 }
 
-export function PublicBenchmarkPage({ benchmarkId }: { benchmarkId: string }) {
+export function PublicBenchmarkPage({
+  benchmarkId,
+  bundled = false,
+}: {
+  benchmarkId: string
+  bundled?: boolean
+}) {
   const [benchmarkIndex, setBenchmarkIndex] =
     useState<PublicBenchmarkExportV1 | null>(null)
   const [isLoadingBenchmark, setIsLoadingBenchmark] = useState(true)
@@ -946,6 +952,7 @@ export function PublicBenchmarkPage({ benchmarkId }: { benchmarkId: string }) {
       const response = await fetch(
         getPublicBenchmarkIndexJsonUrl({
           benchmarkId,
+          bundled,
         }),
         {
           credentials: "omit",
@@ -979,7 +986,7 @@ export function PublicBenchmarkPage({ benchmarkId }: { benchmarkId: string }) {
     } finally {
       setIsLoadingBenchmark(false)
     }
-  }, [benchmarkId])
+  }, [benchmarkId, bundled])
 
   const loadSelectedSimulation = useCallback(async () => {
     const loadId = selectedSimulationLoadIdRef.current + 1
@@ -1001,6 +1008,7 @@ export function PublicBenchmarkPage({ benchmarkId }: { benchmarkId: string }) {
       const response = await fetch(
         getPublicBenchmarkSimulationJsonUrl({
           benchmarkId,
+          bundled,
           filePath: selectedSimulationEntry.filePath,
           simulationId: selectedSimulationEntry.simulationId,
         }),
@@ -1054,7 +1062,7 @@ export function PublicBenchmarkPage({ benchmarkId }: { benchmarkId: string }) {
         setIsLoadingSimulation(false)
       }
     }
-  }, [benchmarkId, selectedSimulationEntry])
+  }, [benchmarkId, bundled, selectedSimulationEntry])
 
   useEffect(() => {
     void loadBenchmark()

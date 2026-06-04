@@ -369,6 +369,23 @@ benchmarks/<benchmarkId>/index.json
 benchmarks/<benchmarkId>/simulations/<simulationId>.json
 ```
 
+For a bundled local benchmark, unpack or copy the exported benchmark files into
+the Vite public directory with the same shape:
+
+```text
+public/benchmarks/<benchmarkId>/index.json
+public/benchmarks/<benchmarkId>/simulations/<simulationId>.json
+```
+
+Then open the React app at:
+
+```text
+/public/benchmarks/<benchmarkId>?bundled=true
+```
+
+Bundled benchmark pages load from the app's static assets and do not require
+`VITE_PUBLIC_DATA_BASE_URL`.
+
 Upload a single exported simulation JSON:
 
 ```sh

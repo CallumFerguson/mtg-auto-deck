@@ -1,3 +1,4 @@
+const BUNDLED_PUBLIC_BENCHMARKS_BASE_PATH = "/benchmarks"
 const BUNDLED_PUBLIC_SIMULATIONS_BASE_PATH = "/simulations"
 const MISSING_PUBLIC_DATA_BASE_URL_MESSAGE =
   "Missing VITE_PUBLIC_DATA_BASE_URL."
@@ -22,20 +23,28 @@ export function getPublicSimulationJsonUrl({
 
 export function getPublicBenchmarkIndexJsonUrl({
   benchmarkId,
+  bundled,
 }: {
   benchmarkId: string
+  bundled: boolean
 }) {
   const encodedBenchmarkId = encodeURIComponent(benchmarkId)
+
+  if (bundled) {
+    return `${BUNDLED_PUBLIC_BENCHMARKS_BASE_PATH}/${encodedBenchmarkId}/index.json`
+  }
 
   return `${getPublicDataBaseUrl()}/benchmarks/${encodedBenchmarkId}/index.json`
 }
 
 export function getPublicBenchmarkSimulationJsonUrl({
   benchmarkId,
+  bundled,
   filePath,
   simulationId,
 }: {
   benchmarkId: string
+  bundled: boolean
   filePath: string
   simulationId: string
 }) {
@@ -46,6 +55,10 @@ export function getPublicBenchmarkSimulationJsonUrl({
   })
   const encodedBenchmarkId = encodeURIComponent(benchmarkId)
   const encodedRelativeFilePath = encodeRelativePath(relativeFilePath)
+
+  if (bundled) {
+    return `${BUNDLED_PUBLIC_BENCHMARKS_BASE_PATH}/${encodedBenchmarkId}/${encodedRelativeFilePath}`
+  }
 
   return `${getPublicDataBaseUrl()}/benchmarks/${encodedBenchmarkId}/${encodedRelativeFilePath}`
 }
