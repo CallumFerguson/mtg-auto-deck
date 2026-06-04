@@ -247,7 +247,6 @@ export function buildSimulationRunEvaluationPromptFromData(
     openingHand: promptData.targetRunOpeningHand,
     turnActions: promptData.targetRunTurnActions,
     gameState: promptData.targetRunGameState,
-    librarySnapshot: promptData.targetRunLibrarySnapshot,
   }
   const dynamicRunInput = `Target run metadata:
 ${formatJsonForPrompt(targetRunMetadata)}

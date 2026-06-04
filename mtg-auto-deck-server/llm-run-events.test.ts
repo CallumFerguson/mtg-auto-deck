@@ -71,6 +71,7 @@ import {
   GENERIC_GAME_RULES_REFERENCE,
 } from "./llm/prompt-constants.js"
 import {
+  buildSimulationRunEvaluationPromptFromData,
   buildStartingHandSimulationPromptFromData,
   buildTurnSimulationPromptFromData,
 } from "./simulation-prompts.js"
@@ -1804,6 +1805,70 @@ ${prompt.userGuidelines}
 
 ${prompt.dynamicRunInput}`.trim()
   )
+})
+
+test("builds evaluation prompt without library snapshots", () => {
+  const prompt = buildSimulationRunEvaluationPromptFromData({
+    simulationId: "simulation-1",
+    deckId: "deck-1",
+    targetLlmRunId: "target-run-1",
+    targetRunPhase: "turn",
+    targetRunAttemptNumber: 1,
+    targetRunTurnNumber: 1,
+    targetRunStatus: "completed",
+    targetRunFinalOutputText: JSON.stringify({
+      turnActions: {
+        untap: [],
+        upkeep: [],
+        draw: ["Draw *Forest*."],
+        precombat_main: [],
+        combat: [],
+        postcombat_main: [],
+        end_step_cleanup: [],
+      },
+      gameState: {
+        zones: {
+          hand: [{ name: "Forest", isToken: false, quantity: 1 }],
+          command: [],
+          battlefield: [],
+          graveyard: [],
+          exile: [],
+        },
+      },
+      error: null,
+    }),
+    targetRunSummary: "Drew for turn.",
+    targetRunOpeningHand: null,
+    targetRunTurnActions: {
+      draw: ["Draw *Forest*."],
+    },
+    targetRunGameState: {
+      zones: {
+        hand: [{ name: "Forest", isToken: false, quantity: 1 }],
+      },
+    },
+    targetRunLibrarySnapshot: ["Hidden Library Card"],
+    mcpFunctionCalls: [],
+    commanders: [
+      createPromptCard({
+        name: "Atraxa, Praetors' Voice",
+        quantity: 1,
+        zone: "commander",
+      }),
+    ],
+    libraryCards: [
+      createPromptCard({
+        name: "Forest",
+        quantity: 1,
+        zone: "library",
+      }),
+    ],
+  })
+
+  assert.equal(prompt.dynamicRunInput.includes("librarySnapshot"), false)
+  assert.equal(prompt.dynamicRunInput.includes("Hidden Library Card"), false)
+  assert.equal(prompt.fullPrompt.includes("librarySnapshot"), false)
+  assert.equal(prompt.fullPrompt.includes("Hidden Library Card"), false)
 })
 
 test("builds Anthropic payload with adaptive thinking, remote MCP, and 5m cache controls", () => {
