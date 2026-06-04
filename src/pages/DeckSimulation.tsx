@@ -1386,6 +1386,9 @@ export function PublicBenchmarkPage({
                       onClick={handleSelectBenchmarkResults}
                     >
                       <span className="min-w-0 flex-1 truncate">Results</span>
+                      <span className="ml-2 shrink-0 rounded-full border border-border bg-background/35 px-2 py-0.5 text-xs text-muted-foreground">
+                        score
+                      </span>
                       {isLoadingBenchmarkResults ? (
                         <span className="ml-2 shrink-0 text-xs text-muted-foreground">
                           ...
@@ -1595,41 +1598,9 @@ function PublicBenchmarkResultsPanel({
                 tone="primary"
               />
               <PublicBenchmarkResultMetricCard
-                label="Opening score"
-                value={formatPublicBenchmarkResultScore(
-                  metrics.openingHandScore
-                )}
-              />
-              <PublicBenchmarkResultMetricCard
-                label="Turn score"
-                value={formatPublicBenchmarkResultScore(metrics.turnScore)}
-              />
-              <PublicBenchmarkResultMetricCard
-                label="Completion rate"
-                value={formatPublicBenchmarkResultPercent(
-                  metrics.completionRate
-                )}
-              />
-              <PublicBenchmarkResultMetricCard
                 label="Legal pass rate"
                 value={formatPublicBenchmarkResultPercent(
                   metrics.legalPassRate
-                )}
-              />
-              <PublicBenchmarkResultMetricCard
-                label="Strategic pass rate"
-                value={formatPublicBenchmarkResultPercent(
-                  metrics.strategicPassRate
-                )}
-              />
-              <PublicBenchmarkResultMetricCard
-                label="Run cost"
-                value={formatPublicBenchmarkResultCost(metrics.totalRunCostUsd)}
-              />
-              <PublicBenchmarkResultMetricCard
-                label="Cost / attempted turn"
-                value={formatPublicBenchmarkResultCost(
-                  metrics.costPerAttemptedTurn
                 )}
               />
               <PublicBenchmarkResultMetricCard
@@ -1642,18 +1613,6 @@ function PublicBenchmarkResultsPanel({
                 label="Reasoning tokens / turn"
                 value={formatPublicBenchmarkResultTokenRate(
                   metrics.reasoningTokensPerAttemptedTurn
-                )}
-              />
-              <PublicBenchmarkResultMetricCard
-                label="Total tokens / turn"
-                value={formatPublicBenchmarkResultTokenRate(
-                  metrics.totalTokensPerAttemptedTurn
-                )}
-              />
-              <PublicBenchmarkResultMetricCard
-                label="Cost / score point"
-                value={formatPublicBenchmarkResultCost(
-                  metrics.costPerGoldfishPoint
                 )}
               />
             </div>
@@ -1713,14 +1672,12 @@ function PublicBenchmarkResultsDeckTable({
       <h3 className="text-sm font-semibold text-foreground">Decks</h3>
       <div className="overflow-hidden rounded-md border border-border bg-background/35">
         <div className="simulation-scrollbar overflow-x-auto">
-          <table className="w-full min-w-[52rem] text-sm">
+          <table className="w-full min-w-[40rem] text-sm">
             <thead className="border-b border-border bg-muted/25 text-xs text-muted-foreground uppercase">
               <tr>
                 <th className="px-3 py-2 text-left font-medium">Deck</th>
                 <th className="px-3 py-2 text-right font-medium">Score</th>
-                <th className="px-3 py-2 text-right font-medium">Completion</th>
                 <th className="px-3 py-2 text-right font-medium">Legal</th>
-                <th className="px-3 py-2 text-right font-medium">Strategic</th>
                 <th className="px-3 py-2 text-right font-medium">
                   Cost / turn
                 </th>
@@ -1749,13 +1706,7 @@ function PublicBenchmarkResultsDeckTable({
                     {formatPublicBenchmarkResultScore(deck.mtgGoldfishScore)}
                   </td>
                   <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
-                    {formatPublicBenchmarkResultPercent(deck.completionRate)}
-                  </td>
-                  <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
                     {formatPublicBenchmarkResultPercent(deck.legalPassRate)}
-                  </td>
-                  <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
-                    {formatPublicBenchmarkResultPercent(deck.strategicPassRate)}
                   </td>
                   <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
                     {formatPublicBenchmarkResultCost(deck.costPerAttemptedTurn)}
