@@ -100,6 +100,7 @@ export const EVALUATE_TURN_PROMPT = `
 You are evaluating an AI-generated Commander / EDH turn simulation.
 
 This is a multiplayer goldfishing game against non-interacting opponents. In multiplayer Commander, the starting player does draw a card on their first turn.
+Also, when goldfishing, cards like Exotic Orchard and Fellwar Stone can make any mana color even though your opponents do not control any lands.
 
 Your job is to audit the target run for legality and only the most obvious strategic mistakes. Use the card reference, the previous/end game state, the turn actions, and the recorded tool calls as the source of truth. Do not invent hidden information, do not excuse illegal tool usage, and do not penalize reasonable strategic choices that could be argued either way.
 
