@@ -84,7 +84,9 @@ export function BenchmarkEvaluationModal({
       const response = await apiFetch(evaluationsUrl)
 
       if (!response.ok) {
-        setError(await readApiError(response, "Evaluations could not be loaded."))
+        setError(
+          await readApiError(response, "Evaluations could not be loaded.")
+        )
         return
       }
 
@@ -356,6 +358,8 @@ export function BenchmarkEvaluationModal({
                 </Button>
               </div>
 
+              <BenchmarkEvaluationBenchmarkOverview benchmark={benchmark} />
+
               {isLoading && summary === null ? (
                 <p className="rounded-md border border-border bg-black/20 px-3 py-3 text-sm text-muted-foreground">
                   Loading evaluations...
@@ -404,6 +408,56 @@ function BenchmarkEvaluationProcessingChoiceButton({
   )
 }
 
+function BenchmarkEvaluationBenchmarkOverview({
+  benchmark,
+}: {
+  benchmark: AdminBenchmark
+}) {
+  const deckCount = benchmark.decks.length
+  const plannedSimulationCount = deckCount * benchmark.simulationsPerDeck
+  const plannedOpeningHandRunCount = plannedSimulationCount
+  const plannedTurnRunCount = plannedSimulationCount * benchmark.turnsToSimulate
+  const plannedTotalRunCount = plannedOpeningHandRunCount + plannedTurnRunCount
+
+  return (
+    <section className="grid gap-2" aria-label="Benchmark overview">
+      <h4 className="text-xs font-semibold text-muted-foreground uppercase">
+        Benchmark overview
+      </h4>
+      <p className="text-xs text-muted-foreground">
+        Expected total assumes every planned simulation produced one
+        opening-hand run and all planned turn runs.
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <BenchmarkEvaluationMetric
+          label="Decks"
+          value={formatBenchmarkEvaluationInteger(deckCount)}
+        />
+        <BenchmarkEvaluationMetric
+          label="Simulations per deck"
+          value={formatBenchmarkEvaluationInteger(benchmark.simulationsPerDeck)}
+        />
+        <BenchmarkEvaluationMetric
+          label="Turns per simulation"
+          value={formatBenchmarkEvaluationInteger(benchmark.turnsToSimulate)}
+        />
+        <BenchmarkEvaluationMetric
+          label="Expected simulations"
+          value={formatBenchmarkEvaluationInteger(plannedSimulationCount)}
+        />
+        <BenchmarkEvaluationMetric
+          label="Expected turn runs"
+          value={formatBenchmarkEvaluationInteger(plannedTurnRunCount)}
+        />
+        <BenchmarkEvaluationMetric
+          label="Expected total runs"
+          value={formatBenchmarkEvaluationInteger(plannedTotalRunCount)}
+        />
+      </div>
+    </section>
+  )
+}
+
 function BenchmarkEvaluationSummaryGrid({
   summary,
 }: {
@@ -412,7 +466,7 @@ function BenchmarkEvaluationSummaryGrid({
   return (
     <div className="grid gap-4">
       <section className="grid gap-2" aria-label="Evaluation runs">
-        <h4 className="text-xs font-semibold uppercase text-muted-foreground">
+        <h4 className="text-xs font-semibold text-muted-foreground uppercase">
           Evaluation runs
         </h4>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -447,7 +501,7 @@ function BenchmarkEvaluationSummaryGrid({
       </section>
 
       <section className="grid gap-2" aria-label="Evaluation results">
-        <h4 className="text-xs font-semibold uppercase text-muted-foreground">
+        <h4 className="text-xs font-semibold text-muted-foreground uppercase">
           Evaluation results
         </h4>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -664,6 +718,12 @@ function formatBenchmarkEvaluationCost(value: number) {
   return `$${(Number.isFinite(value) ? value : 0).toFixed(2)}`
 }
 
+function formatBenchmarkEvaluationInteger(value: number) {
+  return (
+    Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0
+  ).toLocaleString()
+}
+
 function BenchmarkEvaluationMetric({
   icon = null,
   label,
@@ -712,7 +772,9 @@ function BenchmarkEvaluationPassFailMetric({
 
 function getBenchmarkEvaluationLabel(benchmark: AdminBenchmark) {
   return [
-    benchmark.llmModelPresetName ?? benchmark.llmModelPresetModel ?? "Benchmark",
+    benchmark.llmModelPresetName ??
+      benchmark.llmModelPresetModel ??
+      "Benchmark",
     `${benchmark.totalSimulationCount} simulations`,
   ].join(" / ")
 }
