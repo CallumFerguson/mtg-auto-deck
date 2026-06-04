@@ -56,6 +56,10 @@ import {
   type BenchmarkEvaluationTargetRun,
 } from "./benchmark-evaluations.js"
 import {
+  buildBenchmarkExportAverageEvaluationScoreBySimulation,
+  buildBenchmarkSimulationIndexEntry,
+} from "./benchmark-export.js"
+import {
   isAdminGrantBillingTier,
   type AdminGrantBillingTier,
 } from "./subscription-tiers.js"
@@ -888,6 +892,26 @@ async function getAdminBenchmarkZipExport(
       ),
     }))
   )
+  const latestEvaluationRuns = await listBenchmarkEvaluationLatestRunsForAdmin(
+    benchmarkRunId,
+    adminUserId
+  )
+
+  if (latestEvaluationRuns === null) {
+    return null
+  }
+
+  const { targetRuns } =
+    getEligibleBenchmarkEvaluationTargetRuns(latestEvaluationRuns)
+  const latestEvaluations =
+    await listLatestBenchmarkEvaluationSnapshotsForTargets(
+      targetRuns.map((run) => run.targetLlmRunId)
+    )
+  const averageEvaluationScoreBySimulationId =
+    buildBenchmarkExportAverageEvaluationScoreBySimulation({
+      latestEvaluations,
+      targetRuns,
+    })
   const benchmarkIndexMetadata = (() => {
     const { totalEstimatedCostUsd, ...metadata } = benchmark
 
@@ -899,15 +923,17 @@ async function getAdminBenchmarkZipExport(
     schemaVersion: BENCHMARK_EXPORT_SCHEMA_VERSION,
     exportedAt,
     benchmark: benchmarkIndexMetadata,
-    simulations: simulationFiles.map(({ childSimulation, filePath }) => ({
-      simulationId: childSimulation.simulationId,
-      deckId: childSimulation.deckId,
-      deckName: childSimulation.deckName,
-      deckIndex: childSimulation.deckIndex,
-      simulationIndex: childSimulation.simulationIndex,
-      seed: childSimulation.seed,
-      filePath,
-    })),
+    simulations: simulationFiles.map(({ childSimulation, filePath, value }) =>
+      buildBenchmarkSimulationIndexEntry({
+        averageEvaluationScore:
+          averageEvaluationScoreBySimulationId.get(
+            childSimulation.simulationId
+          ) ?? null,
+        childSimulation,
+        filePath,
+        simulation: value.simulation,
+      })
+    ),
   }
 
   return {

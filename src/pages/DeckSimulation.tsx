@@ -1194,7 +1194,9 @@ export function PublicBenchmarkPage({ benchmarkId }: { benchmarkId: string }) {
                                 }
                               >
                                 <span className="truncate">
-                                  Simulation {simulation.simulationIndex}
+                                  {formatPublicBenchmarkSimulationLabel(
+                                    simulation
+                                  )}
                                 </span>
                               </button>
                             </li>
@@ -5809,12 +5811,46 @@ function isPublicBenchmarkSimulationIndexEntry(
     Number.isInteger(record.deckIndex) &&
     Number.isInteger(record.simulationIndex) &&
     typeof record.seed === "string" &&
+    isOptionalPublicBenchmarkSimulationStatus(record.status) &&
+    isOptionalPublicBenchmarkNonnegativeInteger(record.turnsToSimulate) &&
+    isOptionalPublicBenchmarkNonnegativeInteger(record.simulatedTurnCount) &&
+    isOptionalNullablePublicBenchmarkNumber(record.averageEvaluationScore) &&
     typeof record.filePath === "string"
   )
 }
 
+function isOptionalPublicBenchmarkSimulationStatus(value: unknown) {
+  return value === undefined || isPublicBenchmarkSimulationStatus(value)
+}
+
+function isPublicBenchmarkSimulationStatus(value: unknown) {
+  return (
+    value === "pending" ||
+    value === "unmanaged" ||
+    value === "running" ||
+    value === "completed" ||
+    value === "failed" ||
+    value === "cancelled"
+  )
+}
+
+function isOptionalPublicBenchmarkNonnegativeInteger(value: unknown) {
+  return (
+    value === undefined ||
+    (typeof value === "number" && Number.isInteger(value) && value >= 0)
+  )
+}
+
+function isOptionalNullablePublicBenchmarkNumber(value: unknown) {
+  return value === undefined || isNullablePublicBenchmarkNumber(value)
+}
+
 function isNullableString(value: unknown) {
   return value === null || typeof value === "string"
+}
+
+function isNullablePublicBenchmarkNumber(value: unknown) {
+  return value === null || isPublicBenchmarkNumber(value)
 }
 
 function isPublicBenchmarkNumber(value: unknown) {
@@ -5939,6 +5975,22 @@ function getSelectedPublicBenchmarkSimulationEntry(
       (simulation) => simulation.simulationId === selectedSimulationId
     ) ?? simulations[0]
   )
+}
+
+function formatPublicBenchmarkSimulationLabel(
+  simulation: PublicBenchmarkSimulationIndexEntry
+) {
+  const baseLabel = `Sim ${simulation.simulationIndex}`
+
+  return typeof simulation.averageEvaluationScore === "number"
+    ? `${baseLabel} - Score ${formatPublicBenchmarkSimulationScore(
+        simulation.averageEvaluationScore
+      )}`
+    : baseLabel
+}
+
+function formatPublicBenchmarkSimulationScore(score: number) {
+  return score.toFixed(1).replace(/\.0$/u, "")
 }
 
 function pushPublicBenchmarkSimulationSearch(simulationId: string) {

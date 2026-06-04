@@ -307,6 +307,10 @@ export type PublicBenchmarkSimulationIndexEntry = {
   deckIndex: number
   simulationIndex: number
   seed: string
+  status?: Simulation["status"]
+  turnsToSimulate?: number
+  simulatedTurnCount?: number
+  averageEvaluationScore?: number | null
   filePath: string
 }
 
