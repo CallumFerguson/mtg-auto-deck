@@ -57,7 +57,9 @@ import {
 } from "./benchmark-evaluations.js"
 import {
   buildBenchmarkExportAverageEvaluationScoreBySimulation,
+  buildBenchmarkExportSimulationWithEvaluations,
   buildBenchmarkSimulationIndexEntry,
+  getBenchmarkExportSimulationRunIds,
 } from "./benchmark-export.js"
 import {
   isAdminGrantBillingTier,
@@ -903,10 +905,27 @@ async function getAdminBenchmarkZipExport(
 
   const { targetRuns } =
     getEligibleBenchmarkEvaluationTargetRuns(latestEvaluationRuns)
+  const benchmarkEvaluationTargetRunIds = Array.from(
+    new Set([
+      ...targetRuns.map((run) => run.targetLlmRunId),
+      ...simulationFiles.flatMap(({ value }) =>
+        getBenchmarkExportSimulationRunIds(value)
+      ),
+    ])
+  )
   const latestEvaluations =
     await listLatestBenchmarkEvaluationSnapshotsForTargets(
-      targetRuns.map((run) => run.targetLlmRunId)
+      benchmarkEvaluationTargetRunIds
     )
+  const simulationFilesWithEvaluations = simulationFiles.map(
+    (simulationFile) => ({
+      ...simulationFile,
+      value: buildBenchmarkExportSimulationWithEvaluations({
+        latestEvaluations,
+        simulationExport: simulationFile.value,
+      }),
+    })
+  )
   const averageEvaluationScoreBySimulationId =
     buildBenchmarkExportAverageEvaluationScoreBySimulation({
       latestEvaluations,
@@ -924,16 +943,17 @@ async function getAdminBenchmarkZipExport(
     schemaVersion: BENCHMARK_EXPORT_SCHEMA_VERSION,
     exportedAt,
     benchmark: benchmarkIndexMetadata,
-    simulations: simulationFiles.map(({ childSimulation, filePath, value }) =>
-      buildBenchmarkSimulationIndexEntry({
-        averageEvaluationScore:
-          averageEvaluationScoreBySimulationId.get(
-            childSimulation.simulationId
-          ) ?? null,
-        childSimulation,
-        filePath,
-        simulation: value.simulation,
-      })
+    simulations: simulationFilesWithEvaluations.map(
+      ({ childSimulation, filePath, value }) =>
+        buildBenchmarkSimulationIndexEntry({
+          averageEvaluationScore:
+            averageEvaluationScoreBySimulationId.get(
+              childSimulation.simulationId
+            ) ?? null,
+          childSimulation,
+          filePath,
+          simulation: value.simulation,
+        })
     ),
   }
 
@@ -945,7 +965,7 @@ async function getAdminBenchmarkZipExport(
           path: `${benchmarkExportRootPath}/index.json`,
           value: index,
         },
-        ...simulationFiles.map((simulationFile) => ({
+        ...simulationFilesWithEvaluations.map((simulationFile) => ({
           path: simulationFile.filePath,
           value: simulationFile.value,
         })),

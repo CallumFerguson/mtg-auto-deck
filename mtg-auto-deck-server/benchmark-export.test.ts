@@ -2,7 +2,10 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import {
   buildBenchmarkExportAverageEvaluationScoreBySimulation,
+  buildBenchmarkExportSimulationWithEvaluations,
   buildBenchmarkSimulationIndexEntry,
+  getBenchmarkExportSimulationRunIds,
+  type BenchmarkExportRunEvaluation,
 } from "./benchmark-export.js"
 import type {
   BenchmarkEvaluationLatestEvaluationSnapshot,
@@ -209,6 +212,149 @@ test("builds benchmark simulation index entries with run counts and average scor
   assert.equal(entryWithScore.averageEvaluationScore, 8.5)
 })
 
+test("decorates benchmark simulation runs with latest completed evaluations", () => {
+  const simulationExport = createBenchmarkSimulationExport({
+    openingHandLlmRuns: [
+      createBenchmarkSimulationRun({ llmRunId: "opening-run" }),
+    ],
+    turnLlmRuns: [createBenchmarkSimulationRun({ llmRunId: "turn-run" })],
+  })
+  const decorated = buildBenchmarkExportSimulationWithEvaluations({
+    latestEvaluations: [
+      createEvaluation({
+        targetLlmRunId: "opening-run",
+        attemptNumber: 1,
+        legalPass: false,
+        strategicPass: true,
+        simulationQualityScore: 8.5,
+        simulationQualityScoreReasoning: "Opening hand sequencing was legal.",
+        illegalActions: ["Missed required reveal."],
+        strategicMistakes: [],
+        costUsd: 0.01,
+      }),
+      createEvaluation({
+        targetLlmRunId: "turn-run",
+        attemptNumber: 2,
+        legalPass: true,
+        strategicPass: false,
+        simulationQualityScore: 7,
+        simulationQualityScoreReasoning: "Turn line missed a stronger attack.",
+        illegalActions: [],
+        strategicMistakes: ["Attacked with the wrong creature."],
+        costUsd: 0.02,
+      }),
+    ],
+    simulationExport,
+  })
+
+  assert.deepEqual(getBenchmarkExportSimulationRunIds(decorated), [
+    "opening-run",
+    "turn-run",
+  ])
+  assert.deepEqual(
+    decorated.results.openingHandLlmRuns[0]?.benchmarkEvaluation,
+    {
+      legalPass: false,
+      strategicPass: true,
+      simulationQualityScore: 8.5,
+      simulationQualityScoreReasoning: "Opening hand sequencing was legal.",
+      illegalActions: ["Missed required reveal."],
+      strategicMistakes: [],
+    }
+  )
+  assert.deepEqual(decorated.results.turnLlmRuns[0]?.benchmarkEvaluation, {
+    legalPass: true,
+    strategicPass: false,
+    simulationQualityScore: 7,
+    simulationQualityScoreReasoning: "Turn line missed a stronger attack.",
+    illegalActions: [],
+    strategicMistakes: ["Attacked with the wrong creature."],
+  })
+
+  const exportedEvaluation = decorated.results.turnLlmRuns[0]
+    ?.benchmarkEvaluation as Record<string, unknown> | undefined
+
+  assert.ok(exportedEvaluation)
+  assert.equal("attemptNumber" in exportedEvaluation, false)
+  assert.equal("targetLlmRunId" in exportedEvaluation, false)
+  assert.equal("llmRunId" in exportedEvaluation, false)
+  assert.equal("costUsd" in exportedEvaluation, false)
+})
+
+test("omits missing, incomplete, failed, result-failed, and superseded benchmark run evaluations", () => {
+  const simulationExport = createBenchmarkSimulationExport({
+    openingHandLlmRuns: [
+      createBenchmarkSimulationRun({ llmRunId: "active-run" }),
+      createBenchmarkSimulationRun({ llmRunId: "failed-run" }),
+      createBenchmarkSimulationRun({ llmRunId: "result-failed-run" }),
+    ],
+    turnLlmRuns: [
+      createBenchmarkSimulationRun({ llmRunId: "missing-run" }),
+      createBenchmarkSimulationRun({ llmRunId: "superseded-run" }),
+    ],
+  })
+  const decorated = buildBenchmarkExportSimulationWithEvaluations({
+    latestEvaluations: [
+      createEvaluation({
+        targetLlmRunId: "active-run",
+        status: "streaming",
+      }),
+      createEvaluation({
+        targetLlmRunId: "failed-run",
+        status: "failed",
+      }),
+      createEvaluation({
+        targetLlmRunId: "result-failed-run",
+        resultStatus: "failed",
+      }),
+      createEvaluation({
+        targetLlmRunId: "superseded-run",
+        attemptNumber: 1,
+        legalPass: true,
+        strategicPass: true,
+        simulationQualityScore: 10,
+      }),
+      createEvaluation({
+        targetLlmRunId: "superseded-run",
+        attemptNumber: 2,
+        status: "failed",
+        legalPass: false,
+        strategicPass: false,
+        simulationQualityScore: 0,
+      }),
+    ],
+    simulationExport,
+  })
+
+  for (const run of [
+    ...decorated.results.openingHandLlmRuns,
+    ...decorated.results.turnLlmRuns,
+  ]) {
+    assert.equal(run.benchmarkEvaluation, undefined)
+  }
+})
+
+test("leaves simulation exports undecorated when no benchmark evaluations exist", () => {
+  const simulationExport = createBenchmarkSimulationExport({
+    openingHandLlmRuns: [
+      createBenchmarkSimulationRun({ llmRunId: "opening-run" }),
+    ],
+    turnLlmRuns: [createBenchmarkSimulationRun({ llmRunId: "turn-run" })],
+  })
+  const decorated = buildBenchmarkExportSimulationWithEvaluations({
+    latestEvaluations: [],
+    simulationExport,
+  })
+  const openingRun = decorated.results.openingHandLlmRuns[0]
+  const turnRun = decorated.results.turnLlmRuns[0]
+
+  assert.deepEqual(decorated, simulationExport)
+  assert.ok(openingRun)
+  assert.ok(turnRun)
+  assert.equal("benchmarkEvaluation" in openingRun, false)
+  assert.equal("benchmarkEvaluation" in turnRun, false)
+})
+
 function createTargetRun(
   overrides: Partial<BenchmarkEvaluationTargetRun> = {}
 ): BenchmarkEvaluationTargetRun {
@@ -218,6 +364,41 @@ function createTargetRun(
     targetLlmRunId: "target-run",
     targetRunPhase: "turn",
     turnNumber: 1,
+    ...overrides,
+  }
+}
+
+type TestBenchmarkSimulationRun = {
+  llmRunId: string
+  attemptNumber: number
+  benchmarkEvaluation?: BenchmarkExportRunEvaluation
+}
+
+function createBenchmarkSimulationExport({
+  openingHandLlmRuns = [],
+  turnLlmRuns = [],
+}: {
+  openingHandLlmRuns?: TestBenchmarkSimulationRun[]
+  turnLlmRuns?: TestBenchmarkSimulationRun[]
+} = {}) {
+  return {
+    schemaVersion: 1,
+    results: {
+      openingHandLlmRuns,
+      turnLlmRuns,
+    },
+    simulation: {
+      id: "simulation-one",
+    },
+  }
+}
+
+function createBenchmarkSimulationRun(
+  overrides: Partial<TestBenchmarkSimulationRun> = {}
+): TestBenchmarkSimulationRun {
+  return {
+    llmRunId: "run",
+    attemptNumber: 1,
     ...overrides,
   }
 }

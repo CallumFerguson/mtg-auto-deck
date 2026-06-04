@@ -138,6 +138,7 @@ export type SimulationDebugLlmRun = {
   librarySnapshot?: string[] | null
   outdated?: boolean
   openingHandIsValid?: boolean
+  benchmarkEvaluation?: BenchmarkSimulationRunEvaluation
   mcpFunctionCalls: SimulationMcpFunctionCall[]
   openrouterGenerations: OpenRouterGeneration[]
 }
@@ -232,6 +233,15 @@ export type SimulationRunEvaluation = {
   completedAt: string | null
   failedAt: string | null
   cancelledAt: string | null
+}
+
+export type BenchmarkSimulationRunEvaluation = {
+  legalPass: boolean | null
+  strategicPass: boolean | null
+  simulationQualityScore: number | null
+  simulationQualityScoreReasoning: string | null
+  illegalActions: string[]
+  strategicMistakes: string[]
 }
 
 export type SimulationRunEvaluationsResponse = {

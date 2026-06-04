@@ -45,6 +45,7 @@ import { UsageLimitRows } from "@/components/UsageLimitRows"
 import { loadApiHelpers } from "@/lib/api-lazy"
 import { useOptionalBillingTier } from "@/lib/billing-tier-state"
 import type {
+  BenchmarkSimulationRunEvaluation,
   CreateSimulationResponse,
   CreateStartingHandResponse,
   CreateTurnLlmRunResponse,
@@ -1266,6 +1267,7 @@ export function PublicBenchmarkPage({
                   onTimelineTurnSelected={handleTimelineTurnSelected}
                   readOnly={true}
                   requestedTimelineTurn={requestedTimelineTurn}
+                  showBenchmarkEvaluations={true}
                   showRunCost={false}
                   shouldStreamResults={false}
                   simulation={publicSimulation.simulation}
@@ -2853,6 +2855,7 @@ function SimulationDetails({
   resultsStreamUrl,
   resultsStreamWithCredentials = true,
   requestedTimelineTurn = null,
+  showBenchmarkEvaluations = false,
   showRunCost,
   shouldStreamResults = true,
   simulation,
@@ -2880,6 +2883,7 @@ function SimulationDetails({
   resultsStreamUrl?: string
   resultsStreamWithCredentials?: boolean
   requestedTimelineTurn?: number | null
+  showBenchmarkEvaluations?: boolean
   showRunCost: boolean
   shouldStreamResults?: boolean
   simulation: Simulation
@@ -3445,6 +3449,7 @@ function SimulationDetails({
           resultsError={resultsError}
           resultsInfo={resultsInfo}
           resultsPanelRef={resultsPanelRef}
+          showBenchmarkEvaluations={showBenchmarkEvaluations}
           showRunCost={showRunCost}
           simulation={simulation}
           startingHand={startingHand}
@@ -3565,6 +3570,7 @@ function SimulationResultsPanel({
   resultsError,
   resultsInfo,
   resultsPanelRef,
+  showBenchmarkEvaluations,
   showRunCost,
   simulation,
   startingHand,
@@ -3611,6 +3617,7 @@ function SimulationResultsPanel({
   resultsError: string | null
   resultsInfo: SimulationResultsInfo
   resultsPanelRef: RefObject<HTMLElement | null>
+  showBenchmarkEvaluations: boolean
   showRunCost: boolean
   simulation: Simulation
   startingHand: StartingHand | null
@@ -4489,6 +4496,12 @@ function SimulationResultsPanel({
             </div>
           </div>
         ) : null}
+
+        {showBenchmarkEvaluations && run.benchmarkEvaluation ? (
+          <BenchmarkRunEvaluationCard
+            evaluation={run.benchmarkEvaluation}
+          />
+        ) : null}
       </section>
     )
   }
@@ -4868,6 +4881,151 @@ function SimulationResultsPanel({
       {renderDemoCoachMark()}
     </div>
   )
+}
+
+function BenchmarkRunEvaluationCard({
+  evaluation,
+}: {
+  evaluation: BenchmarkSimulationRunEvaluation
+}) {
+  return (
+    <article
+      aria-label="Benchmark evaluation"
+      className="grid gap-3 rounded-md border border-sky-300/25 bg-sky-400/10 px-3 py-3"
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <ClipboardCheck
+          className="size-4 shrink-0 text-sky-300"
+          aria-hidden
+        />
+        <h3 className="text-sm font-semibold text-foreground">
+          Benchmark evaluation
+        </h3>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-3">
+        <BenchmarkEvaluationPassTile
+          label="Legal"
+          value={evaluation.legalPass}
+        />
+        <BenchmarkEvaluationPassTile
+          label="Strategic"
+          value={evaluation.strategicPass}
+        />
+        <div className="rounded-md border border-border bg-black/20 px-3 py-2">
+          <p className="text-xs text-muted-foreground">Quality</p>
+          <p className="mt-1 text-lg font-semibold text-foreground">
+            {formatBenchmarkEvaluationScore(evaluation.simulationQualityScore)}
+          </p>
+        </div>
+      </div>
+      <BenchmarkEvaluationTextValue
+        label="Quality score reasoning"
+        value={evaluation.simulationQualityScoreReasoning}
+      />
+      <BenchmarkEvaluationIssueList
+        label="Illegal actions"
+        values={evaluation.illegalActions}
+      />
+      <BenchmarkEvaluationIssueList
+        label="Strategic mistakes"
+        values={evaluation.strategicMistakes}
+      />
+    </article>
+  )
+}
+
+function BenchmarkEvaluationPassTile({
+  label,
+  value,
+}: {
+  label: string
+  value: boolean | null
+}) {
+  const icon =
+    value === true ? (
+      <Check className="size-4" aria-hidden />
+    ) : value === false ? (
+      <X className="size-4" aria-hidden />
+    ) : (
+      <Square className="size-4" aria-hidden />
+    )
+  const valueLabel =
+    value === true ? "Pass" : value === false ? "Fail" : "Unknown"
+
+  return (
+    <div
+      className={`rounded-md border px-3 py-2 ${
+        value === true
+          ? "border-emerald-300/35 bg-emerald-400/10"
+          : value === false
+            ? "border-destructive/40 bg-destructive/10"
+            : "border-border bg-black/20"
+      }`}
+    >
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p
+        className={`mt-1 flex items-center gap-1 text-sm font-semibold ${
+          value === true
+            ? "text-emerald-100"
+            : value === false
+              ? "text-destructive"
+              : "text-muted-foreground"
+        }`}
+      >
+        {icon}
+        {valueLabel}
+      </p>
+    </div>
+  )
+}
+
+function BenchmarkEvaluationTextValue({
+  label,
+  value,
+}: {
+  label: string
+  value: string | null
+}) {
+  return (
+    <div className="grid gap-1 rounded-md border border-border bg-black/20 px-3 py-2">
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      <p className="text-sm break-words whitespace-pre-wrap text-foreground">
+        {value?.trim() ? value : "None"}
+      </p>
+    </div>
+  )
+}
+
+function BenchmarkEvaluationIssueList({
+  label,
+  values,
+}: {
+  label: string
+  values: string[]
+}) {
+  return (
+    <div className="grid gap-1 rounded-md border border-border bg-black/20 px-3 py-2">
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      {values.length === 0 ? (
+        <p className="text-sm text-foreground">None</p>
+      ) : (
+        <ul className="grid gap-1 text-sm text-foreground">
+          {values.map((value, index) => (
+            <li
+              key={`${label}-${index}`}
+              className="break-words whitespace-pre-wrap"
+            >
+              {value}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function formatBenchmarkEvaluationScore(score: number | null) {
+  return score === null ? "- / 10" : `${score.toFixed(1)} / 10`
 }
 
 function notifyParentDemoStarted() {

@@ -20,10 +20,31 @@ export type BenchmarkExportSimulationIndexEntry = {
   filePath: string
 }
 
+export type BenchmarkExportRunEvaluation = {
+  legalPass: boolean | null
+  strategicPass: boolean | null
+  simulationQualityScore: number | null
+  simulationQualityScoreReasoning: string | null
+  illegalActions: string[]
+  strategicMistakes: string[]
+}
+
 type BenchmarkExportSimulationSummary = {
   status: SimulationStatus
   turnsToSimulate: number
   simulatedTurnCount: number
+}
+
+type BenchmarkExportSimulationRun = {
+  llmRunId: string
+  benchmarkEvaluation?: BenchmarkExportRunEvaluation
+}
+
+type BenchmarkExportSimulationWithRuns = {
+  results: {
+    openingHandLlmRuns: readonly BenchmarkExportSimulationRun[]
+    turnLlmRuns: readonly BenchmarkExportSimulationRun[]
+  }
 }
 
 export function buildBenchmarkExportAverageEvaluationScoreBySimulation({
@@ -107,6 +128,48 @@ export function buildBenchmarkExportAverageEvaluationScoreBySimulation({
   return averageScoreBySimulationId
 }
 
+export function getBenchmarkExportSimulationRunIds(
+  simulationExport: BenchmarkExportSimulationWithRuns
+) {
+  return [
+    ...simulationExport.results.openingHandLlmRuns,
+    ...simulationExport.results.turnLlmRuns,
+  ].map((run) => run.llmRunId)
+}
+
+export function buildBenchmarkExportSimulationWithEvaluations<
+  T extends BenchmarkExportSimulationWithRuns,
+>({
+  latestEvaluations,
+  simulationExport,
+}: {
+  latestEvaluations: readonly BenchmarkEvaluationLatestEvaluationSnapshot[]
+  simulationExport: T
+}): T {
+  const latestEvaluationByTargetRunId =
+    buildLatestBenchmarkExportEvaluationByTargetRunId(latestEvaluations)
+
+  return {
+    ...simulationExport,
+    results: {
+      ...simulationExport.results,
+      openingHandLlmRuns: simulationExport.results.openingHandLlmRuns.map(
+        (run) =>
+          buildBenchmarkExportRunWithEvaluation(
+            run,
+            latestEvaluationByTargetRunId
+          )
+      ),
+      turnLlmRuns: simulationExport.results.turnLlmRuns.map((run) =>
+        buildBenchmarkExportRunWithEvaluation(
+          run,
+          latestEvaluationByTargetRunId
+        )
+      ),
+    },
+  } as T
+}
+
 export function buildBenchmarkSimulationIndexEntry({
   averageEvaluationScore,
   childSimulation,
@@ -131,6 +194,73 @@ export function buildBenchmarkSimulationIndexEntry({
     averageEvaluationScore,
     filePath,
   }
+}
+
+function buildLatestBenchmarkExportEvaluationByTargetRunId(
+  latestEvaluations: readonly BenchmarkEvaluationLatestEvaluationSnapshot[]
+) {
+  const latestEvaluationByTargetRunId = new Map<
+    string,
+    BenchmarkEvaluationLatestEvaluationSnapshot
+  >()
+
+  for (const evaluation of latestEvaluations) {
+    const currentEvaluation = latestEvaluationByTargetRunId.get(
+      evaluation.targetLlmRunId
+    )
+
+    if (
+      !currentEvaluation ||
+      evaluation.attemptNumber > currentEvaluation.attemptNumber
+    ) {
+      latestEvaluationByTargetRunId.set(
+        evaluation.targetLlmRunId,
+        evaluation
+      )
+    }
+  }
+
+  return latestEvaluationByTargetRunId
+}
+
+function buildBenchmarkExportRunWithEvaluation(
+  run: BenchmarkExportSimulationRun,
+  latestEvaluationByTargetRunId: ReadonlyMap<
+    string,
+    BenchmarkEvaluationLatestEvaluationSnapshot
+  >
+): BenchmarkExportSimulationRun {
+  const evaluation = latestEvaluationByTargetRunId.get(run.llmRunId)
+
+  if (!evaluation || !isCompletedBenchmarkExportEvaluation(evaluation)) {
+    const { benchmarkEvaluation, ...runWithoutEvaluation } = run
+
+    void benchmarkEvaluation
+
+    return runWithoutEvaluation
+  }
+
+  return {
+    ...run,
+    benchmarkEvaluation: {
+      legalPass: evaluation.legalPass,
+      strategicPass: evaluation.strategicPass,
+      simulationQualityScore: evaluation.simulationQualityScore,
+      simulationQualityScoreReasoning:
+        evaluation.simulationQualityScoreReasoning,
+      illegalActions: evaluation.illegalActions,
+      strategicMistakes: evaluation.strategicMistakes,
+    },
+  }
+}
+
+function isCompletedBenchmarkExportEvaluation(
+  evaluation: BenchmarkEvaluationLatestEvaluationSnapshot
+) {
+  return (
+    evaluation.status === "completed" &&
+    evaluation.resultStatus === "completed"
+  )
 }
 
 function isScoredBenchmarkExportEvaluation(
