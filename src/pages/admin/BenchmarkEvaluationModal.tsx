@@ -22,6 +22,7 @@ import { readApiError } from "@/lib/api-error"
 import type {
   AdminBenchmark,
   AdminBenchmarkEvaluationAttentionResult,
+  AdminBenchmarkEvaluationFailedResult,
   AdminBenchmarkEvaluationSummary,
   AdminBenchmarkEvaluationsResponse,
   StartAdminBenchmarkEvaluationsResponse,
@@ -367,6 +368,9 @@ export function BenchmarkEvaluationModal({
               ) : summary ? (
                 <div className="grid gap-4">
                   <BenchmarkEvaluationSummaryGrid summary={summary} />
+                  <BenchmarkEvaluationFailedResults
+                    results={summary.failedResults}
+                  />
                   <BenchmarkEvaluationAttentionResults
                     results={summary.attentionResults}
                   />
@@ -563,6 +567,88 @@ function BenchmarkEvaluationAttentionResults({
   )
 }
 
+function BenchmarkEvaluationFailedResults({
+  results,
+}: {
+  results: AdminBenchmarkEvaluationFailedResult[]
+}) {
+  if (results.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="grid gap-3">
+      <div className="flex items-center justify-between gap-3">
+        <h4 className="text-sm font-semibold text-foreground">
+          Failed runs
+        </h4>
+        <span className="text-xs text-muted-foreground">
+          {results.length} {results.length === 1 ? "run" : "runs"}
+        </span>
+      </div>
+      <div className="grid gap-3">
+        {results.map((result) => (
+          <BenchmarkEvaluationFailedResultCard
+            key={`${result.targetLlmRunId}-${result.attemptNumber}`}
+            result={result}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function BenchmarkEvaluationFailedResultCard({
+  result,
+}: {
+  result: AdminBenchmarkEvaluationFailedResult
+}) {
+  const displayStatus =
+    result.status === "completed" && result.resultStatus === "failed"
+      ? "failed"
+      : result.status
+  const failureMessage =
+    result.resultStatus === "failed"
+      ? (result.resultFailureMessage ?? "Evaluation result was rejected.")
+      : (result.failureMessage ?? "Evaluation run failed.")
+  const metadata = [
+    `Evaluation ${result.attemptNumber}`,
+    `Run ${formatBenchmarkEvaluationStatus(result.status)}`,
+    `Result ${formatBenchmarkEvaluationStatus(result.resultStatus)}`,
+  ]
+
+  return (
+    <article className="grid gap-3 rounded-md border border-destructive/35 bg-destructive/5 px-4 py-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-foreground">
+            {getBenchmarkEvaluationRunLabel(result)}
+          </p>
+          <p className="mt-1 text-xs break-words text-muted-foreground">
+            {metadata.join(" / ")}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <BenchmarkEvaluationStatusBadge status={displayStatus} />
+          <a
+            className="inline-flex w-fit items-center gap-1 rounded-md border border-sky-300/35 bg-sky-400/10 px-2.5 py-1.5 text-xs font-medium text-sky-100 transition-colors hover:bg-sky-400/20"
+            href={getBenchmarkEvaluationSimulationHref(result)}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Open simulation
+            <ExternalLink className="size-3.5" aria-hidden />
+          </a>
+        </div>
+      </div>
+
+      <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm break-words text-destructive">
+        {failureMessage}
+      </p>
+    </article>
+  )
+}
+
 function BenchmarkEvaluationAttentionResultCard({
   result,
 }: {
@@ -652,6 +738,29 @@ function BenchmarkEvaluationPassBadge({
   )
 }
 
+function BenchmarkEvaluationStatusBadge({ status }: { status: string }) {
+  return (
+    <span
+      className={`inline-flex w-fit items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium ${
+        status === "completed"
+          ? "border-emerald-300/35 bg-emerald-400/10 text-emerald-100"
+          : status === "failed" || status === "cancelled"
+            ? "border-destructive/40 bg-destructive/10 text-destructive"
+            : "border-sky-300/35 bg-sky-400/10 text-sky-100"
+      }`}
+    >
+      {status === "completed" ? (
+        <CheckCircle2 className="size-3.5" aria-hidden />
+      ) : status === "failed" || status === "cancelled" ? (
+        <XCircle className="size-3.5" aria-hidden />
+      ) : (
+        <LoaderCircle className="size-3.5 animate-spin" aria-hidden />
+      )}
+      {formatBenchmarkEvaluationStatus(status)}
+    </span>
+  )
+}
+
 function BenchmarkEvaluationTextValue({
   label,
   value,
@@ -693,7 +802,9 @@ function BenchmarkEvaluationIssueList({
 }
 
 function getBenchmarkEvaluationRunLabel(
-  result: AdminBenchmarkEvaluationAttentionResult
+  result:
+    | AdminBenchmarkEvaluationAttentionResult
+    | AdminBenchmarkEvaluationFailedResult
 ) {
   if (result.targetRunPhase === "opening_hand") {
     return "Opening hand"
@@ -705,7 +816,9 @@ function getBenchmarkEvaluationRunLabel(
 }
 
 function getBenchmarkEvaluationSimulationHref(
-  result: AdminBenchmarkEvaluationAttentionResult
+  result:
+    | AdminBenchmarkEvaluationAttentionResult
+    | AdminBenchmarkEvaluationFailedResult
 ) {
   return getDeckSimulationPath(
     result.deckId,
@@ -722,6 +835,26 @@ function formatBenchmarkEvaluationInteger(value: number) {
   return (
     Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0
   ).toLocaleString()
+}
+
+function formatBenchmarkEvaluationStatus(status: string) {
+  if (status === "streaming") {
+    return "Running"
+  }
+
+  if (status === "batch_pending") {
+    return "Waiting for batch"
+  }
+
+  if (status === "batch_submitted") {
+    return "Submitted to batch"
+  }
+
+  if (status === "cancel_requested") {
+    return "Stopping"
+  }
+
+  return status
 }
 
 function BenchmarkEvaluationMetric({

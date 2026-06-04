@@ -2,7 +2,10 @@ import type {
   ActiveAdminSubscriptionTierGrant,
   BillingTier,
 } from "@/lib/subscription-tiers"
-import type { LlmProcessingMode } from "@/lib/deck-types"
+import type {
+  LlmProcessingMode,
+  SimulationRunEvaluationResultStatus,
+} from "@/lib/deck-types"
 
 export type AdminUser = {
   activeAdminTierGrant: ActiveAdminSubscriptionTierGrant | null
@@ -95,6 +98,7 @@ export type AdminBenchmarkEvaluationSummary = {
   strategicFailCount: number
   totalEvaluationCostUsd: number
   attentionResults: AdminBenchmarkEvaluationAttentionResult[]
+  failedResults: AdminBenchmarkEvaluationFailedResult[]
 }
 
 export type AdminBenchmarkEvaluationAttentionResult = {
@@ -110,6 +114,19 @@ export type AdminBenchmarkEvaluationAttentionResult = {
   simulationQualityScoreReasoning: string | null
   illegalActions: string[]
   strategicMistakes: string[]
+}
+
+export type AdminBenchmarkEvaluationFailedResult = {
+  deckId: string
+  simulationId: string
+  targetLlmRunId: string
+  targetRunPhase: "opening_hand" | "turn"
+  turnNumber: number | null
+  attemptNumber: number
+  status: string
+  failureMessage: string | null
+  resultStatus: SimulationRunEvaluationResultStatus
+  resultFailureMessage: string | null
 }
 
 export type AdminBenchmarkEvaluationsResponse = {

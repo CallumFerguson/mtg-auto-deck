@@ -43,7 +43,9 @@ export type BenchmarkEvaluationLatestEvaluationSnapshot = {
   targetLlmRunId: string
   attemptNumber: number
   status: LlmRunStatus
+  failureMessage: string | null
   resultStatus: SimulationRunEvaluationResultStatus
+  resultFailureMessage: string | null
   legalPass: boolean | null
   strategicPass: boolean | null
   simulationQualityScore: number | null
@@ -68,6 +70,19 @@ export type BenchmarkEvaluationAttentionResult = {
   strategicMistakes: string[]
 }
 
+export type BenchmarkEvaluationFailedResult = {
+  deckId: string
+  simulationId: string
+  targetLlmRunId: string
+  targetRunPhase: BenchmarkEvaluationRunPhase
+  turnNumber: number | null
+  attemptNumber: number
+  status: LlmRunStatus
+  failureMessage: string | null
+  resultStatus: SimulationRunEvaluationResultStatus
+  resultFailureMessage: string | null
+}
+
 export type BenchmarkEvaluationSummary = {
   targetRunCount: number
   evaluationCount: number
@@ -81,6 +96,7 @@ export type BenchmarkEvaluationSummary = {
   strategicFailCount: number
   totalEvaluationCostUsd: number
   attentionResults: BenchmarkEvaluationAttentionResult[]
+  failedResults: BenchmarkEvaluationFailedResult[]
 }
 
 export function getEligibleBenchmarkEvaluationTargetRuns(
@@ -198,6 +214,30 @@ export function buildBenchmarkEvaluationSummary({
       ]
     })
     .sort(compareBenchmarkEvaluationAttentionResults)
+  const failedResults = failedEvaluations
+    .flatMap((evaluation) => {
+      const targetRun = targetRunById.get(evaluation.targetLlmRunId)
+
+      if (!targetRun) {
+        return []
+      }
+
+      return [
+        {
+          deckId: targetRun.deckId,
+          simulationId: targetRun.simulationId,
+          targetLlmRunId: targetRun.targetLlmRunId,
+          targetRunPhase: targetRun.targetRunPhase,
+          turnNumber: targetRun.turnNumber,
+          attemptNumber: evaluation.attemptNumber,
+          status: evaluation.status,
+          failureMessage: evaluation.failureMessage,
+          resultStatus: evaluation.resultStatus,
+          resultFailureMessage: evaluation.resultFailureMessage,
+        },
+      ]
+    })
+    .sort(compareBenchmarkEvaluationFailedResults)
 
   return {
     targetRunCount: targetRuns.length,
@@ -222,6 +262,7 @@ export function buildBenchmarkEvaluationSummary({
     ).length,
     totalEvaluationCostUsd,
     attentionResults,
+    failedResults,
   }
 }
 
@@ -264,6 +305,47 @@ function compareBenchmarkEvaluationAttentionResults(
   }
 
   return first.simulationQualityScore - second.simulationQualityScore
+}
+
+function compareBenchmarkEvaluationFailedResults(
+  first: BenchmarkEvaluationFailedResult,
+  second: BenchmarkEvaluationFailedResult
+) {
+  const deckCompare = first.deckId.localeCompare(second.deckId)
+
+  if (deckCompare !== 0) {
+    return deckCompare
+  }
+
+  const simulationCompare = first.simulationId.localeCompare(
+    second.simulationId
+  )
+
+  if (simulationCompare !== 0) {
+    return simulationCompare
+  }
+
+  const phaseCompare =
+    getBenchmarkEvaluationPhaseSortOrder(first.targetRunPhase) -
+    getBenchmarkEvaluationPhaseSortOrder(second.targetRunPhase)
+
+  if (phaseCompare !== 0) {
+    return phaseCompare
+  }
+
+  const turnCompare = (first.turnNumber ?? 0) - (second.turnNumber ?? 0)
+
+  if (turnCompare !== 0) {
+    return turnCompare
+  }
+
+  return second.attemptNumber - first.attemptNumber
+}
+
+function getBenchmarkEvaluationPhaseSortOrder(
+  phase: BenchmarkEvaluationRunPhase
+) {
+  return phase === "opening_hand" ? 0 : 1
 }
 
 function isEligibleBenchmarkEvaluationTargetRun(
