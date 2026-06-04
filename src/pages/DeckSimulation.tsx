@@ -51,6 +51,7 @@ import type {
   CreateTurnLlmRunResponse,
   DeckCard,
   PublicBenchmarkExportV1,
+  PublicBenchmarkFailedEvaluation,
   PublicBenchmarkMetadata,
   PublicBenchmarkSimulationIndexEntry,
   PublicSimulationExportV1,
@@ -121,6 +122,8 @@ import {
 } from "@/lib/simulation-result-tool-labels"
 import {
   getPublicBenchmarkIndexJsonUrl,
+  getPublicBenchmarkFailedEvaluationsJsonUrl,
+  getPublicBenchmarkFailedEvaluationsLoadFailureMessage,
   getPublicBenchmarkLoadFailureMessage,
   getPublicBenchmarkSimulationJsonUrl,
   getPublicBenchmarkSimulationLoadFailureMessage,
@@ -896,6 +899,8 @@ export function PublicSimulationPage({
   )
 }
 
+type PublicBenchmarkSelectedPanel = "simulation" | "failed-evaluations"
+
 export function PublicBenchmarkPage({
   benchmarkId,
   bundled = false,
@@ -912,11 +917,26 @@ export function PublicBenchmarkPage({
   const [selectedSimulationId, setSelectedSimulationId] = useState(() =>
     getPublicBenchmarkSimulationIdFromSearch(window.location.search)
   )
+  const [selectedBenchmarkPanel, setSelectedBenchmarkPanel] =
+    useState<PublicBenchmarkSelectedPanel>(() =>
+      getPublicBenchmarkSelectedPanelFromSearch(window.location.search)
+    )
   const [requestedTimelineTurn, setRequestedTimelineTurn] = useState(() =>
     getSimulationTimelineTurnFromCurrentSearch()
   )
+  const [requestedTimelineRunId, setRequestedTimelineRunId] = useState(() =>
+    getPublicBenchmarkRunIdFromSearch(window.location.search)
+  )
   const [publicSimulation, setPublicSimulation] =
     useState<PublicSimulationExportV1 | null>(null)
+  const [failedEvaluations, setFailedEvaluations] = useState<
+    PublicBenchmarkFailedEvaluation[] | null
+  >(null)
+  const [isLoadingFailedEvaluations, setIsLoadingFailedEvaluations] =
+    useState(false)
+  const [failedEvaluationsLoadError, setFailedEvaluationsLoadError] = useState<
+    string | null
+  >(null)
   const [isLoadingSimulation, setIsLoadingSimulation] = useState(false)
   const [simulationLoadError, setSimulationLoadError] = useState<string | null>(
     null
@@ -948,6 +968,9 @@ export function PublicBenchmarkPage({
     setBenchmarkLoadError(null)
     setSimulationLoadError(null)
     setPublicSimulation(null)
+    setFailedEvaluations(null)
+    setFailedEvaluationsLoadError(null)
+    setIsLoadingFailedEvaluations(false)
 
     try {
       const response = await fetch(
@@ -989,12 +1012,64 @@ export function PublicBenchmarkPage({
     }
   }, [benchmarkId, bundled])
 
+  const loadFailedEvaluations = useCallback(async () => {
+    setIsLoadingFailedEvaluations(true)
+    setFailedEvaluationsLoadError(null)
+
+    try {
+      const response = await fetch(
+        getPublicBenchmarkFailedEvaluationsJsonUrl({
+          benchmarkId,
+          bundled,
+        }),
+        {
+          credentials: "omit",
+        }
+      )
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          setFailedEvaluations([])
+          return
+        }
+
+        setFailedEvaluationsLoadError(
+          "Public benchmark failed evaluations could not be loaded."
+        )
+        setFailedEvaluations(null)
+        return
+      }
+
+      const data = await response.json()
+
+      if (!isPublicBenchmarkFailedEvaluationsExport(data)) {
+        setFailedEvaluationsLoadError(
+          "Public benchmark failed evaluations file is not in the expected format."
+        )
+        setFailedEvaluations(null)
+        return
+      }
+
+      setFailedEvaluations(data)
+    } catch (error) {
+      setFailedEvaluationsLoadError(
+        getPublicBenchmarkFailedEvaluationsLoadFailureMessage(error)
+      )
+      setFailedEvaluations(null)
+    } finally {
+      setIsLoadingFailedEvaluations(false)
+    }
+  }, [benchmarkId, bundled])
+
   const loadSelectedSimulation = useCallback(async () => {
     const loadId = selectedSimulationLoadIdRef.current + 1
     selectedSimulationLoadIdRef.current = loadId
     const isCurrentLoad = () => selectedSimulationLoadIdRef.current === loadId
 
-    if (!selectedSimulationEntry) {
+    if (
+      selectedBenchmarkPanel !== "simulation" ||
+      !selectedSimulationEntry
+    ) {
       setPublicSimulation(null)
       setIsLoadingSimulation(false)
       setSimulationLoadError(null)
@@ -1063,18 +1138,32 @@ export function PublicBenchmarkPage({
         setIsLoadingSimulation(false)
       }
     }
-  }, [benchmarkId, bundled, selectedSimulationEntry])
+  }, [benchmarkId, bundled, selectedBenchmarkPanel, selectedSimulationEntry])
 
   useEffect(() => {
     void loadBenchmark()
   }, [loadBenchmark])
 
   useEffect(() => {
+    if (!benchmarkIndex) {
+      return
+    }
+
+    void loadFailedEvaluations()
+  }, [benchmarkIndex, loadFailedEvaluations])
+
+  useEffect(() => {
     function handlePopState() {
       setSelectedSimulationId(
         getPublicBenchmarkSimulationIdFromSearch(window.location.search)
       )
+      setSelectedBenchmarkPanel(
+        getPublicBenchmarkSelectedPanelFromSearch(window.location.search)
+      )
       setRequestedTimelineTurn(getSimulationTimelineTurnFromCurrentSearch())
+      setRequestedTimelineRunId(
+        getPublicBenchmarkRunIdFromSearch(window.location.search)
+      )
     }
 
     window.addEventListener("popstate", handlePopState)
@@ -1085,6 +1174,10 @@ export function PublicBenchmarkPage({
   }, [])
 
   useEffect(() => {
+    if (selectedBenchmarkPanel !== "simulation") {
+      return
+    }
+
     if (!selectedSimulationEntry) {
       return
     }
@@ -1095,19 +1188,53 @@ export function PublicBenchmarkPage({
         selectedSimulationEntry.simulationId
       )
     }
-  }, [selectedSimulationEntry, selectedSimulationId])
+  }, [selectedBenchmarkPanel, selectedSimulationEntry, selectedSimulationId])
 
   useEffect(() => {
     void loadSelectedSimulation()
   }, [loadSelectedSimulation])
 
   function handleSelectSimulation(simulationId: string) {
-    if (simulationId === selectedSimulationEntry?.simulationId) {
+    if (
+      selectedBenchmarkPanel === "simulation" &&
+      simulationId === selectedSimulationEntry?.simulationId
+    ) {
       return
     }
 
+    setSelectedBenchmarkPanel("simulation")
     setSelectedSimulationId(simulationId)
+    setRequestedTimelineTurn(null)
+    setRequestedTimelineRunId("")
     pushPublicBenchmarkSimulationSearch(simulationId)
+  }
+
+  function handleSelectFailedEvaluations() {
+    if (selectedBenchmarkPanel === "failed-evaluations") {
+      return
+    }
+
+    setSelectedBenchmarkPanel("failed-evaluations")
+    setRequestedTimelineRunId("")
+    pushPublicBenchmarkFailedEvaluationsSearch()
+  }
+
+  function handleJumpToFailedEvaluation(
+    evaluation: PublicBenchmarkFailedEvaluation
+  ) {
+    const turnNumber = getPublicBenchmarkFailedEvaluationTimelineTurn(
+      evaluation
+    )
+
+    setSelectedBenchmarkPanel("simulation")
+    setSelectedSimulationId(evaluation.simulationId)
+    setRequestedTimelineTurn(turnNumber)
+    setRequestedTimelineRunId(evaluation.targetLlmRunId)
+    pushPublicBenchmarkRunSearch({
+      runId: evaluation.targetLlmRunId,
+      simulationId: evaluation.simulationId,
+      turnNumber,
+    })
   }
 
   function handleTimelineTurnSelected(
@@ -1115,6 +1242,7 @@ export function PublicBenchmarkPage({
     options?: SimulationTimelineTurnSearchUpdateOptions
   ) {
     setRequestedTimelineTurn(turnNumber)
+    setRequestedTimelineRunId("")
     updateSimulationTimelineTurnSearch(
       turnNumber,
       options?.historyMode ?? "push"
@@ -1172,6 +1300,33 @@ export function PublicBenchmarkPage({
                 aria-label="Benchmark simulations"
               >
                 <div className="px-2 py-2">
+                  <section className="grid gap-1">
+                    <button
+                      className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-medium transition-colors ${
+                        selectedBenchmarkPanel === "failed-evaluations"
+                          ? "bg-accent text-accent-foreground"
+                          : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+                      }`}
+                      type="button"
+                      aria-pressed={
+                        selectedBenchmarkPanel === "failed-evaluations"
+                      }
+                      onClick={handleSelectFailedEvaluations}
+                    >
+                      <span className="min-w-0 flex-1 truncate">
+                        Failed runs
+                      </span>
+                      {failedEvaluations ? (
+                        <span className="ml-2 shrink-0 rounded-full border border-border bg-background/35 px-2 py-0.5 text-xs text-muted-foreground">
+                          {failedEvaluations.length}
+                        </span>
+                      ) : isLoadingFailedEvaluations ? (
+                        <span className="ml-2 shrink-0 text-xs text-muted-foreground">
+                          ...
+                        </span>
+                      ) : null}
+                    </button>
+                  </section>
                   {simulationGroups.map((group) => (
                     <section className="grid gap-1" key={group.deckId}>
                       <h2
@@ -1183,8 +1338,9 @@ export function PublicBenchmarkPage({
                       <ul className="grid gap-1">
                         {group.simulations.map((simulation) => {
                           const isSelected =
+                            selectedBenchmarkPanel === "simulation" &&
                             selectedSimulationEntry?.simulationId ===
-                            simulation.simulationId
+                              simulation.simulationId
 
                           return (
                             <li key={simulation.simulationId}>
@@ -1219,7 +1375,15 @@ export function PublicBenchmarkPage({
             </aside>
 
             <section className="h-full min-h-0 min-w-0 overflow-hidden">
-              {isLoadingSimulation ? (
+              {selectedBenchmarkPanel === "failed-evaluations" ? (
+                <PublicBenchmarkFailedEvaluationsPanel
+                  failedEvaluations={failedEvaluations}
+                  isLoading={isLoadingFailedEvaluations}
+                  loadError={failedEvaluationsLoadError}
+                  onJumpToEvaluation={handleJumpToFailedEvaluation}
+                  onReload={() => void loadFailedEvaluations()}
+                />
+              ) : isLoadingSimulation ? (
                 <div className="simulation-scrollbar h-full min-h-0 overflow-y-auto p-5">
                   <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
                     Loading public benchmark simulation...
@@ -1266,6 +1430,7 @@ export function PublicBenchmarkPage({
                   onUpgradeUsage={() => {}}
                   onTimelineTurnSelected={handleTimelineTurnSelected}
                   readOnly={true}
+                  requestedTimelineRunId={requestedTimelineRunId}
                   requestedTimelineTurn={requestedTimelineTurn}
                   showBenchmarkEvaluations={true}
                   showRunCost={false}
@@ -1280,6 +1445,124 @@ export function PublicBenchmarkPage({
         ) : null}
       </section>
     </main>
+  )
+}
+
+function PublicBenchmarkFailedEvaluationsPanel({
+  failedEvaluations,
+  isLoading,
+  loadError,
+  onJumpToEvaluation,
+  onReload,
+}: {
+  failedEvaluations: PublicBenchmarkFailedEvaluation[] | null
+  isLoading: boolean
+  loadError: string | null
+  onJumpToEvaluation: (evaluation: PublicBenchmarkFailedEvaluation) => void
+  onReload: () => void
+}) {
+  return (
+    <div className="simulation-scrollbar h-full min-h-0 overflow-y-auto p-5">
+      <section className="mx-auto grid w-full max-w-5xl gap-4">
+        <div className="grid gap-1">
+          <h2 className="text-lg font-semibold text-foreground">
+            Failed runs
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Legal or strategic failures sorted by score.
+          </p>
+        </div>
+
+        {loadError ? (
+          <div className="flex flex-col gap-3 rounded-md border border-border bg-background/35 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-destructive">{loadError}</p>
+            <Button type="button" variant="outline" onClick={onReload}>
+              <RefreshCw data-icon="inline-start" />
+              Try again
+            </Button>
+          </div>
+        ) : isLoading && failedEvaluations === null ? (
+          <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+            Loading failed evaluations...
+          </p>
+        ) : failedEvaluations && failedEvaluations.length > 0 ? (
+          <div className="grid gap-3">
+            {failedEvaluations.map((evaluation) => (
+              <PublicBenchmarkFailedEvaluationCard
+                key={`${evaluation.simulationId}:${evaluation.targetLlmRunId}`}
+                evaluation={evaluation}
+                onJump={() => onJumpToEvaluation(evaluation)}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+            No legal or strategic evaluation failures were exported for this
+            benchmark.
+          </p>
+        )}
+      </section>
+    </div>
+  )
+}
+
+function PublicBenchmarkFailedEvaluationCard({
+  evaluation,
+  onJump,
+}: {
+  evaluation: PublicBenchmarkFailedEvaluation
+  onJump: () => void
+}) {
+  return (
+    <article className="grid gap-3 rounded-md border border-border bg-background/35 px-4 py-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-foreground">
+            {evaluation.deckName} / Sim {evaluation.simulationIndex} /{" "}
+            {evaluation.resultLabel}
+          </p>
+          <p className="mt-1 text-xs break-words text-muted-foreground">
+            {evaluation.simulationId}
+          </p>
+        </div>
+        <button
+          type="button"
+          className="inline-flex w-fit shrink-0 items-center gap-1 rounded-md border border-sky-300/35 bg-sky-400/10 px-2.5 py-1.5 text-xs font-medium text-sky-100 transition-colors hover:bg-sky-400/20 focus-visible:border-sky-300/50 focus-visible:ring-3 focus-visible:ring-sky-300/40 focus-visible:outline-none"
+          onClick={onJump}
+        >
+          <Eye className="size-3.5" aria-hidden />
+          View run
+        </button>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-3">
+        <BenchmarkEvaluationPassTile
+          label="Legal"
+          value={evaluation.legalPass}
+        />
+        <BenchmarkEvaluationPassTile
+          label="Strategic"
+          value={evaluation.strategicPass}
+        />
+        <div className="rounded-md border border-border bg-black/20 px-3 py-2">
+          <p className="text-xs text-muted-foreground">Quality</p>
+          <p className="mt-1 text-lg font-semibold text-foreground">
+            {formatBenchmarkEvaluationScore(evaluation.simulationQualityScore)}
+          </p>
+        </div>
+      </div>
+      <BenchmarkEvaluationTextValue
+        label="Quality score reasoning"
+        value={evaluation.simulationQualityScoreReasoning}
+      />
+      <BenchmarkEvaluationIssueList
+        label="Illegal actions"
+        values={evaluation.illegalActions}
+      />
+      <BenchmarkEvaluationIssueList
+        label="Strategic mistakes"
+        values={evaluation.strategicMistakes}
+      />
+    </article>
   )
 }
 
@@ -2854,6 +3137,7 @@ function SimulationDetails({
   readOnly = false,
   resultsStreamUrl,
   resultsStreamWithCredentials = true,
+  requestedTimelineRunId = null,
   requestedTimelineTurn = null,
   showBenchmarkEvaluations = false,
   showRunCost,
@@ -2882,6 +3166,7 @@ function SimulationDetails({
   readOnly?: boolean
   resultsStreamUrl?: string
   resultsStreamWithCredentials?: boolean
+  requestedTimelineRunId?: string | null
   requestedTimelineTurn?: number | null
   showBenchmarkEvaluations?: boolean
   showRunCost: boolean
@@ -3445,6 +3730,7 @@ function SimulationDetails({
           onUpgradeUsage={onUpgradeUsage}
           openingHandRunError={openingHandRunError}
           readOnly={readOnly}
+          requestedTimelineRunId={requestedTimelineRunId}
           requestedTimelineTurn={requestedTimelineTurn}
           resultsError={resultsError}
           resultsInfo={resultsInfo}
@@ -3566,6 +3852,7 @@ function SimulationResultsPanel({
   onUpgradeUsage,
   openingHandRunError,
   readOnly,
+  requestedTimelineRunId,
   requestedTimelineTurn,
   resultsError,
   resultsInfo,
@@ -3613,6 +3900,7 @@ function SimulationResultsPanel({
   onUpgradeUsage: () => void
   openingHandRunError: string | null
   readOnly: boolean
+  requestedTimelineRunId: string | null
   requestedTimelineTurn: number | null
   resultsError: string | null
   resultsInfo: SimulationResultsInfo
@@ -4065,6 +4353,14 @@ function SimulationResultsPanel({
   }, [requestedTimelineTurn])
 
   useEffect(() => {
+    if (!requestedTimelineRunId) {
+      return
+    }
+
+    setSelectedTimelineStepIdPreference(null)
+  }, [requestedTimelineRunId])
+
+  useEffect(() => {
     if (demoMode && demoHasStarted && demoCoachMarkTargetStep) {
       return
     }
@@ -4119,12 +4415,15 @@ function SimulationResultsPanel({
   const runsByTimelineStepId = new Map(
     runs.map((run) => [getSimulationTimelineRunStepId(run.llmRunId), run])
   )
+  const requestedTimelineStepId = requestedTimelineRunId
+    ? getSimulationTimelineRunStepId(requestedTimelineRunId)
+    : null
   const timelineDefaultSelection = isDemoIntroOverlayVisible
     ? "latest"
     : defaultTimelineSelection
   const selectedTimelineStepId = resolveSimulationResultsTimelineSelection(
     timelineSteps,
-    selectedTimelineStepIdPreference,
+    requestedTimelineStepId ?? selectedTimelineStepIdPreference,
     null,
     timelineDefaultSelection,
     requestedTimelineTurn
@@ -4891,11 +5190,11 @@ function BenchmarkRunEvaluationCard({
   return (
     <article
       aria-label="Benchmark evaluation"
-      className="grid gap-3 rounded-md border border-sky-300/25 bg-sky-400/10 px-3 py-3"
+      className="grid gap-3 rounded-md border border-border bg-background/35 px-3 py-3"
     >
       <div className="flex min-w-0 items-center gap-2">
         <ClipboardCheck
-          className="size-4 shrink-0 text-sky-300"
+          className="size-4 shrink-0 text-muted-foreground"
           aria-hidden
         />
         <h3 className="text-sm font-semibold text-foreground">
@@ -5911,6 +6210,46 @@ function isPublicBenchmarkExportV1(
   )
 }
 
+function isPublicBenchmarkFailedEvaluationsExport(
+  value: unknown
+): value is PublicBenchmarkFailedEvaluation[] {
+  return Array.isArray(value) && value.every(isPublicBenchmarkFailedEvaluation)
+}
+
+function isPublicBenchmarkFailedEvaluation(
+  value: unknown
+): value is PublicBenchmarkFailedEvaluation {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false
+  }
+
+  const record = value as Record<string, unknown>
+
+  return (
+    typeof record.simulationId === "string" &&
+    typeof record.deckId === "string" &&
+    typeof record.deckName === "string" &&
+    Number.isInteger(record.deckIndex) &&
+    Number.isInteger(record.simulationIndex) &&
+    typeof record.seed === "string" &&
+    typeof record.filePath === "string" &&
+    typeof record.targetLlmRunId === "string" &&
+    (record.targetRunPhase === "opening_hand" ||
+      record.targetRunPhase === "turn") &&
+    (record.turnNumber === null ||
+      (typeof record.turnNumber === "number" &&
+        Number.isInteger(record.turnNumber) &&
+        record.turnNumber >= 0)) &&
+    typeof record.resultLabel === "string" &&
+    isNullableBoolean(record.legalPass) &&
+    isNullableBoolean(record.strategicPass) &&
+    isNullablePublicBenchmarkNumber(record.simulationQualityScore) &&
+    isNullableString(record.simulationQualityScoreReasoning) &&
+    isStringArray(record.illegalActions) &&
+    isStringArray(record.strategicMistakes)
+  )
+}
+
 function isPublicBenchmarkMetadata(
   value: unknown
 ): value is PublicBenchmarkMetadata {
@@ -6015,6 +6354,14 @@ function isNullableString(value: unknown) {
   return value === null || typeof value === "string"
 }
 
+function isNullableBoolean(value: unknown) {
+  return value === null || typeof value === "boolean"
+}
+
+function isStringArray(value: unknown) {
+  return Array.isArray(value) && value.every((item) => typeof item === "string")
+}
+
 function isNullablePublicBenchmarkNumber(value: unknown) {
   return value === null || isPublicBenchmarkNumber(value)
 }
@@ -6074,6 +6421,30 @@ function getPublicBenchmarkSimulationIdFromSearch(search: string) {
   return simulationId || ""
 }
 
+function getPublicBenchmarkRunIdFromSearch(search: string) {
+  const searchParams = new URLSearchParams(search)
+  const runId = searchParams.get("run")?.trim()
+
+  return runId || ""
+}
+
+function getPublicBenchmarkSelectedPanelFromSearch(
+  search: string
+): PublicBenchmarkSelectedPanel {
+  const searchParams = new URLSearchParams(search)
+
+  if (searchParams.get("view") === "failed-evaluations") {
+    return "failed-evaluations"
+  }
+
+  const hasSimulationSelection =
+    Boolean(searchParams.get("simulation")?.trim()) ||
+    Boolean(searchParams.get("run")?.trim()) ||
+    Boolean(searchParams.get("turn")?.trim())
+
+  return hasSimulationSelection ? "simulation" : "failed-evaluations"
+}
+
 function getSimulationTimelineTurnFromCurrentSearch() {
   return getSimulationResultsTimelineTurnFromSearchParams(
     new URLSearchParams(window.location.search)
@@ -6087,6 +6458,8 @@ function updateSimulationTimelineTurnSearch(
   const url = new URL(window.location.href)
 
   url.searchParams.set("turn", String(turnNumber))
+  url.searchParams.delete("run")
+  url.searchParams.delete("view")
   updateWindowHistoryUrl(url, mode)
 }
 
@@ -6167,6 +6540,34 @@ function replacePublicBenchmarkSimulationSearch(simulationId: string) {
   updatePublicBenchmarkSimulationSearch(simulationId, "replace")
 }
 
+function pushPublicBenchmarkFailedEvaluationsSearch() {
+  const url = new URL(window.location.href)
+
+  url.searchParams.set("view", "failed-evaluations")
+  url.searchParams.delete("simulation")
+  url.searchParams.delete("run")
+  url.searchParams.delete("turn")
+  updateWindowHistoryUrl(url, "push")
+}
+
+function pushPublicBenchmarkRunSearch({
+  runId,
+  simulationId,
+  turnNumber,
+}: {
+  runId: string
+  simulationId: string
+  turnNumber: number
+}) {
+  const url = new URL(window.location.href)
+
+  url.searchParams.set("simulation", simulationId)
+  url.searchParams.set("run", runId)
+  url.searchParams.set("turn", String(turnNumber))
+  url.searchParams.delete("view")
+  updateWindowHistoryUrl(url, "push")
+}
+
 function updatePublicBenchmarkSimulationSearch(
   simulationId: string,
   mode: "push" | "replace"
@@ -6174,7 +6575,18 @@ function updatePublicBenchmarkSimulationSearch(
   const url = new URL(window.location.href)
 
   url.searchParams.set("simulation", simulationId)
+  url.searchParams.delete("run")
+  url.searchParams.delete("turn")
+  url.searchParams.delete("view")
   updateWindowHistoryUrl(url, mode)
+}
+
+function getPublicBenchmarkFailedEvaluationTimelineTurn(
+  evaluation: PublicBenchmarkFailedEvaluation
+) {
+  return evaluation.targetRunPhase === "opening_hand"
+    ? 0
+    : (evaluation.turnNumber ?? 0)
 }
 
 function updateWindowHistoryUrl(url: URL, mode: "push" | "replace") {

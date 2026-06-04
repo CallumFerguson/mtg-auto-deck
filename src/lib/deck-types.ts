@@ -324,6 +324,20 @@ export type PublicBenchmarkSimulationIndexEntry = {
   filePath: string
 }
 
+export type PublicBenchmarkFailedEvaluation = BenchmarkSimulationRunEvaluation & {
+  simulationId: string
+  deckId: string
+  deckName: string
+  deckIndex: number
+  simulationIndex: number
+  seed: string
+  filePath: string
+  targetLlmRunId: string
+  targetRunPhase: "opening_hand" | "turn"
+  turnNumber: number | null
+  resultLabel: string
+}
+
 export type PublicBenchmarkExportV1 = {
   schemaVersion: 1
   exportedAt: string

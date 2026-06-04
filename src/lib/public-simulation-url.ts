@@ -37,6 +37,22 @@ export function getPublicBenchmarkIndexJsonUrl({
   return `${getPublicDataBaseUrl()}/benchmarks/${encodedBenchmarkId}/index.json`
 }
 
+export function getPublicBenchmarkFailedEvaluationsJsonUrl({
+  benchmarkId,
+  bundled,
+}: {
+  benchmarkId: string
+  bundled: boolean
+}) {
+  const encodedBenchmarkId = encodeURIComponent(benchmarkId)
+
+  if (bundled) {
+    return `${BUNDLED_PUBLIC_BENCHMARKS_BASE_PATH}/${encodedBenchmarkId}/failed-evaluations.json`
+  }
+
+  return `${getPublicDataBaseUrl()}/benchmarks/${encodedBenchmarkId}/failed-evaluations.json`
+}
+
 export function getPublicBenchmarkSimulationJsonUrl({
   benchmarkId,
   bundled,
@@ -82,6 +98,15 @@ export function getPublicBenchmarkSimulationLoadFailureMessage(error: unknown) {
     error.message === MISSING_PUBLIC_DATA_BASE_URL_MESSAGE
     ? error.message
     : "Public benchmark simulation could not be loaded."
+}
+
+export function getPublicBenchmarkFailedEvaluationsLoadFailureMessage(
+  error: unknown
+) {
+  return error instanceof Error &&
+    error.message === MISSING_PUBLIC_DATA_BASE_URL_MESSAGE
+    ? error.message
+    : "Public benchmark failed evaluations could not be loaded."
 }
 
 function getPublicDataBaseUrl() {

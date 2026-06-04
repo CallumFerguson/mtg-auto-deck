@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import {
   buildBenchmarkExportAverageEvaluationScoreBySimulation,
+  buildBenchmarkExportFailedEvaluations,
   buildBenchmarkExportSimulationWithEvaluations,
   buildBenchmarkSimulationIndexEntry,
   getBenchmarkExportSimulationRunIds,
@@ -355,6 +356,193 @@ test("leaves simulation exports undecorated when no benchmark evaluations exist"
   assert.equal("benchmarkEvaluation" in turnRun, false)
 })
 
+test("builds failed benchmark evaluations with run context sorted by score", () => {
+  const failedEvaluations = buildBenchmarkExportFailedEvaluations({
+    latestEvaluations: [
+      createEvaluation({
+        targetLlmRunId: "turn-low-score",
+        legalPass: true,
+        strategicPass: false,
+        simulationQualityScore: 2,
+        simulationQualityScoreReasoning: "Missed the winning attack.",
+        strategicMistakes: ["Held back lethal damage."],
+        costUsd: 0.02,
+      }),
+      createEvaluation({
+        targetLlmRunId: "opening-null-score",
+        legalPass: false,
+        strategicPass: true,
+        simulationQualityScore: null,
+        simulationQualityScoreReasoning: "Opening hand was illegal.",
+        illegalActions: ["Kept eight cards."],
+        costUsd: 0.01,
+      }),
+      createEvaluation({
+        targetLlmRunId: "turn-mid-score",
+        legalPass: false,
+        strategicPass: false,
+        simulationQualityScore: 6,
+        simulationQualityScoreReasoning: "Illegal spell and weak sequencing.",
+        illegalActions: ["Cast a spell without enough mana."],
+        strategicMistakes: ["Sequenced draw after combat."],
+      }),
+      createEvaluation({
+        targetLlmRunId: "turn-passing",
+        legalPass: true,
+        strategicPass: true,
+        simulationQualityScore: 1,
+      }),
+    ],
+    simulationFiles: [
+      createBenchmarkSimulationFile({
+        childSimulation: createChildSimulation({
+          deckId: "deck-two",
+          deckIndex: 1,
+          deckName: "Deck Two",
+          simulationId: "simulation-two",
+          simulationIndex: 0,
+          seed: "seed-two",
+        }),
+        filePath: "benchmark-id/simulations/simulation-two.json",
+        value: createBenchmarkSimulationExport({
+          turnLlmRuns: [
+            createBenchmarkSimulationRun({
+              llmRunId: "turn-mid-score",
+              attemptNumber: 1,
+              turnNumber: 2,
+            }),
+          ],
+        }),
+      }),
+      createBenchmarkSimulationFile({
+        childSimulation: createChildSimulation(),
+        value: createBenchmarkSimulationExport({
+          openingHandLlmRuns: [
+            createBenchmarkSimulationRun({
+              llmRunId: "opening-null-score",
+              attemptNumber: 1,
+            }),
+          ],
+          turnLlmRuns: [
+            createBenchmarkSimulationRun({
+              llmRunId: "turn-low-score",
+              attemptNumber: 3,
+              turnNumber: 1,
+            }),
+            createBenchmarkSimulationRun({
+              llmRunId: "turn-passing",
+              attemptNumber: 1,
+              turnNumber: 2,
+            }),
+          ],
+        }),
+      }),
+    ],
+  })
+
+  assert.deepEqual(
+    failedEvaluations.map((evaluation) => evaluation.targetLlmRunId),
+    ["turn-low-score", "turn-mid-score", "opening-null-score"]
+  )
+  assert.deepEqual(failedEvaluations[0], {
+    simulationId: "simulation-one",
+    deckId: "deck-one",
+    deckName: "Deck One",
+    deckIndex: 0,
+    simulationIndex: 1,
+    seed: "seed-one",
+    filePath: "benchmark-id/simulations/simulation-one.json",
+    targetLlmRunId: "turn-low-score",
+    targetRunPhase: "turn",
+    turnNumber: 1,
+    resultLabel: "Turn 1",
+    legalPass: true,
+    strategicPass: false,
+    simulationQualityScore: 2,
+    simulationQualityScoreReasoning: "Missed the winning attack.",
+    illegalActions: [],
+    strategicMistakes: ["Held back lethal damage."],
+  })
+
+  const exportedEvaluation = failedEvaluations[0] as Record<string, unknown>
+
+  assert.equal("attemptNumber" in exportedEvaluation, false)
+  assert.equal("id" in exportedEvaluation, false)
+  assert.equal("llmRunId" in exportedEvaluation, false)
+  assert.equal("model" in exportedEvaluation, false)
+  assert.equal("costUsd" in exportedEvaluation, false)
+})
+
+test("omits incomplete and superseded failed benchmark evaluations from failed export", () => {
+  const failedEvaluations = buildBenchmarkExportFailedEvaluations({
+    latestEvaluations: [
+      createEvaluation({
+        targetLlmRunId: "active-run",
+        status: "streaming",
+        legalPass: false,
+        strategicPass: false,
+      }),
+      createEvaluation({
+        targetLlmRunId: "result-failed-run",
+        resultStatus: "failed",
+        legalPass: false,
+      }),
+      createEvaluation({
+        targetLlmRunId: "superseded-run",
+        attemptNumber: 1,
+        legalPass: false,
+        strategicPass: false,
+        simulationQualityScore: 1,
+      }),
+      createEvaluation({
+        targetLlmRunId: "superseded-run",
+        attemptNumber: 2,
+        status: "failed",
+        legalPass: false,
+        strategicPass: false,
+        simulationQualityScore: 0,
+      }),
+    ],
+    simulationFiles: [
+      createBenchmarkSimulationFile({
+        value: createBenchmarkSimulationExport({
+          turnLlmRuns: [
+            createBenchmarkSimulationRun({ llmRunId: "active-run" }),
+            createBenchmarkSimulationRun({ llmRunId: "result-failed-run" }),
+            createBenchmarkSimulationRun({ llmRunId: "superseded-run" }),
+          ],
+        }),
+      }),
+    ],
+  })
+
+  assert.deepEqual(failedEvaluations, [])
+})
+
+test("builds an empty failed benchmark evaluations export when no evaluations fail", () => {
+  const failedEvaluations = buildBenchmarkExportFailedEvaluations({
+    latestEvaluations: [
+      createEvaluation({
+        targetLlmRunId: "passing-run",
+        legalPass: true,
+        strategicPass: true,
+        simulationQualityScore: 10,
+      }),
+    ],
+    simulationFiles: [
+      createBenchmarkSimulationFile({
+        value: createBenchmarkSimulationExport({
+          turnLlmRuns: [
+            createBenchmarkSimulationRun({ llmRunId: "passing-run" }),
+          ],
+        }),
+      }),
+    ],
+  })
+
+  assert.deepEqual(failedEvaluations, [])
+})
+
 function createTargetRun(
   overrides: Partial<BenchmarkEvaluationTargetRun> = {}
 ): BenchmarkEvaluationTargetRun {
@@ -371,6 +559,7 @@ function createTargetRun(
 type TestBenchmarkSimulationRun = {
   llmRunId: string
   attemptNumber: number
+  turnNumber?: number
   benchmarkEvaluation?: BenchmarkExportRunEvaluation
 }
 
@@ -399,6 +588,21 @@ function createBenchmarkSimulationRun(
   return {
     llmRunId: "run",
     attemptNumber: 1,
+    ...overrides,
+  }
+}
+
+function createBenchmarkSimulationFile(
+  overrides: Partial<{
+    childSimulation: BenchmarkChildSimulation
+    filePath: string
+    value: ReturnType<typeof createBenchmarkSimulationExport>
+  }> = {}
+) {
+  return {
+    childSimulation: createChildSimulation(),
+    filePath: "benchmark-id/simulations/simulation-one.json",
+    value: createBenchmarkSimulationExport(),
     ...overrides,
   }
 }

@@ -29,6 +29,20 @@ export type BenchmarkExportRunEvaluation = {
   strategicMistakes: string[]
 }
 
+export type BenchmarkExportFailedEvaluation = BenchmarkExportRunEvaluation & {
+  simulationId: string
+  deckId: string
+  deckName: string
+  deckIndex: number
+  simulationIndex: number
+  seed: string
+  filePath: string
+  targetLlmRunId: string
+  targetRunPhase: "opening_hand" | "turn"
+  turnNumber: number | null
+  resultLabel: string
+}
+
 type BenchmarkExportSimulationSummary = {
   status: SimulationStatus
   turnsToSimulate: number
@@ -37,6 +51,8 @@ type BenchmarkExportSimulationSummary = {
 
 type BenchmarkExportSimulationRun = {
   llmRunId: string
+  attemptNumber?: number
+  turnNumber?: number
   benchmarkEvaluation?: BenchmarkExportRunEvaluation
 }
 
@@ -45,6 +61,12 @@ type BenchmarkExportSimulationWithRuns = {
     openingHandLlmRuns: readonly BenchmarkExportSimulationRun[]
     turnLlmRuns: readonly BenchmarkExportSimulationRun[]
   }
+}
+
+type BenchmarkExportSimulationFileWithRuns = {
+  childSimulation: BenchmarkChildSimulation
+  filePath: string
+  value: BenchmarkExportSimulationWithRuns
 }
 
 export function buildBenchmarkExportAverageEvaluationScoreBySimulation({
@@ -170,6 +192,59 @@ export function buildBenchmarkExportSimulationWithEvaluations<
   } as T
 }
 
+export function buildBenchmarkExportFailedEvaluations({
+  latestEvaluations,
+  simulationFiles,
+}: {
+  latestEvaluations: readonly BenchmarkEvaluationLatestEvaluationSnapshot[]
+  simulationFiles: readonly BenchmarkExportSimulationFileWithRuns[]
+}): BenchmarkExportFailedEvaluation[] {
+  const latestEvaluationByTargetRunId =
+    buildLatestBenchmarkExportEvaluationByTargetRunId(latestEvaluations)
+  const failedEvaluations: BenchmarkExportFailedEvaluation[] = []
+
+  for (const simulationFile of simulationFiles) {
+    const openingHandRuns =
+      simulationFile.value.results.openingHandLlmRuns.map((run) => ({
+        run,
+        targetRunPhase: "opening_hand" as const,
+        turnNumber: null,
+      }))
+    const turnRuns = simulationFile.value.results.turnLlmRuns.map((run) => ({
+      run,
+      targetRunPhase: "turn" as const,
+      turnNumber: typeof run.turnNumber === "number" ? run.turnNumber : null,
+    }))
+
+    for (const { run, targetRunPhase, turnNumber } of [
+      ...openingHandRuns,
+      ...turnRuns,
+    ]) {
+      const evaluation = latestEvaluationByTargetRunId.get(run.llmRunId)
+
+      if (
+        !evaluation ||
+        !isCompletedBenchmarkExportEvaluation(evaluation) ||
+        !isFailedBenchmarkExportRunEvaluation(evaluation)
+      ) {
+        continue
+      }
+
+      failedEvaluations.push({
+        ...buildBenchmarkExportRunEvaluation(evaluation),
+        ...buildBenchmarkExportFailedEvaluationContext({
+          simulationFile,
+          targetRunPhase,
+          turnNumber,
+          run,
+        }),
+      })
+    }
+  }
+
+  return failedEvaluations.sort(compareBenchmarkExportFailedEvaluations)
+}
+
 export function buildBenchmarkSimulationIndexEntry({
   averageEvaluationScore,
   childSimulation,
@@ -194,6 +269,51 @@ export function buildBenchmarkSimulationIndexEntry({
     averageEvaluationScore,
     filePath,
   }
+}
+
+function buildBenchmarkExportFailedEvaluationContext({
+  simulationFile,
+  targetRunPhase,
+  turnNumber,
+  run,
+}: {
+  simulationFile: BenchmarkExportSimulationFileWithRuns
+  targetRunPhase: BenchmarkExportFailedEvaluation["targetRunPhase"]
+  turnNumber: number | null
+  run: BenchmarkExportSimulationRun
+}): Omit<BenchmarkExportFailedEvaluation, keyof BenchmarkExportRunEvaluation> {
+  const { childSimulation, filePath } = simulationFile
+
+  return {
+    simulationId: childSimulation.simulationId,
+    deckId: childSimulation.deckId,
+    deckName: childSimulation.deckName,
+    deckIndex: childSimulation.deckIndex,
+    simulationIndex: childSimulation.simulationIndex,
+    seed: childSimulation.seed,
+    filePath,
+    targetLlmRunId: run.llmRunId,
+    targetRunPhase,
+    turnNumber,
+    resultLabel: getBenchmarkExportRunResultLabel({
+      targetRunPhase,
+      turnNumber,
+    }),
+  }
+}
+
+function getBenchmarkExportRunResultLabel({
+  targetRunPhase,
+  turnNumber,
+}: {
+  targetRunPhase: BenchmarkExportFailedEvaluation["targetRunPhase"]
+  turnNumber: number | null
+}) {
+  if (targetRunPhase === "opening_hand") {
+    return "Opening hand"
+  }
+
+  return `Turn ${turnNumber ?? "?"}`
 }
 
 function buildLatestBenchmarkExportEvaluationByTargetRunId(
@@ -223,6 +343,19 @@ function buildLatestBenchmarkExportEvaluationByTargetRunId(
   return latestEvaluationByTargetRunId
 }
 
+function buildBenchmarkExportRunEvaluation(
+  evaluation: BenchmarkEvaluationLatestEvaluationSnapshot
+): BenchmarkExportRunEvaluation {
+  return {
+    legalPass: evaluation.legalPass,
+    strategicPass: evaluation.strategicPass,
+    simulationQualityScore: evaluation.simulationQualityScore,
+    simulationQualityScoreReasoning: evaluation.simulationQualityScoreReasoning,
+    illegalActions: evaluation.illegalActions,
+    strategicMistakes: evaluation.strategicMistakes,
+  }
+}
+
 function buildBenchmarkExportRunWithEvaluation(
   run: BenchmarkExportSimulationRun,
   latestEvaluationByTargetRunId: ReadonlyMap<
@@ -242,15 +375,7 @@ function buildBenchmarkExportRunWithEvaluation(
 
   return {
     ...run,
-    benchmarkEvaluation: {
-      legalPass: evaluation.legalPass,
-      strategicPass: evaluation.strategicPass,
-      simulationQualityScore: evaluation.simulationQualityScore,
-      simulationQualityScoreReasoning:
-        evaluation.simulationQualityScoreReasoning,
-      illegalActions: evaluation.illegalActions,
-      strategicMistakes: evaluation.strategicMistakes,
-    },
+    benchmarkEvaluation: buildBenchmarkExportRunEvaluation(evaluation),
   }
 }
 
@@ -261,6 +386,60 @@ function isCompletedBenchmarkExportEvaluation(
     evaluation.status === "completed" &&
     evaluation.resultStatus === "completed"
   )
+}
+
+function isFailedBenchmarkExportRunEvaluation(
+  evaluation: BenchmarkEvaluationLatestEvaluationSnapshot
+) {
+  return evaluation.legalPass === false || evaluation.strategicPass === false
+}
+
+function compareBenchmarkExportFailedEvaluations(
+  first: BenchmarkExportFailedEvaluation,
+  second: BenchmarkExportFailedEvaluation
+) {
+  const scoreCompare = compareNullableBenchmarkExportScores(
+    first.simulationQualityScore,
+    second.simulationQualityScore
+  )
+
+  if (scoreCompare !== 0) {
+    return scoreCompare
+  }
+
+  return (
+    first.deckIndex - second.deckIndex ||
+    first.simulationIndex - second.simulationIndex ||
+    getBenchmarkExportRunPhaseSortOrder(first.targetRunPhase) -
+      getBenchmarkExportRunPhaseSortOrder(second.targetRunPhase) ||
+    (first.turnNumber ?? 0) - (second.turnNumber ?? 0) ||
+    first.targetLlmRunId.localeCompare(second.targetLlmRunId)
+  )
+}
+
+function compareNullableBenchmarkExportScores(
+  firstScore: number | null,
+  secondScore: number | null
+) {
+  if (firstScore === null && secondScore === null) {
+    return 0
+  }
+
+  if (firstScore === null) {
+    return 1
+  }
+
+  if (secondScore === null) {
+    return -1
+  }
+
+  return firstScore - secondScore
+}
+
+function getBenchmarkExportRunPhaseSortOrder(
+  phase: BenchmarkExportFailedEvaluation["targetRunPhase"]
+) {
+  return phase === "opening_hand" ? 0 : 1
 }
 
 function isScoredBenchmarkExportEvaluation(
