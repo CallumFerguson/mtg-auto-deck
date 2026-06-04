@@ -53,6 +53,8 @@ import type {
   PublicBenchmarkExportV1,
   PublicBenchmarkFailedEvaluation,
   PublicBenchmarkMetadata,
+  PublicBenchmarkResultDeckMetrics,
+  PublicBenchmarkResultsExportV1,
   PublicBenchmarkSimulationIndexEntry,
   PublicSimulationExportV1,
   SavedSeed,
@@ -125,11 +127,18 @@ import {
   getPublicBenchmarkFailedEvaluationsJsonUrl,
   getPublicBenchmarkFailedEvaluationsLoadFailureMessage,
   getPublicBenchmarkLoadFailureMessage,
+  getPublicBenchmarkResultsJsonUrl,
+  getPublicBenchmarkResultsLoadFailureMessage,
   getPublicBenchmarkSimulationJsonUrl,
   getPublicBenchmarkSimulationLoadFailureMessage,
   getPublicSimulationJsonUrl,
   getPublicSimulationLoadFailureMessage,
 } from "@/lib/public-simulation-url"
+import {
+  getPublicBenchmarkSelectedPanelFromSearch,
+  isPublicBenchmarkResultsExportV1,
+  type PublicBenchmarkSelectedPanel,
+} from "@/lib/public-benchmark-results"
 import { useOptionalUsageLimits } from "@/lib/usage-limits"
 import {
   formatMinutesSeconds,
@@ -899,8 +908,6 @@ export function PublicSimulationPage({
   )
 }
 
-type PublicBenchmarkSelectedPanel = "simulation" | "failed-evaluations"
-
 export function PublicBenchmarkPage({
   benchmarkId,
   bundled = false,
@@ -931,6 +938,13 @@ export function PublicBenchmarkPage({
     useState<PublicSimulationExportV1 | null>(null)
   const [failedEvaluations, setFailedEvaluations] = useState<
     PublicBenchmarkFailedEvaluation[] | null
+  >(null)
+  const [benchmarkResults, setBenchmarkResults] =
+    useState<PublicBenchmarkResultsExportV1 | null>(null)
+  const [isLoadingBenchmarkResults, setIsLoadingBenchmarkResults] =
+    useState(false)
+  const [benchmarkResultsLoadError, setBenchmarkResultsLoadError] = useState<
+    string | null
   >(null)
   const [isLoadingFailedEvaluations, setIsLoadingFailedEvaluations] =
     useState(false)
@@ -968,6 +982,9 @@ export function PublicBenchmarkPage({
     setBenchmarkLoadError(null)
     setSimulationLoadError(null)
     setPublicSimulation(null)
+    setBenchmarkResults(null)
+    setBenchmarkResultsLoadError(null)
+    setIsLoadingBenchmarkResults(false)
     setFailedEvaluations(null)
     setFailedEvaluationsLoadError(null)
     setIsLoadingFailedEvaluations(false)
@@ -1009,6 +1026,55 @@ export function PublicBenchmarkPage({
       setBenchmarkIndex(null)
     } finally {
       setIsLoadingBenchmark(false)
+    }
+  }, [benchmarkId, bundled])
+
+  const loadBenchmarkResults = useCallback(async () => {
+    setIsLoadingBenchmarkResults(true)
+    setBenchmarkResultsLoadError(null)
+
+    try {
+      const response = await fetch(
+        getPublicBenchmarkResultsJsonUrl({
+          benchmarkId,
+          bundled,
+        }),
+        {
+          credentials: "omit",
+        }
+      )
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          setBenchmarkResults(null)
+          return
+        }
+
+        setBenchmarkResultsLoadError(
+          "Public benchmark results could not be loaded."
+        )
+        setBenchmarkResults(null)
+        return
+      }
+
+      const data = await response.json()
+
+      if (!isPublicBenchmarkResultsExportV1(data)) {
+        setBenchmarkResultsLoadError(
+          "Public benchmark results file is not in the expected format."
+        )
+        setBenchmarkResults(null)
+        return
+      }
+
+      setBenchmarkResults(data)
+    } catch (error) {
+      setBenchmarkResultsLoadError(
+        getPublicBenchmarkResultsLoadFailureMessage(error)
+      )
+      setBenchmarkResults(null)
+    } finally {
+      setIsLoadingBenchmarkResults(false)
     }
   }, [benchmarkId, bundled])
 
@@ -1066,10 +1132,7 @@ export function PublicBenchmarkPage({
     selectedSimulationLoadIdRef.current = loadId
     const isCurrentLoad = () => selectedSimulationLoadIdRef.current === loadId
 
-    if (
-      selectedBenchmarkPanel !== "simulation" ||
-      !selectedSimulationEntry
-    ) {
+    if (selectedBenchmarkPanel !== "simulation" || !selectedSimulationEntry) {
       setPublicSimulation(null)
       setIsLoadingSimulation(false)
       setSimulationLoadError(null)
@@ -1149,8 +1212,9 @@ export function PublicBenchmarkPage({
       return
     }
 
+    void loadBenchmarkResults()
     void loadFailedEvaluations()
-  }, [benchmarkIndex, loadFailedEvaluations])
+  }, [benchmarkIndex, loadBenchmarkResults, loadFailedEvaluations])
 
   useEffect(() => {
     function handlePopState() {
@@ -1219,12 +1283,22 @@ export function PublicBenchmarkPage({
     pushPublicBenchmarkFailedEvaluationsSearch()
   }
 
+  function handleSelectBenchmarkResults() {
+    if (selectedBenchmarkPanel === "results") {
+      return
+    }
+
+    setSelectedBenchmarkPanel("results")
+    setRequestedTimelineRunId("")
+    setRequestedTimelineTurn(null)
+    pushPublicBenchmarkResultsSearch()
+  }
+
   function handleJumpToFailedEvaluation(
     evaluation: PublicBenchmarkFailedEvaluation
   ) {
-    const turnNumber = getPublicBenchmarkFailedEvaluationTimelineTurn(
-      evaluation
-    )
+    const turnNumber =
+      getPublicBenchmarkFailedEvaluationTimelineTurn(evaluation)
 
     setSelectedBenchmarkPanel("simulation")
     setSelectedSimulationId(evaluation.simulationId)
@@ -1303,6 +1377,23 @@ export function PublicBenchmarkPage({
                   <section className="grid gap-1">
                     <button
                       className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-medium transition-colors ${
+                        selectedBenchmarkPanel === "results"
+                          ? "bg-accent text-accent-foreground"
+                          : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+                      }`}
+                      type="button"
+                      aria-pressed={selectedBenchmarkPanel === "results"}
+                      onClick={handleSelectBenchmarkResults}
+                    >
+                      <span className="min-w-0 flex-1 truncate">Results</span>
+                      {isLoadingBenchmarkResults ? (
+                        <span className="ml-2 shrink-0 text-xs text-muted-foreground">
+                          ...
+                        </span>
+                      ) : null}
+                    </button>
+                    <button
+                      className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-medium transition-colors ${
                         selectedBenchmarkPanel === "failed-evaluations"
                           ? "bg-accent text-accent-foreground"
                           : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
@@ -1375,7 +1466,14 @@ export function PublicBenchmarkPage({
             </aside>
 
             <section className="h-full min-h-0 min-w-0 overflow-hidden">
-              {selectedBenchmarkPanel === "failed-evaluations" ? (
+              {selectedBenchmarkPanel === "results" ? (
+                <PublicBenchmarkResultsPanel
+                  benchmarkResults={benchmarkResults}
+                  isLoading={isLoadingBenchmarkResults}
+                  loadError={benchmarkResultsLoadError}
+                  onReload={() => void loadBenchmarkResults()}
+                />
+              ) : selectedBenchmarkPanel === "failed-evaluations" ? (
                 <PublicBenchmarkFailedEvaluationsPanel
                   failedEvaluations={failedEvaluations}
                   isLoading={isLoadingFailedEvaluations}
@@ -1448,6 +1546,235 @@ export function PublicBenchmarkPage({
   )
 }
 
+function PublicBenchmarkResultsPanel({
+  benchmarkResults,
+  isLoading,
+  loadError,
+  onReload,
+}: {
+  benchmarkResults: PublicBenchmarkResultsExportV1 | null
+  isLoading: boolean
+  loadError: string | null
+  onReload: () => void
+}) {
+  const metrics = benchmarkResults?.resultMetrics ?? null
+
+  return (
+    <div className="simulation-scrollbar h-full min-h-0 overflow-y-auto p-5">
+      <section className="mx-auto grid w-full max-w-6xl gap-4">
+        <div className="grid gap-1">
+          <h2 className="text-lg font-semibold text-foreground">Results</h2>
+          {benchmarkResults ? (
+            <p className="text-sm text-muted-foreground">
+              Exported{" "}
+              {formatPublicBenchmarkExportDate(benchmarkResults.exportedAt)}
+            </p>
+          ) : null}
+        </div>
+
+        {loadError ? (
+          <div className="flex flex-col gap-3 rounded-md border border-border bg-background/35 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-destructive">{loadError}</p>
+            <Button type="button" variant="outline" onClick={onReload}>
+              <RefreshCw data-icon="inline-start" />
+              Try again
+            </Button>
+          </div>
+        ) : isLoading && !metrics ? (
+          <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+            Loading benchmark results...
+          </p>
+        ) : metrics ? (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <PublicBenchmarkResultMetricCard
+                label="MTG Goldfish Score"
+                value={formatPublicBenchmarkResultScore(
+                  metrics.mtgGoldfishScore
+                )}
+                tone="primary"
+              />
+              <PublicBenchmarkResultMetricCard
+                label="Opening score"
+                value={formatPublicBenchmarkResultScore(
+                  metrics.openingHandScore
+                )}
+              />
+              <PublicBenchmarkResultMetricCard
+                label="Turn score"
+                value={formatPublicBenchmarkResultScore(metrics.turnScore)}
+              />
+              <PublicBenchmarkResultMetricCard
+                label="Completion rate"
+                value={formatPublicBenchmarkResultPercent(
+                  metrics.completionRate
+                )}
+              />
+              <PublicBenchmarkResultMetricCard
+                label="Legal pass rate"
+                value={formatPublicBenchmarkResultPercent(
+                  metrics.legalPassRate
+                )}
+              />
+              <PublicBenchmarkResultMetricCard
+                label="Strategic pass rate"
+                value={formatPublicBenchmarkResultPercent(
+                  metrics.strategicPassRate
+                )}
+              />
+              <PublicBenchmarkResultMetricCard
+                label="Run cost"
+                value={formatPublicBenchmarkResultCost(metrics.totalRunCostUsd)}
+              />
+              <PublicBenchmarkResultMetricCard
+                label="Cost / attempted turn"
+                value={formatPublicBenchmarkResultCost(
+                  metrics.costPerAttemptedTurn
+                )}
+              />
+              <PublicBenchmarkResultMetricCard
+                label="Cost / completed turn"
+                value={formatPublicBenchmarkResultCost(
+                  metrics.costPerCompletedTurn
+                )}
+              />
+              <PublicBenchmarkResultMetricCard
+                label="Reasoning tokens / turn"
+                value={formatPublicBenchmarkResultTokenRate(
+                  metrics.reasoningTokensPerAttemptedTurn
+                )}
+              />
+              <PublicBenchmarkResultMetricCard
+                label="Total tokens / turn"
+                value={formatPublicBenchmarkResultTokenRate(
+                  metrics.totalTokensPerAttemptedTurn
+                )}
+              />
+              <PublicBenchmarkResultMetricCard
+                label="Cost / score point"
+                value={formatPublicBenchmarkResultCost(
+                  metrics.costPerGoldfishPoint
+                )}
+              />
+            </div>
+
+            <PublicBenchmarkResultsDeckTable decks={metrics.decks} />
+          </>
+        ) : (
+          <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+            Benchmark results were not exported for this benchmark.
+          </p>
+        )}
+      </section>
+    </div>
+  )
+}
+
+function PublicBenchmarkResultMetricCard({
+  label,
+  tone = "default",
+  value,
+}: {
+  label: string
+  tone?: "default" | "primary"
+  value: string
+}) {
+  return (
+    <div
+      className={`rounded-md border px-3 py-3 ${
+        tone === "primary"
+          ? "border-sky-300/35 bg-sky-400/10"
+          : "border-border bg-background/35"
+      }`}
+    >
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      <p className="mt-1 text-2xl font-semibold tracking-normal text-foreground tabular-nums">
+        {value}
+      </p>
+    </div>
+  )
+}
+
+function PublicBenchmarkResultsDeckTable({
+  decks,
+}: {
+  decks: PublicBenchmarkResultDeckMetrics[]
+}) {
+  if (decks.length === 0) {
+    return (
+      <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+        No per-deck result rows were exported.
+      </p>
+    )
+  }
+
+  return (
+    <section className="grid gap-2">
+      <h3 className="text-sm font-semibold text-foreground">Decks</h3>
+      <div className="overflow-hidden rounded-md border border-border bg-background/35">
+        <div className="simulation-scrollbar overflow-x-auto">
+          <table className="w-full min-w-[52rem] text-sm">
+            <thead className="border-b border-border bg-muted/25 text-xs text-muted-foreground uppercase">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium">Deck</th>
+                <th className="px-3 py-2 text-right font-medium">Score</th>
+                <th className="px-3 py-2 text-right font-medium">Completion</th>
+                <th className="px-3 py-2 text-right font-medium">Legal</th>
+                <th className="px-3 py-2 text-right font-medium">Strategic</th>
+                <th className="px-3 py-2 text-right font-medium">
+                  Cost / turn
+                </th>
+                <th className="px-3 py-2 text-right font-medium">
+                  Reasoning / turn
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/70">
+              {decks.map((deck) => (
+                <tr key={deck.deckId}>
+                  <td className="px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-foreground">
+                        {deck.deckName}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatPublicBenchmarkResultCount(
+                          deck.plannedSimulationCount
+                        )}{" "}
+                        simulations
+                      </p>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-right font-medium text-foreground tabular-nums">
+                    {formatPublicBenchmarkResultScore(deck.mtgGoldfishScore)}
+                  </td>
+                  <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
+                    {formatPublicBenchmarkResultPercent(deck.completionRate)}
+                  </td>
+                  <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
+                    {formatPublicBenchmarkResultPercent(deck.legalPassRate)}
+                  </td>
+                  <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
+                    {formatPublicBenchmarkResultPercent(deck.strategicPassRate)}
+                  </td>
+                  <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
+                    {formatPublicBenchmarkResultCost(deck.costPerAttemptedTurn)}
+                  </td>
+                  <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
+                    {formatPublicBenchmarkResultTokenRate(
+                      deck.reasoningTokensPerAttemptedTurn
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function PublicBenchmarkFailedEvaluationsPanel({
   failedEvaluations,
   isLoading,
@@ -1465,9 +1792,7 @@ function PublicBenchmarkFailedEvaluationsPanel({
     <div className="simulation-scrollbar h-full min-h-0 overflow-y-auto p-5">
       <section className="mx-auto grid w-full max-w-5xl gap-4">
         <div className="grid gap-1">
-          <h2 className="text-lg font-semibold text-foreground">
-            Failed runs
-          </h2>
+          <h2 className="text-lg font-semibold text-foreground">Failed runs</h2>
           <p className="text-sm text-muted-foreground">
             Legal or strategic failures sorted by score.
           </p>
@@ -4797,9 +5122,7 @@ function SimulationResultsPanel({
         ) : null}
 
         {showBenchmarkEvaluations && run.benchmarkEvaluation ? (
-          <BenchmarkRunEvaluationCard
-            evaluation={run.benchmarkEvaluation}
-          />
+          <BenchmarkRunEvaluationCard evaluation={run.benchmarkEvaluation} />
         ) : null}
       </section>
     )
@@ -6340,10 +6663,11 @@ function isPublicBenchmarkSimulationStatus(value: unknown) {
 }
 
 function isOptionalPublicBenchmarkNonnegativeInteger(value: unknown) {
-  return (
-    value === undefined ||
-    (typeof value === "number" && Number.isInteger(value) && value >= 0)
-  )
+  return value === undefined || isPublicBenchmarkNonnegativeInteger(value)
+}
+
+function isPublicBenchmarkNonnegativeInteger(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0
 }
 
 function isOptionalNullablePublicBenchmarkNumber(value: unknown) {
@@ -6426,23 +6750,6 @@ function getPublicBenchmarkRunIdFromSearch(search: string) {
   const runId = searchParams.get("run")?.trim()
 
   return runId || ""
-}
-
-function getPublicBenchmarkSelectedPanelFromSearch(
-  search: string
-): PublicBenchmarkSelectedPanel {
-  const searchParams = new URLSearchParams(search)
-
-  if (searchParams.get("view") === "failed-evaluations") {
-    return "failed-evaluations"
-  }
-
-  const hasSimulationSelection =
-    Boolean(searchParams.get("simulation")?.trim()) ||
-    Boolean(searchParams.get("run")?.trim()) ||
-    Boolean(searchParams.get("turn")?.trim())
-
-  return hasSimulationSelection ? "simulation" : "failed-evaluations"
 }
 
 function getSimulationTimelineTurnFromCurrentSearch() {
@@ -6532,6 +6839,54 @@ function formatPublicBenchmarkSimulationScore(score: number) {
   return score.toFixed(1).replace(/\.0$/u, "")
 }
 
+function formatPublicBenchmarkExportDate(value: string) {
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date)
+}
+
+function formatPublicBenchmarkResultCost(value: number | null) {
+  if (value === null || !Number.isFinite(value) || value <= 0) {
+    return value === null ? "-" : "$0.00"
+  }
+
+  if (value < 0.0001) {
+    return "<$0.0001"
+  }
+
+  return `$${value < 1 ? value.toFixed(4) : value.toFixed(2)}`
+}
+
+function formatPublicBenchmarkResultCount(value: number) {
+  return (
+    Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0
+  ).toLocaleString()
+}
+
+function formatPublicBenchmarkResultScore(value: number | null) {
+  return value === null ? "-" : `${value.toFixed(1)} / 100`
+}
+
+function formatPublicBenchmarkResultPercent(value: number | null) {
+  return value === null ? "-" : `${value.toFixed(1)}%`
+}
+
+function formatPublicBenchmarkResultTokenRate(value: number | null) {
+  return value === null
+    ? "-"
+    : value.toLocaleString(undefined, {
+        maximumFractionDigits: 1,
+        minimumFractionDigits: Number.isInteger(value) ? 0 : 1,
+      })
+}
+
 function pushPublicBenchmarkSimulationSearch(simulationId: string) {
   updatePublicBenchmarkSimulationSearch(simulationId, "push")
 }
@@ -6544,6 +6899,16 @@ function pushPublicBenchmarkFailedEvaluationsSearch() {
   const url = new URL(window.location.href)
 
   url.searchParams.set("view", "failed-evaluations")
+  url.searchParams.delete("simulation")
+  url.searchParams.delete("run")
+  url.searchParams.delete("turn")
+  updateWindowHistoryUrl(url, "push")
+}
+
+function pushPublicBenchmarkResultsSearch() {
+  const url = new URL(window.location.href)
+
+  url.searchParams.set("view", "results")
   url.searchParams.delete("simulation")
   url.searchParams.delete("run")
   url.searchParams.delete("turn")

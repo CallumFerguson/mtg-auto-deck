@@ -199,8 +199,7 @@ export type SimulationDebugResponse = {
   debug: SimulationDebugInfo
 }
 
-export type SimulationRunEvaluationResultStatus =
-  SimulationRunResultStatus
+export type SimulationRunEvaluationResultStatus = SimulationRunResultStatus
 
 export type SimulationRunEvaluation = {
   id: string
@@ -324,18 +323,53 @@ export type PublicBenchmarkSimulationIndexEntry = {
   filePath: string
 }
 
-export type PublicBenchmarkFailedEvaluation = BenchmarkSimulationRunEvaluation & {
-  simulationId: string
+export type PublicBenchmarkFailedEvaluation =
+  BenchmarkSimulationRunEvaluation & {
+    simulationId: string
+    deckId: string
+    deckName: string
+    deckIndex: number
+    simulationIndex: number
+    seed: string
+    filePath: string
+    targetLlmRunId: string
+    targetRunPhase: "opening_hand" | "turn"
+    turnNumber: number | null
+    resultLabel: string
+  }
+
+export type PublicBenchmarkResultDeckMetrics = {
   deckId: string
   deckName: string
   deckIndex: number
-  simulationIndex: number
-  seed: string
-  filePath: string
-  targetLlmRunId: string
-  targetRunPhase: "opening_hand" | "turn"
-  turnNumber: number | null
-  resultLabel: string
+  plannedSimulationCount: number
+  mtgGoldfishScore: number | null
+  completionRate: number | null
+  legalPassRate: number | null
+  strategicPassRate: number | null
+  costPerAttemptedTurn: number | null
+  reasoningTokensPerAttemptedTurn: number | null
+}
+
+export type PublicBenchmarkResultMetrics = {
+  plannedOpeningHandCount: number
+  plannedTurnCount: number
+  attemptedTurnCount: number
+  completedTurnCount: number
+  mtgGoldfishScore: number | null
+  openingHandScore: number | null
+  turnScore: number | null
+  completedEvaluationQualityAverage: number | null
+  legalPassRate: number | null
+  strategicPassRate: number | null
+  completionRate: number | null
+  totalRunCostUsd: number
+  costPerAttemptedTurn: number | null
+  costPerCompletedTurn: number | null
+  costPerGoldfishPoint: number | null
+  reasoningTokensPerAttemptedTurn: number | null
+  totalTokensPerAttemptedTurn: number | null
+  decks: PublicBenchmarkResultDeckMetrics[]
 }
 
 export type PublicBenchmarkExportV1 = {
@@ -343,6 +377,13 @@ export type PublicBenchmarkExportV1 = {
   exportedAt: string
   benchmark: PublicBenchmarkMetadata
   simulations: PublicBenchmarkSimulationIndexEntry[]
+}
+
+export type PublicBenchmarkResultsExportV1 = {
+  schemaVersion: 1
+  exportedAt: string
+  benchmark: PublicBenchmarkMetadata
+  resultMetrics: PublicBenchmarkResultMetrics
 }
 
 export type SimulationResultsStreamEvent =

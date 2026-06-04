@@ -50,6 +50,7 @@ import {
   MAX_BENCHMARK_SIMULATIONS_PER_DECK,
 } from "./benchmarks-postgres.js"
 import {
+  buildBenchmarkEvaluationResultMetrics,
   buildBenchmarkEvaluationSummary,
   getEligibleBenchmarkEvaluationTargetRuns,
   type BenchmarkEvaluationSummary,
@@ -59,6 +60,7 @@ import {
   buildBenchmarkExportAverageEvaluationScoreBySimulation,
   buildBenchmarkExportFailedEvaluations,
   buildBenchmarkExportSimulationWithEvaluations,
+  buildBenchmarkResultsExport,
   buildBenchmarkSimulationIndexEntry,
   getBenchmarkExportSimulationRunIds,
 } from "./benchmark-export.js"
@@ -945,6 +947,12 @@ async function getAdminBenchmarkZipExport(
 
     return metadata
   })()
+  const resultMetrics = buildBenchmarkEvaluationResultMetrics({
+    latestEvaluations,
+    latestRuns: latestEvaluationRuns,
+    plannedSimulations: childSimulations,
+    turnsToSimulate: benchmark.turnsToSimulate,
+  })
   const index = {
     schemaVersion: BENCHMARK_EXPORT_SCHEMA_VERSION,
     exportedAt,
@@ -970,6 +978,14 @@ async function getAdminBenchmarkZipExport(
         {
           path: `${benchmarkExportRootPath}/index.json`,
           value: index,
+        },
+        {
+          path: `${benchmarkExportRootPath}/results.json`,
+          value: buildBenchmarkResultsExport({
+            benchmark: benchmarkIndexMetadata,
+            exportedAt,
+            resultMetrics,
+          }),
         },
         {
           path: `${benchmarkExportRootPath}/failed-evaluations.json`,

@@ -20,8 +20,10 @@
     "src/lib/simulation-results-stream.ts",
     "src/lib/simulation-results-timeline.ts",
     "src/lib/simulation-turn-actions.ts",
+    "src/lib/public-benchmark-results.ts",
     "tests/simulation-results-timeline.test.ts",
     "tests/simulation-game-state-zones.test.ts",
-    "tests/simulation-results-stream.test.ts"
+    "tests/simulation-results-stream.test.ts",
+    "tests/public-benchmark-results.test.ts"
   ]
 }

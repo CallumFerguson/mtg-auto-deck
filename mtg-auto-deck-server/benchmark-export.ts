@@ -1,6 +1,7 @@
 import type {
   BenchmarkEvaluationLatestEvaluationSnapshot,
   BenchmarkEvaluationLatestRunSnapshot,
+  BenchmarkEvaluationResultMetrics,
   BenchmarkEvaluationTargetRun,
 } from "./benchmark-evaluations.js"
 import type { BenchmarkChildSimulation } from "./benchmarks-postgres.js"
@@ -41,6 +42,13 @@ export type BenchmarkExportFailedEvaluation = BenchmarkExportRunEvaluation & {
   targetRunPhase: "opening_hand" | "turn"
   turnNumber: number | null
   resultLabel: string
+}
+
+export type BenchmarkResultsExportV1<TBenchmarkMetadata> = {
+  schemaVersion: 1
+  exportedAt: string
+  benchmark: TBenchmarkMetadata
+  resultMetrics: BenchmarkEvaluationResultMetrics
 }
 
 type BenchmarkExportSimulationSummary = {
@@ -99,10 +107,7 @@ export function buildBenchmarkExportAverageEvaluationScoreBySimulation({
       !currentEvaluation ||
       evaluation.attemptNumber > currentEvaluation.attemptNumber
     ) {
-      latestEvaluationByTargetRunId.set(
-        evaluation.targetLlmRunId,
-        evaluation
-      )
+      latestEvaluationByTargetRunId.set(evaluation.targetLlmRunId, evaluation)
     }
   }
 
@@ -204,12 +209,13 @@ export function buildBenchmarkExportFailedEvaluations({
   const failedEvaluations: BenchmarkExportFailedEvaluation[] = []
 
   for (const simulationFile of simulationFiles) {
-    const openingHandRuns =
-      simulationFile.value.results.openingHandLlmRuns.map((run) => ({
+    const openingHandRuns = simulationFile.value.results.openingHandLlmRuns.map(
+      (run) => ({
         run,
         targetRunPhase: "opening_hand" as const,
         turnNumber: null,
-      }))
+      })
+    )
     const turnRuns = simulationFile.value.results.turnLlmRuns.map((run) => ({
       run,
       targetRunPhase: "turn" as const,
@@ -243,6 +249,23 @@ export function buildBenchmarkExportFailedEvaluations({
   }
 
   return failedEvaluations.sort(compareBenchmarkExportFailedEvaluations)
+}
+
+export function buildBenchmarkResultsExport<TBenchmarkMetadata>({
+  benchmark,
+  exportedAt,
+  resultMetrics,
+}: {
+  benchmark: TBenchmarkMetadata
+  exportedAt: string
+  resultMetrics: BenchmarkEvaluationResultMetrics
+}): BenchmarkResultsExportV1<TBenchmarkMetadata> {
+  return {
+    schemaVersion: 1,
+    exportedAt,
+    benchmark,
+    resultMetrics,
+  }
 }
 
 export function buildBenchmarkSimulationIndexEntry({
@@ -333,10 +356,7 @@ function buildLatestBenchmarkExportEvaluationByTargetRunId(
       !currentEvaluation ||
       evaluation.attemptNumber > currentEvaluation.attemptNumber
     ) {
-      latestEvaluationByTargetRunId.set(
-        evaluation.targetLlmRunId,
-        evaluation
-      )
+      latestEvaluationByTargetRunId.set(evaluation.targetLlmRunId, evaluation)
     }
   }
 
@@ -383,8 +403,7 @@ function isCompletedBenchmarkExportEvaluation(
   evaluation: BenchmarkEvaluationLatestEvaluationSnapshot
 ) {
   return (
-    evaluation.status === "completed" &&
-    evaluation.resultStatus === "completed"
+    evaluation.status === "completed" && evaluation.resultStatus === "completed"
   )
 }
 

@@ -53,6 +53,22 @@ export function getPublicBenchmarkFailedEvaluationsJsonUrl({
   return `${getPublicDataBaseUrl()}/benchmarks/${encodedBenchmarkId}/failed-evaluations.json`
 }
 
+export function getPublicBenchmarkResultsJsonUrl({
+  benchmarkId,
+  bundled,
+}: {
+  benchmarkId: string
+  bundled: boolean
+}) {
+  const encodedBenchmarkId = encodeURIComponent(benchmarkId)
+
+  if (bundled) {
+    return `${BUNDLED_PUBLIC_BENCHMARKS_BASE_PATH}/${encodedBenchmarkId}/results.json`
+  }
+
+  return `${getPublicDataBaseUrl()}/benchmarks/${encodedBenchmarkId}/results.json`
+}
+
 export function getPublicBenchmarkSimulationJsonUrl({
   benchmarkId,
   bundled,
@@ -107,6 +123,13 @@ export function getPublicBenchmarkFailedEvaluationsLoadFailureMessage(
     error.message === MISSING_PUBLIC_DATA_BASE_URL_MESSAGE
     ? error.message
     : "Public benchmark failed evaluations could not be loaded."
+}
+
+export function getPublicBenchmarkResultsLoadFailureMessage(error: unknown) {
+  return error instanceof Error &&
+    error.message === MISSING_PUBLIC_DATA_BASE_URL_MESSAGE
+    ? error.message
+    : "Public benchmark results could not be loaded."
 }
 
 function getPublicDataBaseUrl() {
@@ -166,9 +189,7 @@ function isSafeRelativePath(path: string) {
     !path.startsWith("/") &&
     pathSegments.every(
       (pathSegment) =>
-        pathSegment.length > 0 &&
-        pathSegment !== "." &&
-        pathSegment !== ".."
+        pathSegment.length > 0 && pathSegment !== "." && pathSegment !== ".."
     )
   )
 }

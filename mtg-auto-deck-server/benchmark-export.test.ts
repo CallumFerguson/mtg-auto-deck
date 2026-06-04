@@ -4,11 +4,15 @@ import {
   buildBenchmarkExportAverageEvaluationScoreBySimulation,
   buildBenchmarkExportFailedEvaluations,
   buildBenchmarkExportSimulationWithEvaluations,
+  buildBenchmarkResultsExport,
   buildBenchmarkSimulationIndexEntry,
   getBenchmarkExportSimulationRunIds,
   type BenchmarkExportRunEvaluation,
 } from "./benchmark-export.js"
-import { getEligibleBenchmarkEvaluationTargetRuns } from "./benchmark-evaluations.js"
+import {
+  buildBenchmarkEvaluationResultMetrics,
+  getEligibleBenchmarkEvaluationTargetRuns,
+} from "./benchmark-evaluations.js"
 import type {
   BenchmarkEvaluationLatestEvaluationSnapshot,
   BenchmarkEvaluationLatestRunSnapshot,
@@ -288,6 +292,117 @@ test("builds benchmark simulation index entries with run counts and average scor
   assert.equal(entryWithScore.turnsToSimulate, 5)
   assert.equal(entryWithScore.simulatedTurnCount, 2)
   assert.equal(entryWithScore.averageEvaluationScore, 8.5)
+})
+
+test("builds benchmark results export from planned-slot result metrics", () => {
+  const resultMetrics = buildBenchmarkEvaluationResultMetrics({
+    latestEvaluations: [
+      createEvaluation({
+        targetLlmRunId: "opening-run",
+        simulationQualityScore: 10,
+      }),
+      createEvaluation({
+        targetLlmRunId: "turn-one-run",
+        simulationQualityScore: 8,
+      }),
+    ],
+    latestRuns: [
+      createLatestRun({
+        targetLlmRunId: "opening-run",
+        targetRunPhase: "opening_hand",
+        turnNumber: null,
+        finalOutputText: createOpeningHandCompletionText(),
+        openingHandIsValid: true,
+        gameState: null,
+        turnActions: null,
+        costUsd: 0.01,
+      }),
+      createLatestRun({
+        targetLlmRunId: "turn-one-run",
+        targetRunPhase: "turn",
+        turnNumber: 1,
+        finalOutputText: createTurnCompletionText(),
+        gameState: {},
+        turnActions: createTurnActions(),
+        usage: {
+          input_tokens: 100,
+          output_tokens: 50,
+          output_tokens_details: {
+            reasoning_tokens: 30,
+          },
+          total_tokens: 150,
+        },
+        costUsd: 0.02,
+      }),
+      createLatestRun({
+        targetLlmRunId: "turn-two-run",
+        targetRunPhase: "turn",
+        turnNumber: 2,
+        status: "failed",
+        failureMessage: "The model run failed.",
+        finalOutputText: null,
+        gameState: null,
+        turnActions: null,
+        usage: {
+          input_tokens: 20,
+          output_tokens: 20,
+          output_tokens_details: {
+            reasoning_tokens: 10,
+          },
+          total_tokens: 40,
+        },
+        costUsd: 0.03,
+      }),
+    ],
+    plannedSimulations: [createChildSimulation()],
+    turnsToSimulate: 5,
+  })
+  const resultsExport = buildBenchmarkResultsExport({
+    benchmark: {
+      id: "benchmark-id",
+      model: "test-model",
+    },
+    exportedAt: "2026-06-04T12:00:00.000Z",
+    resultMetrics,
+  })
+
+  assert.equal(resultsExport.schemaVersion, 1)
+  assert.deepEqual(resultsExport.benchmark, {
+    id: "benchmark-id",
+    model: "test-model",
+  })
+  assert.equal(resultsExport.exportedAt, "2026-06-04T12:00:00.000Z")
+  assert.equal(resultsExport.resultMetrics.plannedOpeningHandCount, 1)
+  assert.equal(resultsExport.resultMetrics.plannedTurnCount, 5)
+  assert.equal(resultsExport.resultMetrics.attemptedTurnCount, 2)
+  assert.equal(resultsExport.resultMetrics.completedTurnCount, 1)
+  assert.equal(resultsExport.resultMetrics.openingHandScore, 100)
+  assert.equal(resultsExport.resultMetrics.turnScore, 16)
+  assert.equal(resultsExport.resultMetrics.mtgGoldfishScore, 28.6)
+  assert.equal(resultsExport.resultMetrics.completedEvaluationQualityAverage, 9)
+  assert.equal(resultsExport.resultMetrics.legalPassRate, 33.3)
+  assert.equal(resultsExport.resultMetrics.strategicPassRate, 33.3)
+  assert.equal(resultsExport.resultMetrics.completionRate, 20)
+  assert.equal(resultsExport.resultMetrics.totalRunCostUsd, 0.06)
+  assert.equal(resultsExport.resultMetrics.costPerAttemptedTurn, 0.025)
+  assert.equal(resultsExport.resultMetrics.costPerCompletedTurn, 0.05)
+  assert.equal(resultsExport.resultMetrics.costPerGoldfishPoint, 0.002097902)
+  assert.equal(resultsExport.resultMetrics.reasoningTokensPerAttemptedTurn, 20)
+  assert.equal(resultsExport.resultMetrics.totalTokensPerAttemptedTurn, 95)
+  assert.deepEqual(resultsExport.resultMetrics.decks, [
+    {
+      deckId: "deck-one",
+      deckName: "Deck One",
+      deckIndex: 0,
+      plannedSimulationCount: 1,
+      mtgGoldfishScore: 28.6,
+      completionRate: 20,
+      legalPassRate: 33.3,
+      strategicPassRate: 33.3,
+      costPerAttemptedTurn: 0.025,
+      reasoningTokensPerAttemptedTurn: 20,
+    },
+  ])
 })
 
 test("decorates benchmark simulation runs with latest completed evaluations", () => {
