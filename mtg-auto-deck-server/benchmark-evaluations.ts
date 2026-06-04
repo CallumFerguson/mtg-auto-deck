@@ -79,7 +79,7 @@ export type BenchmarkEvaluationResultDeckMetrics = {
   deckName: string
   deckIndex: number
   plannedSimulationCount: number
-  mtgGoldfishScore: number | null
+  mtgAutoDeckScore: number | null
   completionRate: number | null
   legalPassRate: number | null
   strategicPassRate: number | null
@@ -92,7 +92,7 @@ export type BenchmarkEvaluationResultMetrics = {
   plannedTurnCount: number
   attemptedTurnCount: number
   completedTurnCount: number
-  mtgGoldfishScore: number | null
+  mtgAutoDeckScore: number | null
   openingHandScore: number | null
   turnScore: number | null
   completedEvaluationQualityAverage: number | null
@@ -102,7 +102,7 @@ export type BenchmarkEvaluationResultMetrics = {
   totalRunCostUsd: number
   costPerAttemptedTurn: number | null
   costPerCompletedTurn: number | null
-  costPerGoldfishPoint: number | null
+  costPerMtgAutoDeckScorePoint: number | null
   reasoningTokensPerAttemptedTurn: number | null
   totalTokensPerAttemptedTurn: number | null
   decks: BenchmarkEvaluationResultDeckMetrics[]
@@ -460,16 +460,16 @@ export function buildBenchmarkEvaluationResultMetrics({
     .sort((first, second) => first.deckIndex - second.deckIndex)
     .map(buildBenchmarkEvaluationResultDeckMetrics)
   const deckScores = deckMetrics
-    .map((deckMetric) => deckMetric.mtgGoldfishScore)
+    .map((deckMetric) => deckMetric.mtgAutoDeckScore)
     .filter((score): score is number => score !== null)
-  const mtgGoldfishScore = averageNumbers(deckScores)
+  const mtgAutoDeckScore = averageNumbers(deckScores)
 
   return {
     plannedOpeningHandCount,
     plannedTurnCount,
     attemptedTurnCount,
     completedTurnCount,
-    mtgGoldfishScore: roundNullableBenchmarkScore(mtgGoldfishScore),
+    mtgAutoDeckScore: roundNullableBenchmarkScore(mtgAutoDeckScore),
     openingHandScore: roundNullableBenchmarkScore(
       averageNumbers(openingHandScores)
     ),
@@ -491,8 +491,8 @@ export function buildBenchmarkEvaluationResultMetrics({
     costPerCompletedTurn: roundNullableBenchmarkCost(
       divide(turnRunCostUsd, completedTurnCount)
     ),
-    costPerGoldfishPoint: roundNullableBenchmarkCost(
-      divide(totalRunCostUsd, mtgGoldfishScore ?? 0)
+    costPerMtgAutoDeckScorePoint: roundNullableBenchmarkCost(
+      divide(totalRunCostUsd, mtgAutoDeckScore ?? 0)
     ),
     reasoningTokensPerAttemptedTurn: roundNullableBenchmarkTokenRate(
       divide(turnReasoningTokens, attemptedTurnCount)
@@ -627,7 +627,7 @@ function buildBenchmarkEvaluationResultDeckMetrics(
     deckName: deckMetrics.deckName,
     deckIndex: deckMetrics.deckIndex,
     plannedSimulationCount: deckMetrics.plannedSimulationCount,
-    mtgGoldfishScore: roundNullableBenchmarkScore(
+    mtgAutoDeckScore: roundNullableBenchmarkScore(
       averageNumbers(deckMetrics.simulationScores)
     ),
     completionRate: roundNullableBenchmarkRate(

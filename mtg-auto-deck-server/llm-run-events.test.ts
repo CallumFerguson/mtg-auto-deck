@@ -3302,7 +3302,7 @@ test("summarizes latest benchmark evaluations only", () => {
         plannedTurnCount: 0,
         attemptedTurnCount: 0,
         completedTurnCount: 0,
-        mtgGoldfishScore: null,
+        mtgAutoDeckScore: null,
         openingHandScore: null,
         turnScore: null,
         completedEvaluationQualityAverage: null,
@@ -3312,7 +3312,7 @@ test("summarizes latest benchmark evaluations only", () => {
         totalRunCostUsd: 0,
         costPerAttemptedTurn: null,
         costPerCompletedTurn: null,
-        costPerGoldfishPoint: null,
+        costPerMtgAutoDeckScorePoint: null,
         reasoningTokensPerAttemptedTurn: null,
         totalTokensPerAttemptedTurn: null,
         decks: [],
@@ -3444,7 +3444,7 @@ test("scores benchmark result metrics across every planned slot", () => {
   assert.equal(metrics.completedTurnCount, 1)
   assert.equal(metrics.openingHandScore, 100)
   assert.equal(metrics.turnScore, 16)
-  assert.equal(metrics.mtgGoldfishScore, 28.6)
+  assert.equal(metrics.mtgAutoDeckScore, 28.6)
   assert.equal(metrics.completionRate, 20)
   assert.equal(metrics.legalPassRate, 33.3)
   assert.equal(metrics.strategicPassRate, 33.3)
@@ -3453,7 +3453,7 @@ test("scores benchmark result metrics across every planned slot", () => {
   assert.equal(metrics.costPerCompletedTurn, 0.5)
   assert.equal(metrics.reasoningTokensPerAttemptedTurn, 15)
   assert.equal(metrics.totalTokensPerAttemptedTurn, 140)
-  assert.equal(metrics.decks[0]?.mtgGoldfishScore, 28.6)
+  assert.equal(metrics.decks[0]?.mtgAutoDeckScore, 28.6)
 })
 
 test("applies benchmark score caps and zeroes incomplete evaluations", () => {
@@ -3524,7 +3524,7 @@ test("applies benchmark score caps and zeroes incomplete evaluations", () => {
 
   assert.equal(metrics.openingHandScore, 40)
   assert.equal(metrics.turnScore, 41.3)
-  assert.equal(metrics.mtgGoldfishScore, 41.1)
+  assert.equal(metrics.mtgAutoDeckScore, 41.1)
   assert.equal(metrics.completedTurnCount, 4)
   assert.equal(metrics.legalPassRate, 40)
   assert.equal(metrics.strategicPassRate, 40)

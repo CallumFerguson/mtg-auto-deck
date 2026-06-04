@@ -2,7 +2,7 @@ import type {
   PublicBenchmarkMetadata,
   PublicBenchmarkResultDeckMetrics,
   PublicBenchmarkResultMetrics,
-  PublicBenchmarkResultsExportV1,
+  PublicBenchmarkResultsExportV2,
 } from "./deck-types"
 
 export type PublicBenchmarkSelectedPanel =
@@ -27,9 +27,9 @@ export function getPublicBenchmarkSelectedPanelFromSearch(
   return hasSimulationSelection ? "simulation" : "results"
 }
 
-export function isPublicBenchmarkResultsExportV1(
+export function isPublicBenchmarkResultsExportV2(
   value: unknown
-): value is PublicBenchmarkResultsExportV1 {
+): value is PublicBenchmarkResultsExportV2 {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false
   }
@@ -37,7 +37,7 @@ export function isPublicBenchmarkResultsExportV1(
   const record = value as Record<string, unknown>
 
   return (
-    record.schemaVersion === 1 &&
+    record.schemaVersion === 2 &&
     typeof record.exportedAt === "string" &&
     isPublicBenchmarkMetadata(record.benchmark) &&
     isPublicBenchmarkResultMetrics(record.resultMetrics)
@@ -58,7 +58,7 @@ export function isPublicBenchmarkResultMetrics(
     isPublicBenchmarkNonnegativeInteger(record.plannedTurnCount) &&
     isPublicBenchmarkNonnegativeInteger(record.attemptedTurnCount) &&
     isPublicBenchmarkNonnegativeInteger(record.completedTurnCount) &&
-    isNullablePublicBenchmarkNumber(record.mtgGoldfishScore) &&
+    isNullablePublicBenchmarkNumber(record.mtgAutoDeckScore) &&
     isNullablePublicBenchmarkNumber(record.openingHandScore) &&
     isNullablePublicBenchmarkNumber(record.turnScore) &&
     isNullablePublicBenchmarkNumber(record.completedEvaluationQualityAverage) &&
@@ -68,7 +68,7 @@ export function isPublicBenchmarkResultMetrics(
     isPublicBenchmarkNumber(record.totalRunCostUsd) &&
     isNullablePublicBenchmarkNumber(record.costPerAttemptedTurn) &&
     isNullablePublicBenchmarkNumber(record.costPerCompletedTurn) &&
-    isNullablePublicBenchmarkNumber(record.costPerGoldfishPoint) &&
+    isNullablePublicBenchmarkNumber(record.costPerMtgAutoDeckScorePoint) &&
     isNullablePublicBenchmarkNumber(record.reasoningTokensPerAttemptedTurn) &&
     isNullablePublicBenchmarkNumber(record.totalTokensPerAttemptedTurn) &&
     Array.isArray(record.decks) &&
@@ -90,7 +90,7 @@ export function isPublicBenchmarkResultDeckMetrics(
     typeof record.deckName === "string" &&
     isPublicBenchmarkNonnegativeInteger(record.deckIndex) &&
     isPublicBenchmarkNonnegativeInteger(record.plannedSimulationCount) &&
-    isNullablePublicBenchmarkNumber(record.mtgGoldfishScore) &&
+    isNullablePublicBenchmarkNumber(record.mtgAutoDeckScore) &&
     isNullablePublicBenchmarkNumber(record.completionRate) &&
     isNullablePublicBenchmarkNumber(record.legalPassRate) &&
     isNullablePublicBenchmarkNumber(record.strategicPassRate) &&

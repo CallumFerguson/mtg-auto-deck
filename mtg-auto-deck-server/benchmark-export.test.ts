@@ -366,7 +366,7 @@ test("builds benchmark results export from planned-slot result metrics", () => {
     resultMetrics,
   })
 
-  assert.equal(resultsExport.schemaVersion, 1)
+  assert.equal(resultsExport.schemaVersion, 2)
   assert.deepEqual(resultsExport.benchmark, {
     id: "benchmark-id",
     model: "test-model",
@@ -378,7 +378,7 @@ test("builds benchmark results export from planned-slot result metrics", () => {
   assert.equal(resultsExport.resultMetrics.completedTurnCount, 1)
   assert.equal(resultsExport.resultMetrics.openingHandScore, 100)
   assert.equal(resultsExport.resultMetrics.turnScore, 16)
-  assert.equal(resultsExport.resultMetrics.mtgGoldfishScore, 28.6)
+  assert.equal(resultsExport.resultMetrics.mtgAutoDeckScore, 28.6)
   assert.equal(resultsExport.resultMetrics.completedEvaluationQualityAverage, 9)
   assert.equal(resultsExport.resultMetrics.legalPassRate, 33.3)
   assert.equal(resultsExport.resultMetrics.strategicPassRate, 33.3)
@@ -386,7 +386,10 @@ test("builds benchmark results export from planned-slot result metrics", () => {
   assert.equal(resultsExport.resultMetrics.totalRunCostUsd, 0.06)
   assert.equal(resultsExport.resultMetrics.costPerAttemptedTurn, 0.025)
   assert.equal(resultsExport.resultMetrics.costPerCompletedTurn, 0.05)
-  assert.equal(resultsExport.resultMetrics.costPerGoldfishPoint, 0.002097902)
+  assert.equal(
+    resultsExport.resultMetrics.costPerMtgAutoDeckScorePoint,
+    0.002097902
+  )
   assert.equal(resultsExport.resultMetrics.reasoningTokensPerAttemptedTurn, 20)
   assert.equal(resultsExport.resultMetrics.totalTokensPerAttemptedTurn, 95)
   assert.deepEqual(resultsExport.resultMetrics.decks, [
@@ -395,7 +398,7 @@ test("builds benchmark results export from planned-slot result metrics", () => {
       deckName: "Deck One",
       deckIndex: 0,
       plannedSimulationCount: 1,
-      mtgGoldfishScore: 28.6,
+      mtgAutoDeckScore: 28.6,
       completionRate: 20,
       legalPassRate: 33.3,
       strategicPassRate: 33.3,

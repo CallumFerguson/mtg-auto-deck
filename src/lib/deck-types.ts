@@ -343,7 +343,7 @@ export type PublicBenchmarkResultDeckMetrics = {
   deckName: string
   deckIndex: number
   plannedSimulationCount: number
-  mtgGoldfishScore: number | null
+  mtgAutoDeckScore: number | null
   completionRate: number | null
   legalPassRate: number | null
   strategicPassRate: number | null
@@ -356,7 +356,7 @@ export type PublicBenchmarkResultMetrics = {
   plannedTurnCount: number
   attemptedTurnCount: number
   completedTurnCount: number
-  mtgGoldfishScore: number | null
+  mtgAutoDeckScore: number | null
   openingHandScore: number | null
   turnScore: number | null
   completedEvaluationQualityAverage: number | null
@@ -366,7 +366,7 @@ export type PublicBenchmarkResultMetrics = {
   totalRunCostUsd: number
   costPerAttemptedTurn: number | null
   costPerCompletedTurn: number | null
-  costPerGoldfishPoint: number | null
+  costPerMtgAutoDeckScorePoint: number | null
   reasoningTokensPerAttemptedTurn: number | null
   totalTokensPerAttemptedTurn: number | null
   decks: PublicBenchmarkResultDeckMetrics[]
@@ -379,8 +379,8 @@ export type PublicBenchmarkExportV1 = {
   simulations: PublicBenchmarkSimulationIndexEntry[]
 }
 
-export type PublicBenchmarkResultsExportV1 = {
-  schemaVersion: 1
+export type PublicBenchmarkResultsExportV2 = {
+  schemaVersion: 2
   exportedAt: string
   benchmark: PublicBenchmarkMetadata
   resultMetrics: PublicBenchmarkResultMetrics

@@ -1,14 +1,14 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import type { PublicBenchmarkResultsExportV1 } from "../src/lib/deck-types.js"
+import type { PublicBenchmarkResultsExportV2 } from "../src/lib/deck-types.js"
 import {
   getPublicBenchmarkSelectedPanelFromSearch,
-  isPublicBenchmarkResultsExportV1,
+  isPublicBenchmarkResultsExportV2,
 } from "../src/lib/public-benchmark-results.js"
 
 test("validates public benchmark results exports", () => {
-  assert.equal(isPublicBenchmarkResultsExportV1(createResultsExport()), true)
+  assert.equal(isPublicBenchmarkResultsExportV2(createResultsExport()), true)
 })
 
 test("rejects malformed public benchmark results exports", () => {
@@ -16,7 +16,7 @@ test("rejects malformed public benchmark results exports", () => {
     ...createResultsExport(),
     resultMetrics: {
       ...createResultsExport().resultMetrics,
-      mtgGoldfishScore: "91.5",
+      mtgAutoDeckScore: "91.5",
     },
   }
   const malformedDeckMetrics = {
@@ -31,9 +31,30 @@ test("rejects malformed public benchmark results exports", () => {
       ],
     },
   }
+  const legacyScoreKey = ["mtg", "Gold", "fish", "Score"].join("")
+  const legacyCostKey = ["cost", "Per", "Gold", "fish", "Point"].join("")
+  const legacyResultsExport = {
+    ...createResultsExport(),
+    schemaVersion: 1,
+    resultMetrics: {
+      ...createResultsExport().resultMetrics,
+      [legacyScoreKey]: createResultsExport().resultMetrics.mtgAutoDeckScore,
+      [legacyCostKey]:
+        createResultsExport().resultMetrics.costPerMtgAutoDeckScorePoint,
+      decks: [
+        {
+          ...createResultsExport().resultMetrics.decks[0],
+          [legacyScoreKey]:
+            createResultsExport().resultMetrics.decks[0]?.mtgAutoDeckScore ??
+            null,
+        },
+      ],
+    },
+  }
 
-  assert.equal(isPublicBenchmarkResultsExportV1(malformedMissingMetrics), false)
-  assert.equal(isPublicBenchmarkResultsExportV1(malformedDeckMetrics), false)
+  assert.equal(isPublicBenchmarkResultsExportV2(malformedMissingMetrics), false)
+  assert.equal(isPublicBenchmarkResultsExportV2(malformedDeckMetrics), false)
+  assert.equal(isPublicBenchmarkResultsExportV2(legacyResultsExport), false)
 })
 
 test("selects public benchmark results by default", () => {
@@ -63,9 +84,9 @@ test("selects failed runs or simulations from public benchmark search params", (
   )
 })
 
-function createResultsExport(): PublicBenchmarkResultsExportV1 {
+function createResultsExport(): PublicBenchmarkResultsExportV2 {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     exportedAt: "2026-06-04T12:00:00.000Z",
     benchmark: {
       id: "benchmark-one",
@@ -105,7 +126,7 @@ function createResultsExport(): PublicBenchmarkResultsExportV1 {
       plannedTurnCount: 5,
       attemptedTurnCount: 2,
       completedTurnCount: 1,
-      mtgGoldfishScore: 25.7,
+      mtgAutoDeckScore: 25.7,
       openingHandScore: 90,
       turnScore: 14.4,
       completedEvaluationQualityAverage: 8.7,
@@ -115,7 +136,7 @@ function createResultsExport(): PublicBenchmarkResultsExportV1 {
       totalRunCostUsd: 0.0421,
       costPerAttemptedTurn: 0.011,
       costPerCompletedTurn: 0.022,
-      costPerGoldfishPoint: 0.0016,
+      costPerMtgAutoDeckScorePoint: 0.0016,
       reasoningTokensPerAttemptedTurn: 1024.5,
       totalTokensPerAttemptedTurn: 4096,
       decks: [
@@ -124,7 +145,7 @@ function createResultsExport(): PublicBenchmarkResultsExportV1 {
           deckName: "Deck One",
           deckIndex: 0,
           plannedSimulationCount: 1,
-          mtgGoldfishScore: 25.7,
+          mtgAutoDeckScore: 25.7,
           completionRate: 20,
           legalPassRate: 33.3,
           strategicPassRate: 50,

@@ -54,7 +54,7 @@ import type {
   PublicBenchmarkFailedEvaluation,
   PublicBenchmarkMetadata,
   PublicBenchmarkResultDeckMetrics,
-  PublicBenchmarkResultsExportV1,
+  PublicBenchmarkResultsExportV2,
   PublicBenchmarkSimulationIndexEntry,
   PublicSimulationExportV1,
   SavedSeed,
@@ -136,7 +136,7 @@ import {
 } from "@/lib/public-simulation-url"
 import {
   getPublicBenchmarkSelectedPanelFromSearch,
-  isPublicBenchmarkResultsExportV1,
+  isPublicBenchmarkResultsExportV2,
   type PublicBenchmarkSelectedPanel,
 } from "@/lib/public-benchmark-results"
 import { useOptionalUsageLimits } from "@/lib/usage-limits"
@@ -940,7 +940,7 @@ export function PublicBenchmarkPage({
     PublicBenchmarkFailedEvaluation[] | null
   >(null)
   const [benchmarkResults, setBenchmarkResults] =
-    useState<PublicBenchmarkResultsExportV1 | null>(null)
+    useState<PublicBenchmarkResultsExportV2 | null>(null)
   const [isLoadingBenchmarkResults, setIsLoadingBenchmarkResults] =
     useState(false)
   const [benchmarkResultsLoadError, setBenchmarkResultsLoadError] = useState<
@@ -1059,7 +1059,7 @@ export function PublicBenchmarkPage({
 
       const data = await response.json()
 
-      if (!isPublicBenchmarkResultsExportV1(data)) {
+      if (!isPublicBenchmarkResultsExportV2(data)) {
         setBenchmarkResultsLoadError(
           "Public benchmark results file is not in the expected format."
         )
@@ -1561,7 +1561,7 @@ function PublicBenchmarkResultsPanel({
   onViewFailedEvaluations,
   onReload,
 }: {
-  benchmarkResults: PublicBenchmarkResultsExportV1 | null
+  benchmarkResults: PublicBenchmarkResultsExportV2 | null
   failedEvaluationCount: number | null
   isLoadingFailedEvaluations: boolean
   isLoading: boolean
@@ -1600,9 +1600,9 @@ function PublicBenchmarkResultsPanel({
           <>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <PublicBenchmarkResultMetricCard
-                label="MTG Goldfish Score"
+                label="MTG Auto Deck Score"
                 value={formatPublicBenchmarkResultScore(
-                  metrics.mtgGoldfishScore
+                  metrics.mtgAutoDeckScore
                 )}
                 tone="primary"
               />
@@ -1759,7 +1759,7 @@ function PublicBenchmarkResultsDeckTable({
                     </div>
                   </td>
                   <td className="px-3 py-2 text-right font-medium text-foreground tabular-nums">
-                    {formatPublicBenchmarkResultScore(deck.mtgGoldfishScore)}
+                    {formatPublicBenchmarkResultScore(deck.mtgAutoDeckScore)}
                   </td>
                   <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
                     {formatPublicBenchmarkResultPercent(deck.legalPassRate)}

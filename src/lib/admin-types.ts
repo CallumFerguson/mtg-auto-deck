@@ -133,7 +133,7 @@ export type AdminBenchmarkEvaluationResultMetrics = {
   plannedTurnCount: number
   attemptedTurnCount: number
   completedTurnCount: number
-  mtgGoldfishScore: number | null
+  mtgAutoDeckScore: number | null
   openingHandScore: number | null
   turnScore: number | null
   completedEvaluationQualityAverage: number | null
@@ -143,7 +143,7 @@ export type AdminBenchmarkEvaluationResultMetrics = {
   totalRunCostUsd: number
   costPerAttemptedTurn: number | null
   costPerCompletedTurn: number | null
-  costPerGoldfishPoint: number | null
+  costPerMtgAutoDeckScorePoint: number | null
   reasoningTokensPerAttemptedTurn: number | null
   totalTokensPerAttemptedTurn: number | null
   decks: AdminBenchmarkEvaluationResultDeckMetrics[]
@@ -154,7 +154,7 @@ export type AdminBenchmarkEvaluationResultDeckMetrics = {
   deckName: string
   deckIndex: number
   plannedSimulationCount: number
-  mtgGoldfishScore: number | null
+  mtgAutoDeckScore: number | null
   completionRate: number | null
   legalPassRate: number | null
   strategicPassRate: number | null

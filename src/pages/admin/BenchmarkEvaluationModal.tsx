@@ -488,8 +488,8 @@ function BenchmarkEvaluationResultMetrics({
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <BenchmarkEvaluationMetric
-          label="MTG Goldfish Score"
-          value={formatBenchmarkEvaluationScore(resultMetrics.mtgGoldfishScore)}
+          label="MTG Auto Deck Score"
+          value={formatBenchmarkEvaluationScore(resultMetrics.mtgAutoDeckScore)}
           icon={<BarChart3 className="size-4 text-sky-300" aria-hidden />}
         />
         <BenchmarkEvaluationMetric
@@ -546,7 +546,7 @@ function BenchmarkEvaluationResultMetrics({
         <BenchmarkEvaluationMetric
           label="Cost / score point"
           value={formatBenchmarkEvaluationNullableCost(
-            resultMetrics.costPerGoldfishPoint
+            resultMetrics.costPerMtgAutoDeckScorePoint
           )}
         />
       </div>
@@ -596,7 +596,7 @@ function BenchmarkEvaluationDeckMetricsTable({
                 </p>
               </td>
               <td className="px-3 py-2 font-medium text-foreground">
-                {formatBenchmarkEvaluationScore(deck.mtgGoldfishScore)}
+                {formatBenchmarkEvaluationScore(deck.mtgAutoDeckScore)}
               </td>
               <td className="px-3 py-2 text-muted-foreground">
                 {formatBenchmarkEvaluationPercent(deck.completionRate)}

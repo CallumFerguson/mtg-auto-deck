@@ -44,8 +44,8 @@ export type BenchmarkExportFailedEvaluation = BenchmarkExportRunEvaluation & {
   resultLabel: string
 }
 
-export type BenchmarkResultsExportV1<TBenchmarkMetadata> = {
-  schemaVersion: 1
+export type BenchmarkResultsExportV2<TBenchmarkMetadata> = {
+  schemaVersion: 2
   exportedAt: string
   benchmark: TBenchmarkMetadata
   resultMetrics: BenchmarkEvaluationResultMetrics
@@ -259,9 +259,9 @@ export function buildBenchmarkResultsExport<TBenchmarkMetadata>({
   benchmark: TBenchmarkMetadata
   exportedAt: string
   resultMetrics: BenchmarkEvaluationResultMetrics
-}): BenchmarkResultsExportV1<TBenchmarkMetadata> {
+}): BenchmarkResultsExportV2<TBenchmarkMetadata> {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     exportedAt,
     benchmark,
     resultMetrics,
