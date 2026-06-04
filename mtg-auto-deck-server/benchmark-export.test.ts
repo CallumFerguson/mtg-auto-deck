@@ -6,6 +6,7 @@ import {
 } from "./benchmark-export.js"
 import type {
   BenchmarkEvaluationLatestEvaluationSnapshot,
+  BenchmarkEvaluationLatestRunSnapshot,
   BenchmarkEvaluationTargetRun,
 } from "./benchmark-evaluations.js"
 import type { BenchmarkChildSimulation } from "./benchmarks-postgres.js"
@@ -49,10 +50,69 @@ test("averages latest completed evaluation scores by simulation", () => {
           simulationQualityScore: 7.5,
         }),
       ],
+      latestRuns: targetRuns.map((run) => createLatestRun(run)),
       targetRuns,
     })
 
   assert.equal(averageScoreBySimulation.get("simulation-one"), 7.7)
+})
+
+test("counts failed target runs as zero scores in simulation averages", () => {
+  const targetRuns = [
+    createTargetRun({
+      targetLlmRunId: "scored-run",
+    }),
+  ]
+  const averageScoreBySimulation =
+    buildBenchmarkExportAverageEvaluationScoreBySimulation({
+      latestEvaluations: [
+        createEvaluation({
+          targetLlmRunId: "scored-run",
+          simulationQualityScore: 8,
+        }),
+      ],
+      latestRuns: [
+        createLatestRun({
+          targetLlmRunId: "scored-run",
+        }),
+        createLatestRun({
+          targetLlmRunId: "failed-opening-run",
+          targetRunPhase: "opening_hand",
+          turnNumber: null,
+          status: "failed",
+          failureMessage: "Opening hand run failed.",
+          finalOutputText: null,
+          openingHandIsValid: null,
+        }),
+        createLatestRun({
+          targetLlmRunId: "failed-turn-run",
+          targetRunPhase: "turn",
+          turnNumber: 2,
+          status: "failed",
+          failureMessage: "Turn run failed.",
+          finalOutputText: null,
+          gameState: null,
+          turnActions: null,
+        }),
+        createLatestRun({
+          simulationId: "simulation-two",
+          targetLlmRunId: "failed-only-run",
+          status: "failed",
+          failureMessage: "Only run failed.",
+          finalOutputText: null,
+        }),
+        createLatestRun({
+          simulationId: "simulation-three",
+          targetLlmRunId: "completed-error-run",
+          failureMessage: "Completed run still had an error.",
+        }),
+      ],
+      targetRuns,
+    })
+
+  assert.equal(averageScoreBySimulation.get("simulation-one"), 2.7)
+  assert.equal(averageScoreBySimulation.get("simulation-two"), 0)
+  assert.equal(averageScoreBySimulation.get("simulation-three"), 0)
 })
 
 test("omits active, failed, result-failed, unscored, and superseded evaluations", () => {
@@ -98,6 +158,7 @@ test("omits active, failed, result-failed, unscored, and superseded evaluations"
           simulationQualityScore: 0,
         }),
       ],
+      latestRuns: targetRuns.map((run) => createLatestRun(run)),
       targetRuns,
     })
 
@@ -157,6 +218,25 @@ function createTargetRun(
     targetLlmRunId: "target-run",
     targetRunPhase: "turn",
     turnNumber: 1,
+    ...overrides,
+  }
+}
+
+function createLatestRun(
+  overrides: Partial<BenchmarkEvaluationLatestRunSnapshot> = {}
+): BenchmarkEvaluationLatestRunSnapshot {
+  return {
+    deckId: "deck-one",
+    simulationId: "simulation-one",
+    targetLlmRunId: "target-run",
+    targetRunPhase: "turn",
+    turnNumber: 1,
+    status: "completed",
+    failureMessage: null,
+    finalOutputText: "final output",
+    openingHandIsValid: null,
+    gameState: {},
+    turnActions: {},
     ...overrides,
   }
 }

@@ -910,6 +910,7 @@ async function getAdminBenchmarkZipExport(
   const averageEvaluationScoreBySimulationId =
     buildBenchmarkExportAverageEvaluationScoreBySimulation({
       latestEvaluations,
+      latestRuns: latestEvaluationRuns,
       targetRuns,
     })
   const benchmarkIndexMetadata = (() => {

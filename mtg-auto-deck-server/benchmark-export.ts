@@ -1,5 +1,6 @@
 import type {
   BenchmarkEvaluationLatestEvaluationSnapshot,
+  BenchmarkEvaluationLatestRunSnapshot,
   BenchmarkEvaluationTargetRun,
 } from "./benchmark-evaluations.js"
 import type { BenchmarkChildSimulation } from "./benchmarks-postgres.js"
@@ -27,9 +28,11 @@ type BenchmarkExportSimulationSummary = {
 
 export function buildBenchmarkExportAverageEvaluationScoreBySimulation({
   latestEvaluations,
+  latestRuns,
   targetRuns,
 }: {
   latestEvaluations: readonly BenchmarkEvaluationLatestEvaluationSnapshot[]
+  latestRuns: readonly BenchmarkEvaluationLatestRunSnapshot[]
   targetRuns: readonly BenchmarkEvaluationTargetRun[]
 }) {
   const targetRunById = new Map(
@@ -62,6 +65,16 @@ export function buildBenchmarkExportAverageEvaluationScoreBySimulation({
 
   const scoresBySimulationId = new Map<string, number[]>()
 
+  for (const run of latestRuns) {
+    if (isFailedBenchmarkExportTargetRun(run)) {
+      addBenchmarkExportSimulationScore(
+        scoresBySimulationId,
+        run.simulationId,
+        0
+      )
+    }
+  }
+
   for (const evaluation of latestEvaluationByTargetRunId.values()) {
     if (!isScoredBenchmarkExportEvaluation(evaluation)) {
       continue
@@ -73,9 +86,11 @@ export function buildBenchmarkExportAverageEvaluationScoreBySimulation({
       continue
     }
 
-    const scores = scoresBySimulationId.get(targetRun.simulationId) ?? []
-    scores.push(evaluation.simulationQualityScore)
-    scoresBySimulationId.set(targetRun.simulationId, scores)
+    addBenchmarkExportSimulationScore(
+      scoresBySimulationId,
+      targetRun.simulationId,
+      evaluation.simulationQualityScore
+    )
   }
 
   const averageScoreBySimulationId = new Map<string, number>()
@@ -128,6 +143,25 @@ function isScoredBenchmarkExportEvaluation(
     evaluation.resultStatus === "completed" &&
     evaluation.simulationQualityScore !== null
   )
+}
+
+function isFailedBenchmarkExportTargetRun(
+  run: BenchmarkEvaluationLatestRunSnapshot
+) {
+  return (
+    run.status === "failed" ||
+    (run.status === "completed" && run.failureMessage !== null)
+  )
+}
+
+function addBenchmarkExportSimulationScore(
+  scoresBySimulationId: Map<string, number[]>,
+  simulationId: string,
+  score: number
+) {
+  const scores = scoresBySimulationId.get(simulationId) ?? []
+  scores.push(score)
+  scoresBySimulationId.set(simulationId, scores)
 }
 
 function roundBenchmarkExportAverageScore(score: number) {
