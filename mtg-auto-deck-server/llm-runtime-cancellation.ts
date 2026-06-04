@@ -7,13 +7,62 @@ class RuntimeAbortError extends Error {
   }
 }
 
+export class RuntimeTimeoutError extends Error {
+  readonly timeoutSeconds: number
+
+  constructor(timeoutSeconds: number) {
+    super(formatRuntimeTimeoutMessage(timeoutSeconds))
+    this.name = "RuntimeTimeoutError"
+    this.timeoutSeconds = timeoutSeconds
+  }
+}
+
 export function createRuntimeAbortError(message?: string) {
   return new RuntimeAbortError(message)
 }
 
+export function createRuntimeAbortErrorForSignal(
+  signal: AbortSignal,
+  message?: string
+) {
+  return (
+    getRuntimeTimeoutAbortError(undefined, signal) ??
+    createRuntimeAbortError(message)
+  )
+}
+
+export function createRuntimeTimeoutError(timeoutSeconds: number) {
+  return new RuntimeTimeoutError(timeoutSeconds)
+}
+
+export function getRuntimeTimeoutAbortError(
+  error: unknown,
+  signal?: AbortSignal
+) {
+  if (isRuntimeTimeoutError(error)) {
+    return error
+  }
+
+  if (signal) {
+    const reason = getRuntimeAbortReason(signal)
+
+    if (isRuntimeTimeoutError(reason)) {
+      return reason
+    }
+  }
+
+  return null
+}
+
+export function isRuntimeTimeoutError(
+  error: unknown
+): error is RuntimeTimeoutError {
+  return error instanceof RuntimeTimeoutError
+}
+
 export function throwIfRuntimeAborted(signal: AbortSignal, message?: string) {
   if (signal.aborted) {
-    throw createRuntimeAbortError(message)
+    throw createRuntimeAbortErrorForSignal(signal, message)
   }
 }
 
@@ -59,7 +108,7 @@ export async function callWithRuntimeAbortSignal<T>(
     return result
   } catch (error) {
     if (signal.aborted) {
-      throw createRuntimeAbortError(message)
+      throw createRuntimeAbortErrorForSignal(signal, message)
     }
 
     throw error
@@ -84,9 +133,17 @@ export async function forEachRuntimeAbortableAsync<T>(
     throwIfRuntimeAborted(signal, message)
   } catch (error) {
     if (signal.aborted) {
-      throw createRuntimeAbortError(message)
+      throw createRuntimeAbortErrorForSignal(signal, message)
     }
 
     throw error
   }
+}
+
+function formatRuntimeTimeoutMessage(timeoutSeconds: number) {
+  return `LLM run timed out after ${timeoutSeconds} seconds without producing a final response.`
+}
+
+function getRuntimeAbortReason(signal: AbortSignal) {
+  return signal.reason
 }

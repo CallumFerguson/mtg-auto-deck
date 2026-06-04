@@ -24,6 +24,9 @@ type Environment = Record<string, string | undefined>
 
 export const GENERIC_GAME_RULES_REFERENCE_ENABLED_ENVIRONMENT_VARIABLE =
   "GENERIC_GAME_RULES_REFERENCE_ENABLED"
+export const DEFAULT_LLM_RUN_API_TIMEOUT_SECONDS = 600
+export const LLM_RUN_API_TIMEOUT_SECONDS_ENVIRONMENT_VARIABLE =
+  "LLM_RUN_API_TIMEOUT_SECONDS"
 
 type BaseLlmRunConfig = {
   apiKey: string
@@ -134,6 +137,7 @@ export type ResolvedEvaluationLlmRunConfig =
   | ResolvedLlamaCppRunConfig
 
 export type LlmRunQueueConfig = {
+  apiTimeoutSeconds: number
   maxConcurrentRuns: number
 }
 
@@ -240,6 +244,11 @@ export function getLlmRunQueueConfig(
   environment: Environment = process.env
 ): LlmRunQueueConfig {
   return {
+    apiTimeoutSeconds: getOptionalPositiveIntegerEnvironmentVariable(
+      environment,
+      LLM_RUN_API_TIMEOUT_SECONDS_ENVIRONMENT_VARIABLE,
+      DEFAULT_LLM_RUN_API_TIMEOUT_SECONDS
+    ),
     maxConcurrentRuns: getRequiredPositiveIntegerEnvironmentVariable(
       environment,
       "LLM_RUN_QUEUE_MAX_CONCURRENT_RUNS"
@@ -383,6 +392,28 @@ function getOptionalEnvironmentVariable(
   environmentVariable: string
 ) {
   return environment[environmentVariable]?.trim() || null
+}
+
+function getOptionalPositiveIntegerEnvironmentVariable(
+  environment: Environment,
+  environmentVariable: string,
+  defaultValue: number
+) {
+  const value = getOptionalEnvironmentVariable(environment, environmentVariable)
+
+  if (value === null) {
+    return defaultValue
+  }
+
+  const parsedValue = Number(value)
+
+  if (!Number.isInteger(parsedValue) || parsedValue <= 0) {
+    throw new LlmConfigurationError(
+      `${environmentVariable} must be a positive integer.`
+    )
+  }
+
+  return parsedValue
 }
 
 function getOptionalBooleanEnvironmentVariable(

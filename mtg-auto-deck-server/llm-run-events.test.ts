@@ -49,7 +49,10 @@ import {
 } from "./benchmark-evaluations.js"
 import {
   callWithRuntimeAbortSignal,
+  createRuntimeTimeoutError,
   forEachRuntimeAbortableAsync,
+  getRuntimeTimeoutAbortError,
+  isRuntimeTimeoutError,
   registerRuntimeAbortHandler,
   throwIfRuntimeAborted,
 } from "./llm-runtime-cancellation.js"
@@ -77,7 +80,9 @@ import {
 import {
   buildOpenRouterReasoningOptions,
   buildProviderReasoningOptions,
+  DEFAULT_LLM_RUN_API_TIMEOUT_SECONDS,
   GENERIC_GAME_RULES_REFERENCE_ENABLED_ENVIRONMENT_VARIABLE,
+  LLM_RUN_API_TIMEOUT_SECONDS_ENVIRONMENT_VARIABLE,
   getGenericGameRulesReferenceEnabled,
   getLlmRunQueueConfig,
   getOpeningHandLlmRunConfig,
@@ -1586,12 +1591,39 @@ test("requires a positive LLM run queue global concurrency limit", () => {
       }),
     /LLM_RUN_QUEUE_MAX_CONCURRENT_RUNS must be a positive integer\./
   )
+  assert.throws(
+    () =>
+      getLlmRunQueueConfig({
+        LLM_RUN_QUEUE_MAX_CONCURRENT_RUNS: "50",
+        [LLM_RUN_API_TIMEOUT_SECONDS_ENVIRONMENT_VARIABLE]: "0",
+      }),
+    /LLM_RUN_API_TIMEOUT_SECONDS must be a positive integer\./
+  )
+  assert.throws(
+    () =>
+      getLlmRunQueueConfig({
+        LLM_RUN_QUEUE_MAX_CONCURRENT_RUNS: "50",
+        [LLM_RUN_API_TIMEOUT_SECONDS_ENVIRONMENT_VARIABLE]: "10.5",
+      }),
+    /LLM_RUN_API_TIMEOUT_SECONDS must be a positive integer\./
+  )
 
   assert.deepEqual(
     getLlmRunQueueConfig({
       LLM_RUN_QUEUE_MAX_CONCURRENT_RUNS: "50",
     }),
     {
+      apiTimeoutSeconds: DEFAULT_LLM_RUN_API_TIMEOUT_SECONDS,
+      maxConcurrentRuns: 50,
+    }
+  )
+  assert.deepEqual(
+    getLlmRunQueueConfig({
+      LLM_RUN_QUEUE_MAX_CONCURRENT_RUNS: "50",
+      [LLM_RUN_API_TIMEOUT_SECONDS_ENVIRONMENT_VARIABLE]: "120",
+    }),
+    {
+      apiTimeoutSeconds: 120,
       maxConcurrentRuns: 50,
     }
   )
@@ -2553,6 +2585,32 @@ test("runtime abort helper throws a recognized abort error", () => {
   )
 })
 
+test("runtime timeout aborts are distinguishable from cancellation", () => {
+  const abortController = new AbortController()
+  const timeoutError = createRuntimeTimeoutError(600)
+
+  abortController.abort(timeoutError)
+
+  assert.throws(
+    () => throwIfRuntimeAborted(abortController.signal),
+    (error: unknown) =>
+      error === timeoutError &&
+      isRuntimeTimeoutError(error) &&
+      !isAbortError(error)
+  )
+  assert.equal(
+    timeoutError.message,
+    "LLM run timed out after 600 seconds without producing a final response."
+  )
+  assert.equal(
+    getRuntimeTimeoutAbortError(
+      new Error("Request aborted."),
+      abortController.signal
+    ),
+    timeoutError
+  )
+})
+
 test("runtime abort handler runs once when cancellation is requested", () => {
   const abortController = new AbortController()
   let abortCallCount = 0
@@ -2599,6 +2657,19 @@ test("runtime abort call helper forwards the abort signal", async () => {
   )
 
   assert.equal(receivedSignal, abortController.signal)
+})
+
+test("runtime abort call helper preserves timeout abort reasons", async () => {
+  const abortController = new AbortController()
+  const timeoutError = createRuntimeTimeoutError(30)
+
+  await assert.rejects(
+    callWithRuntimeAbortSignal(abortController.signal, async () => {
+      abortController.abort(timeoutError)
+      return "late result"
+    }),
+    (error: unknown) => error === timeoutError && isRuntimeTimeoutError(error)
+  )
 })
 
 test("late LLM terminal updates do not apply after cancellation starts", () => {

@@ -218,7 +218,9 @@ import {
 } from "./llamacpp-chat.js"
 import {
   callWithRuntimeAbortSignal,
-  createRuntimeAbortError,
+  createRuntimeAbortErrorForSignal,
+  createRuntimeTimeoutError,
+  getRuntimeTimeoutAbortError,
   registerRuntimeAbortHandler,
   throwIfRuntimeAborted,
 } from "./llm-runtime-cancellation.js"
@@ -302,6 +304,7 @@ const OPENING_HAND_MCP_SERVER_LABEL = "opening_hand"
 const TURN_SIMULATION_MCP_SERVER_LABEL = "turn_simulation"
 const PUBLIC_SIMULATION_EXPORT_SCHEMA_VERSION = 1
 const BENCHMARK_EXPORT_SCHEMA_VERSION = 1
+const MILLISECONDS_PER_SECOND = 1000
 const SSE_KEEPALIVE_INTERVAL_MS = 15000
 const LLM_RUN_QUEUE_POLL_INTERVAL_MS = 1000
 const MCP_RUN_TOKEN_TTL_MS = 6 * 60 * 60 * 1000
@@ -550,6 +553,19 @@ function createRuntimeCompletion() {
     completionPromise,
     resolveCompletion,
   }
+}
+
+function startLlmRunApiTimeout(
+  runtime: ActiveLlmRunRuntime,
+  apiTimeoutSeconds: number
+) {
+  const timeoutTimer = setTimeout(() => {
+    runtime.abortController.abort(createRuntimeTimeoutError(apiTimeoutSeconds))
+  }, apiTimeoutSeconds * MILLISECONDS_PER_SECOND)
+
+  timeoutTimer.unref()
+
+  return timeoutTimer
 }
 
 function isTerminalSimulationStatus(status: SimulationSummary["status"]) {
@@ -3579,7 +3595,10 @@ async function drainLlmRunQueue(config: LlmRunQueueConfig) {
       continue
     }
 
-    await startClaimedQueuedLlmRun(claimedRun)
+    await startClaimedQueuedLlmRun(
+      claimedRun,
+      config.apiTimeoutSeconds
+    )
   }
 }
 
@@ -4674,7 +4693,10 @@ async function handleUsageLimitedQueuedLlmRun(
   })
 }
 
-async function startClaimedQueuedLlmRun(run: ClaimedQueuedLlmRun) {
+async function startClaimedQueuedLlmRun(
+  run: ClaimedQueuedLlmRun,
+  apiTimeoutSeconds: number
+) {
   try {
     const modelPreset = await getRequiredEnabledQueuedRunLlmModelPreset(run)
 
@@ -4701,6 +4723,7 @@ async function startClaimedQueuedLlmRun(run: ClaimedQueuedLlmRun) {
       }
 
       startOpeningHandLlmRun({
+        apiTimeoutSeconds,
         attemptNumber: run.attemptNumber,
         config,
         createdAt: run.createdAt,
@@ -4736,6 +4759,7 @@ async function startClaimedQueuedLlmRun(run: ClaimedQueuedLlmRun) {
       }
 
       startEvaluationLlmRun({
+        apiTimeoutSeconds,
         attemptNumber: run.attemptNumber,
         config,
         createdAt: run.createdAt,
@@ -4772,6 +4796,7 @@ async function startClaimedQueuedLlmRun(run: ClaimedQueuedLlmRun) {
       }
 
       startTurnLlmRun({
+        apiTimeoutSeconds,
         attemptNumber: run.attemptNumber,
         config,
         createdAt: run.createdAt,
@@ -5288,7 +5313,7 @@ async function collectOpenRouterLlmResponse({
       }
     } catch (error) {
       if (signal.aborted) {
-        throw createRuntimeAbortError()
+        throw createRuntimeAbortErrorForSignal(signal)
       }
 
       throw error
@@ -5400,7 +5425,7 @@ async function collectOpenRouterChatCompletionLlmResponse({
       }
     } catch (error) {
       if (signal.aborted) {
-        throw createRuntimeAbortError()
+        throw createRuntimeAbortErrorForSignal(signal)
       }
 
       throw error
@@ -6005,7 +6030,7 @@ async function collectLlamaCppLlmResponse({
       }
     } catch (error) {
       if (signal.aborted) {
-        throw createRuntimeAbortError()
+        throw createRuntimeAbortErrorForSignal(signal)
       }
 
       throw error
@@ -6018,6 +6043,7 @@ async function collectLlamaCppLlmResponse({
 }
 
 function startOpeningHandLlmRun({
+  apiTimeoutSeconds,
   attemptNumber,
   config,
   createdAt,
@@ -6031,6 +6057,7 @@ function startOpeningHandLlmRun({
   simulationId,
   startedAt,
 }: {
+  apiTimeoutSeconds: number
   attemptNumber: number
   config: ResolvedOpeningHandLlmRunConfig
   createdAt: string
@@ -6045,6 +6072,7 @@ function startOpeningHandLlmRun({
   startedAt: string
 }) {
   void runOpeningHandLlmRun({
+    apiTimeoutSeconds,
     attemptNumber,
     config,
     createdAt,
@@ -6061,6 +6089,7 @@ function startOpeningHandLlmRun({
 }
 
 function startEvaluationLlmRun({
+  apiTimeoutSeconds,
   attemptNumber,
   config,
   createdAt,
@@ -6075,6 +6104,7 @@ function startEvaluationLlmRun({
   targetLlmRunId,
   targetRunPhase,
 }: {
+  apiTimeoutSeconds: number
   attemptNumber: number
   config: ResolvedEvaluationLlmRunConfig
   createdAt: string
@@ -6090,6 +6120,7 @@ function startEvaluationLlmRun({
   targetRunPhase: "opening_hand" | "turn"
 }) {
   void runEvaluationLlmRun({
+    apiTimeoutSeconds,
     attemptNumber,
     config,
     createdAt,
@@ -6107,6 +6138,7 @@ function startEvaluationLlmRun({
 }
 
 async function runEvaluationLlmRun({
+  apiTimeoutSeconds,
   attemptNumber,
   config,
   createdAt,
@@ -6121,6 +6153,7 @@ async function runEvaluationLlmRun({
   targetLlmRunId,
   targetRunPhase,
 }: {
+  apiTimeoutSeconds: number
   attemptNumber: number
   config: ResolvedEvaluationLlmRunConfig
   createdAt: string
@@ -6162,6 +6195,7 @@ async function runEvaluationLlmRun({
   }
 
   activeLlmRunRuntimes.set(runtimeStreamKey, runtime)
+  const apiTimeoutTimer = startLlmRunApiTimeout(runtime, apiTimeoutSeconds)
   let responseResult: CompletedLlmResponseResult | null = null
 
   try {
@@ -6249,6 +6283,28 @@ async function runEvaluationLlmRun({
     })
     runtime.status = "completed"
   } catch (error) {
+    const timeoutError = getRuntimeTimeoutAbortError(
+      error,
+      runtime.abortController.signal
+    )
+
+    if (timeoutError) {
+      logLlmApiCallStoppedWithError({
+        error: timeoutError,
+        llmRunId,
+        phase: "evaluation",
+        provider: config.provider,
+      })
+      console.error("Evaluation LLM run timed out:", timeoutError)
+      await failLlmRun(
+        llmRunId,
+        getErrorMessage(timeoutError),
+        responseResult?.outputText
+      )
+      runtime.status = "failed"
+      return
+    }
+
     if (isAbortError(error) || runtime.abortController.signal.aborted) {
       logLlmApiCallCancelled({
         llmRunId,
@@ -6282,6 +6338,7 @@ async function runEvaluationLlmRun({
     )
     runtime.status = "failed"
   } finally {
+    clearTimeout(apiTimeoutTimer)
     activeLlmRunRuntimes.delete(runtimeStreamKey)
     runtime.resolveCompletion()
     nudgeLlmRunQueue()
@@ -6289,6 +6346,7 @@ async function runEvaluationLlmRun({
 }
 
 async function runOpeningHandLlmRun({
+  apiTimeoutSeconds,
   attemptNumber,
   config,
   createdAt,
@@ -6302,6 +6360,7 @@ async function runOpeningHandLlmRun({
   simulationId,
   startedAt,
 }: {
+  apiTimeoutSeconds: number
   attemptNumber: number
   config: ResolvedOpeningHandLlmRunConfig
   createdAt: string
@@ -6340,6 +6399,7 @@ async function runOpeningHandLlmRun({
   }
 
   activeLlmRunRuntimes.set(runtimeStreamKey, runtime)
+  const apiTimeoutTimer = startLlmRunApiTimeout(runtime, apiTimeoutSeconds)
   let responseResult: CompletedLlmResponseResult | null = null
 
   try {
@@ -6467,6 +6527,33 @@ async function runOpeningHandLlmRun({
     })
     await handleSimulationCompletionNextStep(completion)
   } catch (error) {
+    const timeoutError = getRuntimeTimeoutAbortError(
+      error,
+      runtime.abortController.signal
+    )
+
+    if (timeoutError) {
+      logLlmApiCallStoppedWithError({
+        error: timeoutError,
+        llmRunId,
+        phase: "opening_hand",
+        provider: config.provider,
+      })
+      console.error("Opening-hand LLM run timed out:", timeoutError)
+      await failLlmRun(
+        llmRunId,
+        getErrorMessage(timeoutError),
+        responseResult?.outputText
+      )
+      runtime.status = "failed"
+      await publishSimulationResultsState({
+        deckId,
+        llmRunId,
+        simulationId,
+      })
+      return
+    }
+
     if (isAbortError(error) || runtime.abortController.signal.aborted) {
       logLlmApiCallCancelled({
         llmRunId,
@@ -6510,6 +6597,7 @@ async function runOpeningHandLlmRun({
       simulationId,
     })
   } finally {
+    clearTimeout(apiTimeoutTimer)
     await revokeLlmRunMcpToken(llmRunId).catch((error: unknown) => {
       console.error("Failed to revoke opening-hand MCP run token:", error)
     })
@@ -6520,6 +6608,7 @@ async function runOpeningHandLlmRun({
 }
 
 function startTurnLlmRun({
+  apiTimeoutSeconds,
   attemptNumber,
   config,
   createdAt,
@@ -6534,6 +6623,7 @@ function startTurnLlmRun({
   startedAt,
   turnNumber,
 }: {
+  apiTimeoutSeconds: number
   attemptNumber: number
   config: ResolvedTurnSimulationLlmRunConfig
   createdAt: string
@@ -6549,6 +6639,7 @@ function startTurnLlmRun({
   turnNumber: number
 }) {
   void runTurnLlmRun({
+    apiTimeoutSeconds,
     attemptNumber,
     config,
     createdAt,
@@ -6566,6 +6657,7 @@ function startTurnLlmRun({
 }
 
 async function runTurnLlmRun({
+  apiTimeoutSeconds,
   attemptNumber,
   config,
   createdAt,
@@ -6580,6 +6672,7 @@ async function runTurnLlmRun({
   startedAt,
   turnNumber,
 }: {
+  apiTimeoutSeconds: number
   attemptNumber: number
   config: ResolvedTurnSimulationLlmRunConfig
   createdAt: string
@@ -6620,6 +6713,7 @@ async function runTurnLlmRun({
   }
 
   activeLlmRunRuntimes.set(runtimeStreamKey, runtime)
+  const apiTimeoutTimer = startLlmRunApiTimeout(runtime, apiTimeoutSeconds)
   let responseResult: CompletedLlmResponseResult | null = null
 
   try {
@@ -6748,6 +6842,33 @@ async function runTurnLlmRun({
     })
     await handleSimulationCompletionNextStep(completion)
   } catch (error) {
+    const timeoutError = getRuntimeTimeoutAbortError(
+      error,
+      runtime.abortController.signal
+    )
+
+    if (timeoutError) {
+      logLlmApiCallStoppedWithError({
+        error: timeoutError,
+        llmRunId,
+        phase: "turn",
+        provider: config.provider,
+      })
+      console.error("Turn LLM run timed out:", timeoutError)
+      await failLlmRun(
+        llmRunId,
+        getErrorMessage(timeoutError),
+        responseResult?.outputText
+      )
+      runtime.status = "failed"
+      await publishSimulationResultsState({
+        deckId,
+        llmRunId,
+        simulationId,
+      })
+      return
+    }
+
     if (isAbortError(error) || runtime.abortController.signal.aborted) {
       logLlmApiCallCancelled({
         llmRunId,
@@ -6791,6 +6912,7 @@ async function runTurnLlmRun({
       simulationId,
     })
   } finally {
+    clearTimeout(apiTimeoutTimer)
     await revokeLlmRunMcpToken(llmRunId).catch((error: unknown) => {
       console.error("Failed to revoke turn MCP run token:", error)
     })
