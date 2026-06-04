@@ -1472,8 +1472,11 @@ export function PublicBenchmarkPage({
               {selectedBenchmarkPanel === "results" ? (
                 <PublicBenchmarkResultsPanel
                   benchmarkResults={benchmarkResults}
+                  failedEvaluationCount={failedEvaluations?.length ?? null}
+                  isLoadingFailedEvaluations={isLoadingFailedEvaluations}
                   isLoading={isLoadingBenchmarkResults}
                   loadError={benchmarkResultsLoadError}
+                  onViewFailedEvaluations={handleSelectFailedEvaluations}
                   onReload={() => void loadBenchmarkResults()}
                 />
               ) : selectedBenchmarkPanel === "failed-evaluations" ? (
@@ -1551,13 +1554,19 @@ export function PublicBenchmarkPage({
 
 function PublicBenchmarkResultsPanel({
   benchmarkResults,
+  failedEvaluationCount,
+  isLoadingFailedEvaluations,
   isLoading,
   loadError,
+  onViewFailedEvaluations,
   onReload,
 }: {
   benchmarkResults: PublicBenchmarkResultsExportV1 | null
+  failedEvaluationCount: number | null
+  isLoadingFailedEvaluations: boolean
   isLoading: boolean
   loadError: string | null
+  onViewFailedEvaluations: () => void
   onReload: () => void
 }) {
   const metrics = benchmarkResults?.resultMetrics ?? null
@@ -1617,6 +1626,12 @@ function PublicBenchmarkResultsPanel({
               />
             </div>
 
+            <PublicBenchmarkFailedRunSummary
+              failedEvaluationCount={failedEvaluationCount}
+              isLoading={isLoadingFailedEvaluations}
+              onViewFailedEvaluations={onViewFailedEvaluations}
+            />
+
             <PublicBenchmarkResultsDeckTable decks={metrics.decks} />
           </>
         ) : (
@@ -1626,6 +1641,47 @@ function PublicBenchmarkResultsPanel({
         )}
       </section>
     </div>
+  )
+}
+
+function PublicBenchmarkFailedRunSummary({
+  failedEvaluationCount,
+  isLoading,
+  onViewFailedEvaluations,
+}: {
+  failedEvaluationCount: number | null
+  isLoading: boolean
+  onViewFailedEvaluations: () => void
+}) {
+  const failedRunSummaryText =
+    failedEvaluationCount === null
+      ? isLoading
+        ? "Loading failed runs..."
+        : "Failed run count could not be loaded."
+      : `${formatPublicBenchmarkResultCount(failedEvaluationCount)} failed ${
+          failedEvaluationCount === 1 ? "run" : "runs"
+        }.`
+
+  return (
+    <section className="flex flex-col gap-3 rounded-md border border-border bg-background/35 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="grid gap-1">
+        <h3 className="text-sm font-semibold text-foreground">Failed runs</h3>
+        <p className="text-sm text-muted-foreground">
+          <span className="font-medium text-foreground tabular-nums">
+            {failedRunSummaryText}
+          </span>{" "}
+          Legal or strategic evaluation failures.
+        </p>
+      </div>
+      <button
+        type="button"
+        className="inline-flex w-fit shrink-0 items-center gap-1 rounded-md border border-sky-300/35 bg-sky-400/10 px-2.5 py-1.5 text-xs font-medium text-sky-100 transition-colors hover:bg-sky-400/20 focus-visible:border-sky-300/50 focus-visible:ring-3 focus-visible:ring-sky-300/40 focus-visible:outline-none"
+        onClick={onViewFailedEvaluations}
+      >
+        <Eye className="size-3.5" aria-hidden />
+        View failed runs
+      </button>
+    </section>
   )
 }
 
