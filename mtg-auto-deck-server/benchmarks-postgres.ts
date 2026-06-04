@@ -1,5 +1,5 @@
 import { queryDatabase, withDatabaseTransaction } from "./db.js"
-import type { LlmProcessingMode } from "./simulations-postgres.js"
+import type { LlmProcessingMode, SimulationStatus } from "./simulations-postgres.js"
 import type {
   BenchmarkEvaluationLatestEvaluationSnapshot,
   BenchmarkEvaluationLatestRunSnapshot,
@@ -57,6 +57,12 @@ export type BenchmarkChildSimulation = {
   simulationId: string
   simulationIndex: number
   seed: string
+}
+
+export type BenchmarkChildSimulationWithStatus = BenchmarkChildSimulation & {
+  status: SimulationStatus
+  createdAt: string
+  updatedAt: string
 }
 
 type AdminBenchmarkRunRow = {
@@ -368,10 +374,22 @@ export async function getAdminBenchmark(
   return row ? mapAdminBenchmarkRunRow(row) : null
 }
 
-export async function listBenchmarkRunSimulationsForAdmin(
+export function listBenchmarkRunSimulationsForAdmin(
+  benchmarkRunId: string,
+  adminUserId: string,
+  options: { includeSimulationDetails: true }
+): Promise<BenchmarkChildSimulationWithStatus[] | null>
+export function listBenchmarkRunSimulationsForAdmin(
   benchmarkRunId: string,
   adminUserId: string
-): Promise<BenchmarkChildSimulation[] | null> {
+): Promise<BenchmarkChildSimulation[] | null>
+export async function listBenchmarkRunSimulationsForAdmin(
+  benchmarkRunId: string,
+  adminUserId: string,
+  options: { includeSimulationDetails?: boolean } = {}
+): Promise<
+  BenchmarkChildSimulation[] | BenchmarkChildSimulationWithStatus[] | null
+> {
   const benchmarkResult = await queryDatabase(
     `
       SELECT id
@@ -394,6 +412,9 @@ export async function listBenchmarkRunSimulationsForAdmin(
     simulation_id: string
     simulation_index: number
     seed: string
+    status: string
+    created_at: Date
+    updated_at: Date
   }>(
     `
       SELECT
@@ -403,28 +424,46 @@ export async function listBenchmarkRunSimulationsForAdmin(
         deck.name AS deck_name,
         benchmark_simulation.simulation_id,
         benchmark_simulation.simulation_index,
-        benchmark_simulation.seed
+        benchmark_simulation.seed,
+        simulation.status,
+        simulation.created_at,
+        simulation.updated_at
       FROM benchmark_run_simulations benchmark_simulation
       JOIN benchmark_run_decks benchmark_deck
         ON benchmark_deck.benchmark_run_id = benchmark_simulation.benchmark_run_id
         AND benchmark_deck.deck_id = benchmark_simulation.deck_id
       JOIN decks deck
         ON deck.id = benchmark_simulation.deck_id
+      JOIN simulations simulation
+        ON simulation.id = benchmark_simulation.simulation_id
       WHERE benchmark_simulation.benchmark_run_id = $1
       ORDER BY benchmark_deck.deck_index ASC, benchmark_simulation.simulation_index ASC
     `,
     [benchmarkRunId]
   )
 
-  return result.rows.map((row) => ({
-    benchmarkRunId: row.benchmark_run_id,
-    deckId: row.deck_id,
-    deckIndex: row.deck_index,
-    deckName: row.deck_name,
-    simulationId: row.simulation_id,
-    simulationIndex: row.simulation_index,
-    seed: row.seed,
-  }))
+  return result.rows.map((row) => {
+    const childSimulation = {
+      benchmarkRunId: row.benchmark_run_id,
+      deckId: row.deck_id,
+      deckIndex: row.deck_index,
+      deckName: row.deck_name,
+      simulationId: row.simulation_id,
+      simulationIndex: row.simulation_index,
+      seed: row.seed,
+    }
+
+    if (!options.includeSimulationDetails) {
+      return childSimulation
+    }
+
+    return {
+      ...childSimulation,
+      status: row.status as SimulationStatus,
+      createdAt: row.created_at.toISOString(),
+      updatedAt: row.updated_at.toISOString(),
+    }
+  })
 }
 
 export async function listBenchmarkEvaluationLatestRunsForAdmin(

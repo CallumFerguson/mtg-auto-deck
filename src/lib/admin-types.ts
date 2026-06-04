@@ -85,6 +85,32 @@ export type AdminBenchmarksResponse = {
   total: number
 }
 
+export type AdminBenchmarkSimulationStatus =
+  | "pending"
+  | "unmanaged"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+
+export type AdminBenchmarkSimulation = {
+  benchmarkRunId: string
+  deckId: string
+  deckIndex: number
+  deckName: string
+  simulationId: string
+  simulationIndex: number
+  seed: string
+  status: AdminBenchmarkSimulationStatus
+  createdAt: string
+  updatedAt: string
+}
+
+export type AdminBenchmarkSimulationsResponse = {
+  simulations: AdminBenchmarkSimulation[]
+  total: number
+}
+
 export type AdminBenchmarkEvaluationSummary = {
   targetRunCount: number
   evaluationCount: number

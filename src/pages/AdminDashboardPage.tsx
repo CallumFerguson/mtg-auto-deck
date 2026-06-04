@@ -21,12 +21,14 @@ import {
   Copy,
   Download,
   Edit3,
+  ExternalLink,
   LayoutDashboard,
   LogIn,
   MoreVertical,
   Plus,
   Power,
   RefreshCw,
+  Search,
   ShieldAlert,
   ShieldCheck,
   ShieldMinus,
@@ -46,6 +48,9 @@ import { API_BASE_URL, apiFetch } from "@/lib/api"
 import { readApiError } from "@/lib/api-error"
 import type {
   AdminBenchmark,
+  AdminBenchmarkSimulation,
+  AdminBenchmarkSimulationStatus,
+  AdminBenchmarkSimulationsResponse,
   AdminBenchmarksResponse,
   AdminUser,
   AdminUserEmailVerificationResponse,
@@ -72,7 +77,10 @@ import {
   type LlmProvider,
   type ReasoningEffort,
 } from "@/lib/llm-model-preset-types"
-import type { AdminDashboardSectionId } from "@/lib/navigation"
+import {
+  getDeckSimulationPath,
+  type AdminDashboardSectionId,
+} from "@/lib/navigation"
 import { FlexServiceTierSwitch } from "./deck-simulation/SimulationSetupControls"
 import { BenchmarkEvaluationModal } from "./admin/BenchmarkEvaluationModal"
 
@@ -1904,6 +1912,8 @@ function AdminBenchmarksSection() {
   )
   const [evaluatingBenchmark, setEvaluatingBenchmark] =
     useState<AdminBenchmark | null>(null)
+  const [viewingBenchmarkSimulations, setViewingBenchmarkSimulations] =
+    useState<AdminBenchmark | null>(null)
   const [selectedDeckIds, setSelectedDeckIds] = useState<string[]>([])
   const [selectedModelPresetId, setSelectedModelPresetId] = useState("")
   const [simulationsPerDeck, setSimulationsPerDeck] = useState("1")
@@ -2586,6 +2596,9 @@ function AdminBenchmarksSection() {
                         onEvaluateBenchmark={setEvaluatingBenchmark}
                         onExportBenchmark={handleExportBenchmark}
                         onStopBenchmark={handleStopBenchmark}
+                        onViewBenchmarkSimulations={
+                          setViewingBenchmarkSimulations
+                        }
                         openBenchmarkMenuId={openBenchmarkMenuId}
                         setOpenBenchmarkMenuId={setOpenBenchmarkMenuId}
                         stoppingBenchmarkId={stoppingBenchmarkId}
@@ -2608,6 +2621,13 @@ function AdminBenchmarksSection() {
           onClose={() => setEvaluatingBenchmark(null)}
         />
       ) : null}
+
+      {viewingBenchmarkSimulations ? (
+        <BenchmarkSimulationsModal
+          benchmark={viewingBenchmarkSimulations}
+          onClose={() => setViewingBenchmarkSimulations(null)}
+        />
+      ) : null}
     </section>
   )
 }
@@ -2620,6 +2640,7 @@ function AdminBenchmarkActionsMenu({
   onEvaluateBenchmark,
   onExportBenchmark,
   onStopBenchmark,
+  onViewBenchmarkSimulations,
   openBenchmarkMenuId,
   setOpenBenchmarkMenuId,
   stoppingBenchmarkId,
@@ -2631,6 +2652,7 @@ function AdminBenchmarkActionsMenu({
   onEvaluateBenchmark: (benchmark: AdminBenchmark) => void
   onExportBenchmark: (benchmark: AdminBenchmark) => void
   onStopBenchmark: (benchmark: AdminBenchmark) => void
+  onViewBenchmarkSimulations: (benchmark: AdminBenchmark) => void
   openBenchmarkMenuId: string | null
   setOpenBenchmarkMenuId: Dispatch<SetStateAction<string | null>>
   stoppingBenchmarkId: string | null
@@ -2826,6 +2848,18 @@ function AdminBenchmarkActionsMenu({
                   role="menuitem"
                   onClick={() => {
                     setOpenBenchmarkMenuId(null)
+                    onViewBenchmarkSimulations(benchmark)
+                  }}
+                >
+                  <Search data-icon="inline-start" />
+                  View simulations
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-sky-100 transition-colors hover:bg-sky-400/10 hover:text-sky-100 focus:bg-sky-400/10 focus:outline-none"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setOpenBenchmarkMenuId(null)
                     onEvaluateBenchmark(benchmark)
                   }}
                 >
@@ -2852,6 +2886,366 @@ function AdminBenchmarkActionsMenu({
         : null}
     </div>
   )
+}
+
+function BenchmarkSimulationsModal({
+  benchmark,
+  onClose,
+}: {
+  benchmark: AdminBenchmark
+  onClose: () => void
+}) {
+  const [simulations, setSimulations] = useState<
+    AdminBenchmarkSimulation[]
+  >([])
+  const [simulationTotal, setSimulationTotal] = useState(0)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const simulationsUrl = useMemo(
+    () =>
+      `${API_BASE_URL}/admin/benchmarks/${encodeURIComponent(
+        benchmark.id
+      )}/simulations`,
+    [benchmark.id]
+  )
+  const groupedSimulations = useMemo(
+    () =>
+      BENCHMARK_SIMULATION_CATEGORIES.map((category) => ({
+        ...category,
+        simulations: simulations.filter(
+          (simulation) =>
+            getBenchmarkSimulationCategoryId(simulation.status) === category.id
+        ),
+      })).filter((category) => category.simulations.length > 0),
+    [simulations]
+  )
+
+  const loadSimulations = useCallback(async () => {
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const response = await apiFetch(simulationsUrl)
+
+      if (!response.ok) {
+        setError(
+          await readApiError(
+            response,
+            "Benchmark simulations could not be loaded."
+          )
+        )
+        return
+      }
+
+      const data =
+        (await response.json()) as AdminBenchmarkSimulationsResponse
+      setSimulations(data.simulations)
+      setSimulationTotal(data.total)
+    } catch {
+      setError("Benchmark simulations could not be loaded.")
+    } finally {
+      setIsLoading(false)
+    }
+  }, [simulationsUrl])
+
+  useEffect(() => {
+    void loadSimulations()
+  }, [loadSimulations])
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose()
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [onClose])
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 py-6 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose()
+        }
+      }}
+    >
+      <section
+        aria-labelledby="benchmark-simulations-title"
+        className="flex max-h-[calc(100svh-3rem)] w-full max-w-3xl flex-col rounded-lg border border-border bg-card shadow-2xl shadow-black/40"
+        role="dialog"
+        aria-modal="true"
+      >
+        <header className="flex flex-col gap-4 border-b border-border px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex min-w-0 items-center gap-2">
+              <Search
+                className="size-5 shrink-0 text-sky-300"
+                aria-hidden
+              />
+              <h2
+                id="benchmark-simulations-title"
+                className="text-xl font-semibold text-foreground"
+              >
+                Benchmark simulations
+              </h2>
+            </div>
+            <p className="mt-1 text-sm break-words text-muted-foreground">
+              {getBenchmarkPresetLabel(benchmark)}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {isLoading
+                ? "Loading simulations..."
+                : `${simulationTotal} ${
+                    simulationTotal === 1 ? "simulation" : "simulations"
+                  }`}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void loadSimulations()}
+              disabled={isLoading}
+            >
+              <RefreshCw
+                data-icon="inline-start"
+                className={isLoading ? "animate-spin" : undefined}
+              />
+              Refresh
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label="Close benchmark simulations"
+              title="Close"
+              onClick={onClose}
+            >
+              <X />
+            </Button>
+          </div>
+        </header>
+
+        <div className="simulation-scrollbar min-h-0 flex-1 overflow-y-auto px-5 py-5">
+          <div className="grid gap-4">
+            {error ? (
+              <div className="flex flex-col gap-3 rounded-md border border-destructive/35 bg-destructive/10 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-destructive" role="alert">
+                  {error}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void loadSimulations()}
+                >
+                  Try again
+                </Button>
+              </div>
+            ) : null}
+
+            {isLoading ? (
+              <div className="rounded-md border border-border bg-background/35 px-4 py-8 text-center text-sm text-muted-foreground">
+                Loading simulations...
+              </div>
+            ) : simulations.length > 0 ? (
+              <div className="grid gap-5">
+                {groupedSimulations.map((category) => (
+                  <section
+                    className="grid gap-3"
+                    key={category.id}
+                    aria-label={category.label}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="text-sm font-semibold text-foreground">
+                        {category.label}
+                      </h3>
+                      <span className="text-xs text-muted-foreground">
+                        {category.simulations.length}{" "}
+                        {category.simulations.length === 1
+                          ? "simulation"
+                          : "simulations"}
+                      </span>
+                    </div>
+                    <div className="grid gap-3">
+                      {category.simulations.map((simulation) => (
+                        <BenchmarkSimulationRow
+                          key={simulation.simulationId}
+                          simulation={simulation}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-md border border-border bg-background/35 px-4 py-8 text-center text-sm text-muted-foreground">
+                No simulations.
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function BenchmarkSimulationRow({
+  simulation,
+}: {
+  simulation: AdminBenchmarkSimulation
+}) {
+  return (
+    <article className="grid gap-3 rounded-md border border-border bg-background/35 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+      <div className="min-w-0">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <p className="min-w-0 text-sm font-semibold break-words text-foreground">
+            {simulation.deckName}
+          </p>
+          <BenchmarkSimulationStatusBadge status={simulation.status} />
+        </div>
+        <p className="mt-1 text-xs break-words text-muted-foreground">
+          {[
+            `Deck ${simulation.deckIndex + 1}`,
+            `Simulation ${simulation.simulationIndex}`,
+            `Updated ${formatDateTime(simulation.updatedAt)}`,
+          ].join(" / ")}
+        </p>
+        <dl className="mt-3 grid gap-2 text-xs text-muted-foreground">
+          <div className="grid gap-1 sm:grid-cols-[5rem_minmax(0,1fr)]">
+            <dt className="font-medium text-foreground/80">ID</dt>
+            <dd className="break-all">{simulation.simulationId}</dd>
+          </div>
+          <div className="grid gap-1 sm:grid-cols-[5rem_minmax(0,1fr)]">
+            <dt className="font-medium text-foreground/80">Seed</dt>
+            <dd className="break-all">{simulation.seed}</dd>
+          </div>
+        </dl>
+      </div>
+      <a
+        className="inline-flex w-fit items-center gap-1 rounded-md border border-sky-300/35 bg-sky-400/10 px-2.5 py-1.5 text-xs font-medium text-sky-100 transition-colors hover:bg-sky-400/20"
+        href={getBenchmarkSimulationHref(simulation)}
+        target="_blank"
+        rel="noreferrer"
+      >
+        Open simulation
+        <ExternalLink className="size-3.5" aria-hidden />
+      </a>
+    </article>
+  )
+}
+
+function BenchmarkSimulationStatusBadge({
+  status,
+}: {
+  status: AdminBenchmarkSimulationStatus
+}) {
+  const badge = getBenchmarkSimulationStatusBadge(status)
+
+  return (
+    <span
+      className={`inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-xs font-medium ${
+        badge.className
+      }`}
+    >
+      {badge.label}
+    </span>
+  )
+}
+
+function getBenchmarkSimulationHref(
+  simulation: AdminBenchmarkSimulation
+) {
+  return getDeckSimulationPath(simulation.deckId, simulation.simulationId)
+}
+
+type BenchmarkSimulationCategoryId =
+  | "in_progress"
+  | "failed"
+  | "completed"
+  | "cancelled"
+  | "other"
+
+const BENCHMARK_SIMULATION_CATEGORIES: {
+  id: BenchmarkSimulationCategoryId
+  label: string
+}[] = [
+  { id: "in_progress", label: "In progress" },
+  { id: "failed", label: "Failed" },
+  { id: "completed", label: "Completed" },
+  { id: "cancelled", label: "Stopped" },
+  { id: "other", label: "Other" },
+]
+
+function getBenchmarkSimulationCategoryId(
+  status: AdminBenchmarkSimulationStatus
+): BenchmarkSimulationCategoryId {
+  if (status === "pending" || status === "running") {
+    return "in_progress"
+  }
+
+  if (status === "failed") {
+    return "failed"
+  }
+
+  if (status === "completed") {
+    return "completed"
+  }
+
+  if (status === "cancelled") {
+    return "cancelled"
+  }
+
+  return "other"
+}
+
+function getBenchmarkSimulationStatusBadge(
+  status: AdminBenchmarkSimulationStatus
+) {
+  if (status === "running") {
+    return {
+      className: "border-emerald-300/35 bg-emerald-400/10 text-emerald-100",
+      label: "Running",
+    }
+  }
+
+  if (status === "pending") {
+    return {
+      className: "border-amber-300/35 bg-amber-400/10 text-amber-100",
+      label: "Pending",
+    }
+  }
+
+  if (status === "completed") {
+    return {
+      className: "border-sky-300/35 bg-sky-400/10 text-sky-100",
+      label: "Completed",
+    }
+  }
+
+  if (status === "failed") {
+    return {
+      className: "border-destructive/45 bg-destructive/10 text-destructive",
+      label: "Failed",
+    }
+  }
+
+  if (status === "cancelled") {
+    return {
+      className: "border-muted-foreground/35 bg-muted/35 text-muted-foreground",
+      label: "Stopped",
+    }
+  }
+
+  return {
+    className: "border-violet-300/35 bg-violet-400/10 text-violet-100",
+    label: "Unmanaged",
+  }
 }
 
 function UnknownAdminSection() {

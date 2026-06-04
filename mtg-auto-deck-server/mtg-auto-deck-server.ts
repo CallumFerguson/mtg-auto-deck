@@ -7378,6 +7378,44 @@ async function main() {
   })
 
   app.get(
+    "/admin/benchmarks/:benchmarkId/simulations",
+    async (req: Request, res: Response) => {
+      const adminUser = requireAdminUser(req, res)
+
+      if (!adminUser) {
+        return
+      }
+
+      const benchmarkId = String(req.params.benchmarkId)
+
+      try {
+        const simulations = await listBenchmarkRunSimulationsForAdmin(
+          benchmarkId,
+          adminUser.id,
+          { includeSimulationDetails: true }
+        )
+
+        if (simulations === null) {
+          res.status(404).json({
+            error: "Benchmark not found.",
+          })
+          return
+        }
+
+        res.status(200).json({
+          simulations,
+          total: simulations.length,
+        })
+      } catch (error) {
+        console.error("Failed to list benchmark simulations:", error)
+        res.status(500).json({
+          error: "Failed to list benchmark simulations.",
+        })
+      }
+    }
+  )
+
+  app.get(
     "/admin/benchmarks/:benchmarkId/evaluations",
     async (req: Request, res: Response) => {
       const adminUser = requireAdminUser(req, res)
