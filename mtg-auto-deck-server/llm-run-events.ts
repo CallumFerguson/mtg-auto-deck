@@ -35,7 +35,7 @@ export function parseOpeningHandCompletionFromResponseText(
   }
 
   const responseRecord = asRecord(parsedResponse)
-  assertSuccessfulSimulationOutputErrorIsNull(responseRecord, "Opening-hand")
+  assertSuccessfulSimulationOutputDidNotReportError(responseRecord)
   const keptHand = responseRecord.keptHand
   const summary = getRequiredStringProperty(responseRecord, "summary")
 
@@ -85,7 +85,7 @@ export function parseTurnSimulationCompletionFromResponseText(
   }
 
   const responseRecord = asRecord(parsedResponse)
-  assertSuccessfulSimulationOutputErrorIsNull(responseRecord, "Turn")
+  assertSuccessfulSimulationOutputDidNotReportError(responseRecord)
   const gameState = responseRecord.gameState
   const turnActions = responseRecord.turnActions
 
@@ -250,18 +250,13 @@ function roundEvaluationScore(value: number) {
   return Math.round(value * 10) / 10
 }
 
-function assertSuccessfulSimulationOutputErrorIsNull(
-  responseRecord: Record<string, unknown>,
-  phaseName: string
+function assertSuccessfulSimulationOutputDidNotReportError(
+  responseRecord: Record<string, unknown>
 ) {
   const errorValue = responseRecord.error
 
-  if (errorValue === null) {
+  if (errorValue === null || errorValue === undefined) {
     return
-  }
-
-  if (errorValue === undefined) {
-    throw new Error(`${phaseName} LLM response did not include error: null.`)
   }
 
   const modelError = typeof errorValue === "string" ? errorValue.trim() : ""

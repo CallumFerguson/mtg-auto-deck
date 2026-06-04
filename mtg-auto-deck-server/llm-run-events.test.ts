@@ -2570,16 +2570,17 @@ test("reports opening-hand model error JSON as an unrecoverable simulation error
   )
 })
 
-test("rejects opening-hand success JSON without explicit error null", () => {
-  assert.throws(
-    () =>
-      parseOpeningHandFromResponseText(
-        JSON.stringify({
-          keptHand: ["Sol Ring"],
-          summary: "Kept a fast mana hand.",
-        })
-      ),
-    /Opening-hand LLM response did not include error: null\./
+test("parses opening-hand success JSON without explicit error null", () => {
+  assert.deepEqual(
+    parseOpeningHandFromResponseText(
+      JSON.stringify({
+        keptHand: ["Sol Ring"],
+        summary: "Kept a fast mana hand.",
+      })
+    ),
+    {
+      keptHand: ["Sol Ring"],
+    }
   )
 })
 
@@ -2818,15 +2819,21 @@ test("reports turn model error JSON as an unrecoverable simulation error", () =>
   )
 })
 
-test("rejects turn success JSON without explicit error null", () => {
-  assert.throws(
-    () =>
-      parseTurnSimulationFromResponseText(
-        JSON.stringify({
-          gameState: createTurnGameState(),
-        })
-      ),
-    /Turn LLM response did not include error: null\./
+test("parses turn success JSON without explicit error null", () => {
+  const gameState = createTurnGameState()
+  const turnActions = createTurnActions()
+
+  assert.deepEqual(
+    parseTurnSimulationFromResponseText(
+      JSON.stringify({
+        gameState,
+        turnActions,
+      })
+    ),
+    {
+      gameState,
+      turnActions,
+    }
   )
 })
 
