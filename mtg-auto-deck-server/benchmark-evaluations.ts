@@ -5,6 +5,7 @@ import {
 import type {
   LlmRunStatus,
   SimulationRunEvaluationResultStatus,
+  SimulationRunResultStatus,
 } from "./simulations-postgres.js"
 
 export const ACTIVE_BENCHMARK_EVALUATION_STATUSES = new Set<LlmRunStatus>([
@@ -25,6 +26,8 @@ export type BenchmarkEvaluationLatestRunSnapshot = {
   turnNumber: number | null
   status: LlmRunStatus
   failureMessage: string | null
+  resultStatus: SimulationRunResultStatus
+  resultFailureMessage: string | null
   finalOutputText: string | null
   openingHandIsValid: boolean | null
   gameState: unknown | null
@@ -353,6 +356,10 @@ function isEligibleBenchmarkEvaluationTargetRun(
   }
 
   if (run.failureMessage) {
+    return false
+  }
+
+  if (run.resultStatus !== "completed") {
     return false
   }
 

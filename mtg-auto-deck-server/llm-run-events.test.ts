@@ -3627,6 +3627,8 @@ function createBenchmarkEvaluationLatestRun(
     turnNumber: targetRunPhase === "turn" ? 1 : null,
     status: "completed",
     failureMessage: null,
+    resultStatus: "completed",
+    resultFailureMessage: null,
     finalOutputText,
     openingHandIsValid: targetRunPhase === "opening_hand" ? true : null,
     gameState: targetRunPhase === "turn" ? createTurnGameState() : null,

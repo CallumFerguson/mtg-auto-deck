@@ -8,6 +8,7 @@ import {
   getBenchmarkExportSimulationRunIds,
   type BenchmarkExportRunEvaluation,
 } from "./benchmark-export.js"
+import { getEligibleBenchmarkEvaluationTargetRuns } from "./benchmark-evaluations.js"
 import type {
   BenchmarkEvaluationLatestEvaluationSnapshot,
   BenchmarkEvaluationLatestRunSnapshot,
@@ -117,6 +118,84 @@ test("counts failed target runs as zero scores in simulation averages", () => {
   assert.equal(averageScoreBySimulation.get("simulation-one"), 2.7)
   assert.equal(averageScoreBySimulation.get("simulation-two"), 0)
   assert.equal(averageScoreBySimulation.get("simulation-three"), 0)
+})
+
+test("counts result-failed completed runs as zero scores in simulation averages", () => {
+  const targetRuns = [
+    createTargetRun({
+      targetLlmRunId: "opening-run",
+      targetRunPhase: "opening_hand",
+      turnNumber: null,
+    }),
+  ]
+  const averageScoreBySimulation =
+    buildBenchmarkExportAverageEvaluationScoreBySimulation({
+      latestEvaluations: [
+        createEvaluation({
+          targetLlmRunId: "opening-run",
+          simulationQualityScore: 9.2,
+        }),
+      ],
+      latestRuns: [
+        createLatestRun({
+          targetLlmRunId: "opening-run",
+          targetRunPhase: "opening_hand",
+          turnNumber: null,
+        }),
+        createLatestRun({
+          targetLlmRunId: "result-failed-turn-run",
+          targetRunPhase: "turn",
+          turnNumber: 1,
+          resultStatus: "failed",
+          resultFailureMessage:
+            "Model reported unrecoverable simulation error.",
+          gameState: null,
+          turnActions: null,
+        }),
+      ],
+      targetRuns,
+    })
+
+  assert.equal(averageScoreBySimulation.get("simulation-one"), 4.6)
+})
+
+test("omits result-failed opening-hand and turn runs from evaluation targets", () => {
+  const { skippedRunCount, targetRuns } =
+    getEligibleBenchmarkEvaluationTargetRuns([
+      createLatestRun({
+        targetLlmRunId: "result-failed-opening-run",
+        targetRunPhase: "opening_hand",
+        turnNumber: null,
+        resultStatus: "failed",
+        resultFailureMessage:
+          "Model reported unrecoverable simulation error.",
+        finalOutputText: createOpeningHandCompletionText(),
+        openingHandIsValid: true,
+      }),
+      createLatestRun({
+        targetLlmRunId: "result-failed-turn-run",
+        targetRunPhase: "turn",
+        resultStatus: "failed",
+        resultFailureMessage:
+          "Model reported unrecoverable simulation error.",
+        finalOutputText: createTurnCompletionText(),
+        gameState: {},
+        turnActions: createTurnActions(),
+      }),
+      createLatestRun({
+        targetLlmRunId: "completed-turn-run",
+        targetRunPhase: "turn",
+        finalOutputText: createTurnCompletionText(),
+        gameState: {},
+        turnActions: createTurnActions(),
+      }),
+    ])
+
+  assert.equal(skippedRunCount, 2)
+  assert.deepEqual(
+    targetRuns.map((run) => run.targetLlmRunId),
+    ["completed-turn-run"]
+  )
 })
 
 test("omits active, failed, result-failed, unscored, and superseded evaluations", () => {
@@ -592,6 +671,34 @@ function createBenchmarkSimulationRun(
   }
 }
 
+function createOpeningHandCompletionText() {
+  return JSON.stringify({
+    keptHand: ["Sol Ring", "Command Tower"],
+    summary: "Kept a fast mana hand.",
+    error: null,
+  })
+}
+
+function createTurnCompletionText() {
+  return JSON.stringify({
+    gameState: {},
+    turnActions: createTurnActions(),
+    error: null,
+  })
+}
+
+function createTurnActions() {
+  return {
+    untap: [],
+    upkeep: [],
+    draw: [],
+    precombat_main: [],
+    combat: [],
+    postcombat_main: [],
+    end_step_cleanup: [],
+  }
+}
+
 function createBenchmarkSimulationFile(
   overrides: Partial<{
     childSimulation: BenchmarkChildSimulation
@@ -618,6 +725,8 @@ function createLatestRun(
     turnNumber: 1,
     status: "completed",
     failureMessage: null,
+    resultStatus: "completed",
+    resultFailureMessage: null,
     finalOutputText: "final output",
     openingHandIsValid: null,
     gameState: {},

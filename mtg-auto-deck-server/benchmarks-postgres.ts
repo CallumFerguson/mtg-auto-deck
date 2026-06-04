@@ -492,6 +492,8 @@ export async function listBenchmarkEvaluationLatestRunsForAdmin(
     turn_number: number | null
     status: BenchmarkEvaluationLatestRunSnapshot["status"]
     failure_message: string | null
+    result_status: BenchmarkEvaluationLatestRunSnapshot["resultStatus"]
+    result_failure_message: string | null
     final_output_text: string | null
     opening_hand_is_valid: boolean | null
     game_state: unknown | null
@@ -507,6 +509,8 @@ export async function listBenchmarkEvaluationLatestRunsForAdmin(
           NULL::integer AS turn_number,
           llm_run.status,
           llm_run.failure_message,
+          opening_run.result_status,
+          opening_run.result_failure_message,
           llm_run.final_output_text,
           opening_run.opening_hand_is_valid,
           NULL::jsonb AS game_state,
@@ -535,6 +539,8 @@ export async function listBenchmarkEvaluationLatestRunsForAdmin(
           turn_run.turn_number,
           llm_run.status,
           llm_run.failure_message,
+          turn_run.result_status,
+          turn_run.result_failure_message,
           llm_run.final_output_text,
           NULL::boolean AS opening_hand_is_valid,
           turn_run.game_state,
@@ -571,6 +577,8 @@ export async function listBenchmarkEvaluationLatestRunsForAdmin(
     turnNumber: row.turn_number,
     status: row.status,
     failureMessage: row.failure_message,
+    resultStatus: row.result_status,
+    resultFailureMessage: row.result_failure_message,
     finalOutputText: row.final_output_text,
     openingHandIsValid: row.opening_hand_is_valid,
     gameState: row.game_state,

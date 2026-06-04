@@ -459,7 +459,8 @@ function isFailedBenchmarkExportTargetRun(
 ) {
   return (
     run.status === "failed" ||
-    (run.status === "completed" && run.failureMessage !== null)
+    (run.status === "completed" &&
+      (run.failureMessage !== null || run.resultStatus === "failed"))
   )
 }
 
