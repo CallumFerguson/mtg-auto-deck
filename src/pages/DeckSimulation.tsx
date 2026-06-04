@@ -1550,10 +1550,6 @@ function PublicBenchmarkFailedEvaluationCard({
           </p>
         </div>
       </div>
-      <BenchmarkEvaluationTextValue
-        label="Quality score reasoning"
-        value={evaluation.simulationQualityScoreReasoning}
-      />
       <BenchmarkEvaluationIssueList
         label="Illegal actions"
         values={evaluation.illegalActions}
@@ -1561,6 +1557,10 @@ function PublicBenchmarkFailedEvaluationCard({
       <BenchmarkEvaluationIssueList
         label="Strategic mistakes"
         values={evaluation.strategicMistakes}
+      />
+      <BenchmarkEvaluationTextValue
+        label="Quality score reasoning"
+        value={evaluation.simulationQualityScoreReasoning}
       />
     </article>
   )
@@ -5217,10 +5217,6 @@ function BenchmarkRunEvaluationCard({
           </p>
         </div>
       </div>
-      <BenchmarkEvaluationTextValue
-        label="Quality score reasoning"
-        value={evaluation.simulationQualityScoreReasoning}
-      />
       <BenchmarkEvaluationIssueList
         label="Illegal actions"
         values={evaluation.illegalActions}
@@ -5228,6 +5224,10 @@ function BenchmarkRunEvaluationCard({
       <BenchmarkEvaluationIssueList
         label="Strategic mistakes"
         values={evaluation.strategicMistakes}
+      />
+      <BenchmarkEvaluationTextValue
+        label="Quality score reasoning"
+        value={evaluation.simulationQualityScoreReasoning}
       />
     </article>
   )

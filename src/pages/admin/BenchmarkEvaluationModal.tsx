@@ -690,10 +690,6 @@ function BenchmarkEvaluationAttentionResultCard({
         </div>
       </div>
 
-      <BenchmarkEvaluationTextValue
-        label="Quality score reasoning"
-        value={result.simulationQualityScoreReasoning}
-      />
       <BenchmarkEvaluationIssueList
         label="Illegal actions"
         values={result.illegalActions}
@@ -701,6 +697,10 @@ function BenchmarkEvaluationAttentionResultCard({
       <BenchmarkEvaluationIssueList
         label="Strategic mistakes"
         values={result.strategicMistakes}
+      />
+      <BenchmarkEvaluationTextValue
+        label="Quality score reasoning"
+        value={result.simulationQualityScoreReasoning}
       />
     </article>
   )

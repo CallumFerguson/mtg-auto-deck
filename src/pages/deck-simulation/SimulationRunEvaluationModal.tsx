@@ -459,10 +459,6 @@ function EvaluationResultCard({
               </p>
             </div>
           </div>
-          <EvaluationTextValue
-            label="Quality score reasoning"
-            value={evaluation.simulationQualityScoreReasoning}
-          />
           <EvaluationIssueList
             label="Illegal actions"
             values={evaluation.illegalActions}
@@ -470,6 +466,10 @@ function EvaluationResultCard({
           <EvaluationIssueList
             label="Strategic mistakes"
             values={evaluation.strategicMistakes}
+          />
+          <EvaluationTextValue
+            label="Quality score reasoning"
+            value={evaluation.simulationQualityScoreReasoning}
           />
         </>
       ) : failureMessage ? (
