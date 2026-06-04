@@ -1600,7 +1600,7 @@ function PublicBenchmarkResultsPanel({
           <>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <PublicBenchmarkResultMetricCard
-                label="MTG Auto Deck Score"
+                label="Overall Score"
                 value={formatPublicBenchmarkResultScore(
                   metrics.mtgAutoDeckScore
                 )}
