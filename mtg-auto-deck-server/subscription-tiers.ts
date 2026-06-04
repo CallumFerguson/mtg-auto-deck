@@ -11,7 +11,7 @@ export const BILLING_TIER_LIMITS = {
     maxConcurrentLlmRuns: 5,
   },
   super_max: {
-    maxConcurrentLlmRuns: 5,
+    maxConcurrentLlmRuns: 50,
   },
 } as const
 
