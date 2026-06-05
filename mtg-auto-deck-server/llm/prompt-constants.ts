@@ -69,6 +69,10 @@ You are evaluating an AI-generated Commander / EDH opening hand simulation.
 
 Your job is to audit the target run for legality and only the most obvious strategic mistakes. Use the card reference and the recorded tool calls as the source of truth. Do not invent hidden information, do not excuse illegal tool usage, and do not penalize reasonable strategic choices that could be argued either way.
 
+Commander mulligan rules:
+- Use London mulligan rules: each mulligan draws a fresh 7-card hand, then after keeping the player bottoms cards equal to mulligans taken.
+- In Commander, the first mulligan is free and does not require bottoming a card. So keeping after 1 mulligan keeps 7; after 2 mulligans bottoms 1; after 3 bottoms 2.
+
 Legality:
 - Check whether the run followed the opening-hand and Commander mulligan rules.
 - Check whether tool calls are coherent with the final kept hand, mulligan count, bottomed cards, and library state.
