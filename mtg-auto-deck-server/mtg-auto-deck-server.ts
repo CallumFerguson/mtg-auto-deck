@@ -3615,10 +3615,10 @@ async function drainLlmRunQueue(config: LlmRunQueueConfig) {
   }
 }
 
-function startOpenAiBatchWorkers(config: LlmRunQueueConfig) {
+function startOpenAiBatchWorkers() {
   if (!openAiBatchSubmitTimer) {
     openAiBatchSubmitTimer = setInterval(
-      () => nudgeOpenAiBatchSubmitter(config),
+      nudgeOpenAiBatchSubmitter,
       OPENAI_BATCH_POLL_INTERVAL_MS
     )
   }
@@ -3643,12 +3643,12 @@ function stopOpenAiBatchWorkers() {
   }
 }
 
-function nudgeOpenAiBatchSubmitter(config: LlmRunQueueConfig) {
+function nudgeOpenAiBatchSubmitter() {
   if (openAiBatchSubmitPromise) {
     return
   }
 
-  openAiBatchSubmitPromise = submitPendingOpenAiBatches(config)
+  openAiBatchSubmitPromise = submitPendingOpenAiBatches()
     .catch((error: unknown) => {
       console.error("Failed to submit OpenAI batches:", error)
     })
@@ -3684,10 +3684,8 @@ type PreparedOpenAiBatchLine = {
   run: OpenAiBatchPendingRun
 }
 
-async function submitPendingOpenAiBatches(config: LlmRunQueueConfig) {
-  const pendingRuns = await listPendingOpenAiBatchRuns({
-    maxConcurrentRuns: config.maxConcurrentRuns,
-  })
+async function submitPendingOpenAiBatches() {
+  const pendingRuns = await listPendingOpenAiBatchRuns()
 
   if (pendingRuns.length === 0) {
     return
@@ -9306,7 +9304,7 @@ async function main() {
       `Turn-simulation MCP endpoint available at http://${host}:${port}${TURN_SIMULATION_MCP_PATH}`
     )
     startLlmRunQueue(queueConfig)
-    startOpenAiBatchWorkers(queueConfig)
+    startOpenAiBatchWorkers()
   })
 }
 

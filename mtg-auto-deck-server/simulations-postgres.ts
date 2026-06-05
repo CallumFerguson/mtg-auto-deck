@@ -3392,11 +3392,10 @@ export async function markLlmRunQueued(llmRunId: string) {
   return (result.rowCount ?? 0) > 0
 }
 
-export async function listPendingOpenAiBatchRuns({
-  maxConcurrentRuns,
-}: {
-  maxConcurrentRuns: number
-}): Promise<OpenAiBatchPendingRun[]> {
+export async function listPendingOpenAiBatchRuns(): Promise<
+  OpenAiBatchPendingRun[]
+> {
+  const query = buildListPendingOpenAiBatchRunsQuery()
   const result = await queryDatabase<{
     simulation_id: string
     deck_id: string
@@ -3418,8 +3417,48 @@ export async function listPendingOpenAiBatchRuns({
     turn_number: number | null
     target_llm_run_id: string | null
     target_run_phase: SimulationRunPhase | null
-  }>(
-    `
+  }>(query.text, query.values)
+
+  return result.rows.map((row) => {
+    const run: OpenAiBatchPendingRun = {
+      simulationId: row.simulation_id,
+      deckId: row.deck_id,
+      llmRunId: row.llm_run_id,
+      llmModelPresetId: row.llm_model_preset_id,
+      phase: row.phase,
+      provider: row.provider,
+      model: row.model,
+      openrouterModelProvider: row.openrouter_model_provider,
+      serviceTier: row.service_tier,
+      reasoningEffort: row.reasoning_effort,
+      reasoningSummariesEnabled: row.reasoning_summaries_enabled,
+      runtimeStreamKey: row.runtime_stream_key,
+      attemptNumber: row.attempt_number,
+      createdAt: row.created_at.toISOString(),
+      fullPrompt: row.full_prompt,
+      requestPayload: row.request_payload,
+      ownerUserId: row.owner_user_id,
+    }
+
+    if (row.turn_number !== null) {
+      run.turnNumber = row.turn_number
+    }
+
+    if (row.target_llm_run_id !== null) {
+      run.targetLlmRunId = row.target_llm_run_id
+    }
+
+    if (row.target_run_phase !== null) {
+      run.targetRunPhase = row.target_run_phase
+    }
+
+    return run
+  })
+}
+
+export function buildListPendingOpenAiBatchRunsQuery() {
+  return {
+    text: `
       WITH linked_run AS (
         SELECT
           opening_run.simulation_id,
@@ -3491,63 +3530,10 @@ export async function listPendingOpenAiBatchRuns({
           FROM openai_batch_items item
           WHERE item.llm_run_id = llm_run.id
         )
-        AND (
-          SELECT COUNT(*)::integer
-          FROM llm_runs active_run
-          WHERE active_run.status IN ('streaming', 'batch_submitted')
-        ) < $1::integer
-        AND (
-          SELECT COUNT(*)::integer
-          FROM llm_runs active_run
-          WHERE active_run.status IN ('streaming', 'batch_submitted')
-            AND active_run.owner_user_id IS NOT DISTINCT FROM llm_run.owner_user_id
-        ) < ${getLlmRunOwnerConcurrencyLimitSql()}
       ORDER BY llm_run.llm_model_preset_id ASC, llm_run.created_at ASC, llm_run.id ASC
     `,
-    [
-      maxConcurrentRuns,
-      BILLING_TIER_LIMITS.free.maxConcurrentLlmRuns,
-      BILLING_TIER_LIMITS.plus.maxConcurrentLlmRuns,
-      BILLING_TIER_LIMITS.pro.maxConcurrentLlmRuns,
-      BILLING_TIER_LIMITS.super_max.maxConcurrentLlmRuns,
-    ]
-  )
-
-  return result.rows.map((row) => {
-    const run: OpenAiBatchPendingRun = {
-      simulationId: row.simulation_id,
-      deckId: row.deck_id,
-      llmRunId: row.llm_run_id,
-      llmModelPresetId: row.llm_model_preset_id,
-      phase: row.phase,
-      provider: row.provider,
-      model: row.model,
-      openrouterModelProvider: row.openrouter_model_provider,
-      serviceTier: row.service_tier,
-      reasoningEffort: row.reasoning_effort,
-      reasoningSummariesEnabled: row.reasoning_summaries_enabled,
-      runtimeStreamKey: row.runtime_stream_key,
-      attemptNumber: row.attempt_number,
-      createdAt: row.created_at.toISOString(),
-      fullPrompt: row.full_prompt,
-      requestPayload: row.request_payload,
-      ownerUserId: row.owner_user_id,
-    }
-
-    if (row.turn_number !== null) {
-      run.turnNumber = row.turn_number
-    }
-
-    if (row.target_llm_run_id !== null) {
-      run.targetLlmRunId = row.target_llm_run_id
-    }
-
-    if (row.target_run_phase !== null) {
-      run.targetRunPhase = row.target_run_phase
-    }
-
-    return run
-  })
+    values: [],
+  }
 }
 
 export async function recordOpenAiBatchSubmitted({

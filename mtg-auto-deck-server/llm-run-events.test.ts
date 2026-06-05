@@ -17,6 +17,7 @@ import {
   STALE_RUNNING_SIMULATION_CANCELLATION_MESSAGE,
   buildCancelLlmRunQuery,
   buildClaimQueuedLlmRunStartQuery,
+  buildListPendingOpenAiBatchRunsQuery,
   buildCompleteLlmRunQuery,
   buildFailSimulationRunEvaluationResultQuery,
   buildFailSimulationRunResultQuery,
@@ -2140,6 +2141,24 @@ test("builds LLM run owner concurrency SQL from effective billing tier", () => {
   assert.match(normalizedSql, /THEN \$5::integer/)
   assert.match(normalizedSql, /lower\(active_subscription\.plan\) = 'pro'/)
   assert.match(normalizedSql, /lower\(active_subscription\.plan\) = 'plus'/)
+})
+
+test("builds batch pending run query without queue concurrency gates", () => {
+  const query = buildListPendingOpenAiBatchRunsQuery()
+  const normalizedSql = query.text.replace(/\s+/g, " ")
+
+  assert.deepEqual(query.values, [])
+  assert.match(normalizedSql, /llm_run\.status = 'batch_pending'/)
+  assert.match(normalizedSql, /llm_run\.processing_mode = 'openai_batch'/)
+  assert.match(normalizedSql, /llm_run\.provider = 'openai'/)
+  assert.match(normalizedSql, /FROM openai_batch_items item/)
+  assert.match(normalizedSql, /item\.llm_run_id = llm_run\.id/)
+  assert.doesNotMatch(normalizedSql, /COUNT\(\*\)::integer/)
+  assert.doesNotMatch(normalizedSql, /active_run/)
+  assert.doesNotMatch(normalizedSql, /batch_submitted/)
+  assert.doesNotMatch(normalizedSql, /admin_subscription_tier_grants/)
+  assert.doesNotMatch(normalizedSql, /active_subscription/)
+  assert.doesNotMatch(normalizedSql, /maxConcurrentLlmRuns/)
 })
 
 test("validates provider-specific LLM config requirements with presets", () => {
