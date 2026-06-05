@@ -223,35 +223,31 @@ export async function buildSimulationRunEvaluationPromptParts({
 export function buildSimulationRunEvaluationPromptFromData(
   promptData: SimulationRunEvaluationPromptData
 ): StructuredSimulationPrompt {
-  const baseInstructions =
-    promptData.targetRunPhase === "opening_hand"
-      ? EVALUATE_OPENING_HAND_PROMPT
-      : EVALUATE_TURN_PROMPT
-  const uniqueCards = dedupeCardsByNameAndText([
-    ...promptData.commanders,
-    ...promptData.libraryCards,
-  ])
-  const cardReference = `Card reference:\n${formatCardReference(uniqueCards)}`
+  return promptData.targetRunPhase === "opening_hand"
+    ? buildOpeningHandRunEvaluationPromptFromData(promptData)
+    : buildTurnRunEvaluationPromptFromData(promptData)
+}
+
+function buildOpeningHandRunEvaluationPromptFromData(
+  promptData: SimulationRunEvaluationPromptData
+): StructuredSimulationPrompt {
+  const baseInstructions = EVALUATE_OPENING_HAND_PROMPT
+  const cardReference = buildEvaluationCardReference(promptData)
   const targetRunMetadata = {
     simulationId: promptData.simulationId,
     deckId: promptData.deckId,
     targetLlmRunId: promptData.targetLlmRunId,
     targetRunPhase: promptData.targetRunPhase,
-    targetRunAttemptNumber: promptData.targetRunAttemptNumber,
-    targetRunTurnNumber: promptData.targetRunTurnNumber,
     targetRunStatus: promptData.targetRunStatus,
   }
   const targetRunOutput = {
-    finalOutputText: promptData.targetRunFinalOutputText,
     summary: promptData.targetRunSummary,
     openingHand: promptData.targetRunOpeningHand,
-    turnActions: promptData.targetRunTurnActions,
-    gameState: promptData.targetRunGameState,
   }
   const dynamicRunInput = `Target run metadata:
 ${formatJsonForPrompt(targetRunMetadata)}
 
-Target run saved output:
+Target run saved opening-hand output:
 ${formatJsonForPrompt(targetRunOutput)}
 
 Target run MCP function calls:
@@ -270,6 +266,57 @@ ${dynamicRunInput}
     fullPrompt,
     userGuidelines: null,
   }
+}
+
+function buildTurnRunEvaluationPromptFromData(
+  promptData: SimulationRunEvaluationPromptData
+): StructuredSimulationPrompt {
+  const baseInstructions = EVALUATE_TURN_PROMPT
+  const cardReference = buildEvaluationCardReference(promptData)
+  const targetRunMetadata = {
+    simulationId: promptData.simulationId,
+    deckId: promptData.deckId,
+    targetLlmRunId: promptData.targetLlmRunId,
+    targetRunPhase: promptData.targetRunPhase,
+    targetRunStatus: promptData.targetRunStatus,
+  }
+  const targetRunOutput = {
+    turnActions: promptData.targetRunTurnActions,
+    gameState: promptData.targetRunGameState,
+  }
+  const dynamicRunInput = `Target run metadata:
+${formatJsonForPrompt(targetRunMetadata)}
+
+Target run saved turn output:
+${formatJsonForPrompt(targetRunOutput)}
+
+Target run MCP function calls:
+${formatJsonForPrompt(promptData.mcpFunctionCalls)}`
+  const fullPrompt = `${baseInstructions}
+
+${cardReference}
+
+${dynamicRunInput}
+`.trim()
+
+  return {
+    baseInstructions,
+    cardReference,
+    dynamicRunInput,
+    fullPrompt,
+    userGuidelines: null,
+  }
+}
+
+function buildEvaluationCardReference(
+  promptData: SimulationRunEvaluationPromptData
+) {
+  const uniqueCards = dedupeCardsByNameAndText([
+    ...promptData.commanders,
+    ...promptData.libraryCards,
+  ])
+
+  return `Card reference:\n${formatCardReference(uniqueCards)}`
 }
 
 export async function buildTurnSimulationPromptParts(

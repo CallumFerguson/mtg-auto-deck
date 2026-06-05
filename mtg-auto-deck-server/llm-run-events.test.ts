@@ -1901,8 +1901,92 @@ test("builds evaluation prompt without library snapshots", () => {
 
   assert.equal(prompt.dynamicRunInput.includes("librarySnapshot"), false)
   assert.equal(prompt.dynamicRunInput.includes("Hidden Library Card"), false)
+  assert.match(prompt.dynamicRunInput, /Target run saved turn output:/)
+  assert.match(prompt.dynamicRunInput, /"turnActions":/)
+  assert.match(prompt.dynamicRunInput, /"gameState":/)
+  assert.equal(prompt.dynamicRunInput.includes('"summary"'), false)
+  assert.equal(prompt.dynamicRunInput.includes('"openingHand"'), false)
+  assert.equal(prompt.dynamicRunInput.includes('"finalOutputText"'), false)
+  assert.equal(prompt.dynamicRunInput.includes("Drew for turn."), false)
+  assert.equal(prompt.dynamicRunInput.includes("targetRunAttemptNumber"), false)
+  assert.equal(prompt.dynamicRunInput.includes("targetRunTurnNumber"), false)
   assert.equal(prompt.fullPrompt.includes("librarySnapshot"), false)
   assert.equal(prompt.fullPrompt.includes("Hidden Library Card"), false)
+})
+
+test("builds opening-hand evaluation prompt without turn-only fields", () => {
+  const prompt = buildSimulationRunEvaluationPromptFromData({
+    simulationId: "simulation-1",
+    deckId: "deck-1",
+    targetLlmRunId: "target-run-1",
+    targetRunPhase: "opening_hand",
+    targetRunAttemptNumber: 1,
+    targetRunTurnNumber: null,
+    targetRunStatus: "completed",
+    targetRunFinalOutputText: JSON.stringify({
+      keptHand: ["Forest", "Sol Ring"],
+      summary: "Kept a fast mana hand.",
+      error: null,
+    }),
+    targetRunSummary: "Kept a fast mana hand.",
+    targetRunOpeningHand: ["Forest", "Sol Ring"],
+    targetRunTurnActions: null,
+    targetRunGameState: null,
+    targetRunLibrarySnapshot: ["Hidden Library Card"],
+    mcpFunctionCalls: [
+      {
+        id: 1,
+        mcpFunctionName: "draw_starting_hand",
+        status: "completed",
+        inputPayload: {
+          llmRunId: "target-run-1",
+          reason: "Draw opening hand.",
+        },
+        outputPayload: {
+          cards: ["Forest", "Sol Ring"],
+        },
+        calledAt: "2026-01-01T00:00:00.000Z",
+        completedAt: "2026-01-01T00:00:01.000Z",
+      },
+    ],
+    commanders: [
+      createPromptCard({
+        name: "Atraxa, Praetors' Voice",
+        quantity: 1,
+        zone: "commander",
+      }),
+    ],
+    libraryCards: [
+      createPromptCard({
+        name: "Forest",
+        quantity: 1,
+        zone: "library",
+      }),
+      createPromptCard({
+        manaCost: "{1}",
+        name: "Sol Ring",
+        oracleText: "{T}: Add {C}{C}.",
+        quantity: 1,
+        typeLine: "Artifact",
+        zone: "library",
+      }),
+    ],
+  })
+
+  assert.match(prompt.baseInstructions, /opening hand simulation/)
+  assert.match(prompt.dynamicRunInput, /Target run saved opening-hand output:/)
+  assert.match(prompt.dynamicRunInput, /"summary":/)
+  assert.match(prompt.dynamicRunInput, /"openingHand":/)
+  assert.match(prompt.dynamicRunInput, /draw_starting_hand/)
+  assert.equal(prompt.dynamicRunInput.includes('"turnActions"'), false)
+  assert.equal(prompt.dynamicRunInput.includes('"gameState"'), false)
+  assert.equal(prompt.dynamicRunInput.includes('"finalOutputText"'), false)
+  assert.equal(prompt.dynamicRunInput.includes("targetRunAttemptNumber"), false)
+  assert.equal(prompt.dynamicRunInput.includes("targetRunTurnNumber"), false)
+  assert.equal(prompt.dynamicRunInput.includes("librarySnapshot"), false)
+  assert.equal(prompt.dynamicRunInput.includes("Hidden Library Card"), false)
+  assert.equal(prompt.fullPrompt.includes('"turnActions"'), false)
+  assert.equal(prompt.fullPrompt.includes('"gameState"'), false)
 })
 
 test("builds Anthropic payload with adaptive thinking, remote MCP, and 5m cache controls", () => {
