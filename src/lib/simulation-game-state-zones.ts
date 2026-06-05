@@ -111,8 +111,7 @@ function getSimulationGameStateZoneObjects(
         name: name.trim(),
         notes: typeof notes === "string" && notes.trim() ? notes.trim() : null,
         quantity: getSimulationGameStateZoneObjectQuantity(
-          objectRecord.quantity,
-          isToken
+          objectRecord.quantity
         ),
         tapped:
           typeof objectRecord.tapped === "boolean" ? objectRecord.tapped : null,
@@ -122,14 +121,7 @@ function getSimulationGameStateZoneObjects(
   })
 }
 
-function getSimulationGameStateZoneObjectQuantity(
-  value: unknown,
-  isToken: boolean
-) {
-  if (!isToken) {
-    return 1
-  }
-
+function getSimulationGameStateZoneObjectQuantity(value: unknown) {
   return typeof value === "number" &&
     Number.isInteger(value) &&
     Number.isFinite(value) &&

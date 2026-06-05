@@ -51,7 +51,7 @@ test("keeps token quantities and describes grouped tokens", () => {
   )
 })
 
-test("ignores grouped quantity for non-token cards", () => {
+test("keeps grouped quantity for non-token cards", () => {
   const zones = getSimulationGameStateZones({
     zones: {
       battlefield: [
@@ -63,8 +63,13 @@ test("ignores grouped quantity for non-token cards", () => {
       ],
     },
   })
+  const object = zones[0]?.objects[0]
 
-  assert.equal(zones[0]?.objects[0]?.quantity, 1)
+  assert.equal(object?.quantity, 3)
+  assert.equal(
+    object ? getSimulationGameStateZoneObjectTitle(object) : null,
+    "Forest (x3)"
+  )
 })
 
 test("keeps duplicate physical cards as separate objects", () => {
