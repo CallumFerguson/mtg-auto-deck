@@ -285,6 +285,7 @@ export type SimulationRunEvaluationPromptData = {
   targetRunOpeningHand: string[] | null
   targetRunTurnActions: unknown | null
   targetRunGameState: unknown | null
+  targetRunPreviousGameState: unknown | null
   targetRunLibrarySnapshot: string[] | null
   mcpFunctionCalls: LlmRunMcpFunctionCall[]
   commanders: SimulationPromptCard[]
@@ -705,6 +706,52 @@ export type TurnSimulationPromptData = {
   libraryCards: SimulationPromptCard[]
   library: string[]
   startingHand: string[]
+}
+
+export function buildInitialTurnGameState({
+  commanderNames,
+  startingHand,
+}: {
+  commanderNames: readonly string[]
+  startingHand: readonly string[]
+}) {
+  const commanderDamage = Object.fromEntries(
+    commanderNames.map((commanderName) => [commanderName, 0])
+  )
+
+  return {
+    zones: {
+      hand: startingHand.map(createInitialGameStateCard),
+      command: commanderNames.map(createInitialGameStateCard),
+      battlefield: [],
+      graveyard: [],
+      exile: [],
+    },
+    yourLife: 40,
+    opponentA: {
+      life: 40,
+      commanderDamage,
+    },
+    opponentB: {
+      life: 40,
+      commanderDamage,
+    },
+    opponentC: {
+      life: 40,
+      commanderDamage,
+    },
+    other: "",
+  }
+}
+
+function createInitialGameStateCard(name: string) {
+  return {
+    name,
+    isToken: false,
+    quantity: 1,
+    tapped: null,
+    notes: null,
+  }
 }
 
 export class SimulationValidationError extends Error {
@@ -5189,6 +5236,7 @@ export async function getSimulationRunEvaluationPromptData({
       SELECT
         opening_run.simulation_id,
         simulation.deck_id,
+        simulation.starting_hand_id AS simulation_starting_hand_id,
         opening_run.llm_run_id AS target_llm_run_id,
         'opening_hand'::llm_run_phase AS target_run_phase,
         opening_run.attempt_number AS target_run_attempt_number,
@@ -5212,6 +5260,7 @@ export async function getSimulationRunEvaluationPromptData({
       SELECT
         turn_run.simulation_id,
         simulation.deck_id,
+        simulation.starting_hand_id AS simulation_starting_hand_id,
         turn_run.llm_run_id AS target_llm_run_id,
         'turn'::llm_run_phase AS target_run_phase,
         turn_run.attempt_number AS target_run_attempt_number,
@@ -5275,6 +5324,13 @@ export async function getSimulationRunEvaluationPromptData({
     [simulationId]
   )
   const cards = cardsResult.rows.map(mapSimulationPromptCard)
+  const commanders = cards.filter((card) => card.zone === "commander")
+  const libraryCards = cards.filter((card) => card.zone === "library")
+  const targetRunPreviousGameState =
+    await getSimulationRunEvaluationPreviousGameState({
+      commanders,
+      target,
+    })
   const mcpFunctionCallsByRunId = await getMcpFunctionCallsByLlmRunIds([
     targetLlmRunId,
   ])
@@ -5295,13 +5351,65 @@ export async function getSimulationRunEvaluationPromptData({
         : parseStringArray(target.target_run_opening_hand),
     targetRunTurnActions: target.target_run_turn_actions,
     targetRunGameState: target.target_run_game_state,
+    targetRunPreviousGameState,
     targetRunLibrarySnapshot: asStringArray(
       target.target_run_library_snapshot
     ),
     mcpFunctionCalls: mcpFunctionCallsByRunId.get(targetLlmRunId) ?? [],
-    commanders: cards.filter((card) => card.zone === "commander"),
-    libraryCards: cards.filter((card) => card.zone === "library"),
+    commanders,
+    libraryCards,
   }
+}
+
+async function getSimulationRunEvaluationPreviousGameState({
+  commanders,
+  target,
+}: {
+  commanders: readonly SimulationPromptCard[]
+  target: SimulationRunEvaluationPromptRow
+}) {
+  if (target.target_run_phase !== "turn") {
+    return null
+  }
+
+  if (target.target_run_turn_number === null) {
+    return null
+  }
+
+  if (target.target_run_turn_number === 1) {
+    const startingHand = await getTurnSimulationStartingHand({
+      simulationId: target.simulation_id,
+      startingHandId: target.simulation_starting_hand_id,
+    })
+
+    return buildInitialTurnGameState({
+      commanderNames: commanders.flatMap((commander) =>
+        Array.from({ length: commander.quantity }, () => commander.name)
+      ),
+      startingHand,
+    })
+  }
+
+  const previousTurnResult = await queryDatabase<{
+    game_state: unknown | null
+  }>(
+    `
+      SELECT turn_run.game_state
+      FROM simulation_turn_llm_runs turn_run
+      JOIN llm_runs llm_run
+        ON llm_run.id = turn_run.llm_run_id
+      WHERE turn_run.simulation_id = $1
+        AND turn_run.turn_number = $2
+        AND turn_run.outdated = false
+        AND llm_run.status = 'completed'
+        AND turn_run.game_state IS NOT NULL
+      ORDER BY turn_run.attempt_number DESC
+      LIMIT 1
+    `,
+    [target.simulation_id, target.target_run_turn_number - 1]
+  )
+
+  return previousTurnResult.rows[0]?.game_state ?? null
 }
 
 async function getSimulationRunEvaluationByLlmRunId(llmRunId: string) {
@@ -6395,6 +6503,7 @@ type SimulationRunEvaluationRow = {
 type SimulationRunEvaluationPromptRow = {
   simulation_id: string
   deck_id: string
+  simulation_starting_hand_id: string | null
   target_llm_run_id: string
   target_run_phase: SimulationRunPhase
   target_run_attempt_number: number

@@ -7,6 +7,7 @@ import {
 import { formatUserGuidelinesSection } from "./llm/user-guidelines.js"
 import { getGenericGameRulesReferenceEnabled } from "./llm-config.js"
 import {
+  buildInitialTurnGameState,
   getStartingHandSimulationPromptData,
   getSimulationRunEvaluationPromptData,
   getTurnSimulationPromptData,
@@ -287,6 +288,9 @@ function buildTurnRunEvaluationPromptFromData(
   const dynamicRunInput = `Target run metadata:
 ${formatJsonForPrompt(targetRunMetadata)}
 
+Target run previous end-of-turn game state:
+${formatJsonForPrompt(promptData.targetRunPreviousGameState)}
+
 Target run saved turn output:
 ${formatJsonForPrompt(targetRunOutput)}
 
@@ -424,52 +428,6 @@ export function isStructuredSimulationPrompt(
     typeof record.dynamicRunInput === "string" &&
     typeof record.fullPrompt === "string"
   )
-}
-
-function buildInitialTurnGameState({
-  commanderNames,
-  startingHand,
-}: {
-  commanderNames: readonly string[]
-  startingHand: readonly string[]
-}) {
-  const commanderDamage = Object.fromEntries(
-    commanderNames.map((commanderName) => [commanderName, 0])
-  )
-
-  return {
-    zones: {
-      hand: startingHand.map(createInitialGameStateCard),
-      command: commanderNames.map(createInitialGameStateCard),
-      battlefield: [],
-      graveyard: [],
-      exile: [],
-    },
-    yourLife: 40,
-    opponentA: {
-      life: 40,
-      commanderDamage,
-    },
-    opponentB: {
-      life: 40,
-      commanderDamage,
-    },
-    opponentC: {
-      life: 40,
-      commanderDamage,
-    },
-    other: "",
-  }
-}
-
-function createInitialGameStateCard(name: string) {
-  return {
-    name,
-    isToken: false,
-    quantity: 1,
-    tapped: null,
-    notes: null,
-  }
 }
 
 function formatJsonForPrompt(value: unknown) {

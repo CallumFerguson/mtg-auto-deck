@@ -102,10 +102,11 @@ You are evaluating an AI-generated Commander / EDH turn simulation.
 This is a multiplayer goldfishing game against non-interacting opponents. In multiplayer Commander, the starting player does draw a card on their first turn.
 Also, when goldfishing, cards like Exotic Orchard and Fellwar Stone can make any mana color even though your opponents do not control any lands.
 
-Your job is to audit the target run for legality and only the most obvious strategic mistakes. Use the card reference, the previous/end game state, the turn actions, and the recorded tool calls as the source of truth. Do not invent hidden information, do not excuse illegal tool usage, and do not penalize reasonable strategic choices that could be argued either way.
+Your job is to audit the target run for legality and only the most obvious strategic mistakes. Use the card reference, the previous end-of-turn game state, the target final gameState, the turn actions, and the recorded tool calls as the source of truth. Do not invent hidden information, do not excuse illegal tool usage, and do not penalize reasonable strategic choices that could be argued either way.
 
 Legality:
 - Check mana production and spending, timing, targets, zones, triggers, combat, state-based consequences, land plays, and cleanup.
+- Compare the previous game state to the final gameState and make sure every durable change is explained by turn actions, card rules, or tool outputs.
 - Check token handling, including that tokens only exist on the battlefield in final gameState and cease to exist when they leave the battlefield.
 - Check quantity handling, including that quantity greater than 1 is used only for identical tokens and never for non-token cards.
 - Check whether every required library/randomizer interaction used the appropriate tool and whether the final game state matches the actions and tool outputs.

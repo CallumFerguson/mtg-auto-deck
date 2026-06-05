@@ -1881,6 +1881,11 @@ test("builds evaluation prompt without library snapshots", () => {
         hand: [{ name: "Forest", isToken: false, quantity: 1 }],
       },
     },
+    targetRunPreviousGameState: {
+      zones: {
+        hand: [{ name: "Plains", isToken: false, quantity: 1 }],
+      },
+    },
     targetRunLibrarySnapshot: ["Hidden Library Card"],
     mcpFunctionCalls: [],
     commanders: [
@@ -1901,7 +1906,21 @@ test("builds evaluation prompt without library snapshots", () => {
 
   assert.equal(prompt.dynamicRunInput.includes("librarySnapshot"), false)
   assert.equal(prompt.dynamicRunInput.includes("Hidden Library Card"), false)
+  assert.match(prompt.baseInstructions, /previous end-of-turn game state/)
+  assert.match(prompt.baseInstructions, /target final gameState/)
+  assert.match(
+    prompt.dynamicRunInput,
+    /Target run previous end-of-turn game state:/
+  )
   assert.match(prompt.dynamicRunInput, /Target run saved turn output:/)
+  assert.match(prompt.dynamicRunInput, /"name": "Plains"/)
+  assert.match(prompt.dynamicRunInput, /"name": "Forest"/)
+  assert.equal(
+    prompt.dynamicRunInput.indexOf(
+      "Target run previous end-of-turn game state:"
+    ) < prompt.dynamicRunInput.indexOf("Target run saved turn output:"),
+    true
+  )
   assert.match(prompt.dynamicRunInput, /"turnActions":/)
   assert.match(prompt.dynamicRunInput, /"gameState":/)
   assert.equal(prompt.dynamicRunInput.includes('"summary"'), false)
@@ -1932,6 +1951,7 @@ test("builds opening-hand evaluation prompt without turn-only fields", () => {
     targetRunOpeningHand: ["Forest", "Sol Ring"],
     targetRunTurnActions: null,
     targetRunGameState: null,
+    targetRunPreviousGameState: null,
     targetRunLibrarySnapshot: ["Hidden Library Card"],
     mcpFunctionCalls: [
       {
@@ -1980,6 +2000,12 @@ test("builds opening-hand evaluation prompt without turn-only fields", () => {
   assert.match(prompt.dynamicRunInput, /draw_starting_hand/)
   assert.equal(prompt.dynamicRunInput.includes('"turnActions"'), false)
   assert.equal(prompt.dynamicRunInput.includes('"gameState"'), false)
+  assert.equal(
+    prompt.dynamicRunInput.includes(
+      "Target run previous end-of-turn game state:"
+    ),
+    false
+  )
   assert.equal(prompt.dynamicRunInput.includes('"finalOutputText"'), false)
   assert.equal(prompt.dynamicRunInput.includes("targetRunAttemptNumber"), false)
   assert.equal(prompt.dynamicRunInput.includes("targetRunTurnNumber"), false)
