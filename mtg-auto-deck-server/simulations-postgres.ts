@@ -374,6 +374,8 @@ type SimulationDebugLlmRunMetadata = {
   runtimeStreamKey: string | null
   attemptNumber: number
   failureMessage: string | null
+  fullPrompt: string
+  finalOutputText: string | null
   resultStatus: SimulationRunResultStatus
   resultFailureMessage: string | null
   createdAt: string
@@ -6439,6 +6441,8 @@ type SimulationDebugLlmRunMetadataRow = {
   status: LlmRunStatus
   runtime_stream_key: string | null
   failure_message: string | null
+  full_prompt: string
+  final_output_text: string | null
   created_at: Date
   started_at: Date | null
   completed_at: Date | null
@@ -6549,6 +6553,8 @@ async function getSimulationDebugLlmRunMetadata({
         llm_run.status,
         llm_run.runtime_stream_key,
         llm_run.failure_message,
+        llm_run.full_prompt,
+        llm_run.final_output_text,
         llm_run.created_at,
         llm_run.started_at,
         llm_run.completed_at,
@@ -6604,6 +6610,8 @@ function mapSimulationDebugLlmRunMetadataRow(
     runtimeStreamKey: row.runtime_stream_key,
     attemptNumber: row.attempt_number,
     failureMessage: row.failure_message,
+    fullPrompt: row.full_prompt,
+    finalOutputText: row.final_output_text,
     resultStatus: row.result_status,
     resultFailureMessage: row.result_failure_message,
     createdAt: row.created_at.toISOString(),

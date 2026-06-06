@@ -158,6 +158,8 @@ type SimulationDebugLlmRunMetadata = {
   runtimeStreamKey: string | null
   attemptNumber: number
   failureMessage: string | null
+  fullPrompt: string
+  finalOutputText: string | null
   resultStatus?: SimulationRunResultStatus
   resultFailureMessage?: string | null
   createdAt: string

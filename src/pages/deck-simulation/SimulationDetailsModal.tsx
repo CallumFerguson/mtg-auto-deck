@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
-import { Bug, Download, LoaderCircle, RefreshCw, X } from "lucide-react"
+import {
+  Bug,
+  ChevronDown,
+  Download,
+  LoaderCircle,
+  RefreshCw,
+  X,
+} from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { loadApiHelpers } from "@/lib/api-lazy"
@@ -851,7 +858,7 @@ function SimulationDebugPanel({
         modelPresets={modelPresets}
         runs={debugInfo.openingHandLlmRuns}
       />
-      <SimulationDebugRunGroup
+      <SimulationDebugTurnRunGroup
         heading="Turn runs"
         modelPresets={modelPresets}
         runs={debugInfo.turnLlmRuns}
@@ -867,110 +874,18 @@ function SimulationDebugRunGroup({
 }: {
   heading: string
   modelPresets: LlmModelPreset[]
-  runs: SimulationDebugInfo["openingHandLlmRuns"]
+  runs: SimulationDebugRunMetadata[]
 }) {
   return (
     <section className="grid gap-3">
       <h3 className="text-sm font-semibold text-foreground">{heading}</h3>
       {runs.length > 0 ? (
         runs.map((run) => (
-          <article
+          <SimulationDebugRunDisclosure
             key={run.llmRunId}
-            className="grid gap-2 rounded-md border border-border bg-background/35 p-3"
-          >
-            <DebugMetadataGrid>
-              <DebugMetadataItem label="Run ID" value={run.llmRunId} />
-              <DebugMetadataItem label="Phase" value={run.phase} />
-              <DebugMetadataItem label="Status" value={run.status} />
-              <DebugMetadataItem
-                label="Result status"
-                value={run.resultStatus ?? "N/A"}
-              />
-              <DebugMetadataItem label="Attempt" value={run.attemptNumber} />
-              {run.turnNumber !== undefined ? (
-                <DebugMetadataItem label="Turn" value={run.turnNumber} />
-              ) : null}
-              {run.openingHandIsValid !== undefined ? (
-                <DebugMetadataItem
-                  label="Valid opening hand"
-                  value={formatDebugBoolean(run.openingHandIsValid)}
-                />
-              ) : null}
-              {run.outdated !== undefined ? (
-                <DebugMetadataItem
-                  label="Outdated"
-                  value={formatDebugBoolean(run.outdated)}
-                />
-              ) : null}
-              <DebugMetadataItem
-                label="Provider"
-                value={formatProviderLabel(run.provider)}
-              />
-              <DebugMetadataItem label="Model" value={run.model} />
-              <DebugMetadataItem
-                label="Intellegence level"
-                value={getDebugModelPresetLabel(
-                  run.llmModelPresetId,
-                  run.llmModelPresetName,
-                  modelPresets
-                )}
-              />
-              <DebugMetadataItem
-                label="Estimated price"
-                value={getLlmRunEstimatedPriceText(run) ?? "N/A"}
-              />
-              <DebugMetadataItem
-                label="Reasoning effort"
-                value={run.reasoningEffort || "N/A"}
-              />
-              <DebugMetadataItem
-                label="Service tier"
-                value={run.serviceTier || "N/A"}
-              />
-              <DebugMetadataItem
-                label="Runtime key"
-                value={run.runtimeStreamKey ?? "none"}
-              />
-              <DebugMetadataItem
-                label="Created"
-                value={formatDebugDateTime(run.createdAt)}
-              />
-              <DebugMetadataItem
-                label="Started"
-                value={formatDebugDateTime(run.startedAt)}
-              />
-              <DebugMetadataItem
-                label="Completed"
-                value={formatDebugDateTime(run.completedAt)}
-              />
-              <DebugMetadataItem
-                label="Failed"
-                value={formatDebugDateTime(run.failedAt)}
-              />
-              <DebugMetadataItem
-                label="Cancelled"
-                value={formatDebugDateTime(run.cancelledAt)}
-              />
-              <DebugMetadataItem
-                label="Duration"
-                value={getSimulationRunFinishedDurationText(run) ?? "N/A"}
-              />
-              <DebugMetadataItem
-                label="Failure"
-                value={run.failureMessage?.trim() || "N/A"}
-              />
-              <DebugMetadataItem
-                label="Result failure"
-                value={run.resultFailureMessage?.trim() || "N/A"}
-              />
-              <DebugMetadataItem
-                label="OpenRouter generations"
-                value={formatOpenRouterGenerationMetadata(
-                  run.openrouterGenerations
-                )}
-              />
-            </DebugMetadataGrid>
-          </article>
+            modelPresets={modelPresets}
+            run={run}
+          />
         ))
       ) : (
         <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
@@ -979,6 +894,332 @@ function SimulationDebugRunGroup({
       )}
     </section>
   )
+}
+
+type SimulationDebugRunMetadata =
+  SimulationDebugInfo["openingHandLlmRuns"][number]
+
+type SimulationDebugTurnRunGroup = {
+  turnNumber: number | null
+  runs: SimulationDebugRunMetadata[]
+}
+
+function SimulationDebugTurnRunGroup({
+  heading,
+  modelPresets,
+  runs,
+}: {
+  heading: string
+  modelPresets: LlmModelPreset[]
+  runs: SimulationDebugRunMetadata[]
+}) {
+  const turnGroups = getSimulationDebugTurnRunGroups(runs)
+
+  return (
+    <section className="grid gap-3">
+      <h3 className="text-sm font-semibold text-foreground">{heading}</h3>
+      {turnGroups.length > 0 ? (
+        turnGroups.map((group) => (
+          <div
+            key={group.turnNumber ?? "unknown"}
+            className="grid gap-2 border-l border-border/70 pl-3"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <h4 className="text-sm font-semibold text-foreground">
+                {formatDebugTurnGroupLabel(group.turnNumber)}
+              </h4>
+              <span className="rounded-md border border-border bg-background/45 px-2 py-0.5 text-xs text-muted-foreground">
+                {formatDebugAttemptCount(group.runs.length)}
+              </span>
+            </div>
+            {group.runs.map((run) => (
+              <SimulationDebugRunDisclosure
+                key={run.llmRunId}
+                modelPresets={modelPresets}
+                run={run}
+              />
+            ))}
+          </div>
+        ))
+      ) : (
+        <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+          No runs yet.
+        </p>
+      )}
+    </section>
+  )
+}
+
+function SimulationDebugRunDisclosure({
+  modelPresets,
+  run,
+}: {
+  modelPresets: LlmModelPreset[]
+  run: SimulationDebugRunMetadata
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const runTitle = getSimulationDebugRunTitle(run)
+
+  return (
+    <article className="overflow-hidden rounded-md border border-border bg-background/35">
+      <button
+        type="button"
+        className="flex w-full items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/20"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen((current) => !current)}
+      >
+        <ChevronDown
+          className={`mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform ${
+            isOpen ? "" : "-rotate-90"
+          }`}
+          aria-hidden="true"
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h4 className="text-sm font-semibold text-foreground">
+              {runTitle}
+            </h4>
+            <span className="rounded-md border border-border bg-background/45 px-2 py-0.5 text-xs text-muted-foreground">
+              {run.status}
+            </span>
+            <span className="rounded-md border border-border bg-background/45 px-2 py-0.5 text-xs text-muted-foreground">
+              Result {run.resultStatus ?? "N/A"}
+            </span>
+          </div>
+          <p className="mt-1 break-all text-xs text-muted-foreground">
+            {run.llmRunId}
+          </p>
+        </div>
+      </button>
+
+      {isOpen ? (
+        <div className="grid gap-3 border-t border-border px-3 py-3">
+          <SimulationDebugRunMetadataGrid
+            modelPresets={modelPresets}
+            run={run}
+          />
+          <SimulationDebugTextDisclosure
+            emptyText="No saved prompt."
+            text={run.fullPrompt}
+            title="Full prompt"
+          />
+          <SimulationDebugTextDisclosure
+            emptyText="No saved output yet."
+            text={run.finalOutputText}
+            title="Full output / response text"
+          />
+        </div>
+      ) : null}
+    </article>
+  )
+}
+
+function SimulationDebugRunMetadataGrid({
+  modelPresets,
+  run,
+}: {
+  modelPresets: LlmModelPreset[]
+  run: SimulationDebugRunMetadata
+}) {
+  return (
+    <DebugMetadataGrid>
+      <DebugMetadataItem label="Run ID" value={run.llmRunId} />
+      <DebugMetadataItem label="Phase" value={run.phase} />
+      <DebugMetadataItem label="Status" value={run.status} />
+      <DebugMetadataItem
+        label="Result status"
+        value={run.resultStatus ?? "N/A"}
+      />
+      <DebugMetadataItem label="Attempt" value={run.attemptNumber} />
+      {run.turnNumber !== undefined ? (
+        <DebugMetadataItem label="Turn" value={run.turnNumber} />
+      ) : null}
+      {run.openingHandIsValid !== undefined ? (
+        <DebugMetadataItem
+          label="Valid opening hand"
+          value={formatDebugBoolean(run.openingHandIsValid)}
+        />
+      ) : null}
+      {run.outdated !== undefined ? (
+        <DebugMetadataItem
+          label="Outdated"
+          value={formatDebugBoolean(run.outdated)}
+        />
+      ) : null}
+      <DebugMetadataItem
+        label="Provider"
+        value={formatProviderLabel(run.provider)}
+      />
+      <DebugMetadataItem label="Model" value={run.model} />
+      <DebugMetadataItem
+        label="Intellegence level"
+        value={getDebugModelPresetLabel(
+          run.llmModelPresetId,
+          run.llmModelPresetName,
+          modelPresets
+        )}
+      />
+      <DebugMetadataItem
+        label="Estimated price"
+        value={getLlmRunEstimatedPriceText(run) ?? "N/A"}
+      />
+      <DebugMetadataItem
+        label="Reasoning effort"
+        value={run.reasoningEffort || "N/A"}
+      />
+      <DebugMetadataItem
+        label="Service tier"
+        value={run.serviceTier || "N/A"}
+      />
+      <DebugMetadataItem
+        label="Runtime key"
+        value={run.runtimeStreamKey ?? "none"}
+      />
+      <DebugMetadataItem
+        label="Created"
+        value={formatDebugDateTime(run.createdAt)}
+      />
+      <DebugMetadataItem
+        label="Started"
+        value={formatDebugDateTime(run.startedAt)}
+      />
+      <DebugMetadataItem
+        label="Completed"
+        value={formatDebugDateTime(run.completedAt)}
+      />
+      <DebugMetadataItem
+        label="Failed"
+        value={formatDebugDateTime(run.failedAt)}
+      />
+      <DebugMetadataItem
+        label="Cancelled"
+        value={formatDebugDateTime(run.cancelledAt)}
+      />
+      <DebugMetadataItem
+        label="Duration"
+        value={getSimulationRunFinishedDurationText(run) ?? "N/A"}
+      />
+      <DebugMetadataItem
+        label="Failure"
+        value={run.failureMessage?.trim() || "N/A"}
+      />
+      <DebugMetadataItem
+        label="Result failure"
+        value={run.resultFailureMessage?.trim() || "N/A"}
+      />
+      <DebugMetadataItem
+        label="OpenRouter generations"
+        value={formatOpenRouterGenerationMetadata(run.openrouterGenerations)}
+      />
+    </DebugMetadataGrid>
+  )
+}
+
+function SimulationDebugTextDisclosure({
+  emptyText,
+  text,
+  title,
+}: {
+  emptyText: string
+  text: string | null
+  title: string
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const hasText = Boolean(text?.trim())
+
+  return (
+    <div className="overflow-hidden rounded-md border border-border bg-background/35">
+      <button
+        type="button"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-foreground transition-colors hover:bg-muted/20"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen((current) => !current)}
+      >
+        <ChevronDown
+          className={`size-4 shrink-0 text-muted-foreground transition-transform ${
+            isOpen ? "" : "-rotate-90"
+          }`}
+          aria-hidden="true"
+        />
+        <span>{title}</span>
+      </button>
+      {isOpen ? (
+        <pre
+          className={`debug-scrollbar-neutral max-h-96 overflow-auto whitespace-pre-wrap break-words border-t border-border bg-black/25 p-3 font-mono text-xs leading-5 ${
+            hasText ? "text-foreground" : "text-muted-foreground"
+          }`}
+        >
+          {hasText ? text : emptyText}
+        </pre>
+      ) : null}
+    </div>
+  )
+}
+
+function getSimulationDebugTurnRunGroups(
+  runs: readonly SimulationDebugRunMetadata[]
+): SimulationDebugTurnRunGroup[] {
+  const groupsByTurn = new Map<string, SimulationDebugTurnRunGroup>()
+
+  for (const run of runs) {
+    const turnNumber =
+      typeof run.turnNumber === "number" ? run.turnNumber : null
+    const key = turnNumber === null ? "unknown" : String(turnNumber)
+    const group = groupsByTurn.get(key) ?? {
+      turnNumber,
+      runs: [],
+    }
+
+    group.runs.push(run)
+    groupsByTurn.set(key, group)
+  }
+
+  return Array.from(groupsByTurn.values())
+    .map((group) => ({
+      ...group,
+      runs: [...group.runs].sort(compareSimulationDebugRunAttempts),
+    }))
+    .sort(compareSimulationDebugTurnGroups)
+}
+
+function compareSimulationDebugTurnGroups(
+  firstGroup: SimulationDebugTurnRunGroup,
+  secondGroup: SimulationDebugTurnRunGroup
+) {
+  return (
+    getSortableDebugTurnNumber(firstGroup.turnNumber) -
+    getSortableDebugTurnNumber(secondGroup.turnNumber)
+  )
+}
+
+function compareSimulationDebugRunAttempts(
+  firstRun: SimulationDebugRunMetadata,
+  secondRun: SimulationDebugRunMetadata
+) {
+  return (
+    firstRun.attemptNumber - secondRun.attemptNumber ||
+    firstRun.llmRunId.localeCompare(secondRun.llmRunId)
+  )
+}
+
+function getSortableDebugTurnNumber(turnNumber: number | null) {
+  return turnNumber ?? Number.MAX_SAFE_INTEGER
+}
+
+function getSimulationDebugRunTitle(run: SimulationDebugRunMetadata) {
+  if (run.turnNumber !== undefined) {
+    return `Turn ${run.turnNumber} attempt ${run.attemptNumber}`
+  }
+
+  return `Opening hand attempt ${run.attemptNumber}`
+}
+
+function formatDebugTurnGroupLabel(turnNumber: number | null) {
+  return turnNumber === null ? "Turn unknown" : `Turn ${turnNumber}`
+}
+
+function formatDebugAttemptCount(count: number) {
+  return count === 1 ? "1 attempt" : `${count} attempts`
 }
 
 function DebugMetadataGrid({ children }: { children: ReactNode }) {
