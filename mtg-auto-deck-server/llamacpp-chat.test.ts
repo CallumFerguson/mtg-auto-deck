@@ -157,6 +157,40 @@ test("preserves reasoning content on assistant tool-call messages", async () => 
   )
 })
 
+test("passes provider-specific extra body fields into chat completion requests", async () => {
+  const chatRequests: ChatCompletionCreateParamsNonStreaming[] = []
+
+  await collectLlamaCppChatCompletionNonStreaming({
+    callTool: async () => ({ cards: ["Sol Ring"] }),
+    createChatCompletion: async (body) => {
+      chatRequests.push(body)
+
+      return createChatCompletion({
+        content: '{"keptHand":["Sol Ring"]}',
+        finishReason: "stop",
+      })
+    },
+    requestPayload: {
+      ...createRequestPayload(openingHandToolDefinitions),
+      extraBody: {
+        provider: {
+          only: ["anthropic"],
+        },
+        session_id: "simulation:simulation_1",
+      },
+    },
+    signal: new AbortController().signal,
+    toolDefinitions: openingHandToolDefinitions,
+  })
+
+  const request = chatRequests[0] as unknown as Record<string, unknown>
+
+  assert.deepEqual(request.provider, {
+    only: ["anthropic"],
+  })
+  assert.equal(request.session_id, "simulation:simulation_1")
+})
+
 test("collects a non-streaming llama.cpp turn tool loop with shorthand calls", async () => {
   const toolCalls: Array<{ args: Record<string, unknown>; name: string }> = []
   const finalOutput =

@@ -2340,6 +2340,10 @@ function requireStructuredLlmPrompt(
   return prompt
 }
 
+function createOpenRouterSessionId(simulationId: string) {
+  return `simulation:${simulationId}`
+}
+
 function buildOpeningHandOpenRouterRequestPayload(
   config: OpenRouterRunConfig,
   prompt: LlmPromptInput,
@@ -2358,6 +2362,7 @@ function buildOpeningHandOpenRouterRequestPayload(
       simulationId,
       phase: "opening_hand",
     },
+    sessionId: createOpenRouterSessionId(simulationId),
     reasoning: buildOpenRouterReasoningOptions(
       config.reasoningEffort,
       reasoningSummariesEnabled
@@ -2415,6 +2420,7 @@ function buildTurnSimulationOpenRouterRequestPayload(
       phase: "turn",
       turnNumber: String(turnNumber),
     },
+    sessionId: createOpenRouterSessionId(simulationId),
     reasoning: buildOpenRouterReasoningOptions(
       config.reasoningEffort,
       reasoningSummariesEnabled
@@ -2444,6 +2450,7 @@ function buildEvaluationOpenRouterRequestPayload(
       phase: "evaluation",
       targetLlmRunId,
     },
+    sessionId: createOpenRouterSessionId(simulationId),
     reasoning: buildOpenRouterReasoningOptions(config.reasoningEffort, false),
     parallelToolCalls: false as const,
     provider: getOpenRouterProviderPreferences(config.modelProvider),
@@ -5264,6 +5271,7 @@ function createOpenRouterChatCompletionToolLoopPayload(
     extraBody: {
       provider: requestPayload.provider,
       reasoning: requestPayload.reasoning,
+      session_id: requestPayload.sessionId,
       ...(requestPayload.serviceTier
         ? { service_tier: requestPayload.serviceTier }
         : {}),
