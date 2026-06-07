@@ -217,8 +217,10 @@ import {
 } from "./saved-seeds-postgres.js"
 import {
   asRecord,
+  createLlmRunRawResponseError,
   getCompletedResponseOutputText,
   getErrorMessage,
+  getLlmRunRawResponseArtifacts,
   getLlmRunFailureMessage,
   getStringProperty,
   isAbortError,
@@ -4477,6 +4479,7 @@ async function reconcileOpenAiBatchOutputLine({
       failureMessage: getOpenAiBatchLineFailureMessage(outputLine),
       item,
       openAiBatchId,
+      rawResponse: responseBody ?? outputLine,
     })
     return
   }
@@ -4495,6 +4498,7 @@ async function reconcileOpenAiBatchOutputLine({
       failureMessage: getErrorMessage(error),
       item,
       openAiBatchId,
+      rawResponse: responseBody ?? outputLine,
     })
     return
   }
@@ -4560,6 +4564,7 @@ async function reconcileOpenAiBatchOutputLine({
       failureMessage: getErrorMessage(error),
       item,
       openAiBatchId,
+      rawResponse: responseBody ?? outputLine,
     })
     return
   }
@@ -4716,6 +4721,7 @@ async function reconcileOpenAiBatchErrorLine({
     failureMessage: getOpenAiBatchLineFailureMessage(errorLine),
     item,
     openAiBatchId,
+    rawResponse: errorLine,
   })
 }
 
@@ -4724,11 +4730,13 @@ async function reconcileOpenAiBatchItemFailure({
   failureMessage,
   item,
   openAiBatchId,
+  rawResponse,
 }: {
   errorPayload: unknown
   failureMessage: string
   item: Awaited<ReturnType<typeof listOpenAiBatchItemsForReconcile>>[number]
   openAiBatchId: string
+  rawResponse?: unknown
 }) {
   await recordOpenAiBatchItemError({
     customId: item.customId,
@@ -4736,7 +4744,7 @@ async function reconcileOpenAiBatchItemFailure({
     failureMessage,
     openAiBatchId,
   })
-  await failLlmRun(item.llmRunId, failureMessage)
+  await failLlmRun(item.llmRunId, failureMessage, undefined, rawResponse)
   await revokeLlmRunMcpToken(item.llmRunId).catch((error: unknown) => {
     console.error("Failed to revoke failed batch MCP token:", error)
   })
@@ -5524,6 +5532,7 @@ async function reconcileAnthropicBatchResultLine({
       errorPayload: resultLine,
       failureMessage: getAnthropicBatchResultFailureMessage(resultLine),
       item,
+      rawResponse: resultLine,
     })
     return
   }
@@ -5549,6 +5558,7 @@ async function reconcileAnthropicBatchResultLine({
       errorPayload: resultLine,
       failureMessage: getErrorMessage(error),
       item,
+      rawResponse: message ?? resultLine,
     })
     return
   }
@@ -5614,6 +5624,7 @@ async function reconcileAnthropicBatchResultLine({
       errorPayload: resultLine,
       failureMessage: getErrorMessage(error),
       item,
+      rawResponse: message ?? resultLine,
     })
     return
   }
@@ -5731,6 +5742,7 @@ async function reconcileAnthropicBatchItemFailure({
   errorPayload,
   failureMessage,
   item,
+  rawResponse,
 }: {
   anthropicBatchId: string
   errorPayload: unknown
@@ -5738,6 +5750,7 @@ async function reconcileAnthropicBatchItemFailure({
   item: Awaited<
     ReturnType<typeof listAnthropicBatchItemsForReconcile>
   >[number]
+  rawResponse?: unknown
 }) {
   await recordAnthropicBatchItemError({
     anthropicBatchId,
@@ -5745,7 +5758,7 @@ async function reconcileAnthropicBatchItemFailure({
     errorPayload,
     failureMessage,
   })
-  await failLlmRun(item.llmRunId, failureMessage)
+  await failLlmRun(item.llmRunId, failureMessage, undefined, rawResponse)
   await revokeLlmRunMcpToken(item.llmRunId).catch((error: unknown) => {
     console.error("Failed to revoke failed Anthropic batch MCP token:", error)
   })
@@ -6120,6 +6133,22 @@ type CompletedLlmResponseResult = {
   usage: unknown
 }
 
+function getRealtimeLlmRunFailureArtifacts(
+  error: unknown,
+  responseResult: CompletedLlmResponseResult | null
+): {
+  finalOutputText?: string
+  rawResponse?: unknown
+} {
+  const errorArtifacts = getLlmRunRawResponseArtifacts(error)
+
+  return {
+    finalOutputText:
+      responseResult?.outputText ?? errorArtifacts?.finalOutputText,
+    rawResponse: responseResult?.rawResponse ?? errorArtifacts?.rawResponse,
+  }
+}
+
 type OpenAiRequestPayload =
   | ReturnType<typeof buildEvaluationOpenAiRequestPayload>
   | ReturnType<typeof buildOpeningHandOpenAiRequestPayload>
@@ -6222,9 +6251,21 @@ async function collectOpenAiLlmResponse({
     >[0],
     { signal }
   )
-  assertCompletedProviderResponse(response, phase, "OpenAI")
+  let outputText: string
+
+  try {
+    assertCompletedProviderResponse(response, phase, "OpenAI")
+    outputText = getCompletedResponseOutputText(response)
+  } catch (error) {
+    throw createLlmRunRawResponseError({
+      cause: error,
+      finalOutputText: getCompletedResponseOutputText(response) || undefined,
+      message: getErrorMessage(error),
+      rawResponse: response,
+    })
+  }
+
   const responseRecord = asRecord(response)
-  const outputText = getCompletedResponseOutputText(response)
   const usage = responseRecord.usage ?? {}
 
   logLlmApiCallFinished({
@@ -6282,14 +6323,26 @@ async function collectAnthropicLlmResponse({
     >[0],
     { signal }
   )
-  assertCompletedAnthropicMessage(response, formatLlmRunPhase(phase))
-  const outputText = getAnthropicMessageOutputText(response)
+  let outputText: string
+
+  try {
+    assertCompletedAnthropicMessage(response, formatLlmRunPhase(phase))
+    outputText = getAnthropicMessageOutputText(response)
+
+    if (!outputText.trim()) {
+      throw new Error("Anthropic response did not include final text content.")
+    }
+  } catch (error) {
+    throw createLlmRunRawResponseError({
+      cause: error,
+      finalOutputText: getAnthropicMessageOutputText(response) || undefined,
+      message: getErrorMessage(error),
+      rawResponse: response,
+    })
+  }
+
   const responseRecord = asRecord(response)
   const usage = normalizeAnthropicUsage(responseRecord.usage ?? {})
-
-  if (!outputText.trim()) {
-    throw new Error("Anthropic response did not include final text content.")
-  }
 
   logLlmApiCallFinished({
     llmRunId,
@@ -6496,32 +6549,62 @@ function createOpenRouterChatCompletion(
 
     if (!response.ok) {
       const responseMetadata = formatProviderHttpResponseMetadata(response)
+      const rawResponse = createProviderHttpRawResponse({
+        endpoint: "chat.completions",
+        provider: "openrouter",
+        response,
+        responseText,
+      })
 
-      throw new Error(
-        `OpenRouter Chat Completions API request failed (${response.status}): ${formatProviderHttpErrorBody(responseText)}${responseMetadata ? ` (${responseMetadata})` : ""}`
-      )
+      throw createLlmRunRawResponseError({
+        message: `OpenRouter Chat Completions API request failed (${response.status}): ${formatProviderHttpErrorBody(responseText)}${responseMetadata ? ` (${responseMetadata})` : ""}`,
+        rawResponse,
+      })
     }
 
     if (!responseText.trim()) {
-      throw new Error(
-        "OpenRouter Chat Completions API response did not include choices: empty response body"
-      )
+      throw createLlmRunRawResponseError({
+        message:
+          "OpenRouter Chat Completions API response did not include choices: empty response body",
+        rawResponse: createProviderHttpRawResponse({
+          endpoint: "chat.completions",
+          provider: "openrouter",
+          response,
+          responseText,
+        }),
+      })
     }
 
     try {
       const parsedResponse = JSON.parse(responseText) as unknown
 
-      assertOpenRouterChatCompletionResponse(parsedResponse)
+      try {
+        assertOpenRouterChatCompletionResponse(parsedResponse)
+      } catch (error) {
+        throw createLlmRunRawResponseError({
+          cause: error,
+          message: getErrorMessage(error),
+          rawResponse: parsedResponse,
+        })
+      }
 
       return parsedResponse
     } catch (error) {
+      if (getLlmRunRawResponseArtifacts(error)) {
+        throw error
+      }
+
       if (error instanceof SyntaxError) {
-        throw new Error(
-          "OpenRouter Chat Completions API returned non-JSON output.",
-          {
-            cause: error,
-          }
-        )
+        throw createLlmRunRawResponseError({
+          cause: error,
+          message: "OpenRouter Chat Completions API returned non-JSON output.",
+          rawResponse: createProviderHttpRawResponse({
+            endpoint: "chat.completions",
+            provider: "openrouter",
+            response,
+            responseText,
+          }),
+        })
       }
 
       throw error
@@ -6751,6 +6834,49 @@ function formatProviderHttpResponseMetadata(response: globalThis.Response) {
   ].filter((detail) => detail !== null)
 
   return details.length > 0 ? details.join(", ") : null
+}
+
+function createProviderHttpRawResponse({
+  endpoint,
+  provider,
+  response,
+  responseText,
+}: {
+  provider: string
+  endpoint: string
+  response: globalThis.Response
+  responseText: string
+}) {
+  const parsedBody = parseJsonOrNull(responseText)
+
+  return {
+    provider,
+    endpoint,
+    status: response.status,
+    statusText: response.statusText,
+    responseMetadata: getProviderHttpRawResponseMetadata(response),
+    bodyText: responseText,
+    ...(parsedBody === null ? {} : { body: parsedBody }),
+  }
+}
+
+function parseJsonOrNull(value: string) {
+  if (!value.trim()) {
+    return null
+  }
+
+  try {
+    return JSON.parse(value) as unknown
+  } catch {
+    return null
+  }
+}
+
+function getProviderHttpRawResponseMetadata(response: globalThis.Response) {
+  return {
+    generationId: response.headers.get("X-Generation-Id"),
+    retryAfter: response.headers.get("Retry-After"),
+  }
 }
 
 async function collectLlamaCppLlmResponse({
@@ -7103,6 +7229,11 @@ async function runEvaluationLlmRun({
     )
 
     if (timeoutError) {
+      const failureArtifacts = getRealtimeLlmRunFailureArtifacts(
+        error,
+        responseResult
+      )
+
       logLlmApiCallStoppedWithError({
         error: timeoutError,
         llmRunId,
@@ -7113,13 +7244,19 @@ async function runEvaluationLlmRun({
       await failLlmRun(
         llmRunId,
         getErrorMessage(timeoutError),
-        responseResult?.outputText
+        failureArtifacts.finalOutputText,
+        failureArtifacts.rawResponse
       )
       runtime.status = "failed"
       return
     }
 
     if (isAbortError(error) || runtime.abortController.signal.aborted) {
+      const failureArtifacts = getRealtimeLlmRunFailureArtifacts(
+        error,
+        responseResult
+      )
+
       logLlmApiCallCancelled({
         llmRunId,
         phase: "evaluation",
@@ -7128,7 +7265,8 @@ async function runEvaluationLlmRun({
       await cancelLlmRun(
         llmRunId,
         "Evaluation LLM run was cancelled.",
-        responseResult?.outputText
+        failureArtifacts.finalOutputText,
+        failureArtifacts.rawResponse
       )
       runtime.status = "cancelled"
       return
@@ -7141,6 +7279,10 @@ async function runEvaluationLlmRun({
       provider: config.provider,
     })
     console.error("Evaluation LLM run failed:", error)
+    const failureArtifacts = getRealtimeLlmRunFailureArtifacts(
+      error,
+      responseResult
+    )
     await failLlmRun(
       llmRunId,
       getLlmRunFailureMessage({
@@ -7148,7 +7290,8 @@ async function runEvaluationLlmRun({
         provider: config.provider,
         serviceTier: getLlmRunServiceTier(config),
       }),
-      responseResult?.outputText
+      failureArtifacts.finalOutputText,
+      failureArtifacts.rawResponse
     )
     runtime.status = "failed"
   } finally {
@@ -7347,6 +7490,11 @@ async function runOpeningHandLlmRun({
     )
 
     if (timeoutError) {
+      const failureArtifacts = getRealtimeLlmRunFailureArtifacts(
+        error,
+        responseResult
+      )
+
       logLlmApiCallStoppedWithError({
         error: timeoutError,
         llmRunId,
@@ -7357,7 +7505,8 @@ async function runOpeningHandLlmRun({
       await failLlmRun(
         llmRunId,
         getErrorMessage(timeoutError),
-        responseResult?.outputText
+        failureArtifacts.finalOutputText,
+        failureArtifacts.rawResponse
       )
       runtime.status = "failed"
       await publishSimulationResultsState({
@@ -7369,6 +7518,11 @@ async function runOpeningHandLlmRun({
     }
 
     if (isAbortError(error) || runtime.abortController.signal.aborted) {
+      const failureArtifacts = getRealtimeLlmRunFailureArtifacts(
+        error,
+        responseResult
+      )
+
       logLlmApiCallCancelled({
         llmRunId,
         phase: "opening_hand",
@@ -7377,7 +7531,8 @@ async function runOpeningHandLlmRun({
       await cancelLlmRun(
         llmRunId,
         "Opening-hand LLM run was cancelled.",
-        responseResult?.outputText
+        failureArtifacts.finalOutputText,
+        failureArtifacts.rawResponse
       )
       runtime.status = "cancelled"
       await publishSimulationResultsState({
@@ -7395,6 +7550,10 @@ async function runOpeningHandLlmRun({
       provider: config.provider,
     })
     console.error("Opening-hand LLM run failed:", error)
+    const failureArtifacts = getRealtimeLlmRunFailureArtifacts(
+      error,
+      responseResult
+    )
     await failLlmRun(
       llmRunId,
       getLlmRunFailureMessage({
@@ -7402,7 +7561,8 @@ async function runOpeningHandLlmRun({
         provider: config.provider,
         serviceTier: getLlmRunServiceTier(config),
       }),
-      responseResult?.outputText
+      failureArtifacts.finalOutputText,
+      failureArtifacts.rawResponse
     )
     runtime.status = "failed"
     await publishSimulationResultsState({
@@ -7662,6 +7822,11 @@ async function runTurnLlmRun({
     )
 
     if (timeoutError) {
+      const failureArtifacts = getRealtimeLlmRunFailureArtifacts(
+        error,
+        responseResult
+      )
+
       logLlmApiCallStoppedWithError({
         error: timeoutError,
         llmRunId,
@@ -7672,7 +7837,8 @@ async function runTurnLlmRun({
       await failLlmRun(
         llmRunId,
         getErrorMessage(timeoutError),
-        responseResult?.outputText
+        failureArtifacts.finalOutputText,
+        failureArtifacts.rawResponse
       )
       runtime.status = "failed"
       await publishSimulationResultsState({
@@ -7684,6 +7850,11 @@ async function runTurnLlmRun({
     }
 
     if (isAbortError(error) || runtime.abortController.signal.aborted) {
+      const failureArtifacts = getRealtimeLlmRunFailureArtifacts(
+        error,
+        responseResult
+      )
+
       logLlmApiCallCancelled({
         llmRunId,
         phase: "turn",
@@ -7692,7 +7863,8 @@ async function runTurnLlmRun({
       await cancelLlmRun(
         llmRunId,
         "Turn LLM run was cancelled.",
-        responseResult?.outputText
+        failureArtifacts.finalOutputText,
+        failureArtifacts.rawResponse
       )
       runtime.status = "cancelled"
       await publishSimulationResultsState({
@@ -7710,6 +7882,10 @@ async function runTurnLlmRun({
       provider: config.provider,
     })
     console.error("Turn LLM run failed:", error)
+    const failureArtifacts = getRealtimeLlmRunFailureArtifacts(
+      error,
+      responseResult
+    )
     await failLlmRun(
       llmRunId,
       getLlmRunFailureMessage({
@@ -7717,7 +7893,8 @@ async function runTurnLlmRun({
         provider: config.provider,
         serviceTier: getLlmRunServiceTier(config),
       }),
-      responseResult?.outputText
+      failureArtifacts.finalOutputText,
+      failureArtifacts.rawResponse
     )
     runtime.status = "failed"
     await publishSimulationResultsState({

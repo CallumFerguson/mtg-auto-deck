@@ -1584,8 +1584,33 @@ test("builds failed LLM run query with optional final output text", () => {
   ])
   assert.match(normalizedSql, /status = 'failed'/)
   assert.match(normalizedSql, /final_output_text = \$4/)
+  assert.doesNotMatch(normalizedSql, /raw_response =/)
   assert.match(normalizedSql, /'batch_pending'/)
   assert.match(normalizedSql, /'batch_submitted'/)
+})
+
+test("builds failed LLM run query with optional raw response", () => {
+  const finalOutputText = '{"keptHand":'
+  const rawResponse = { id: "response_1", status: "incomplete" }
+  const query = buildFailLlmRunQuery(
+    "00000000-0000-0000-0000-000000000001",
+    "Opening-hand LLM response ended incomplete.",
+    0.02,
+    finalOutputText,
+    rawResponse
+  )
+  const normalizedSql = query.text.replace(/\s+/g, " ")
+
+  assert.deepEqual(query.values, [
+    "00000000-0000-0000-0000-000000000001",
+    "Opening-hand LLM response ended incomplete.",
+    0.02,
+    finalOutputText,
+    JSON.stringify(rawResponse),
+  ])
+  assert.match(normalizedSql, /status = 'failed'/)
+  assert.match(normalizedSql, /final_output_text = \$4/)
+  assert.match(normalizedSql, /raw_response = \$5::jsonb/)
 })
 
 test("builds cancelled LLM run query with optional final output text", () => {
@@ -1606,8 +1631,33 @@ test("builds cancelled LLM run query with optional final output text", () => {
   ])
   assert.match(normalizedSql, /status = 'cancelled'/)
   assert.match(normalizedSql, /final_output_text = \$4/)
+  assert.doesNotMatch(normalizedSql, /raw_response =/)
   assert.match(normalizedSql, /'batch_pending'/)
   assert.doesNotMatch(normalizedSql, /'batch_submitted'/)
+})
+
+test("builds cancelled LLM run query with optional raw response", () => {
+  const finalOutputText = '{"gameState":{},"turnActions":{},"error":null}'
+  const rawResponse = { responses: [{ id: "chatcmpl_1" }] }
+  const query = buildCancelLlmRunQuery(
+    "00000000-0000-0000-0000-000000000001",
+    "Turn LLM run was cancelled.",
+    0.03,
+    finalOutputText,
+    rawResponse
+  )
+  const normalizedSql = query.text.replace(/\s+/g, " ")
+
+  assert.deepEqual(query.values, [
+    "00000000-0000-0000-0000-000000000001",
+    "Turn LLM run was cancelled.",
+    0.03,
+    finalOutputText,
+    JSON.stringify(rawResponse),
+  ])
+  assert.match(normalizedSql, /status = 'cancelled'/)
+  assert.match(normalizedSql, /final_output_text = \$4/)
+  assert.match(normalizedSql, /raw_response = \$5::jsonb/)
 })
 
 test("requires a positive integer OpenRouter stop step count", () => {

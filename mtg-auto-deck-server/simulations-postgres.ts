@@ -4939,26 +4939,35 @@ export function buildFailLlmRunQuery(
   llmRunId: string,
   failureMessage: string,
   estimatedCostUsd: number | null,
-  finalOutputText?: string
+  finalOutputText?: string,
+  rawResponse?: unknown
 ) {
+  const rawResponseUpdate =
+    rawResponse === undefined ? "" : "raw_response = $5::jsonb,"
+
   return {
     text: `
       UPDATE llm_runs
       SET status = 'failed',
           estimated_cost_usd = $3,
           final_output_text = $4,
+          ${rawResponseUpdate}
           failed_at = now(),
           failure_message = $2,
           updated_at = now()
       WHERE id = $1
         AND status IN ('pending', 'batch_pending', 'batch_submitted', 'streaming')
     `,
-    values: [
-      llmRunId,
-      failureMessage,
-      estimatedCostUsd,
-      finalOutputText ?? null,
-    ],
+    values:
+      rawResponse === undefined
+        ? [llmRunId, failureMessage, estimatedCostUsd, finalOutputText ?? null]
+        : [
+            llmRunId,
+            failureMessage,
+            estimatedCostUsd,
+            finalOutputText ?? null,
+            JSON.stringify(rawResponse ?? {}),
+          ],
   }
 }
 
@@ -4966,26 +4975,35 @@ export function buildCancelLlmRunQuery(
   llmRunId: string,
   failureMessage: string | null,
   estimatedCostUsd: number | null,
-  finalOutputText?: string
+  finalOutputText?: string,
+  rawResponse?: unknown
 ) {
+  const rawResponseUpdate =
+    rawResponse === undefined ? "" : "raw_response = $5::jsonb,"
+
   return {
     text: `
       UPDATE llm_runs
       SET status = 'cancelled',
           estimated_cost_usd = $3,
           final_output_text = $4,
+          ${rawResponseUpdate}
           cancelled_at = now(),
           failure_message = COALESCE($2, failure_message),
           updated_at = now()
       WHERE id = $1
         AND status IN ('pending', 'batch_pending', 'streaming', 'cancel_requested')
     `,
-    values: [
-      llmRunId,
-      failureMessage,
-      estimatedCostUsd,
-      finalOutputText ?? null,
-    ],
+    values:
+      rawResponse === undefined
+        ? [llmRunId, failureMessage, estimatedCostUsd, finalOutputText ?? null]
+        : [
+            llmRunId,
+            failureMessage,
+            estimatedCostUsd,
+            finalOutputText ?? null,
+            JSON.stringify(rawResponse ?? {}),
+          ],
   }
 }
 
@@ -6155,7 +6173,8 @@ async function estimatePartialLlmRunCostUsdWithClient(
 export async function failLlmRun(
   llmRunId: string,
   failureMessage: string,
-  finalOutputText?: string
+  finalOutputText?: string,
+  rawResponse?: unknown
 ) {
   await withDatabaseTransaction(async (client) => {
     const estimatedCostUsd = await estimatePartialLlmRunCostUsdWithClient(
@@ -6167,7 +6186,8 @@ export async function failLlmRun(
       llmRunId,
       failureMessage,
       estimatedCostUsd,
-      finalOutputText
+      finalOutputText,
+      rawResponse
     )
     await client.query(failRunQuery.text, failRunQuery.values)
 
@@ -6204,7 +6224,8 @@ export async function failLlmRun(
 export async function cancelLlmRun(
   llmRunId: string,
   failureMessage?: string,
-  finalOutputText?: string
+  finalOutputText?: string,
+  rawResponse?: unknown
 ) {
   await withDatabaseTransaction(async (client) => {
     const estimatedCostUsd = await estimatePartialLlmRunCostUsdWithClient(
@@ -6216,7 +6237,8 @@ export async function cancelLlmRun(
       llmRunId,
       failureMessage ?? null,
       estimatedCostUsd,
-      finalOutputText
+      finalOutputText,
+      rawResponse
     )
     await client.query(cancelRunQuery.text, cancelRunQuery.values)
 

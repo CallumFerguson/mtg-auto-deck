@@ -38,9 +38,17 @@ export function createRuntimeTimeoutError(timeoutSeconds: number) {
 export function getRuntimeTimeoutAbortError(
   error: unknown,
   signal?: AbortSignal
-) {
+): RuntimeTimeoutError | null {
   if (isRuntimeTimeoutError(error)) {
     return error
+  }
+
+  if (error instanceof Error) {
+    const causeTimeoutError = getRuntimeTimeoutAbortError(error.cause)
+
+    if (causeTimeoutError) {
+      return causeTimeoutError
+    }
   }
 
   if (signal) {

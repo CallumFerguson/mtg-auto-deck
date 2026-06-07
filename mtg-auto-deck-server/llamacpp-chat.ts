@@ -6,7 +6,12 @@ import type {
   ChatCompletionTool,
 } from "openai/resources/chat/completions"
 import { z } from "zod/v4"
-import { asRecord, getStringProperty } from "./llm-run-events.js"
+import {
+  asRecord,
+  createLlmRunRawResponseError,
+  getErrorMessage,
+  getStringProperty,
+} from "./llm-run-events.js"
 import { throwIfRuntimeAborted } from "./llm-runtime-cancellation.js"
 
 export type LlamaCppToolDefinition = {
@@ -89,24 +94,25 @@ export async function collectLlamaCppChatCompletionNonStreaming({
     toolDefinitions.map((definition) => [definition.name, definition])
   )
 
-  for (
-    let stepNumber = 1;
-    stepNumber <= requestPayload.stopWhenStepCount;
-    stepNumber += 1
-  ) {
+  try {
+    for (
+      let stepNumber = 1;
+      stepNumber <= requestPayload.stopWhenStepCount;
+      stepNumber += 1
+    ) {
     throwIfRuntimeAborted(signal)
 
     const response = await createChatCompletion(
       createNonStreamingChatCompletionApiPayload(requestPayload, messages),
       { signal }
     )
+    rawResponses.push(response)
+
     const stepResult = collectLlamaCppChatCompletionNonStreamingStep(
       response,
       stepNumber
     )
     const { toolCalls } = stepResult
-
-    rawResponses.push(response)
 
     if (toolCalls.length === 0) {
       const { outputText } = stepResult
@@ -150,9 +156,20 @@ export async function collectLlamaCppChatCompletionNonStreaming({
     }
   }
 
-  throw new Error(
-    getStopWhenStepCountFailureMessage(requestPayload)
-  )
+    throw new Error(
+      getStopWhenStepCountFailureMessage(requestPayload)
+    )
+  } catch (error) {
+    if (rawResponses.length === 0) {
+      throw error
+    }
+
+    throw createLlmRunRawResponseError({
+      cause: error,
+      message: getErrorMessage(error),
+      rawResponse: { responses: rawResponses },
+    })
+  }
 }
 
 function formatChatCompletionProviderLabel(

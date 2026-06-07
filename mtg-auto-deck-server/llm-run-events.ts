@@ -435,17 +435,77 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-export function isAbortError(error: unknown) {
+export function isAbortError(error: unknown): boolean {
   return (
     error instanceof Error &&
     (error.name === "APIUserAbortError" ||
       error.name === "AbortError" ||
-      error.name === "RequestAbortedError")
+      error.name === "RequestAbortedError" ||
+      isAbortError(error.cause))
   )
 }
 
 export function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error)
+}
+
+export class LlmRunRawResponseError extends Error {
+  readonly finalOutputText?: string
+  readonly rawResponse: unknown
+
+  constructor({
+    cause,
+    finalOutputText,
+    message,
+    rawResponse,
+  }: {
+    message: string
+    rawResponse: unknown
+    finalOutputText?: string
+    cause?: unknown
+  }) {
+    super(message, { cause })
+    this.name = "LlmRunRawResponseError"
+    this.finalOutputText = finalOutputText
+    this.rawResponse = rawResponse
+  }
+}
+
+export function createLlmRunRawResponseError({
+  cause,
+  finalOutputText,
+  message,
+  rawResponse,
+}: {
+  message: string
+  rawResponse: unknown
+  finalOutputText?: string
+  cause?: unknown
+}) {
+  return new LlmRunRawResponseError({
+    cause,
+    finalOutputText,
+    message,
+    rawResponse,
+  })
+}
+
+export function getLlmRunRawResponseArtifacts(error: unknown): {
+  finalOutputText?: string
+  rawResponse: unknown
+} | null {
+  if (error instanceof LlmRunRawResponseError) {
+    return {
+      finalOutputText: error.finalOutputText,
+      rawResponse: error.rawResponse,
+    }
+  }
+
+  if (error instanceof Error) {
+    return getLlmRunRawResponseArtifacts(error.cause)
+  }
+
+  return null
 }
 
 export function getLlmRunFailureMessage({

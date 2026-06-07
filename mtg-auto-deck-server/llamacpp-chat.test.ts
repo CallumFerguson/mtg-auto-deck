@@ -5,7 +5,10 @@ import type {
   ChatCompletionCreateParamsNonStreaming,
 } from "openai/resources/chat/completions"
 import { z } from "zod/v4"
-import { isAbortError } from "./llm-run-events.js"
+import {
+  getLlmRunRawResponseArtifacts,
+  isAbortError,
+} from "./llm-run-events.js"
 import {
   collectLlamaCppChatCompletionNonStreaming,
   createLlamaCppChatCompletionTools,
@@ -34,6 +37,18 @@ const turnToolDefinitions: LlamaCppToolDefinition[] = [
     }),
   },
 ]
+
+function getRawResponsesFromError(error: unknown) {
+  const artifacts = getLlmRunRawResponseArtifacts(error)
+
+  assert.ok(artifacts)
+
+  const rawResponse = artifacts.rawResponse as { responses?: unknown[] }
+
+  assert.ok(Array.isArray(rawResponse.responses))
+
+  return rawResponse.responses
+}
 
 test("collects a non-streaming llama.cpp opening-hand tool loop", async () => {
   const chatRequests: ChatCompletionCreateParamsNonStreaming[] = []
@@ -193,7 +208,16 @@ test("fails immediately when a tool loop ends with empty assistant content", asy
       signal: new AbortController().signal,
       toolDefinitions: openingHandToolDefinitions,
     }),
-    /llama\.cpp chat completion did not include final assistant content: finish_reason=stop/
+    (error: unknown) => {
+      assert.ok(error instanceof Error)
+      assert.match(
+        error.message,
+        /llama\.cpp chat completion did not include final assistant content: finish_reason=stop/
+      )
+      assert.equal(getRawResponsesFromError(error)?.length, 2)
+
+      return true
+    }
   )
 
   assert.equal(chatRequests.length, 2)
@@ -306,7 +330,16 @@ test("rejects malformed llama.cpp tool arguments", async () => {
       signal: new AbortController().signal,
       toolDefinitions: openingHandToolDefinitions,
     }),
-    /llama\.cpp tool draw_starting_hand arguments were not valid JSON\./
+    (error: unknown) => {
+      assert.ok(error instanceof Error)
+      assert.match(
+        error.message,
+        /llama\.cpp tool draw_starting_hand arguments were not valid JSON\./
+      )
+      assert.equal(getRawResponsesFromError(error)?.length, 1)
+
+      return true
+    }
   )
 })
 
@@ -335,7 +368,13 @@ test("stops runaway llama.cpp tool loops at the step limit", async () => {
       signal: new AbortController().signal,
       toolDefinitions: openingHandToolDefinitions,
     }),
-    /LLAMACPP_STOP_WHEN_STEP_COUNT \(1\)/
+    (error: unknown) => {
+      assert.ok(error instanceof Error)
+      assert.match(error.message, /LLAMACPP_STOP_WHEN_STEP_COUNT \(1\)/)
+      assert.equal(getRawResponsesFromError(error)?.length, 1)
+
+      return true
+    }
   )
 })
 
