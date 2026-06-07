@@ -34,7 +34,7 @@ export const BILLING_TIER_USAGE_LIMITS_USD = {
   },
   super_max: {
     five_hour: 100,
-    weekly: 100,
+    weekly: 200,
   },
 } as const satisfies Record<
   BillingTier,
