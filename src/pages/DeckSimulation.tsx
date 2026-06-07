@@ -1577,12 +1577,6 @@ function PublicBenchmarkResultsPanel({
       <section className="mx-auto grid w-full max-w-6xl gap-4">
         <div className="grid gap-1">
           <h2 className="text-lg font-semibold text-foreground">Results</h2>
-          {benchmarkResults ? (
-            <p className="text-sm text-muted-foreground">
-              Exported{" "}
-              {formatPublicBenchmarkExportDate(benchmarkResults.exportedAt)}
-            </p>
-          ) : null}
         </div>
 
         {loadError ? (
@@ -6849,19 +6843,6 @@ function formatPublicBenchmarkSimulationLabel(
 
 function formatPublicBenchmarkSimulationScore(score: number) {
   return score.toFixed(1).replace(/\.0$/u, "")
-}
-
-function formatPublicBenchmarkExportDate(value: string) {
-  const date = new Date(value)
-
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
-
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date)
 }
 
 function formatPublicBenchmarkResultCost(value: number | null) {
