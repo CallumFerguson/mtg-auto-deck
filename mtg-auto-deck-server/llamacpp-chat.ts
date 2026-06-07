@@ -113,7 +113,7 @@ export async function collectLlamaCppChatCompletionNonStreaming({
 
       if (!outputText.trim()) {
         throw new Error(
-          "llama.cpp chat completion did not include final assistant content."
+          `${formatChatCompletionProviderLabel(requestPayload.providerType)} chat completion did not include final assistant content: ${getEmptyFinalContentFailureDetail(stepResult)}`
         )
       }
 
@@ -151,8 +151,29 @@ export async function collectLlamaCppChatCompletionNonStreaming({
   }
 
   throw new Error(
-    `llama.cpp LLM run reached LLAMACPP_STOP_WHEN_STEP_COUNT (${requestPayload.stopWhenStepCount}) before producing final output.`
+    getStopWhenStepCountFailureMessage(requestPayload)
   )
+}
+
+function formatChatCompletionProviderLabel(
+  providerType: LlamaCppChatCompletionRequestPayload["providerType"]
+) {
+  return providerType === "openrouter" ? "OpenRouter" : "llama.cpp"
+}
+
+function getStopWhenStepCountFailureMessage(
+  requestPayload: LlamaCppChatCompletionRequestPayload
+) {
+  return requestPayload.providerType === "openrouter"
+    ? `OpenRouter LLM run reached stopWhenStepCount (${requestPayload.stopWhenStepCount}) before producing final output.`
+    : `llama.cpp LLM run reached LLAMACPP_STOP_WHEN_STEP_COUNT (${requestPayload.stopWhenStepCount}) before producing final output.`
+}
+
+function getEmptyFinalContentFailureDetail({
+  finishReason,
+  rawMessage,
+}: Pick<LlamaCppChatCompletionStepResult, "finishReason" | "rawMessage">) {
+  return `finish_reason=${finishReason ?? "unknown"} message=${JSON.stringify(rawMessage)}`
 }
 
 export function getLlamaCppChatCompletionToolCalls(

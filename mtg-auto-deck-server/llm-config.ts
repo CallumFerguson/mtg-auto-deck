@@ -51,6 +51,7 @@ export type LlmModelPresetRunConfig = {
   model: string
   reasoningEffort: ReasoningEffort
   openrouterModelProvider: string | null
+  explicitPromptCachingEnabled?: boolean
   supportsFlex: boolean
   inputTokenCostUsdPerMillion: number | null
   cachedInputTokenCostUsdPerMillion: number | null
@@ -69,6 +70,7 @@ export type AnthropicRunConfig = ConfiguredModelLlmRunConfig & {
 
 export type OpenRouterRunConfig = ConfiguredModelLlmRunConfig & {
   provider: "openrouter"
+  explicitPromptCachingEnabled: boolean
   modelProvider: string | null
   stopWhenStepCount: number
 }
@@ -334,6 +336,7 @@ function getLlmRunConfig(
     maxOutputTokens,
     model: preset.model,
     modelPresetId: preset.id,
+    explicitPromptCachingEnabled: preset.explicitPromptCachingEnabled ?? false,
     modelProvider: preset.openrouterModelProvider,
     provider: preset.provider,
     reasoningEffort: preset.reasoningEffort,

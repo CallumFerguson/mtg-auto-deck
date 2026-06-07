@@ -16,6 +16,7 @@ export type LlmModelPreset = {
   model: string
   reasoningEffort: ReasoningEffort
   openrouterModelProvider: string | null
+  explicitPromptCachingEnabled: boolean
   supportsFlex: boolean
   isFreeTier: boolean
   inputTokenCostUsdPerMillion: number | null

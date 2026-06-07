@@ -226,6 +226,10 @@ import {
   type LlamaCppChatCompletionCreateNonStreaming,
 } from "./llamacpp-chat.js"
 import {
+  buildOpenRouterChatCompletionMessages,
+  restorePersistedStructuredSimulationPrompt,
+} from "./openrouter-chat.js"
+import {
   callWithRuntimeAbortSignal,
   createRuntimeAbortErrorForSignal,
   createRuntimeTimeoutError,
@@ -452,6 +456,7 @@ const createLlmModelPresetSchema = z.object({
   model: z.string().trim().min(1),
   reasoningEffort: reasoningEffortSchema,
   openrouterModelProvider: z.string().trim().nullable().default(null),
+  explicitPromptCachingEnabled: z.boolean().default(false),
   supportsFlex: z.boolean().default(false),
   isFreeTier: z.boolean().default(false),
   inputTokenCostUsdPerMillion: optionalTokenCostSchema,
@@ -467,6 +472,7 @@ const updateLlmModelPresetSchema = z
     model: z.string().trim().min(1),
     reasoningEffort: reasoningEffortSchema,
     openrouterModelProvider: z.string().trim().nullable().default(null),
+    explicitPromptCachingEnabled: z.boolean().default(false),
     supportsFlex: z.boolean().default(false),
     isFreeTier: z.boolean().default(false),
     inputTokenCostUsdPerMillion: optionalTokenCostSchema,
@@ -2340,6 +2346,15 @@ function requireStructuredLlmPrompt(
   return prompt
 }
 
+function getOpenRouterExplicitCachingPrompt(
+  config: OpenRouterRunConfig,
+  prompt: LlmPromptInput
+) {
+  return config.explicitPromptCachingEnabled && typeof prompt !== "string"
+    ? prompt
+    : null
+}
+
 function createOpenRouterSessionId(simulationId: string) {
   return `simulation:${simulationId}`
 }
@@ -2351,11 +2366,17 @@ function buildOpeningHandOpenRouterRequestPayload(
   reasoningSummariesEnabled: boolean
 ) {
   const fullPrompt = getLlmPromptFullText(prompt)
+  const explicitCachingPrompt = getOpenRouterExplicitCachingPrompt(
+    config,
+    prompt
+  )
 
   return {
     providerType: "openrouter" as const,
     model: config.model,
     input: fullPrompt,
+    ...(explicitCachingPrompt ? { prompt: explicitCachingPrompt } : {}),
+    explicitPromptCachingEnabled: config.explicitPromptCachingEnabled,
     maxOutputTokens: config.maxOutputTokens,
     ...(config.serviceTier ? { serviceTier: config.serviceTier } : {}),
     metadata: {
@@ -2408,11 +2429,17 @@ function buildTurnSimulationOpenRouterRequestPayload(
   reasoningSummariesEnabled: boolean
 ) {
   const fullPrompt = getLlmPromptFullText(prompt)
+  const explicitCachingPrompt = getOpenRouterExplicitCachingPrompt(
+    config,
+    prompt
+  )
 
   return {
     providerType: "openrouter" as const,
     model: config.model,
     input: fullPrompt,
+    ...(explicitCachingPrompt ? { prompt: explicitCachingPrompt } : {}),
+    explicitPromptCachingEnabled: config.explicitPromptCachingEnabled,
     maxOutputTokens: config.maxOutputTokens,
     ...(config.serviceTier ? { serviceTier: config.serviceTier } : {}),
     metadata: {
@@ -2438,11 +2465,17 @@ function buildEvaluationOpenRouterRequestPayload(
   targetLlmRunId: string
 ) {
   const fullPrompt = getLlmPromptFullText(prompt)
+  const explicitCachingPrompt = getOpenRouterExplicitCachingPrompt(
+    config,
+    prompt
+  )
 
   return {
     providerType: "openrouter" as const,
     model: config.model,
     input: fullPrompt,
+    ...(explicitCachingPrompt ? { prompt: explicitCachingPrompt } : {}),
+    explicitPromptCachingEnabled: config.explicitPromptCachingEnabled,
     maxOutputTokens: config.maxOutputTokens,
     ...(config.serviceTier ? { serviceTier: config.serviceTier } : {}),
     metadata: {
@@ -2550,19 +2583,36 @@ function getLlmRunServiceTier(
 }
 
 function getQueuedLlmPromptInput(run: ClaimedQueuedLlmRun): LlmPromptInput {
+  if (run.provider === "openrouter") {
+    const prompt = restoreQueuedStructuredPrompt(run)
+
+    if (prompt) {
+      return prompt
+    }
+  }
+
   if (run.provider !== "anthropic") {
     return run.fullPrompt
   }
 
-  const prompt = asRecord(run.requestPayload).prompt
+  const prompt = restoreQueuedStructuredPrompt(run)
 
-  if (!isStructuredSimulationPrompt(prompt)) {
+  if (!prompt) {
     throw new Error(
       "Queued Anthropic LLM run is missing structured prompt parts."
     )
   }
 
   return prompt
+}
+
+function restoreQueuedStructuredPrompt(
+  run: Pick<ClaimedQueuedLlmRun, "fullPrompt" | "requestPayload">
+) {
+  return restorePersistedStructuredSimulationPrompt(
+    asRecord(run.requestPayload).prompt,
+    run.fullPrompt
+  )
 }
 
 function withCapturedLlmRunServiceTier<
@@ -2739,6 +2789,13 @@ function getPersistableLlmRequestPayload<
     persistableRequestPayload.input = "[stored in llm_runs.full_prompt]"
   }
 
+  if (isStructuredSimulationPrompt(persistableRequestPayload.prompt)) {
+    persistableRequestPayload.prompt = {
+      ...persistableRequestPayload.prompt,
+      fullPrompt: "[stored in llm_runs.full_prompt]",
+    }
+  }
+
   if (Array.isArray(persistableRequestPayload.messages)) {
     persistableRequestPayload.messages = "[stored in llm_runs.full_prompt]"
   }
@@ -2893,6 +2950,7 @@ function getLlmModelPresetRunConfig(preset: LlmModelPreset) {
     model: preset.model,
     reasoningEffort: preset.reasoningEffort,
     openrouterModelProvider: preset.openrouterModelProvider,
+    explicitPromptCachingEnabled: preset.explicitPromptCachingEnabled,
     supportsFlex: preset.supportsFlex,
     inputTokenCostUsdPerMillion: preset.inputTokenCostUsdPerMillion,
     cachedInputTokenCostUsdPerMillion: preset.cachedInputTokenCostUsdPerMillion,
@@ -5263,7 +5321,12 @@ function createOpenRouterChatCompletionToolLoopPayload(
     providerType: "openrouter",
     model: requestPayload.model,
     max_tokens: requestPayload.maxOutputTokens,
-    messages: normalizeOpenRouterChatCompletionMessages(requestPayload.input),
+    messages: buildOpenRouterChatCompletionMessages({
+      explicitPromptCachingEnabled:
+        requestPayload.explicitPromptCachingEnabled,
+      input: requestPayload.input,
+      prompt: requestPayload.prompt ?? null,
+    }),
     metadata: requestPayload.metadata,
     parallel_tool_calls: requestPayload.parallelToolCalls,
     tools: createLlamaCppChatCompletionTools(toolDefinitions),
@@ -5277,26 +5340,6 @@ function createOpenRouterChatCompletionToolLoopPayload(
         : {}),
     },
   }
-}
-
-function normalizeOpenRouterChatCompletionMessages(
-  input: unknown
-): LlamaCppChatCompletionRequestPayload["messages"] {
-  if (typeof input === "string") {
-    return [
-      {
-        role: "user",
-        content: input,
-      },
-    ]
-  }
-
-  return [
-    {
-      role: "user",
-      content: String(input ?? ""),
-    },
-  ]
 }
 
 function createOpenRouterChatCompletion(

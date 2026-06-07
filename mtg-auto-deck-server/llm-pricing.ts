@@ -174,11 +174,25 @@ export function estimatePresetTokenCostUsd({
     getNumberProperty(inputDetails, "cached_tokens", "cachedTokens") ?? 0,
     inputTokens
   )
-  const standardInputTokens = inputTokens - cachedInputTokens
+  const cacheWriteInputTokens = Math.min(
+    getNumberProperty(
+      inputDetails,
+      "cache_write_tokens",
+      "cacheWriteTokens"
+    ) ?? 0,
+    inputTokens - cachedInputTokens
+  )
+  const standardInputTokens =
+    inputTokens - cachedInputTokens - cacheWriteInputTokens
+
+  if (cacheWriteInputTokens > 0 && cacheWriteInputRate === null) {
+    return null
+  }
 
   return (
     (standardInputTokens * inputRate) / 1_000_000 +
     (cachedInputTokens * cachedInputRate) / 1_000_000 +
+    (cacheWriteInputTokens * (cacheWriteInputRate ?? 0)) / 1_000_000 +
     (outputTokens * outputRate) / 1_000_000
   )
 }
@@ -316,21 +330,37 @@ export function aggregateOpenRouterUsage(
   const aggregate: Record<string, unknown> = {}
 
   if (inputTokens !== null) {
+    const cachedTokens = Math.min(
+      sumOptionalNestedNumberProperties(
+        usageRecords,
+        [
+          "inputTokensDetails",
+          "input_tokens_details",
+          "promptTokensDetails",
+          "prompt_tokens_details",
+        ],
+        ["cachedTokens", "cached_tokens"]
+      ),
+      inputTokens
+    )
+    const cacheWriteTokens = Math.min(
+      sumOptionalNestedNumberProperties(
+        usageRecords,
+        [
+          "inputTokensDetails",
+          "input_tokens_details",
+          "promptTokensDetails",
+          "prompt_tokens_details",
+        ],
+        ["cacheWriteTokens", "cache_write_tokens"]
+      ),
+      inputTokens - cachedTokens
+    )
+
     aggregate.inputTokens = inputTokens
     aggregate.inputTokensDetails = {
-      cachedTokens: Math.min(
-        sumOptionalNestedNumberProperties(
-          usageRecords,
-          [
-            "inputTokensDetails",
-            "input_tokens_details",
-            "promptTokensDetails",
-            "prompt_tokens_details",
-          ],
-          ["cachedTokens", "cached_tokens"]
-        ),
-        inputTokens
-      ),
+      cachedTokens,
+      cacheWriteTokens,
     }
   }
 

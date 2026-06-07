@@ -157,6 +157,48 @@ test("preserves reasoning content on assistant tool-call messages", async () => 
   )
 })
 
+test("fails immediately when a tool loop ends with empty assistant content", async () => {
+  const chatRequests: ChatCompletionCreateParamsNonStreaming[] = []
+  const responses = [
+    createChatCompletion({
+      finishReason: "tool_calls",
+      toolCalls: [
+        {
+          id: "call_1",
+          type: "function",
+          function: {
+            name: "draw_starting_hand",
+            arguments: '{"llmRunId":"run_1"}',
+          },
+        },
+      ],
+    }),
+    createChatCompletion({
+      content: "",
+      finishReason: "stop",
+    }),
+  ]
+
+  await assert.rejects(
+    collectLlamaCppChatCompletionNonStreaming({
+      callTool: async () => ({ cards: ["Sol Ring"] }),
+      createChatCompletion: async (body) => {
+        chatRequests.push(body)
+        const response = responses.shift()
+
+        assert.ok(response)
+        return response
+      },
+      requestPayload: createRequestPayload(openingHandToolDefinitions),
+      signal: new AbortController().signal,
+      toolDefinitions: openingHandToolDefinitions,
+    }),
+    /llama\.cpp chat completion did not include final assistant content: finish_reason=stop/
+  )
+
+  assert.equal(chatRequests.length, 2)
+})
+
 test("passes provider-specific extra body fields into chat completion requests", async () => {
   const chatRequests: ChatCompletionCreateParamsNonStreaming[] = []
 

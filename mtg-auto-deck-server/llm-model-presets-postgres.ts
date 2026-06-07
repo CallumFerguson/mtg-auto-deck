@@ -13,6 +13,7 @@ export type LlmModelPreset = {
   model: string
   reasoningEffort: ReasoningEffort
   openrouterModelProvider: string | null
+  explicitPromptCachingEnabled: boolean
   supportsFlex: boolean
   isFreeTier: boolean
   inputTokenCostUsdPerMillion: number | null
@@ -37,6 +38,7 @@ export type CreateLlmModelPresetInput = {
   model: string
   reasoningEffort: ReasoningEffort
   openrouterModelProvider: string | null
+  explicitPromptCachingEnabled?: boolean
   supportsFlex: boolean
   isFreeTier: boolean
   inputTokenCostUsdPerMillion: number | null
@@ -52,6 +54,7 @@ export type UpdateLlmModelPresetInput = {
   model: string
   reasoningEffort: ReasoningEffort
   openrouterModelProvider: string | null
+  explicitPromptCachingEnabled?: boolean
   supportsFlex: boolean
   isFreeTier: boolean
   inputTokenCostUsdPerMillion: number | null
@@ -68,6 +71,7 @@ export type CreateLlmModelPresetInsertQuery = {
     string,
     ReasoningEffort,
     string | null,
+    boolean,
     boolean,
     boolean,
     number | null,
@@ -89,6 +93,7 @@ export type UpdateLlmModelPresetUpdateQuery = {
     string | null,
     boolean,
     boolean,
+    boolean,
     number | null,
     number | null,
     number | null,
@@ -103,6 +108,7 @@ type LlmModelPresetRow = {
   model: string
   reasoning_effort: ReasoningEffort
   openrouter_model_provider: string | null
+  explicit_prompt_caching_enabled: boolean
   supports_flex: boolean
   is_free_tier: boolean
   input_token_cost_usd_per_million: string | number | null
@@ -134,6 +140,7 @@ const UPDATE_LLM_MODEL_PRESET_INPUT_KEYS = new Set([
   "model",
   "reasoningEffort",
   "openrouterModelProvider",
+  "explicitPromptCachingEnabled",
   "supportsFlex",
   "isFreeTier",
   "inputTokenCostUsdPerMillion",
@@ -152,6 +159,7 @@ export async function ensureLlmModelPresetsSchema() {
       model text NOT NULL,
       reasoning_effort text NOT NULL,
       openrouter_model_provider text,
+      explicit_prompt_caching_enabled boolean NOT NULL DEFAULT false,
       supports_flex boolean NOT NULL DEFAULT false,
       is_free_tier boolean NOT NULL DEFAULT false,
 
@@ -174,6 +182,10 @@ export async function ensureLlmModelPresetsSchema() {
   await queryDatabase(`
     ALTER TABLE llm_model_presets
     ADD COLUMN IF NOT EXISTS openrouter_model_provider text
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_model_presets
+    ADD COLUMN IF NOT EXISTS explicit_prompt_caching_enabled boolean NOT NULL DEFAULT false
   `)
   await queryDatabase(`
     ALTER TABLE llm_model_presets
@@ -262,6 +274,7 @@ export async function listAdminLlmModelPresets() {
       preset.model,
       preset.reasoning_effort,
       preset.openrouter_model_provider,
+      preset.explicit_prompt_caching_enabled,
       preset.supports_flex,
       preset.is_free_tier,
       preset.input_token_cost_usd_per_million,
@@ -368,6 +381,7 @@ function buildValidatedCreateLlmModelPresetInsertQuery(
         model,
         reasoning_effort,
         openrouter_model_provider,
+        explicit_prompt_caching_enabled,
         supports_flex,
         is_free_tier,
         input_token_cost_usd_per_million,
@@ -377,7 +391,7 @@ function buildValidatedCreateLlmModelPresetInsertQuery(
         is_enabled,
         is_default
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
       RETURNING
         id,
         name,
@@ -385,6 +399,7 @@ function buildValidatedCreateLlmModelPresetInsertQuery(
         model,
         reasoning_effort,
         openrouter_model_provider,
+        explicit_prompt_caching_enabled,
         supports_flex,
         is_free_tier,
         input_token_cost_usd_per_million,
@@ -402,6 +417,7 @@ function buildValidatedCreateLlmModelPresetInsertQuery(
       normalizedInput.model,
       normalizedInput.reasoningEffort,
       normalizedInput.openrouterModelProvider,
+      normalizedInput.explicitPromptCachingEnabled ?? false,
       normalizedInput.supportsFlex,
       normalizedInput.isFreeTier,
       normalizedInput.inputTokenCostUsdPerMillion,
@@ -469,12 +485,13 @@ function buildValidatedUpdateLlmModelPresetUpdateQuery(
           model = $3,
           reasoning_effort = $4,
           openrouter_model_provider = $5,
-          supports_flex = $6,
-          is_free_tier = $7,
-          input_token_cost_usd_per_million = $8,
-          cached_input_token_cost_usd_per_million = $9,
-          cache_write_input_token_cost_usd_per_million = $10,
-          output_token_cost_usd_per_million = $11,
+          explicit_prompt_caching_enabled = $6,
+          supports_flex = $7,
+          is_free_tier = $8,
+          input_token_cost_usd_per_million = $9,
+          cached_input_token_cost_usd_per_million = $10,
+          cache_write_input_token_cost_usd_per_million = $11,
+          output_token_cost_usd_per_million = $12,
           updated_at = now()
       WHERE id = $1
       RETURNING
@@ -484,6 +501,7 @@ function buildValidatedUpdateLlmModelPresetUpdateQuery(
         model,
         reasoning_effort,
         openrouter_model_provider,
+        explicit_prompt_caching_enabled,
         supports_flex,
         is_free_tier,
         input_token_cost_usd_per_million,
@@ -501,6 +519,7 @@ function buildValidatedUpdateLlmModelPresetUpdateQuery(
       normalizedInput.model,
       normalizedInput.reasoningEffort,
       normalizedInput.openrouterModelProvider,
+      normalizedInput.explicitPromptCachingEnabled ?? false,
       normalizedInput.supportsFlex,
       normalizedInput.isFreeTier,
       normalizedInput.inputTokenCostUsdPerMillion,
@@ -529,6 +548,7 @@ export async function setLlmModelPresetEnabled(
         model,
         reasoning_effort,
         openrouter_model_provider,
+        explicit_prompt_caching_enabled,
         supports_flex,
         is_free_tier,
         input_token_cost_usd_per_million,
@@ -600,6 +620,7 @@ export async function setDefaultLlmModelPreset(presetId: string | null) {
           model,
           reasoning_effort,
           openrouter_model_provider,
+          explicit_prompt_caching_enabled,
           supports_flex,
           is_free_tier,
           input_token_cost_usd_per_million,
@@ -669,6 +690,7 @@ const LLM_MODEL_PRESET_SELECT_SQL = `
     model,
     reasoning_effort,
     openrouter_model_provider,
+    explicit_prompt_caching_enabled,
     supports_flex,
     is_free_tier,
     input_token_cost_usd_per_million,
@@ -720,6 +742,15 @@ async function ensureLlmModelPresetConstraints() {
         (provider = 'openrouter' AND (openrouter_model_provider IS NULL OR btrim(openrouter_model_provider) <> ''))
         OR (provider <> 'openrouter' AND openrouter_model_provider IS NULL)
       )
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_model_presets
+    DROP CONSTRAINT IF EXISTS llm_model_presets_explicit_prompt_caching_provider_check
+  `)
+  await queryDatabase(`
+    ALTER TABLE llm_model_presets
+    ADD CONSTRAINT llm_model_presets_explicit_prompt_caching_provider_check
+      CHECK (explicit_prompt_caching_enabled = false OR provider = 'openrouter')
   `)
   await queryDatabase(`
     ALTER TABLE llm_model_presets
@@ -809,6 +840,15 @@ function validateCreateLlmModelPresetInput(
     )
   }
 
+  const explicitPromptCachingEnabled =
+    input.explicitPromptCachingEnabled ?? false
+
+  if (parsedProvider.data !== "openrouter" && explicitPromptCachingEnabled) {
+    throw new LlmModelPresetValidationError(
+      "Explicit prompt caching can only be enabled for OpenRouter presets."
+    )
+  }
+
   if (
     parsedProvider.data !== "openai" &&
     parsedProvider.data !== "openrouter" &&
@@ -827,6 +867,7 @@ function validateCreateLlmModelPresetInput(
     reasoningEffort: parsedReasoningEffort.data,
     openrouterModelProvider:
       parsedProvider.data === "openrouter" ? openrouterModelProvider : null,
+    explicitPromptCachingEnabled,
     supportsFlex:
       parsedProvider.data === "openai" || parsedProvider.data === "openrouter"
         ? input.supportsFlex
@@ -898,6 +939,14 @@ function validateUpdateLlmModelPresetInput(
   }
 
   const openrouterModelProvider = input.openrouterModelProvider?.trim() || null
+  const explicitPromptCachingEnabled =
+    input.explicitPromptCachingEnabled ?? false
+
+  if (parsedProvider.data !== "openrouter" && explicitPromptCachingEnabled) {
+    throw new LlmModelPresetValidationError(
+      "Explicit prompt caching can only be enabled for OpenRouter presets."
+    )
+  }
 
   return {
     ...input,
@@ -906,6 +955,7 @@ function validateUpdateLlmModelPresetInput(
     reasoningEffort: parsedReasoningEffort.data,
     openrouterModelProvider:
       parsedProvider.data === "openrouter" ? openrouterModelProvider : null,
+    explicitPromptCachingEnabled,
     supportsFlex:
       parsedProvider.data === "openai" || parsedProvider.data === "openrouter"
         ? input.supportsFlex
@@ -971,6 +1021,7 @@ function mapLlmModelPresetRow(row: LlmModelPresetRow): LlmModelPreset {
     model: row.model,
     reasoningEffort: row.reasoning_effort,
     openrouterModelProvider: row.openrouter_model_provider,
+    explicitPromptCachingEnabled: row.explicit_prompt_caching_enabled,
     supportsFlex: row.supports_flex,
     isFreeTier: row.is_free_tier,
     inputTokenCostUsdPerMillion: toOptionalNumber(

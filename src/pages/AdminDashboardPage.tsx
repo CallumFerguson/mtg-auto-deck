@@ -148,6 +148,7 @@ type UpdateLlmModelPresetPayload = {
   model: string
   reasoningEffort: ReasoningEffort
   openrouterModelProvider: string | null
+  explicitPromptCachingEnabled: boolean
   supportsFlex: boolean
   isFreeTier: boolean
   inputTokenCostUsdPerMillion: number | null
@@ -1131,8 +1132,7 @@ function AdminUsersSection({
           currentUserId={currentUserId}
           error={emailVerificationError}
           isUpdating={
-            updatingEmailVerificationUserId ===
-            userToUpdateEmailVerification.id
+            updatingEmailVerificationUserId === userToUpdateEmailVerification.id
           }
           user={userToUpdateEmailVerification}
           onClose={() => {
@@ -1171,6 +1171,7 @@ function AdminModelPresetsSection() {
     model: "",
     reasoningEffort: "medium" as ReasoningEffort,
     openrouterModelProvider: "",
+    explicitPromptCachingEnabled: false,
     supportsFlex: false,
     isFreeTier: false,
     inputTokenCostUsdPerMillion: "",
@@ -1236,6 +1237,10 @@ function AdminModelPresetsSection() {
               form.provider === "openrouter"
                 ? form.openrouterModelProvider.trim() || null
                 : null,
+            explicitPromptCachingEnabled:
+              form.provider === "openrouter"
+                ? form.explicitPromptCachingEnabled
+                : false,
             supportsFlex: supportsProviderFlex(form.provider)
               ? form.supportsFlex
               : false,
@@ -1271,6 +1276,7 @@ function AdminModelPresetsSection() {
         name: "",
         model: "",
         openrouterModelProvider: "",
+        explicitPromptCachingEnabled: false,
         supportsFlex: false,
         isFreeTier: false,
         inputTokenCostUsdPerMillion: "",
@@ -1425,6 +1431,10 @@ function AdminModelPresetsSection() {
                       supportsFlex: supportsProviderFlex(provider)
                         ? currentForm.supportsFlex
                         : false,
+                      explicitPromptCachingEnabled:
+                        provider === "openrouter"
+                          ? currentForm.explicitPromptCachingEnabled
+                          : false,
                     }
                   })
                 }
@@ -1497,6 +1507,26 @@ function AdminModelPresetsSection() {
                   }
                 />
                 Supports flex
+              </label>
+            </AdminFormField>
+            <AdminFormField label="Explicit caching">
+              <label className="flex h-9 items-center gap-2 rounded-md border border-border bg-background/35 px-3 text-sm">
+                <input
+                  className="size-4 accent-sky-300"
+                  type="checkbox"
+                  checked={
+                    form.explicitPromptCachingEnabled &&
+                    form.provider === "openrouter"
+                  }
+                  disabled={form.provider !== "openrouter"}
+                  onChange={(event) =>
+                    setForm((currentForm) => ({
+                      ...currentForm,
+                      explicitPromptCachingEnabled: event.target.checked,
+                    }))
+                  }
+                />
+                Explicit cache
               </label>
             </AdminFormField>
             <AdminFormField label="Free tier">
@@ -1694,6 +1724,9 @@ function AdminModelPresetsSection() {
                       <p className="text-xs break-words text-muted-foreground">
                         {getLlmModelPresetTechnicalLabel(preset)}
                         {preset.supportsFlex ? " / supports flex" : ""}
+                        {preset.explicitPromptCachingEnabled
+                          ? " / explicit cache"
+                          : ""}
                         {preset.isFreeTier ? " / free tier" : ""}
                       </p>
                     </div>
@@ -2895,9 +2928,7 @@ function BenchmarkSimulationsModal({
   benchmark: AdminBenchmark
   onClose: () => void
 }) {
-  const [simulations, setSimulations] = useState<
-    AdminBenchmarkSimulation[]
-  >([])
+  const [simulations, setSimulations] = useState<AdminBenchmarkSimulation[]>([])
   const [simulationTotal, setSimulationTotal] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -2937,8 +2968,7 @@ function BenchmarkSimulationsModal({
         return
       }
 
-      const data =
-        (await response.json()) as AdminBenchmarkSimulationsResponse
+      const data = (await response.json()) as AdminBenchmarkSimulationsResponse
       setSimulations(data.simulations)
       setSimulationTotal(data.total)
     } catch {
@@ -2984,10 +3014,7 @@ function BenchmarkSimulationsModal({
         <header className="flex flex-col gap-4 border-b border-border px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">
-              <Search
-                className="size-5 shrink-0 text-sky-300"
-                aria-hidden
-              />
+              <Search className="size-5 shrink-0 text-sky-300" aria-hidden />
               <h2
                 id="benchmark-simulations-title"
                 className="text-xl font-semibold text-foreground"
@@ -3158,9 +3185,7 @@ function BenchmarkSimulationStatusBadge({
   )
 }
 
-function getBenchmarkSimulationHref(
-  simulation: AdminBenchmarkSimulation
-) {
+function getBenchmarkSimulationHref(simulation: AdminBenchmarkSimulation) {
   return getDeckSimulationPath(simulation.deckId, simulation.simulationId)
 }
 
@@ -3509,6 +3534,8 @@ function EditLlmModelPresetModal({
   const [openrouterModelProvider, setOpenrouterModelProvider] = useState(
     preset.openrouterModelProvider ?? ""
   )
+  const [explicitPromptCachingEnabled, setExplicitPromptCachingEnabled] =
+    useState(preset.explicitPromptCachingEnabled)
   const [supportsFlex, setSupportsFlex] = useState(preset.supportsFlex)
   const [isFreeTier, setIsFreeTier] = useState(preset.isFreeTier)
   const [inputTokenCostUsdPerMillion, setInputTokenCostUsdPerMillion] =
@@ -3552,6 +3579,9 @@ function EditLlmModelPresetModal({
       openrouterModelProvider: isOpenRouterPreset
         ? openrouterModelProvider.trim() || null
         : null,
+      explicitPromptCachingEnabled: isOpenRouterPreset
+        ? explicitPromptCachingEnabled
+        : false,
       supportsFlex: isFlexEditable ? supportsFlex : false,
       isFreeTier,
       inputTokenCostUsdPerMillion: parseOptionalCost(
@@ -3672,6 +3702,20 @@ function EditLlmModelPresetModal({
                   onChange={(event) => setSupportsFlex(event.target.checked)}
                 />
                 Supports flex
+              </label>
+            </AdminFormField>
+            <AdminFormField label="Explicit caching">
+              <label className="flex h-10 items-center gap-2 rounded-md border border-border bg-background/35 px-3 text-sm">
+                <input
+                  className="size-4 accent-sky-300"
+                  type="checkbox"
+                  checked={explicitPromptCachingEnabled && isOpenRouterPreset}
+                  disabled={isSaving || !isOpenRouterPreset}
+                  onChange={(event) =>
+                    setExplicitPromptCachingEnabled(event.target.checked)
+                  }
+                />
+                Explicit cache
               </label>
             </AdminFormField>
             <AdminFormField label="Free tier">

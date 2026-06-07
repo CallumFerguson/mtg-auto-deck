@@ -101,6 +101,11 @@ import {
   normalizeAnthropicUsage,
 } from "./anthropic-messages.js"
 import {
+  OPENROUTER_EXPLICIT_CACHE_CONTROL,
+  buildOpenRouterChatCompletionMessages,
+  restorePersistedStructuredSimulationPrompt,
+} from "./openrouter-chat.js"
+import {
   buildCreateLlmModelPresetInsertQuery,
   buildUpdateLlmModelPresetUpdateQuery,
   LlmModelPresetValidationError,
@@ -761,6 +766,7 @@ test("estimates preset token cost in unrounded USD", () => {
       inputTokens: 1000,
       inputTokensDetails: {
         cachedTokens: 400,
+        cacheWriteTokens: 0,
       },
       outputTokens: 2000,
       cost: 999,
@@ -803,6 +809,44 @@ test("handles token usage aliases and clamps cached input tokens", () => {
   })
 
   assert.equal(costUsd?.toFixed(4), "0.0003")
+})
+
+test("estimates OpenRouter cache write token costs separately", () => {
+  const costUsd = estimatePresetTokenCostUsd({
+    tokenCosts: {
+      inputDollarsPerMillion: 1,
+      cachedInputDollarsPerMillion: 0.1,
+      cacheWriteInputDollarsPerMillion: 1.25,
+      outputDollarsPerMillion: 10,
+    },
+    usage: {
+      prompt_tokens: 1000,
+      prompt_tokens_details: {
+        cached_tokens: 100,
+        cache_write_tokens: 200,
+      },
+      completion_tokens: 50,
+    },
+  })
+
+  assert.equal(costUsd?.toFixed(6), "0.001460")
+  assert.equal(
+    estimatePresetTokenCostUsd({
+      tokenCosts: {
+        inputDollarsPerMillion: 1,
+        cachedInputDollarsPerMillion: 0.1,
+        outputDollarsPerMillion: 10,
+      },
+      usage: {
+        prompt_tokens: 1000,
+        prompt_tokens_details: {
+          cache_write_tokens: 200,
+        },
+        completion_tokens: 50,
+      },
+    }),
+    null
+  )
 })
 
 test("estimates Anthropic cache creation and read token costs separately", () => {
@@ -964,6 +1008,7 @@ test("aggregates OpenRouter usage across agent turns", () => {
       inputTokens: 100,
       inputTokensDetails: {
         cachedTokens: 25,
+        cacheWriteTokens: 10,
       },
       outputTokens: 40,
       outputTokensDetails: {
@@ -981,6 +1026,7 @@ test("aggregates OpenRouter usage across agent turns", () => {
       input_tokens: 200,
       input_tokens_details: {
         cached_tokens: 50,
+        cache_write_tokens: 20,
       },
       output_tokens: 80,
       output_tokens_details: {
@@ -998,6 +1044,7 @@ test("aggregates OpenRouter usage across agent turns", () => {
       prompt_tokens: 300,
       prompt_tokens_details: {
         cached_tokens: 75,
+        cache_write_tokens: 30,
       },
       completion_tokens: 120,
       completion_tokens_details: {
@@ -1017,6 +1064,7 @@ test("aggregates OpenRouter usage across agent turns", () => {
     inputTokens: 600,
     inputTokensDetails: {
       cachedTokens: 150,
+      cacheWriteTokens: 60,
     },
     outputTokens: 240,
     outputTokensDetails: {
@@ -2082,6 +2130,85 @@ test("builds Anthropic payload with adaptive thinking, remote MCP, and 5m cache 
   )
 })
 
+test("builds plain OpenRouter chat messages when explicit caching is disabled", () => {
+  const prompt = {
+    baseInstructions: "Base rules",
+    cardReference: "Card reference:\nSol Ring",
+    userGuidelines: "Stable guidelines",
+    dynamicRunInput: "Mutable game state",
+    fullPrompt: "legacy prompt",
+  }
+  const messages = buildOpenRouterChatCompletionMessages({
+    explicitPromptCachingEnabled: false,
+    input: prompt.fullPrompt,
+    prompt,
+  })
+
+  assert.deepEqual(messages, [
+    {
+      role: "user",
+      content: prompt.fullPrompt,
+    },
+  ])
+})
+
+test("builds explicit cached OpenRouter chat message blocks from structured prompts", () => {
+  const prompt = {
+    baseInstructions: "Base rules",
+    cardReference: "Card reference:\nSol Ring",
+    userGuidelines: "Stable guidelines",
+    dynamicRunInput: "Mutable game state\nLLM Run ID: run-1",
+    fullPrompt: "legacy prompt",
+  }
+  const messages = buildOpenRouterChatCompletionMessages({
+    explicitPromptCachingEnabled: true,
+    input: prompt.fullPrompt,
+    prompt,
+  }) as unknown as Array<{ content: unknown; role: string }>
+
+  assert.equal(messages[0]?.role, "user")
+  assert.deepEqual(messages[0]?.content, [
+    {
+      type: "text",
+      text: prompt.baseInstructions,
+      cache_control: OPENROUTER_EXPLICIT_CACHE_CONTROL,
+    },
+    {
+      type: "text",
+      text: `${prompt.cardReference}\n\n${prompt.userGuidelines}`,
+      cache_control: OPENROUTER_EXPLICIT_CACHE_CONTROL,
+    },
+    {
+      type: "text",
+      text: prompt.dynamicRunInput,
+    },
+  ])
+})
+
+test("restores persisted structured prompt full text for queued cached OpenRouter runs", () => {
+  const fullPrompt = "Base rules\n\nCard reference\n\nMutable game state"
+  const restoredPrompt = restorePersistedStructuredSimulationPrompt(
+    {
+      baseInstructions: "Base rules",
+      cardReference: "Card reference",
+      userGuidelines: null,
+      dynamicRunInput: "Mutable game state",
+      fullPrompt: "[stored in llm_runs.full_prompt]",
+    },
+    fullPrompt
+  )
+
+  assert.equal(restoredPrompt?.fullPrompt, fullPrompt)
+  assert.equal(
+    buildOpenRouterChatCompletionMessages({
+      explicitPromptCachingEnabled: true,
+      input: fullPrompt,
+      prompt: restoredPrompt,
+    })[0]?.role,
+    "user"
+  )
+})
+
 test("extracts and validates Anthropic responses and usage", () => {
   const response = {
     stop_reason: "end_turn",
@@ -2182,6 +2309,7 @@ test("validates provider-specific LLM config requirements with presets", () => {
   assert.equal(config.modelPresetId, "preset-openrouter")
   assert.equal(config.maxOutputTokens, 12000)
   assert.equal(config.modelProvider, "openai")
+  assert.equal(config.explicitPromptCachingEnabled, false)
   assert.equal(config.reasoningEffort, "high")
   assert.equal(config.serviceTier, null)
   assert.equal(config.stopWhenStepCount, 7)
@@ -2197,6 +2325,18 @@ test("validates provider-specific LLM config requirements with presets", () => {
   )
 
   assert.equal(flexConfig.serviceTier, "flex")
+
+  const explicitCachingConfig = getOpeningHandLlmRunConfig(
+    createOpenRouterPreset({ explicitPromptCachingEnabled: true }),
+    {
+      LLM_MAX_OUTPUT_TOKENS: "12000",
+      OPENROUTER_API_KEY: "key",
+      OPENROUTER_STOP_WHEN_STEP_COUNT: "7",
+    }
+  )
+
+  assert.equal(explicitCachingConfig.provider, "openrouter")
+  assert.equal(explicitCachingConfig.explicitPromptCachingEnabled, true)
 })
 
 test("validates Anthropic LLM config requirements with shared MCP URLs", () => {
@@ -2269,7 +2409,8 @@ test("validates Anthropic model preset provider constraints", () => {
 
   assert.equal(query.values[0], "anthropic")
   assert.equal(query.values[3], "max")
-  assert.equal(query.values[9], 3.75)
+  assert.equal(query.values[5], false)
+  assert.equal(query.values[10], 3.75)
   assert.throws(
     () =>
       buildCreateLlmModelPresetInsertQuery({
@@ -2332,6 +2473,25 @@ test("validates Anthropic model preset provider constraints", () => {
         model: "claude-sonnet-4-5",
         reasoningEffort: "high",
         openrouterModelProvider: null,
+        explicitPromptCachingEnabled: true,
+        supportsFlex: false,
+        isFreeTier: false,
+        inputTokenCostUsdPerMillion: null,
+        cachedInputTokenCostUsdPerMillion: null,
+        outputTokenCostUsdPerMillion: null,
+        isEnabled: true,
+        isDefault: false,
+      }),
+    /Explicit prompt caching can only be enabled for OpenRouter presets\./
+  )
+  assert.throws(
+    () =>
+      buildCreateLlmModelPresetInsertQuery({
+        name: null,
+        provider: "anthropic",
+        model: "claude-sonnet-4-5",
+        reasoningEffort: "high",
+        openrouterModelProvider: null,
         supportsFlex: true,
         isFreeTier: false,
         inputTokenCostUsdPerMillion: null,
@@ -2351,6 +2511,7 @@ test("builds model preset insert with supports-flex and free-tier placeholders",
     model: "openai/gpt-5-nano",
     reasoningEffort: "high",
     openrouterModelProvider: "openai",
+    explicitPromptCachingEnabled: true,
     supportsFlex: true,
     isFreeTier: true,
     inputTokenCostUsdPerMillion: 1,
@@ -2363,16 +2524,37 @@ test("builds model preset insert with supports-flex and free-tier placeholders",
 
   assert.match(normalizedSql, /supports_flex/)
   assert.match(normalizedSql, /is_free_tier/)
+  assert.match(normalizedSql, /explicit_prompt_caching_enabled/)
   assert.match(normalizedSql, /cache_write_input_token_cost_usd_per_million/)
   assert.match(
     normalizedSql,
-    /VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11, \$12, \$13\)/
+    /VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11, \$12, \$13, \$14\)/
   )
-  assert.equal(query.values.length, 13)
+  assert.equal(query.values.length, 14)
   assert.equal(query.values[1], "Fast budget")
   assert.equal(query.values[5], true)
   assert.equal(query.values[6], true)
-  assert.equal(query.values[9], null)
+  assert.equal(query.values[7], true)
+  assert.equal(query.values[10], null)
+})
+
+test("defaults model preset explicit prompt caching to false", () => {
+  const query = buildCreateLlmModelPresetInsertQuery({
+    name: null,
+    provider: "openrouter",
+    model: "openai/gpt-5-nano",
+    reasoningEffort: "high",
+    openrouterModelProvider: "openai",
+    supportsFlex: false,
+    isFreeTier: false,
+    inputTokenCostUsdPerMillion: null,
+    cachedInputTokenCostUsdPerMillion: null,
+    outputTokenCostUsdPerMillion: null,
+    isEnabled: true,
+    isDefault: false,
+  })
+
+  assert.equal(query.values[5], false)
 })
 
 test("builds model preset update with trimmed name, model, and editable costs", () => {
@@ -2384,6 +2566,7 @@ test("builds model preset update with trimmed name, model, and editable costs", 
       model: " openai/gpt-5-nano ",
       reasoningEffort: "high",
       openrouterModelProvider: " openai ",
+      explicitPromptCachingEnabled: true,
       supportsFlex: true,
       isFreeTier: true,
       inputTokenCostUsdPerMillion: 1,
@@ -2399,11 +2582,12 @@ test("builds model preset update with trimmed name, model, and editable costs", 
   assert.match(normalizedSql, /model = \$3/)
   assert.match(normalizedSql, /reasoning_effort = \$4/)
   assert.match(normalizedSql, /openrouter_model_provider = \$5/)
-  assert.match(normalizedSql, /supports_flex = \$6/)
-  assert.match(normalizedSql, /is_free_tier = \$7/)
+  assert.match(normalizedSql, /explicit_prompt_caching_enabled = \$6/)
+  assert.match(normalizedSql, /supports_flex = \$7/)
+  assert.match(normalizedSql, /is_free_tier = \$8/)
   assert.match(
     normalizedSql,
-    /cache_write_input_token_cost_usd_per_million = \$10/
+    /cache_write_input_token_cost_usd_per_million = \$11/
   )
   assert.equal(query.values[0], "preset-openrouter")
   assert.equal(query.values[1], "OpenRouter tools")
@@ -2412,10 +2596,11 @@ test("builds model preset update with trimmed name, model, and editable costs", 
   assert.equal(query.values[4], "openai")
   assert.equal(query.values[5], true)
   assert.equal(query.values[6], true)
-  assert.equal(query.values[7], 1)
-  assert.equal(query.values[8], 0.1)
-  assert.equal(query.values[9], 0.2)
-  assert.equal(query.values[10], 10)
+  assert.equal(query.values[7], true)
+  assert.equal(query.values[8], 1)
+  assert.equal(query.values[9], 0.1)
+  assert.equal(query.values[10], 0.2)
+  assert.equal(query.values[11], 10)
 })
 
 test("normalizes blank model preset names to null", () => {
@@ -2492,6 +2677,25 @@ test("normalizes OpenRouter provider override by existing preset provider", () =
   assert.equal(openAiQuery.values[4], null)
 })
 
+test("rejects explicit prompt caching on non-OpenRouter model preset updates", () => {
+  assert.throws(
+    () =>
+      buildUpdateLlmModelPresetUpdateQuery("preset-openai", "openai", {
+        name: null,
+        model: "gpt-5-nano",
+        reasoningEffort: "medium",
+        openrouterModelProvider: null,
+        explicitPromptCachingEnabled: true,
+        supportsFlex: false,
+        isFreeTier: false,
+        inputTokenCostUsdPerMillion: null,
+        cachedInputTokenCostUsdPerMillion: null,
+        outputTokenCostUsdPerMillion: null,
+      }),
+    /Explicit prompt caching can only be enabled for OpenRouter presets\./
+  )
+})
+
 test("keeps llama.cpp model preset updates from supporting flex", () => {
   const query = buildUpdateLlmModelPresetUpdateQuery(
     "preset-llamacpp",
@@ -2510,6 +2714,7 @@ test("keeps llama.cpp model preset updates from supporting flex", () => {
   )
 
   assert.equal(query.values[5], false)
+  assert.equal(query.values[6], false)
 })
 
 test("rejects immutable model preset fields in update payloads", () => {
@@ -2678,7 +2883,11 @@ function createAnthropicPreset(reasoningEffort: "high" | "max" = "high") {
   }
 }
 
-function createOpenRouterPreset() {
+function createOpenRouterPreset({
+  explicitPromptCachingEnabled = false,
+}: {
+  explicitPromptCachingEnabled?: boolean
+} = {}) {
   return {
     id: "preset-openrouter",
     name: null,
@@ -2686,6 +2895,7 @@ function createOpenRouterPreset() {
     model: "openai/gpt-5-nano",
     reasoningEffort: "high" as const,
     openrouterModelProvider: "openai",
+    explicitPromptCachingEnabled,
     supportsFlex: true,
     inputTokenCostUsdPerMillion: 1,
     cachedInputTokenCostUsdPerMillion: 0.1,
