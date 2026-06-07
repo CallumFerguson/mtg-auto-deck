@@ -235,6 +235,7 @@ import {
   type LlamaCppChatCompletionCreateNonStreaming,
 } from "./llamacpp-chat.js"
 import {
+  assertOpenRouterChatCompletionResponse,
   buildOpenRouterChatCompletionMessages,
   restorePersistedStructuredSimulationPrompt,
 } from "./openrouter-chat.js"
@@ -6502,20 +6503,28 @@ function createOpenRouterChatCompletion(
     }
 
     if (!responseText.trim()) {
-      return {} as Awaited<ReturnType<LlamaCppChatCompletionCreateNonStreaming>>
+      throw new Error(
+        "OpenRouter Chat Completions API response did not include choices: empty response body"
+      )
     }
 
     try {
-      return JSON.parse(responseText) as Awaited<
-        ReturnType<LlamaCppChatCompletionCreateNonStreaming>
-      >
+      const parsedResponse = JSON.parse(responseText) as unknown
+
+      assertOpenRouterChatCompletionResponse(parsedResponse)
+
+      return parsedResponse
     } catch (error) {
-      throw new Error(
-        "OpenRouter Chat Completions API returned non-JSON output.",
-        {
-          cause: error,
-        }
-      )
+      if (error instanceof SyntaxError) {
+        throw new Error(
+          "OpenRouter Chat Completions API returned non-JSON output.",
+          {
+            cause: error,
+          }
+        )
+      }
+
+      throw error
     }
   }
 }

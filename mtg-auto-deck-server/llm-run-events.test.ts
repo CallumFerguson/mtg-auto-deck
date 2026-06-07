@@ -103,6 +103,7 @@ import {
 } from "./anthropic-messages.js"
 import {
   OPENROUTER_EXPLICIT_CACHE_CONTROL,
+  assertOpenRouterChatCompletionResponse,
   buildOpenRouterChatCompletionMessages,
   restorePersistedStructuredSimulationPrompt,
 } from "./openrouter-chat.js"
@@ -2215,6 +2216,38 @@ test("restores persisted structured prompt full text for queued cached OpenRoute
       prompt: restoredPrompt,
     })[0]?.role,
     "user"
+  )
+})
+
+test("rejects OpenRouter chat completion error bodies without choices", () => {
+  assert.throws(
+    () =>
+      assertOpenRouterChatCompletionResponse({
+        error: {
+          message: "Provider disconnected.",
+          metadata: {
+            provider_name: "Anthropic",
+            raw: {
+              error: {
+                message: "Upstream overloaded.",
+              },
+            },
+          },
+        },
+      }),
+    /OpenRouter Chat Completions API response did not include choices: Provider disconnected\.: Anthropic returned: Upstream overloaded\./
+  )
+})
+
+test("rejects OpenRouter chat completion bodies with empty choices", () => {
+  assert.throws(
+    () =>
+      assertOpenRouterChatCompletionResponse({
+        choices: [],
+        id: "gen-empty",
+        object: "chat.completion",
+      }),
+    /OpenRouter Chat Completions API response did not include choices: \{"choices":\[\],"id":"gen-empty","object":"chat.completion"\}/
   )
 })
 
