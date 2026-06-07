@@ -59,7 +59,13 @@ import type {
   StopAdminBenchmarkResponse,
 } from "@/lib/admin-types"
 import { authClient, type AuthUser } from "@/lib/auth-client"
-import type { Deck, DecksResponse, LlmProcessingMode } from "@/lib/deck-types"
+import {
+  getBatchLlmProcessingModeForProvider,
+  isBatchLlmProcessingMode,
+  type Deck,
+  type DecksResponse,
+  type LlmProcessingMode,
+} from "@/lib/deck-types"
 import {
   BILLING_TIER_LABELS,
   type AdminGrantBillingTier,
@@ -1961,8 +1967,11 @@ function AdminBenchmarksSection() {
       null,
     [modelPresets, selectedModelPresetId]
   )
-  const isBatchMode = llmProcessingMode === "openai_batch"
-  const supportsSelectedPresetBatch = selectedModelPreset?.provider === "openai"
+  const selectedPresetBatchMode = getBatchLlmProcessingModeForProvider(
+    selectedModelPreset?.provider
+  )
+  const isBatchMode = isBatchLlmProcessingMode(llmProcessingMode)
+  const supportsSelectedPresetBatch = selectedPresetBatchMode !== null
   const supportsSelectedPresetFlex = Boolean(selectedModelPreset?.supportsFlex)
   const totalBenchmarkSimulationCount =
     selectedDeckIds.length * (Number(simulationsPerDeck) || 0)
@@ -2052,14 +2061,24 @@ function AdminBenchmarksSection() {
   }, [loadBenchmarkOptions])
 
   useEffect(() => {
-    if (isBatchMode && selectedModelPreset?.provider !== "openai") {
-      setLlmProcessingMode("realtime")
+    if (isBatchMode) {
+      if (selectedPresetBatchMode === null) {
+        setLlmProcessingMode("realtime")
+      } else if (llmProcessingMode !== selectedPresetBatchMode) {
+        setLlmProcessingMode(selectedPresetBatchMode)
+      }
     }
 
     if (useFlexServiceTier && !selectedModelPreset?.supportsFlex) {
       setUseFlexServiceTier(false)
     }
-  }, [isBatchMode, selectedModelPreset, useFlexServiceTier])
+  }, [
+    isBatchMode,
+    llmProcessingMode,
+    selectedModelPreset,
+    selectedPresetBatchMode,
+    useFlexServiceTier,
+  ])
 
   function toggleSelectedDeck(deckId: string) {
     setSelectedDeckIds((currentDeckIds) =>
@@ -2071,7 +2090,9 @@ function AdminBenchmarksSection() {
   }
 
   function handleBatchModeChange(checked: boolean) {
-    setLlmProcessingMode(checked ? "openai_batch" : "realtime")
+    setLlmProcessingMode(
+      checked ? selectedPresetBatchMode ?? "realtime" : "realtime"
+    )
 
     if (checked) {
       setUseFlexServiceTier(false)
@@ -2126,8 +2147,8 @@ function AdminBenchmarksSection() {
       return
     }
 
-    if (isBatchMode && selectedModelPreset.provider !== "openai") {
-      setActionError("Batch mode requires an OpenAI model preset.")
+    if (isBatchMode && selectedPresetBatchMode === null) {
+      setActionError("Batch mode requires an OpenAI or Anthropic model preset.")
       return
     }
 
@@ -2415,7 +2436,11 @@ function AdminBenchmarksSection() {
                 <span className="grid min-w-0 gap-1">
                   <span className="font-medium">Use batch mode</span>
                   <span className="text-xs leading-5 text-muted-foreground">
-                    OpenAI batch processing
+                    {selectedPresetBatchMode === "anthropic_batch"
+                      ? "Anthropic batch processing"
+                      : selectedPresetBatchMode === "openai_batch"
+                        ? "OpenAI batch processing"
+                        : "OpenAI and Anthropic batch processing"}
                   </span>
                 </span>
               </label>
@@ -4920,7 +4945,7 @@ function formatBenchmarkProcessingMode(
   llmProcessingMode: LlmProcessingMode,
   useFlexServiceTier: boolean
 ) {
-  if (llmProcessingMode === "openai_batch") {
+  if (isBatchLlmProcessingMode(llmProcessingMode)) {
     return "Batch"
   }
 

@@ -28,7 +28,10 @@ import type {
   AdminBenchmarkEvaluationsResponse,
   StartAdminBenchmarkEvaluationsResponse,
 } from "@/lib/admin-types"
-import type { LlmProcessingMode } from "@/lib/deck-types"
+import {
+  getBatchLlmProcessingModeForProvider,
+  type LlmProcessingMode,
+} from "@/lib/deck-types"
 import {
   getLlmModelPresetLabel,
   type LlmModelPreset,
@@ -36,7 +39,7 @@ import {
 import { getDeckSimulationPath } from "@/lib/navigation"
 import { FlexServiceTierSwitch } from "../deck-simulation/SimulationSetupControls"
 
-type BenchmarkEvaluationProcessingChoice = "realtime" | "flex" | "openai_batch"
+type BenchmarkEvaluationProcessingChoice = "realtime" | "flex" | "batch"
 
 type BenchmarkEvaluationModalProps = {
   benchmark: AdminBenchmark
@@ -68,7 +71,10 @@ export function BenchmarkEvaluationModal({
   const selectedModelPreset =
     modelPresets.find((preset) => preset.id === selectedModelPresetId) ?? null
   const canUseFlex = Boolean(selectedModelPreset?.supportsFlex)
-  const canUseBatch = selectedModelPreset?.provider === "openai"
+  const batchProcessingMode = getBatchLlmProcessingModeForProvider(
+    selectedModelPreset?.provider
+  )
+  const canUseBatch = batchProcessingMode !== null
   const hasActiveEvaluations = (summary?.activeEvaluationCount ?? 0) > 0
   const evaluationsUrl = useMemo(
     () =>
@@ -124,7 +130,7 @@ export function BenchmarkEvaluationModal({
       setProcessingChoice("realtime")
     }
 
-    if (processingChoice === "openai_batch" && !canUseBatch) {
+    if (processingChoice === "batch" && !canUseBatch) {
       setProcessingChoice("realtime")
     }
   }, [canUseBatch, canUseFlex, processingChoice])
@@ -153,7 +159,9 @@ export function BenchmarkEvaluationModal({
     setStartMessage(null)
 
     const llmProcessingMode: LlmProcessingMode =
-      processingChoice === "openai_batch" ? "openai_batch" : "realtime"
+      processingChoice === "batch" && batchProcessingMode
+        ? batchProcessingMode
+        : "realtime"
 
     try {
       const response = await apiFetch(evaluationsUrl, {
@@ -307,10 +315,10 @@ export function BenchmarkEvaluationModal({
                     onClick={() => setProcessingChoice("flex")}
                   />
                   <BenchmarkEvaluationProcessingChoiceButton
-                    checked={processingChoice === "openai_batch"}
+                    checked={processingChoice === "batch"}
                     disabled={isStarting || !canUseBatch}
                     label="Batch"
-                    onClick={() => setProcessingChoice("openai_batch")}
+                    onClick={() => setProcessingChoice("batch")}
                   />
                 </div>
                 {processingChoice === "flex" ? (

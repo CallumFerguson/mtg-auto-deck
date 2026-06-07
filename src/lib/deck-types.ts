@@ -39,7 +39,32 @@ type SimulationStatus =
   | "cancelled"
 
 type SimulationCreatedVia = "app" | "benchmark" | "external_mcp"
-export type LlmProcessingMode = "realtime" | "openai_batch"
+export type LlmProcessingMode =
+  | "realtime"
+  | "openai_batch"
+  | "anthropic_batch"
+
+export type BatchLlmProcessingMode = Exclude<LlmProcessingMode, "realtime">
+
+export function isBatchLlmProcessingMode(
+  processingMode: LlmProcessingMode
+) {
+  return processingMode !== "realtime"
+}
+
+export function getBatchLlmProcessingModeForProvider(
+  provider: string | null | undefined
+): BatchLlmProcessingMode | null {
+  if (provider === "openai") {
+    return "openai_batch"
+  }
+
+  if (provider === "anthropic") {
+    return "anthropic_batch"
+  }
+
+  return null
+}
 
 export type Simulation = {
   id: string

@@ -166,7 +166,11 @@ function isPublicBenchmarkNumber(value: unknown) {
 }
 
 function isPublicBenchmarkLlmProcessingMode(value: unknown) {
-  return value === "realtime" || value === "openai_batch"
+  return (
+    value === "realtime" ||
+    value === "openai_batch" ||
+    value === "anthropic_batch"
+  )
 }
 
 function isPublicBenchmarkStatus(value: unknown) {

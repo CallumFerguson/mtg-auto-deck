@@ -29,7 +29,36 @@ export type SimulationStatus =
 
 export type SimulationCreatedVia = "app" | "benchmark" | "external_mcp"
 
-export type LlmProcessingMode = "realtime" | "openai_batch"
+export type LlmProcessingMode =
+  | "realtime"
+  | "openai_batch"
+  | "anthropic_batch"
+
+export function isBatchLlmProcessingMode(
+  processingMode: LlmProcessingMode
+) {
+  return processingMode !== "realtime"
+}
+
+function getBatchLlmProcessingModeProvider(
+  processingMode: LlmProcessingMode
+) {
+  if (processingMode === "openai_batch") {
+    return "openai"
+  }
+
+  if (processingMode === "anthropic_batch") {
+    return "anthropic"
+  }
+
+  return null
+}
+
+function formatBatchLlmProcessingModeProvider(
+  processingMode: LlmProcessingMode
+) {
+  return processingMode === "anthropic_batch" ? "Anthropic" : "OpenAI"
+}
 
 export function getInitialSimulationStatus(
   createdVia: SimulationCreatedVia
@@ -213,6 +242,51 @@ export type OpenAiBatchToPoll = {
 }
 
 export type OpenAiBatchItemForReconcile = {
+  llmRunId: string
+  customId: string
+  simulationId: string
+  deckId: string
+  phase: Extract<LlmRunPhase, "opening_hand" | "turn" | "evaluation">
+  status: LlmRunStatus
+}
+
+export type AnthropicBatchPendingRun = {
+  simulationId: string
+  deckId: string
+  llmRunId: string
+  llmModelPresetId: string
+  phase: Extract<LlmRunPhase, "opening_hand" | "turn" | "evaluation">
+  provider: string
+  model: string
+  openrouterModelProvider: string | null
+  serviceTier: string | null
+  reasoningEffort: string | null
+  reasoningSummariesEnabled: boolean
+  runtimeStreamKey: string
+  attemptNumber: number
+  createdAt: string
+  fullPrompt: string
+  requestPayload: unknown
+  ownerUserId: string | null
+  turnNumber?: number
+  targetLlmRunId?: string
+  targetRunPhase?: SimulationRunPhase
+}
+
+export type AnthropicBatchSubmittedItemInput = {
+  llmRunId: string
+  customId: string
+  requestPayloadRedacted: unknown
+}
+
+export type AnthropicBatchToPoll = {
+  id: string
+  llmModelPresetId: string
+  providerBatchId: string
+  providerStatus: string
+}
+
+export type AnthropicBatchItemForReconcile = {
   llmRunId: string
   customId: string
   simulationId: string
@@ -778,7 +852,11 @@ export async function ensureSimulationsSchema() {
     "benchmark",
     "external_mcp",
   ])
-  await createEnumType("llm_processing_mode", ["realtime", "openai_batch"])
+  await createEnumType("llm_processing_mode", [
+    "realtime",
+    "openai_batch",
+    "anthropic_batch",
+  ])
   await createEnumType("llm_run_status", [
     "pending",
     "batch_pending",
@@ -1128,6 +1206,45 @@ export async function ensureSimulationsSchema() {
     )
   `)
   await queryDatabase(`
+    CREATE TABLE IF NOT EXISTS anthropic_batches (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+
+      llm_model_preset_id uuid NOT NULL REFERENCES llm_model_presets(id) ON DELETE RESTRICT,
+      provider_batch_id text UNIQUE,
+      provider_status text NOT NULL DEFAULT 'in_progress',
+      request_counts jsonb NOT NULL DEFAULT '{}'::jsonb,
+      results_url text,
+      raw_batch jsonb NOT NULL DEFAULT '{}'::jsonb,
+      failure_message text,
+
+      submitted_at timestamptz,
+      ended_at timestamptz,
+
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )
+  `)
+  await queryDatabase(`
+    CREATE TABLE IF NOT EXISTS anthropic_batch_items (
+      id bigserial PRIMARY KEY,
+
+      anthropic_batch_id uuid NOT NULL REFERENCES anthropic_batches(id) ON DELETE CASCADE,
+      llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
+      custom_id text NOT NULL CHECK (btrim(custom_id) <> ''),
+      status text NOT NULL DEFAULT 'submitted',
+      request_payload_redacted jsonb NOT NULL DEFAULT '{}'::jsonb,
+      output_payload jsonb,
+      error_payload jsonb,
+      failure_message text,
+
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+
+      UNIQUE (anthropic_batch_id, custom_id),
+      UNIQUE (llm_run_id)
+    )
+  `)
+  await queryDatabase(`
     CREATE TABLE IF NOT EXISTS simulation_opening_hand_llm_runs (
       simulation_id uuid NOT NULL REFERENCES simulations(id) ON DELETE CASCADE,
       llm_run_id uuid NOT NULL REFERENCES llm_runs(id) ON DELETE CASCADE,
@@ -1464,6 +1581,11 @@ export async function ensureSimulationsSchema() {
       WHERE status = 'batch_pending' AND processing_mode = 'openai_batch'
   `)
   await queryDatabase(`
+    CREATE INDEX IF NOT EXISTS llm_runs_anthropic_batch_pending_idx
+      ON llm_runs (llm_model_preset_id, created_at, id)
+      WHERE status = 'batch_pending' AND processing_mode = 'anthropic_batch'
+  `)
+  await queryDatabase(`
     CREATE INDEX IF NOT EXISTS llm_runs_streaming_owner_idx
       ON llm_runs (owner_user_id)
       WHERE status = 'streaming'
@@ -1491,6 +1613,14 @@ export async function ensureSimulationsSchema() {
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS openai_batch_items_openai_batch_id_idx
       ON openai_batch_items (openai_batch_id)
+  `)
+  await queryDatabase(`
+    CREATE INDEX IF NOT EXISTS anthropic_batches_status_idx
+      ON anthropic_batches (provider_status, submitted_at, id)
+  `)
+  await queryDatabase(`
+    CREATE INDEX IF NOT EXISTS anthropic_batch_items_anthropic_batch_id_idx
+      ON anthropic_batch_items (anthropic_batch_id)
   `)
   await queryDatabase(`
     CREATE INDEX IF NOT EXISTS simulation_opening_hand_llm_runs_simulation_id_idx
@@ -1792,7 +1922,8 @@ export async function createSimulation(
 
   if (
     llmProcessingMode !== "realtime" &&
-    llmProcessingMode !== "openai_batch"
+    llmProcessingMode !== "openai_batch" &&
+    llmProcessingMode !== "anthropic_batch"
   ) {
     throw new SimulationValidationError("LLM processing mode is invalid.")
   }
@@ -1827,7 +1958,7 @@ export async function createSimulation(
 
   if (
     !input.forceFlexServiceTier &&
-    llmProcessingMode === "openai_batch" &&
+    isBatchLlmProcessingMode(llmProcessingMode) &&
     useFlexServiceTier
   ) {
     throw new SimulationValidationError(
@@ -1874,21 +2005,28 @@ export async function createSimulation(
       )
     }
 
+    const requiredBatchProvider =
+      getBatchLlmProcessingModeProvider(llmProcessingMode)
+
     if (
-      llmProcessingMode === "openai_batch" &&
-      presetResult.rows[0].provider !== "openai"
+      requiredBatchProvider !== null &&
+      presetResult.rows[0].provider !== requiredBatchProvider
     ) {
       throw new SimulationValidationError(
-        "Batch processing can only be enabled for OpenAI model presets."
+        `Batch processing can only be enabled for ${formatBatchLlmProcessingModeProvider(
+          llmProcessingMode
+        )} model presets.`
       )
     }
   } else if (useFlexServiceTier) {
     throw new SimulationValidationError(
       "Flex service tier can only be enabled after selecting a model preset that supports flex."
     )
-  } else if (llmProcessingMode === "openai_batch") {
+  } else if (isBatchLlmProcessingMode(llmProcessingMode)) {
     throw new SimulationValidationError(
-      "Batch processing can only be enabled after selecting an OpenAI model preset."
+      `Batch processing can only be enabled after selecting a ${formatBatchLlmProcessingModeProvider(
+        llmProcessingMode
+      )} model preset.`
     )
   }
 
@@ -2049,7 +2187,8 @@ export async function updateSimulation(
 
   if (
     !input.forceFlexServiceTier &&
-    input.llmProcessingMode === "openai_batch" &&
+    input.llmProcessingMode !== undefined &&
+    isBatchLlmProcessingMode(input.llmProcessingMode) &&
     input.useFlexServiceTier === true
   ) {
     throw new SimulationValidationError(
@@ -2092,18 +2231,20 @@ export async function updateSimulation(
       nextProcessingMode = "realtime"
     }
 
-    if (nextProcessingMode === "openai_batch") {
+    if (isBatchLlmProcessingMode(nextProcessingMode)) {
       nextUseFlexServiceTier = false
     }
 
     const targetPresetId =
       trimmedPresetId ?? currentSimulation.llm_model_preset_id
 
-    if (nextUseFlexServiceTier || nextProcessingMode === "openai_batch") {
+    if (nextUseFlexServiceTier || isBatchLlmProcessingMode(nextProcessingMode)) {
       if (!targetPresetId) {
         throw new SimulationValidationError(
-          nextProcessingMode === "openai_batch"
-            ? "Batch processing can only be enabled after selecting an OpenAI model preset."
+          isBatchLlmProcessingMode(nextProcessingMode)
+            ? `Batch processing can only be enabled after selecting a ${formatBatchLlmProcessingModeProvider(
+                nextProcessingMode
+              )} model preset.`
             : "Flex service tier can only be enabled after selecting a model preset that supports flex."
         )
       }
@@ -2112,7 +2253,7 @@ export async function updateSimulation(
     if (
       trimmedPresetId !== undefined ||
       nextUseFlexServiceTier ||
-      nextProcessingMode === "openai_batch" ||
+      isBatchLlmProcessingMode(nextProcessingMode) ||
       (input.forceFlexServiceTier && targetPresetId !== null) ||
       (input.requireFreeTierModelPreset && targetPresetId !== null)
     ) {
@@ -2138,8 +2279,10 @@ export async function updateSimulation(
         throw new SimulationValidationError(
           trimmedPresetId !== undefined
             ? "Model preset not found or disabled."
-            : nextProcessingMode === "openai_batch"
-              ? "Batch processing can only be enabled for an enabled OpenAI model preset."
+            : isBatchLlmProcessingMode(nextProcessingMode)
+              ? `Batch processing can only be enabled for an enabled ${formatBatchLlmProcessingModeProvider(
+                  nextProcessingMode
+                )} model preset.`
               : "Flex service tier can only be enabled for an enabled model preset that supports flex."
         )
       }
@@ -2158,19 +2301,25 @@ export async function updateSimulation(
         input.forceFlexServiceTier &&
         supportsFlex &&
         (input.useFlexServiceTier === false ||
-          input.llmProcessingMode === "openai_batch")
+          (input.llmProcessingMode !== undefined &&
+            isBatchLlmProcessingMode(input.llmProcessingMode)))
       ) {
         throw new SimulationValidationError(
           "Free tier users must enable flex processing before starting LLM runs."
         )
       }
 
+      const requiredBatchProvider =
+        getBatchLlmProcessingModeProvider(nextProcessingMode)
+
       if (
-        nextProcessingMode === "openai_batch" &&
-        targetPreset.provider !== "openai"
+        requiredBatchProvider !== null &&
+        targetPreset.provider !== requiredBatchProvider
       ) {
         throw new SimulationValidationError(
-          "Batch simulations can only use OpenAI model presets."
+          `Batch simulations can only use ${formatBatchLlmProcessingModeProvider(
+            nextProcessingMode
+          )} model presets.`
         )
       }
 
@@ -2739,7 +2888,9 @@ export async function createOpeningHandLlmRun(
     const attemptNumber = Number(attemptResult.rows[0].attempt_number)
     const openrouterModelProvider = getPersistableOpenRouterModelProvider(input)
     const initialRunStatus: LlmRunStatus =
-      input.processingMode === "openai_batch" ? "batch_pending" : "pending"
+      isBatchLlmProcessingMode(input.processingMode)
+        ? "batch_pending"
+        : "pending"
     const llmRunResult = await client.query<{
       id: string
       status: LlmRunStatus
@@ -2986,7 +3137,9 @@ export async function createTurnLlmRun(
     const attemptNumber = Number(attemptResult.rows[0].attempt_number)
     const openrouterModelProvider = getPersistableOpenRouterModelProvider(input)
     const initialRunStatus: LlmRunStatus =
-      input.processingMode === "openai_batch" ? "batch_pending" : "pending"
+      isBatchLlmProcessingMode(input.processingMode)
+        ? "batch_pending"
+        : "pending"
     const llmRunResult = await client.query<{
       id: string
       status: LlmRunStatus
@@ -3097,7 +3250,9 @@ export async function createSimulationRunEvaluation(
     const attemptNumber = Number(attemptResult.rows[0].attempt_number)
     const openrouterModelProvider = getPersistableOpenRouterModelProvider(input)
     const initialRunStatus: LlmRunStatus =
-      input.processingMode === "openai_batch" ? "batch_pending" : "pending"
+      isBatchLlmProcessingMode(input.processingMode)
+        ? "batch_pending"
+        : "pending"
     const llmRunResult = await client.query<{
       id: string
       status: LlmRunStatus
@@ -3812,6 +3967,418 @@ export async function recordOpenAiBatchItemError({
     `,
     [
       openAiBatchId,
+      customId,
+      getRequiredJsonbQueryValue(errorPayload),
+      failureMessage,
+    ]
+  )
+}
+
+export async function listPendingAnthropicBatchRuns(): Promise<
+  AnthropicBatchPendingRun[]
+> {
+  const query = buildListPendingAnthropicBatchRunsQuery()
+  const result = await queryDatabase<{
+    simulation_id: string
+    deck_id: string
+    llm_run_id: string
+    llm_model_preset_id: string
+    phase: Extract<LlmRunPhase, "opening_hand" | "turn" | "evaluation">
+    provider: string
+    model: string
+    openrouter_model_provider: string | null
+    service_tier: string | null
+    reasoning_effort: string | null
+    reasoning_summaries_enabled: boolean
+    runtime_stream_key: string
+    attempt_number: number
+    created_at: Date
+    full_prompt: string
+    request_payload: unknown
+    owner_user_id: string | null
+    turn_number: number | null
+    target_llm_run_id: string | null
+    target_run_phase: SimulationRunPhase | null
+  }>(query.text, query.values)
+
+  return result.rows.map((row) => {
+    const run: AnthropicBatchPendingRun = {
+      simulationId: row.simulation_id,
+      deckId: row.deck_id,
+      llmRunId: row.llm_run_id,
+      llmModelPresetId: row.llm_model_preset_id,
+      phase: row.phase,
+      provider: row.provider,
+      model: row.model,
+      openrouterModelProvider: row.openrouter_model_provider,
+      serviceTier: row.service_tier,
+      reasoningEffort: row.reasoning_effort,
+      reasoningSummariesEnabled: row.reasoning_summaries_enabled,
+      runtimeStreamKey: row.runtime_stream_key,
+      attemptNumber: row.attempt_number,
+      createdAt: row.created_at.toISOString(),
+      fullPrompt: row.full_prompt,
+      requestPayload: row.request_payload,
+      ownerUserId: row.owner_user_id,
+    }
+
+    if (row.turn_number !== null) {
+      run.turnNumber = row.turn_number
+    }
+
+    if (row.target_llm_run_id !== null) {
+      run.targetLlmRunId = row.target_llm_run_id
+    }
+
+    if (row.target_run_phase !== null) {
+      run.targetRunPhase = row.target_run_phase
+    }
+
+    return run
+  })
+}
+
+export function buildListPendingAnthropicBatchRunsQuery() {
+  return {
+    text: `
+      WITH linked_run AS (
+        SELECT
+          opening_run.simulation_id,
+          simulation.deck_id,
+          opening_run.llm_run_id,
+          opening_run.attempt_number,
+          NULL::integer AS turn_number,
+          NULL::uuid AS target_llm_run_id,
+          NULL::llm_run_phase AS target_run_phase
+        FROM simulation_opening_hand_llm_runs opening_run
+        JOIN simulations simulation
+          ON simulation.id = opening_run.simulation_id
+        UNION ALL
+        SELECT
+          turn_run.simulation_id,
+          simulation.deck_id,
+          turn_run.llm_run_id,
+          turn_run.attempt_number,
+          turn_run.turn_number,
+          NULL::uuid AS target_llm_run_id,
+          NULL::llm_run_phase AS target_run_phase
+        FROM simulation_turn_llm_runs turn_run
+        JOIN simulations simulation
+          ON simulation.id = turn_run.simulation_id
+        UNION ALL
+        SELECT
+          evaluation.simulation_id,
+          simulation.deck_id,
+          evaluation.llm_run_id,
+          evaluation.attempt_number,
+          NULL::integer AS turn_number,
+          evaluation.target_llm_run_id,
+          evaluation.target_run_phase
+        FROM simulation_run_evaluations evaluation
+        JOIN simulations simulation
+          ON simulation.id = evaluation.simulation_id
+      )
+      SELECT
+        linked_run.simulation_id,
+        linked_run.deck_id,
+        llm_run.id AS llm_run_id,
+        llm_run.llm_model_preset_id,
+        llm_run.phase,
+        llm_run.provider,
+        llm_run.model,
+        llm_run.openrouter_model_provider,
+        llm_run.service_tier,
+        llm_run.reasoning_effort,
+        llm_run.reasoning_summaries_enabled,
+        llm_run.runtime_stream_key,
+        linked_run.attempt_number,
+        llm_run.created_at,
+        llm_run.full_prompt,
+        llm_run.request_payload,
+        llm_run.owner_user_id,
+        linked_run.turn_number,
+        linked_run.target_llm_run_id,
+        linked_run.target_run_phase
+      FROM llm_runs llm_run
+      JOIN linked_run
+        ON linked_run.llm_run_id = llm_run.id
+      WHERE llm_run.status = 'batch_pending'
+        AND llm_run.processing_mode = 'anthropic_batch'
+        AND llm_run.provider = 'anthropic'
+        AND llm_run.llm_model_preset_id IS NOT NULL
+        AND llm_run.runtime_stream_key IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM anthropic_batch_items item
+          WHERE item.llm_run_id = llm_run.id
+        )
+      ORDER BY llm_run.llm_model_preset_id ASC, llm_run.created_at ASC, llm_run.id ASC
+    `,
+    values: [],
+  }
+}
+
+export async function recordAnthropicBatchSubmitted({
+  failureMessage,
+  items,
+  llmModelPresetId,
+  providerBatchId,
+  providerStatus,
+  rawBatch,
+  requestCounts,
+  resultsUrl,
+}: {
+  llmModelPresetId: string
+  providerBatchId: string
+  providerStatus: string
+  requestCounts: unknown
+  resultsUrl: string | null
+  rawBatch: unknown
+  failureMessage?: string | null
+  items: AnthropicBatchSubmittedItemInput[]
+}): Promise<string> {
+  return withDatabaseTransaction(async (client) => {
+    const batchResult = await client.query<{ id: string }>(
+      `
+        INSERT INTO anthropic_batches (
+          llm_model_preset_id,
+          provider_batch_id,
+          provider_status,
+          request_counts,
+          results_url,
+          raw_batch,
+          failure_message,
+          submitted_at
+        )
+        VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7, now())
+        RETURNING id
+      `,
+      [
+        llmModelPresetId,
+        providerBatchId,
+        providerStatus,
+        getRequiredJsonbQueryValue(requestCounts),
+        resultsUrl,
+        getRequiredJsonbQueryValue(rawBatch),
+        failureMessage ?? null,
+      ]
+    )
+    const anthropicBatchId = batchResult.rows[0].id
+
+    for (const item of items) {
+      await client.query(
+        `
+          INSERT INTO anthropic_batch_items (
+            anthropic_batch_id,
+            llm_run_id,
+            custom_id,
+            request_payload_redacted
+          )
+          VALUES ($1, $2, $3, $4::jsonb)
+          ON CONFLICT (llm_run_id)
+          DO NOTHING
+        `,
+        [
+          anthropicBatchId,
+          item.llmRunId,
+          item.customId,
+          getRequiredJsonbQueryValue(item.requestPayloadRedacted),
+        ]
+      )
+    }
+
+    await client.query(
+      `
+        UPDATE llm_runs
+        SET status = 'batch_submitted',
+            started_at = COALESCE(started_at, now()),
+            updated_at = now()
+        WHERE id = ANY($1::uuid[])
+          AND status = 'batch_pending'
+          AND processing_mode = 'anthropic_batch'
+      `,
+      [items.map((item) => item.llmRunId)]
+    )
+
+    return anthropicBatchId
+  })
+}
+
+export async function listAnthropicBatchesToPoll(): Promise<
+  AnthropicBatchToPoll[]
+> {
+  const result = await queryDatabase<{
+    id: string
+    llm_model_preset_id: string
+    provider_batch_id: string
+    provider_status: string
+  }>(
+    `
+      SELECT id, llm_model_preset_id, provider_batch_id, provider_status
+      FROM anthropic_batches
+      WHERE provider_batch_id IS NOT NULL
+        AND (
+          provider_status <> 'ended'
+          OR EXISTS (
+            SELECT 1
+            FROM anthropic_batch_items item
+            JOIN llm_runs run
+              ON run.id = item.llm_run_id
+            WHERE item.anthropic_batch_id = anthropic_batches.id
+              AND item.status = 'submitted'
+              AND run.status = 'batch_submitted'
+          )
+        )
+      ORDER BY submitted_at ASC NULLS LAST, created_at ASC
+    `
+  )
+
+  return result.rows.map((row) => ({
+    id: row.id,
+    llmModelPresetId: row.llm_model_preset_id,
+    providerBatchId: row.provider_batch_id,
+    providerStatus: row.provider_status,
+  }))
+}
+
+export async function updateAnthropicBatchProviderState({
+  anthropicBatchId,
+  failureMessage,
+  providerStatus,
+  rawBatch,
+  requestCounts,
+  resultsUrl,
+}: {
+  anthropicBatchId: string
+  providerStatus: string
+  requestCounts: unknown
+  resultsUrl: string | null
+  rawBatch: unknown
+  failureMessage?: string | null
+}) {
+  await queryDatabase(
+    `
+      UPDATE anthropic_batches
+      SET provider_status = $2,
+          request_counts = $3::jsonb,
+          results_url = COALESCE($4, results_url),
+          raw_batch = $5::jsonb,
+          failure_message = COALESCE($6, failure_message),
+          ended_at = CASE WHEN $2 = 'ended' THEN COALESCE(ended_at, now()) ELSE ended_at END,
+          updated_at = now()
+      WHERE id = $1
+    `,
+    [
+      anthropicBatchId,
+      providerStatus,
+      getRequiredJsonbQueryValue(requestCounts),
+      resultsUrl,
+      getRequiredJsonbQueryValue(rawBatch),
+      failureMessage ?? null,
+    ]
+  )
+}
+
+export async function listAnthropicBatchItemsForReconcile(
+  anthropicBatchId: string
+): Promise<AnthropicBatchItemForReconcile[]> {
+  const result = await queryDatabase<{
+    llm_run_id: string
+    custom_id: string
+    simulation_id: string
+    deck_id: string
+    phase: Extract<LlmRunPhase, "opening_hand" | "turn" | "evaluation">
+    status: LlmRunStatus
+  }>(
+    `
+      SELECT
+        item.llm_run_id,
+        item.custom_id,
+        COALESCE(
+          opening_run.simulation_id,
+          turn_run.simulation_id,
+          evaluation.simulation_id
+        ) AS simulation_id,
+        simulation.deck_id,
+        llm_run.phase,
+        llm_run.status
+      FROM anthropic_batch_items item
+      JOIN llm_runs llm_run
+        ON llm_run.id = item.llm_run_id
+      LEFT JOIN simulation_opening_hand_llm_runs opening_run
+        ON opening_run.llm_run_id = item.llm_run_id
+      LEFT JOIN simulation_turn_llm_runs turn_run
+        ON turn_run.llm_run_id = item.llm_run_id
+      LEFT JOIN simulation_run_evaluations evaluation
+        ON evaluation.llm_run_id = item.llm_run_id
+      JOIN simulations simulation
+        ON simulation.id = COALESCE(
+          opening_run.simulation_id,
+          turn_run.simulation_id,
+          evaluation.simulation_id
+        )
+      WHERE item.anthropic_batch_id = $1
+        AND llm_run.phase IN ('opening_hand', 'turn', 'evaluation')
+      ORDER BY item.id ASC
+    `,
+    [anthropicBatchId]
+  )
+
+  return result.rows.map((row) => ({
+    llmRunId: row.llm_run_id,
+    customId: row.custom_id,
+    simulationId: row.simulation_id,
+    deckId: row.deck_id,
+    phase: row.phase,
+    status: row.status,
+  }))
+}
+
+export async function recordAnthropicBatchItemOutput({
+  anthropicBatchId,
+  customId,
+  outputPayload,
+}: {
+  anthropicBatchId: string
+  customId: string
+  outputPayload: unknown
+}) {
+  await queryDatabase(
+    `
+      UPDATE anthropic_batch_items
+      SET status = 'completed',
+          output_payload = $3::jsonb,
+          updated_at = now()
+      WHERE anthropic_batch_id = $1
+        AND custom_id = $2
+    `,
+    [anthropicBatchId, customId, getRequiredJsonbQueryValue(outputPayload)]
+  )
+}
+
+export async function recordAnthropicBatchItemError({
+  anthropicBatchId,
+  customId,
+  errorPayload,
+  failureMessage,
+}: {
+  anthropicBatchId: string
+  customId: string
+  errorPayload: unknown
+  failureMessage: string
+}) {
+  await queryDatabase(
+    `
+      UPDATE anthropic_batch_items
+      SET status = 'failed',
+          error_payload = $3::jsonb,
+          failure_message = $4,
+          updated_at = now()
+      WHERE anthropic_batch_id = $1
+        AND custom_id = $2
+    `,
+    [
+      anthropicBatchId,
       customId,
       getRequiredJsonbQueryValue(errorPayload),
       failureMessage,

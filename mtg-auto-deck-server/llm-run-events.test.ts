@@ -17,6 +17,7 @@ import {
   STALE_RUNNING_SIMULATION_CANCELLATION_MESSAGE,
   buildCancelLlmRunQuery,
   buildClaimQueuedLlmRunStartQuery,
+  buildListPendingAnthropicBatchRunsQuery,
   buildListPendingOpenAiBatchRunsQuery,
   buildCompleteLlmRunQuery,
   buildFailSimulationRunEvaluationResultQuery,
@@ -951,7 +952,7 @@ test("extracts OpenRouter reported cost separately from preset estimates", () =>
   assert.equal(getOpenRouterReportedCostUsd(usage), 0.00125)
 })
 
-test("cuts estimated cost in half for flex service tier and OpenAI batch runs", () => {
+test("cuts estimated cost in half for flex service tier and batch runs", () => {
   assert.equal(
     applyLlmRunEstimatedCostServiceTierDiscount({
       estimatedCostUsd: 0.02064,
@@ -963,6 +964,14 @@ test("cuts estimated cost in half for flex service tier and OpenAI batch runs", 
     applyLlmRunEstimatedCostServiceTierDiscount({
       estimatedCostUsd: 0.02064,
       processingMode: "openai_batch",
+      serviceTier: null,
+    }),
+    0.01032
+  )
+  assert.equal(
+    applyLlmRunEstimatedCostServiceTierDiscount({
+      estimatedCostUsd: 0.02064,
+      processingMode: "anthropic_batch",
       serviceTier: null,
     }),
     0.01032
@@ -2256,6 +2265,17 @@ test("extracts and validates Anthropic responses and usage", () => {
       ),
     /stop_reason "max_tokens"/
   )
+  assert.throws(
+    () =>
+      assertCompletedAnthropicMessage(
+        {
+          stop_reason: "pause_turn",
+          content: [{ type: "text", text: "paused" }],
+        },
+        "turn"
+      ),
+    /stop_reason "pause_turn"/
+  )
 })
 
 test("builds LLM run owner concurrency SQL from effective billing tier", () => {
@@ -2279,6 +2299,24 @@ test("builds batch pending run query without queue concurrency gates", () => {
   assert.match(normalizedSql, /llm_run\.processing_mode = 'openai_batch'/)
   assert.match(normalizedSql, /llm_run\.provider = 'openai'/)
   assert.match(normalizedSql, /FROM openai_batch_items item/)
+  assert.match(normalizedSql, /item\.llm_run_id = llm_run\.id/)
+  assert.doesNotMatch(normalizedSql, /COUNT\(\*\)::integer/)
+  assert.doesNotMatch(normalizedSql, /active_run/)
+  assert.doesNotMatch(normalizedSql, /batch_submitted/)
+  assert.doesNotMatch(normalizedSql, /admin_subscription_tier_grants/)
+  assert.doesNotMatch(normalizedSql, /active_subscription/)
+  assert.doesNotMatch(normalizedSql, /maxConcurrentLlmRuns/)
+})
+
+test("builds Anthropic batch pending run query without queue concurrency gates", () => {
+  const query = buildListPendingAnthropicBatchRunsQuery()
+  const normalizedSql = query.text.replace(/\s+/g, " ")
+
+  assert.deepEqual(query.values, [])
+  assert.match(normalizedSql, /llm_run\.status = 'batch_pending'/)
+  assert.match(normalizedSql, /llm_run\.processing_mode = 'anthropic_batch'/)
+  assert.match(normalizedSql, /llm_run\.provider = 'anthropic'/)
+  assert.match(normalizedSql, /FROM anthropic_batch_items item/)
   assert.match(normalizedSql, /item\.llm_run_id = llm_run\.id/)
   assert.doesNotMatch(normalizedSql, /COUNT\(\*\)::integer/)
   assert.doesNotMatch(normalizedSql, /active_run/)

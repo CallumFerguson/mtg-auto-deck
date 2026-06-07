@@ -11,13 +11,15 @@ import {
 import { Button } from "@/components/ui/button"
 import { loadApiHelpers } from "@/lib/api-lazy"
 import { useOptionalBillingTier } from "@/lib/billing-tier-state"
-import type {
-  LlmProcessingMode,
-  Simulation,
-  SimulationDebugInfo,
-  SimulationDebugResponse,
-  StartingHand,
-  UpdateSimulationResponse,
+import {
+  getBatchLlmProcessingModeForProvider,
+  isBatchLlmProcessingMode,
+  type LlmProcessingMode,
+  type Simulation,
+  type SimulationDebugInfo,
+  type SimulationDebugResponse,
+  type StartingHand,
+  type UpdateSimulationResponse,
 } from "@/lib/deck-types"
 import {
   formatProviderLabel,
@@ -360,7 +362,7 @@ function SimulationLlmOptionsSetting({
   const supportsFlex = Boolean(selectedModelPreset?.supportsFlex)
   const isLocked =
     simulation.status === "running" || simulation.activeLlmRunCount > 0
-  const isBatchEnabled = selectedProcessingMode === "openai_batch"
+  const isBatchEnabled = isBatchLlmProcessingMode(selectedProcessingMode)
   const isFreeTierFlexRestricted = isFreeBillingTier && supportsFlex
   const flexChecked =
     selectedProcessingMode === "realtime" && selectedUseFlexServiceTier
@@ -547,11 +549,14 @@ function SimulationModelPresetSelector({
 
     setSelectedPresetId(nextPresetId)
 
-    const nextLlmProcessingMode =
-      simulation.llmProcessingMode === "openai_batch" &&
-      nextPreset?.provider !== "openai"
-        ? "realtime"
-        : undefined
+    const nextPresetBatchMode = getBatchLlmProcessingModeForProvider(
+      nextPreset?.provider
+    )
+    const nextLlmProcessingMode = isBatchLlmProcessingMode(
+      simulation.llmProcessingMode
+    )
+      ? nextPresetBatchMode ?? "realtime"
+      : undefined
     const nextUseFlexServiceTier =
       simulation.useFlexServiceTier && !nextPreset?.supportsFlex
         ? false
@@ -1270,7 +1275,15 @@ function formatDebugBoolean(value: boolean) {
 }
 
 function formatDebugProcessingMode(value: LlmProcessingMode) {
-  return value === "openai_batch" ? "OpenAI Batch" : "Realtime"
+  if (value === "openai_batch") {
+    return "OpenAI Batch"
+  }
+
+  if (value === "anthropic_batch") {
+    return "Anthropic Batch"
+  }
+
+  return "Realtime"
 }
 
 function formatDebugDateTime(value: string | null) {

@@ -261,7 +261,11 @@ export function applyLlmRunEstimatedCostServiceTierDiscount({
     return null
   }
 
-  return serviceTier === "flex" || processingMode === "openai_batch"
+  return (
+    serviceTier === "flex" ||
+    processingMode === "openai_batch" ||
+    processingMode === "anthropic_batch"
+  )
     ? estimatedCostUsd / 2
     : estimatedCostUsd
 }

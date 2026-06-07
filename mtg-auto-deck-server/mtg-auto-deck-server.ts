@@ -15,6 +15,7 @@ import Anthropic from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 import { z } from "zod/v4"
 import {
+  ANTHROPIC_MCP_CLIENT_BETA,
   assertCompletedAnthropicMessage,
   buildAnthropicRequestPayload,
   buildAnthropicTextRequestPayload,
@@ -144,9 +145,12 @@ import {
   listSimulationRunEvaluations,
   getSimulationSummary,
   isLlmRunActive,
+  listAnthropicBatchesToPoll,
+  listAnthropicBatchItemsForReconcile,
   listActiveSimulationLlmRuns,
   listOpenAiBatchesToPoll,
   listOpenAiBatchItemsForReconcile,
+  listPendingAnthropicBatchRuns,
   listPendingOpenAiBatchRuns,
   listSimulationsForDeck,
   markLlmRunQueued,
@@ -155,6 +159,9 @@ import {
   markSimulationFailed,
   mulliganSimulation,
   requestCancelSimulationLlmRuns,
+  recordAnthropicBatchItemError,
+  recordAnthropicBatchItemOutput,
+  recordAnthropicBatchSubmitted,
   recordOpenAiBatchItemError,
   recordOpenAiBatchItemOutput,
   recordOpenAiBatchSubmitted,
@@ -167,6 +174,7 @@ import {
   SIMULATION_AUTO_ADVANCE_NOT_RUNNING_MESSAGE,
   SimulationValidationError,
   takeCardsFromSimulationLibrary,
+  updateAnthropicBatchProviderState,
   updateLlmRunRequestData,
   updateOpenAiBatchProviderState,
   updateSimulation,
@@ -179,6 +187,7 @@ import type {
   LlmRunStatus,
   ClaimedQueuedLlmRun,
   LlmRunQueueClaimResult,
+  AnthropicBatchPendingRun,
   OpenAiBatchPendingRun,
   SimulationDebugLlmRun,
   SimulationLlmCompletionResult,
@@ -328,6 +337,9 @@ const OPENAI_BATCH_COMPLETION_WINDOW = "24h"
 const OPENAI_BATCH_ENDPOINT = "/v1/responses"
 const OPENAI_BATCH_MAX_JSONL_BYTES = 90 * 1024 * 1024
 const OPENAI_BATCH_TMP_PREFIX = "mtg-auto-deck-openai-batch-"
+const ANTHROPIC_BATCH_POLL_INTERVAL_MS = 60 * 1000
+const ANTHROPIC_BATCH_MCP_RUN_TOKEN_TTL_MS = 26 * 60 * 60 * 1000
+const ANTHROPIC_BATCH_MAX_REQUEST_BYTES = 240 * 1024 * 1024
 const QUEUED_MCP_RUN_TOKEN_PLACEHOLDER = "queued"
 const SUBMITTED_BATCH_RUN_STOP_MESSAGE =
   "Submitted batch runs cannot be stopped. Stop future turns instead."
@@ -411,7 +423,9 @@ const createSimulationSchema = z.object({
   seed: z.string().trim().min(1),
   llmModelPresetId: z.uuid(),
   turnsToSimulate: z.number().int().nonnegative(),
-  llmProcessingMode: z.enum(["realtime", "openai_batch"]).default("realtime"),
+  llmProcessingMode: z
+    .enum(["realtime", "openai_batch", "anthropic_batch"])
+    .default("realtime"),
   reasoningSummariesEnabled: z.boolean().default(false),
   useFlexServiceTier: z.boolean().default(false),
   startingHandId: z.uuid().nullable(),
@@ -426,14 +440,20 @@ const createBenchmarkSchema = z
       .min(1)
       .max(MAX_BENCHMARK_SIMULATIONS_PER_DECK),
     turnsToSimulate: z.number().int().nonnegative(),
-    llmProcessingMode: z.enum(["realtime", "openai_batch"]),
+    llmProcessingMode: z.enum([
+      "realtime",
+      "openai_batch",
+      "anthropic_batch",
+    ]),
     useFlexServiceTier: z.boolean(),
   })
   .strict()
 const updateSimulationSchema = z
   .object({
     llmModelPresetId: z.uuid().optional(),
-    llmProcessingMode: z.enum(["realtime", "openai_batch"]).optional(),
+    llmProcessingMode: z
+      .enum(["realtime", "openai_batch", "anthropic_batch"])
+      .optional(),
     reasoningSummariesEnabled: z.boolean().optional(),
     useFlexServiceTier: z.boolean().optional(),
   })
@@ -502,11 +522,39 @@ const createTurnLlmRunSchema = z.object({
 const createSimulationRunEvaluationSchema = z
   .object({
     llmModelPresetId: z.uuid(),
-    llmProcessingMode: z.enum(["realtime", "openai_batch"]),
+    llmProcessingMode: z.enum([
+      "realtime",
+      "openai_batch",
+      "anthropic_batch",
+    ]),
     useFlexServiceTier: z.boolean().default(false),
   })
   .strict()
 const createBenchmarkEvaluationSchema = createSimulationRunEvaluationSchema
+
+function isBatchLlmProcessingMode(processingMode: LlmProcessingMode) {
+  return processingMode !== "realtime"
+}
+
+function getBatchLlmProcessingModeProvider(
+  processingMode: LlmProcessingMode
+) {
+  if (processingMode === "openai_batch") {
+    return "openai"
+  }
+
+  if (processingMode === "anthropic_batch") {
+    return "anthropic"
+  }
+
+  return null
+}
+
+function formatBatchLlmProcessingModeProvider(
+  processingMode: LlmProcessingMode
+) {
+  return processingMode === "anthropic_batch" ? "Anthropic" : "OpenAI"
+}
 
 type ActiveLlmRunRuntime = {
   abortController: AbortController
@@ -558,6 +606,10 @@ let openAiBatchSubmitTimer: NodeJS.Timeout | null = null
 let openAiBatchSubmitPromise: Promise<void> | null = null
 let openAiBatchPollTimer: NodeJS.Timeout | null = null
 let openAiBatchPollPromise: Promise<void> | null = null
+let anthropicBatchSubmitTimer: NodeJS.Timeout | null = null
+let anthropicBatchSubmitPromise: Promise<void> | null = null
+let anthropicBatchPollTimer: NodeJS.Timeout | null = null
+let anthropicBatchPollPromise: Promise<void> | null = null
 
 function createRuntimeCompletion() {
   let resolveCompletion: () => void = () => {}
@@ -3171,16 +3223,21 @@ async function prepareAndStartSimulationRunEvaluation({
       )
     }
 
+    const requiredBatchProvider =
+      getBatchLlmProcessingModeProvider(llmProcessingMode)
+
     if (
-      llmProcessingMode === "openai_batch" &&
-      modelPreset.provider !== "openai"
+      requiredBatchProvider !== null &&
+      modelPreset.provider !== requiredBatchProvider
     ) {
       throw new SimulationValidationError(
-        "Batch evaluations require an OpenAI model preset."
+        `Batch evaluations require a ${formatBatchLlmProcessingModeProvider(
+          llmProcessingMode
+        )} model preset.`
       )
     }
 
-    if (llmProcessingMode === "openai_batch" && useFlexServiceTier) {
+    if (isBatchLlmProcessingMode(llmProcessingMode) && useFlexServiceTier) {
       throw new SimulationValidationError(
         "Batch processing cannot be combined with flex processing."
       )
@@ -3340,7 +3397,7 @@ async function validateBenchmarkEvaluationModelPreset({
   llmProcessingMode: LlmProcessingMode
   useFlexServiceTier: boolean
 }) {
-  if (llmProcessingMode === "openai_batch" && useFlexServiceTier) {
+  if (isBatchLlmProcessingMode(llmProcessingMode) && useFlexServiceTier) {
     throw new SimulationValidationError(
       "Batch processing cannot be combined with flex processing."
     )
@@ -3352,12 +3409,17 @@ async function validateBenchmarkEvaluationModelPreset({
     throw new SimulationValidationError("Model preset not found or disabled.")
   }
 
+  const requiredBatchProvider =
+    getBatchLlmProcessingModeProvider(llmProcessingMode)
+
   if (
-    llmProcessingMode === "openai_batch" &&
-    modelPreset.provider !== "openai"
+    requiredBatchProvider !== null &&
+    modelPreset.provider !== requiredBatchProvider
   ) {
     throw new SimulationValidationError(
-      "Batch evaluations require an OpenAI model preset."
+      `Batch evaluations require a ${formatBatchLlmProcessingModeProvider(
+        llmProcessingMode
+      )} model preset.`
     )
   }
 
@@ -3705,6 +3767,62 @@ function nudgeOpenAiBatchPoller() {
     })
     .finally(() => {
       openAiBatchPollPromise = null
+    })
+}
+
+function startAnthropicBatchWorkers() {
+  if (!anthropicBatchSubmitTimer) {
+    anthropicBatchSubmitTimer = setInterval(
+      nudgeAnthropicBatchSubmitter,
+      ANTHROPIC_BATCH_POLL_INTERVAL_MS
+    )
+  }
+
+  if (!anthropicBatchPollTimer) {
+    anthropicBatchPollTimer = setInterval(
+      nudgeAnthropicBatchPoller,
+      ANTHROPIC_BATCH_POLL_INTERVAL_MS
+    )
+  }
+}
+
+function stopAnthropicBatchWorkers() {
+  if (anthropicBatchSubmitTimer) {
+    clearInterval(anthropicBatchSubmitTimer)
+    anthropicBatchSubmitTimer = null
+  }
+
+  if (anthropicBatchPollTimer) {
+    clearInterval(anthropicBatchPollTimer)
+    anthropicBatchPollTimer = null
+  }
+}
+
+function nudgeAnthropicBatchSubmitter() {
+  if (anthropicBatchSubmitPromise) {
+    return
+  }
+
+  anthropicBatchSubmitPromise = submitPendingAnthropicBatches()
+    .catch((error: unknown) => {
+      console.error("Failed to submit Anthropic batches:", error)
+    })
+    .finally(() => {
+      anthropicBatchSubmitPromise = null
+    })
+}
+
+function nudgeAnthropicBatchPoller() {
+  if (anthropicBatchPollPromise) {
+    return
+  }
+
+  anthropicBatchPollPromise = pollAnthropicBatches()
+    .catch((error: unknown) => {
+      console.error("Failed to poll Anthropic batches:", error)
+    })
+    .finally(() => {
+      anthropicBatchPollPromise = null
     })
 }
 
@@ -4716,6 +4834,1018 @@ function getOpenAiBatchLineFailureMessage(line: unknown) {
   return message
     ? `OpenAI batch item failed: ${message}`
     : `OpenAI batch item failed: ${JSON.stringify(line)}`
+}
+
+type AnthropicBatchRequest = {
+  custom_id: string
+  params: Record<string, unknown>
+}
+
+type PreparedAnthropicBatchRequest = {
+  betas: string[]
+  request: AnthropicBatchRequest
+  requestPayloadRedacted: unknown
+  run: AnthropicBatchPendingRun
+}
+
+async function submitPendingAnthropicBatches() {
+  const pendingRuns = await listPendingAnthropicBatchRuns()
+
+  if (pendingRuns.length === 0) {
+    return
+  }
+
+  const runsByPresetId = new Map<string, AnthropicBatchPendingRun[]>()
+
+  for (const run of pendingRuns) {
+    const runs = runsByPresetId.get(run.llmModelPresetId) ?? []
+    runs.push(run)
+    runsByPresetId.set(run.llmModelPresetId, runs)
+  }
+
+  for (const runs of runsByPresetId.values()) {
+    await submitAnthropicBatchRunGroup(runs)
+  }
+}
+
+async function submitAnthropicBatchRunGroup(
+  runs: AnthropicBatchPendingRun[]
+) {
+  const freeTierPolicyAllowedRuns =
+    await filterFreeTierPolicyAllowedAnthropicBatchRuns(runs)
+
+  if (freeTierPolicyAllowedRuns.length === 0) {
+    return
+  }
+
+  const usageAllowedRuns = await filterUsageAllowedAnthropicBatchRuns(
+    freeTierPolicyAllowedRuns
+  )
+
+  if (usageAllowedRuns.length === 0) {
+    return
+  }
+
+  const preparedRequests: PreparedAnthropicBatchRequest[] = []
+
+  try {
+    for (const run of usageAllowedRuns) {
+      preparedRequests.push(await prepareAnthropicBatchRequest(run))
+    }
+  } catch (error) {
+    await failPreparedAnthropicBatchRuns(
+      usageAllowedRuns,
+      preparedRequests,
+      error
+    )
+    return
+  }
+
+  let chunks: PreparedAnthropicBatchRequest[][]
+
+  try {
+    chunks = splitAnthropicBatchRequests(preparedRequests)
+  } catch (error) {
+    await failPreparedAnthropicBatchRuns(
+      usageAllowedRuns,
+      preparedRequests,
+      error
+    )
+    return
+  }
+
+  for (const chunk of chunks) {
+    try {
+      await submitPreparedAnthropicBatchRequestChunk(chunk)
+    } catch (error) {
+      await failPreparedAnthropicBatchRuns(
+        chunk.map((preparedRequest) => preparedRequest.run),
+        chunk,
+        error
+      )
+    }
+  }
+}
+
+async function failPreparedAnthropicBatchRuns(
+  runs: readonly AnthropicBatchPendingRun[],
+  preparedRequests: readonly PreparedAnthropicBatchRequest[],
+  error: unknown
+) {
+  const failureMessage = getErrorMessage(error)
+
+  for (const preparedRequest of preparedRequests) {
+    await revokeLlmRunMcpToken(preparedRequest.run.llmRunId).catch(
+      (revokeError: unknown) => {
+        console.error(
+          "Failed to revoke failed Anthropic batch MCP token:",
+          revokeError
+        )
+      }
+    )
+  }
+
+  for (const run of runs) {
+    await failAnthropicBatchRun(run, failureMessage)
+  }
+}
+
+async function filterFreeTierPolicyAllowedAnthropicBatchRuns(
+  runs: AnthropicBatchPendingRun[]
+) {
+  const allowedRuns: AnthropicBatchPendingRun[] = []
+
+  for (const run of runs) {
+    let modelPreset: LlmModelPreset
+
+    try {
+      modelPreset = await getRequiredAnthropicBatchRunModelPreset(run)
+    } catch (error) {
+      await failAnthropicBatchRun(run, getErrorMessage(error))
+      continue
+    }
+
+    const freeTierPolicyFailureMessage =
+      await getFreeTierRunPolicyFailureMessage(run, modelPreset)
+
+    if (freeTierPolicyFailureMessage) {
+      await failAnthropicBatchRun(run, freeTierPolicyFailureMessage)
+      continue
+    }
+
+    allowedRuns.push(run)
+  }
+
+  return allowedRuns
+}
+
+async function failAnthropicBatchRun(
+  run: AnthropicBatchPendingRun,
+  failureMessage: string
+) {
+  await failLlmRun(run.llmRunId, failureMessage).catch(
+    (failError: unknown) => {
+      console.error("Failed to mark Anthropic batch run failed:", failError)
+    }
+  )
+  await publishSimulationResultsState({
+    deckId: run.deckId,
+    llmRunId: run.llmRunId,
+    simulationId: run.simulationId,
+  }).catch((publishError: unknown) => {
+    console.error(
+      "Failed to publish failed Anthropic batch run state:",
+      publishError
+    )
+  })
+}
+
+async function filterUsageAllowedAnthropicBatchRuns(
+  runs: AnthropicBatchPendingRun[]
+) {
+  const allowedRuns: AnthropicBatchPendingRun[] = []
+
+  for (const run of runs) {
+    const ownerUserId = run.ownerUserId
+
+    if (ownerUserId !== null) {
+      const usageDecision = await withDatabaseTransaction((client) =>
+        ensureUserUsageLimitWindowsForRunStartWithClient(
+          client,
+          ownerUserId,
+          new Date()
+        )
+      )
+
+      if (!usageDecision.allowed) {
+        await failLlmRun(run.llmRunId, USAGE_LIMIT_OUT_OF_USAGE_MESSAGE)
+        await publishSimulationResultsState({
+          deckId: run.deckId,
+          llmRunId: run.llmRunId,
+          simulationId: run.simulationId,
+        })
+        continue
+      }
+    }
+
+    allowedRuns.push(run)
+  }
+
+  return allowedRuns
+}
+
+async function prepareAnthropicBatchRequest(
+  run: AnthropicBatchPendingRun
+): Promise<PreparedAnthropicBatchRequest> {
+  const modelPreset = await getRequiredAnthropicBatchRunModelPreset(run)
+  const mcpRunToken =
+    run.phase === "evaluation"
+      ? null
+      : generateMcpRunToken(ANTHROPIC_BATCH_MCP_RUN_TOKEN_TTL_MS)
+
+  if (mcpRunToken !== null) {
+    const mcpRunPhase = run.phase === "opening_hand" ? "opening_hand" : "turn"
+
+    await createLlmRunMcpToken({
+      deckId: run.deckId,
+      llmRunId: run.llmRunId,
+      simulationId: run.simulationId,
+      phase: mcpRunPhase,
+      tokenHash: mcpRunToken.tokenHash,
+      expiresAt: mcpRunToken.expiresAt,
+    })
+  }
+
+  const requestPayload =
+    run.phase === "opening_hand"
+      ? await buildAnthropicBatchOpeningHandRequestPayload({
+          modelPreset,
+          mcpRunToken: mcpRunToken?.token ?? "",
+          run,
+        })
+      : run.phase === "evaluation"
+        ? await buildAnthropicBatchEvaluationRequestPayload({
+            modelPreset,
+            run,
+          })
+        : await buildAnthropicBatchTurnRequestPayload({
+            modelPreset,
+            mcpRunToken: mcpRunToken?.token ?? "",
+            run,
+          })
+  const requestPayloadRedacted = getPersistableLlmRequestPayload(requestPayload)
+  const requestParams = getAnthropicBatchRequestParams(requestPayload)
+
+  await updateLlmRunRequestData({
+    llmRunId: run.llmRunId,
+    fullPrompt: run.fullPrompt,
+    requestPayload: requestPayloadRedacted,
+  })
+
+  return {
+    betas: requestParams.betas,
+    request: {
+      custom_id: run.llmRunId,
+      params: requestParams.params,
+    },
+    requestPayloadRedacted,
+    run,
+  }
+}
+
+async function getRequiredAnthropicBatchRunModelPreset(
+  run: AnthropicBatchPendingRun
+) {
+  const modelPreset = await getEnabledLlmModelPreset(run.llmModelPresetId)
+
+  if (!modelPreset || modelPreset.provider !== "anthropic") {
+    throw new Error(
+      "Batch LLM run model preset is disabled, missing, or not Anthropic."
+    )
+  }
+
+  return modelPreset
+}
+
+async function buildAnthropicBatchOpeningHandRequestPayload({
+  mcpRunToken,
+  modelPreset,
+  run,
+}: {
+  modelPreset: LlmModelPreset
+  mcpRunToken: string
+  run: AnthropicBatchPendingRun
+}): Promise<AnthropicRequestPayload> {
+  const config = withCapturedLlmRunServiceTier(
+    await resolveLlmRunConfigModel(
+      getOpeningHandLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
+    ),
+    run.serviceTier
+  )
+
+  if (config.provider !== "anthropic") {
+    throw new Error(
+      "Batch opening-hand run resolved to a non-Anthropic config."
+    )
+  }
+
+  assertAnthropicBatchRunMatchesConfig(run, config)
+
+  return requireAnthropicRequestPayload(
+    buildOpeningHandLlmRequestPayload(
+      config,
+      getAnthropicBatchPromptInput(run),
+      mcpRunToken,
+      run.simulationId,
+      run.reasoningSummariesEnabled
+    )
+  )
+}
+
+async function buildAnthropicBatchTurnRequestPayload({
+  mcpRunToken,
+  modelPreset,
+  run,
+}: {
+  modelPreset: LlmModelPreset
+  mcpRunToken: string
+  run: AnthropicBatchPendingRun
+}): Promise<AnthropicRequestPayload> {
+  if (typeof run.turnNumber !== "number") {
+    throw new Error("Batch turn LLM run is missing its turn number.")
+  }
+
+  const config = withCapturedLlmRunServiceTier(
+    await resolveLlmRunConfigModel(
+      getTurnSimulationLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
+    ),
+    run.serviceTier
+  )
+
+  if (config.provider !== "anthropic") {
+    throw new Error("Batch turn run resolved to a non-Anthropic config.")
+  }
+
+  assertAnthropicBatchRunMatchesConfig(run, config)
+
+  return requireAnthropicRequestPayload(
+    buildTurnSimulationLlmRequestPayload(
+      config,
+      getAnthropicBatchPromptInput(run),
+      mcpRunToken,
+      run.simulationId,
+      run.turnNumber,
+      run.reasoningSummariesEnabled
+    )
+  )
+}
+
+async function buildAnthropicBatchEvaluationRequestPayload({
+  modelPreset,
+  run,
+}: {
+  modelPreset: LlmModelPreset
+  run: AnthropicBatchPendingRun
+}): Promise<AnthropicRequestPayload> {
+  if (!run.targetLlmRunId) {
+    throw new Error("Batch evaluation LLM run is missing its target run.")
+  }
+
+  const config = withCapturedLlmRunServiceTier(
+    await resolveLlmRunConfigModel(
+      getEvaluationLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
+    ),
+    run.serviceTier
+  )
+
+  if (config.provider !== "anthropic") {
+    throw new Error("Batch evaluation run resolved to a non-Anthropic config.")
+  }
+
+  assertAnthropicBatchRunMatchesConfig(run, config)
+
+  return requireAnthropicRequestPayload(
+    buildEvaluationLlmRequestPayload(
+      config,
+      getAnthropicBatchPromptInput(run),
+      run.simulationId,
+      run.targetLlmRunId
+    )
+  )
+}
+
+function getAnthropicBatchPromptInput(run: AnthropicBatchPendingRun) {
+  const prompt = restorePersistedStructuredSimulationPrompt(
+    asRecord(run.requestPayload).prompt,
+    run.fullPrompt
+  )
+
+  if (!prompt) {
+    throw new Error(
+      "Batch Anthropic LLM run is missing structured prompt parts."
+    )
+  }
+
+  return prompt
+}
+
+function assertAnthropicBatchRunMatchesConfig(
+  run: AnthropicBatchPendingRun,
+  config: AnthropicRunConfig
+) {
+  const expectedOpenRouterModelProvider = null
+  const expectedServiceTier = null
+
+  if (
+    run.provider !== config.provider ||
+    run.model !== config.model ||
+    run.openrouterModelProvider !== expectedOpenRouterModelProvider ||
+    run.reasoningEffort !== config.reasoningEffort ||
+    run.serviceTier !== expectedServiceTier
+  ) {
+    throw new Error(
+      `Batch LLM run config changed before submission: expected ${formatLlmRunConfigParts(
+        {
+          model: config.model,
+          openrouterModelProvider: expectedOpenRouterModelProvider,
+          provider: config.provider,
+          reasoningEffort: config.reasoningEffort,
+          serviceTier: expectedServiceTier,
+        }
+      )}, got ${formatLlmRunConfigParts({
+        model: run.model,
+        openrouterModelProvider: run.openrouterModelProvider,
+        provider: run.provider,
+        reasoningEffort: run.reasoningEffort,
+        serviceTier: run.serviceTier,
+      })}`
+    )
+  }
+}
+
+function getAnthropicBatchRequestParams(
+  requestPayload: AnthropicRequestPayload
+) {
+  const params: Record<string, unknown> = {
+    ...requestPayload,
+  }
+  const betas = Array.isArray(params.betas)
+    ? params.betas.filter((beta): beta is string => typeof beta === "string")
+    : []
+  delete params.providerType
+  delete params.prompt
+  delete params.betas
+
+  return {
+    betas,
+    params,
+  }
+}
+
+function splitAnthropicBatchRequests(
+  preparedRequests: PreparedAnthropicBatchRequest[]
+) {
+  const chunks: PreparedAnthropicBatchRequest[][] = []
+  let currentChunk: PreparedAnthropicBatchRequest[] = []
+  let currentChunkBytes = 0
+
+  for (const preparedRequest of preparedRequests) {
+    const requestBytes = Buffer.byteLength(
+      JSON.stringify(preparedRequest.request),
+      "utf8"
+    )
+
+    if (requestBytes > ANTHROPIC_BATCH_MAX_REQUEST_BYTES) {
+      throw new Error(
+        `Anthropic batch request for LLM run ${preparedRequest.run.llmRunId} exceeds the request size limit.`
+      )
+    }
+
+    if (
+      currentChunk.length > 0 &&
+      currentChunkBytes + requestBytes > ANTHROPIC_BATCH_MAX_REQUEST_BYTES
+    ) {
+      chunks.push(currentChunk)
+      currentChunk = []
+      currentChunkBytes = 0
+    }
+
+    currentChunk.push(preparedRequest)
+    currentChunkBytes += requestBytes
+  }
+
+  if (currentChunk.length > 0) {
+    chunks.push(currentChunk)
+  }
+
+  return chunks
+}
+
+async function submitPreparedAnthropicBatchRequestChunk(
+  preparedRequests: PreparedAnthropicBatchRequest[]
+) {
+  const modelPreset = await getRequiredAnthropicBatchRunModelPreset(
+    preparedRequests[0].run
+  )
+  const config = await resolveLlmRunConfigModel(
+    getEvaluationLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
+  )
+
+  if (config.provider !== "anthropic") {
+    throw new Error(
+      "Anthropic batch model preset resolved to a non-Anthropic config."
+    )
+  }
+
+  const client = new Anthropic({
+    apiKey: config.apiKey,
+  })
+  const betas = getAnthropicBatchBetas(preparedRequests)
+  const createParams = {
+    ...(betas.length > 0 ? { betas } : {}),
+    requests: preparedRequests.map((preparedRequest) => preparedRequest.request),
+  }
+  const providerBatch = await client.beta.messages.batches.create(
+    createParams as unknown as Parameters<
+      typeof client.beta.messages.batches.create
+    >[0]
+  )
+  const providerStatus = getAnthropicBatchProviderStatus(providerBatch)
+
+  await recordAnthropicBatchSubmitted({
+    failureMessage: null,
+    items: preparedRequests.map((preparedRequest) => ({
+      customId: preparedRequest.request.custom_id,
+      llmRunId: preparedRequest.run.llmRunId,
+      requestPayloadRedacted: preparedRequest.requestPayloadRedacted,
+    })),
+    llmModelPresetId: modelPreset.id,
+    providerBatchId: providerBatch.id,
+    providerStatus,
+    rawBatch: providerBatch,
+    requestCounts: getAnthropicBatchRequestCounts(providerBatch),
+    resultsUrl: getAnthropicBatchResultsUrl(providerBatch),
+  })
+
+  for (const preparedRequest of preparedRequests) {
+    await publishSimulationResultsState({
+      deckId: preparedRequest.run.deckId,
+      llmRunId: preparedRequest.run.llmRunId,
+      simulationId: preparedRequest.run.simulationId,
+    })
+  }
+}
+
+function getAnthropicBatchBetas(
+  preparedRequests: readonly PreparedAnthropicBatchRequest[]
+) {
+  const hasMcpRequest = preparedRequests.some((preparedRequest) =>
+    preparedRequest.betas.includes(ANTHROPIC_MCP_CLIENT_BETA)
+  )
+
+  return hasMcpRequest ? [ANTHROPIC_MCP_CLIENT_BETA] : []
+}
+
+async function pollAnthropicBatches() {
+  const batches = await listAnthropicBatchesToPoll()
+
+  for (const batch of batches) {
+    const modelPreset = await getEnabledLlmModelPreset(batch.llmModelPresetId)
+
+    if (!modelPreset || modelPreset.provider !== "anthropic") {
+      const failureMessage =
+        "Anthropic batch model preset is disabled, missing, or no longer Anthropic."
+
+      await updateAnthropicBatchProviderState({
+        anthropicBatchId: batch.id,
+        failureMessage,
+        providerStatus: "ended",
+        rawBatch: {},
+        requestCounts: {},
+        resultsUrl: null,
+      })
+      await failSubmittedAnthropicBatchItems({
+        anthropicBatchId: batch.id,
+        failureMessage,
+      })
+      continue
+    }
+
+    const config = await resolveLlmRunConfigModel(
+      getEvaluationLlmRunConfig(getLlmModelPresetRunConfig(modelPreset))
+    )
+
+    if (config.provider !== "anthropic") {
+      const failureMessage =
+        "Anthropic batch model preset resolved to a non-Anthropic config."
+
+      await updateAnthropicBatchProviderState({
+        anthropicBatchId: batch.id,
+        failureMessage,
+        providerStatus: "ended",
+        rawBatch: {},
+        requestCounts: {},
+        resultsUrl: null,
+      })
+      await failSubmittedAnthropicBatchItems({
+        anthropicBatchId: batch.id,
+        failureMessage,
+      })
+      continue
+    }
+
+    const client = new Anthropic({
+      apiKey: config.apiKey,
+    })
+    const providerBatch = await client.beta.messages.batches.retrieve(
+      batch.providerBatchId,
+      getAnthropicBatchMcpBetaParams() as unknown as Parameters<
+        typeof client.beta.messages.batches.retrieve
+      >[1]
+    )
+    const providerStatus = getAnthropicBatchProviderStatus(providerBatch)
+
+    await updateAnthropicBatchProviderState({
+      anthropicBatchId: batch.id,
+      failureMessage: getAnthropicBatchFailureMessage(providerBatch),
+      providerStatus,
+      rawBatch: providerBatch,
+      requestCounts: getAnthropicBatchRequestCounts(providerBatch),
+      resultsUrl: getAnthropicBatchResultsUrl(providerBatch),
+    })
+
+    if (providerStatus === "ended") {
+      await reconcileCompletedAnthropicBatch({
+        anthropicBatchId: batch.id,
+        client,
+        providerBatchId: batch.providerBatchId,
+      })
+    }
+  }
+}
+
+async function reconcileCompletedAnthropicBatch({
+  anthropicBatchId,
+  client,
+  providerBatchId,
+}: {
+  anthropicBatchId: string
+  client: Anthropic
+  providerBatchId: string
+}) {
+  const items = await listAnthropicBatchItemsForReconcile(anthropicBatchId)
+  const resultLinesByCustomId =
+    await downloadAnthropicBatchResultLinesByCustomId(client, providerBatchId)
+
+  for (const item of items) {
+    if (item.status !== "batch_submitted") {
+      continue
+    }
+
+    const resultLine = resultLinesByCustomId.get(item.customId)
+
+    if (resultLine) {
+      await reconcileAnthropicBatchResultLine({
+        anthropicBatchId,
+        item,
+        resultLine,
+      })
+      continue
+    }
+
+    await reconcileAnthropicBatchItemFailure({
+      anthropicBatchId,
+      errorPayload: {},
+      failureMessage: "Anthropic batch did not return a result line.",
+      item,
+    })
+  }
+}
+
+async function reconcileAnthropicBatchResultLine({
+  anthropicBatchId,
+  item,
+  resultLine,
+}: {
+  anthropicBatchId: string
+  item: Awaited<
+    ReturnType<typeof listAnthropicBatchItemsForReconcile>
+  >[number]
+  resultLine: unknown
+}) {
+  const lineRecord = asRecord(resultLine)
+  const resultRecord = asRecord(lineRecord.result)
+  const resultType = getStringProperty(resultRecord, "type")
+
+  if (resultType !== "succeeded") {
+    await reconcileAnthropicBatchItemFailure({
+      anthropicBatchId,
+      errorPayload: resultLine,
+      failureMessage: getAnthropicBatchResultFailureMessage(resultLine),
+      item,
+    })
+    return
+  }
+
+  const message = resultRecord.message
+  let outputText: string
+  let usage: unknown
+
+  try {
+    assertCompletedAnthropicMessage(message, formatLlmRunPhase(item.phase))
+    outputText = getAnthropicMessageOutputText(message)
+    const messageRecord = asRecord(message)
+    usage = normalizeAnthropicUsage(messageRecord.usage ?? {})
+
+    if (!outputText.trim()) {
+      throw new Error(
+        "Anthropic batch response did not include final text content."
+      )
+    }
+  } catch (error) {
+    await reconcileAnthropicBatchItemFailure({
+      anthropicBatchId,
+      errorPayload: resultLine,
+      failureMessage: getErrorMessage(error),
+      item,
+    })
+    return
+  }
+
+  let completion: SimulationLlmCompletionResult | null = null
+
+  try {
+    if (item.phase === "opening_hand") {
+      const parsedOpeningHand = parseCompletedAnthropicBatchOutput(
+        outputText,
+        parseOpeningHandCompletionFromResponseText
+      )
+      completion = await completeOpeningHandLlmRun({
+        finalOutputText: outputText,
+        llmRunId: item.llmRunId,
+        openingHand: parsedOpeningHand.keptHand,
+        rawResponse: message,
+        summary: parsedOpeningHand.summary,
+        usage,
+      })
+    } else if (item.phase === "turn") {
+      const parsedTurn = parseCompletedAnthropicBatchOutput(
+        outputText,
+        parseTurnSimulationCompletionFromResponseText
+      )
+      completion = await completeTurnLlmRun({
+        finalOutputText: outputText,
+        gameState: parsedTurn.gameState,
+        llmRunId: item.llmRunId,
+        rawResponse: message,
+        turnActions: parsedTurn.turnActions,
+        usage,
+      })
+    } else {
+      const parsedEvaluation = parseCompletedAnthropicBatchOutput(
+        outputText,
+        parseSimulationRunEvaluationCompletionFromResponseText
+      )
+      await finishParsedSimulationRunEvaluation({
+        finalOutputText: outputText,
+        llmRunId: item.llmRunId,
+        parsedEvaluation,
+        rawResponse: message,
+        usage,
+      })
+    }
+  } catch (error) {
+    if (error instanceof CompletedAnthropicBatchOutputRejectedError) {
+      await reconcileCompletedAnthropicBatchOutputRejection({
+        anthropicBatchId,
+        failureMessage: error.message,
+        item,
+        outputLine: resultLine,
+        outputText,
+        rawResponse: message,
+        usage,
+      })
+      return
+    }
+
+    await reconcileAnthropicBatchItemFailure({
+      anthropicBatchId,
+      errorPayload: resultLine,
+      failureMessage: getErrorMessage(error),
+      item,
+    })
+    return
+  }
+
+  await recordAnthropicBatchItemOutput({
+    anthropicBatchId,
+    customId: item.customId,
+    outputPayload: resultLine,
+  })
+  if (item.phase !== "evaluation") {
+    await revokeLlmRunMcpToken(item.llmRunId).catch((error: unknown) => {
+      console.error(
+        "Failed to revoke completed Anthropic batch MCP token:",
+        error
+      )
+    })
+    await publishSimulationResultsState({
+      deckId: item.deckId,
+      llmRunId: item.llmRunId,
+      simulationId: item.simulationId,
+    })
+
+    if (completion !== null) {
+      await handleSimulationCompletionNextStep(completion)
+    }
+  }
+}
+
+class CompletedAnthropicBatchOutputRejectedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "CompletedAnthropicBatchOutputRejectedError"
+  }
+}
+
+function parseCompletedAnthropicBatchOutput<T>(
+  outputText: string,
+  parse: (outputText: string) => T
+) {
+  try {
+    return parse(outputText)
+  } catch (error) {
+    throw new CompletedAnthropicBatchOutputRejectedError(getErrorMessage(error))
+  }
+}
+
+async function reconcileCompletedAnthropicBatchOutputRejection({
+  anthropicBatchId,
+  failureMessage,
+  item,
+  outputLine,
+  outputText,
+  rawResponse,
+  usage,
+}: {
+  anthropicBatchId: string
+  failureMessage: string
+  item: Awaited<
+    ReturnType<typeof listAnthropicBatchItemsForReconcile>
+  >[number]
+  outputLine: unknown
+  outputText: string
+  rawResponse: unknown
+  usage: unknown
+}) {
+  console.error("Completed Anthropic batch output was rejected:", {
+    customId: item.customId,
+    llmRunId: item.llmRunId,
+    phase: item.phase,
+    failureMessage,
+  })
+
+  if (item.phase === "evaluation") {
+    await completeRawLlmRun({
+      finalOutputText: outputText,
+      llmRunId: item.llmRunId,
+      rawResponse,
+      usage,
+    })
+    await failSimulationRunEvaluationResult(item.llmRunId, failureMessage)
+  } else {
+    await failSimulationRunResultWithRawOutput({
+      failureMessage,
+      finalOutputText: outputText,
+      llmRunId: item.llmRunId,
+      phase: item.phase,
+      rawResponse,
+      usage,
+    })
+  }
+
+  await recordAnthropicBatchItemOutput({
+    anthropicBatchId,
+    customId: item.customId,
+    outputPayload: outputLine,
+  })
+
+  if (item.phase !== "evaluation") {
+    await revokeLlmRunMcpToken(item.llmRunId).catch((error: unknown) => {
+      console.error(
+        "Failed to revoke completed Anthropic batch MCP token:",
+        error
+      )
+    })
+    await publishSimulationResultsState({
+      deckId: item.deckId,
+      llmRunId: item.llmRunId,
+      simulationId: item.simulationId,
+    })
+  }
+}
+
+async function reconcileAnthropicBatchItemFailure({
+  anthropicBatchId,
+  errorPayload,
+  failureMessage,
+  item,
+}: {
+  anthropicBatchId: string
+  errorPayload: unknown
+  failureMessage: string
+  item: Awaited<
+    ReturnType<typeof listAnthropicBatchItemsForReconcile>
+  >[number]
+}) {
+  await recordAnthropicBatchItemError({
+    anthropicBatchId,
+    customId: item.customId,
+    errorPayload,
+    failureMessage,
+  })
+  await failLlmRun(item.llmRunId, failureMessage)
+  await revokeLlmRunMcpToken(item.llmRunId).catch((error: unknown) => {
+    console.error("Failed to revoke failed Anthropic batch MCP token:", error)
+  })
+  await publishSimulationResultsState({
+    deckId: item.deckId,
+    llmRunId: item.llmRunId,
+    simulationId: item.simulationId,
+  })
+}
+
+async function failSubmittedAnthropicBatchItems({
+  anthropicBatchId,
+  failureMessage,
+}: {
+  anthropicBatchId: string
+  failureMessage: string
+}) {
+  const items = await listAnthropicBatchItemsForReconcile(anthropicBatchId)
+
+  for (const item of items) {
+    if (item.status !== "batch_submitted") {
+      continue
+    }
+
+    await reconcileAnthropicBatchItemFailure({
+      anthropicBatchId,
+      errorPayload: {},
+      failureMessage,
+      item,
+    })
+  }
+}
+
+async function downloadAnthropicBatchResultLinesByCustomId(
+  client: Anthropic,
+  providerBatchId: string
+) {
+  const results = await client.beta.messages.batches.results(
+    providerBatchId,
+    getAnthropicBatchMcpBetaParams() as unknown as Parameters<
+      typeof client.beta.messages.batches.results
+    >[1]
+  )
+  const linesByCustomId = new Map<string, unknown>()
+
+  for await (const resultLine of results) {
+    const customId = getStringProperty(asRecord(resultLine), "custom_id")
+
+    if (customId) {
+      linesByCustomId.set(customId, resultLine)
+    }
+  }
+
+  return linesByCustomId
+}
+
+function getAnthropicBatchMcpBetaParams() {
+  return {
+    betas: [ANTHROPIC_MCP_CLIENT_BETA],
+  }
+}
+
+function getAnthropicBatchProviderStatus(providerBatch: unknown) {
+  return (
+    getStringProperty(asRecord(providerBatch), "processing_status") ??
+    "unknown"
+  )
+}
+
+function getAnthropicBatchResultsUrl(providerBatch: unknown) {
+  return getStringProperty(asRecord(providerBatch), "results_url")
+}
+
+function getAnthropicBatchRequestCounts(providerBatch: unknown) {
+  return asRecord(providerBatch).request_counts ?? {}
+}
+
+function getAnthropicBatchFailureMessage(providerBatch: unknown) {
+  const batchRecord = asRecord(providerBatch)
+  const error = batchRecord.error
+
+  if (error) {
+    return JSON.stringify(error)
+  }
+
+  return null
+}
+
+function getAnthropicBatchResultFailureMessage(line: unknown) {
+  const lineRecord = asRecord(line)
+  const resultRecord = asRecord(lineRecord.result)
+  const resultType = getStringProperty(resultRecord, "type")
+  const errorRecord = asRecord(resultRecord.error)
+  const message =
+    getStringProperty(errorRecord, "message") ??
+    getStringProperty(errorRecord, "type") ??
+    resultType
+
+  return message
+    ? `Anthropic batch item failed: ${message}`
+    : `Anthropic batch item failed: ${JSON.stringify(line)}`
 }
 
 function isUsageLimitedQueuedLlmRun(
@@ -7422,7 +8552,7 @@ async function main() {
     }
 
     if (
-      benchmarkInput.llmProcessingMode === "openai_batch" &&
+      isBatchLlmProcessingMode(benchmarkInput.llmProcessingMode) &&
       benchmarkInput.useFlexServiceTier
     ) {
       res.status(400).json({
@@ -7452,12 +8582,18 @@ async function main() {
         return
       }
 
+      const requiredBatchProvider = getBatchLlmProcessingModeProvider(
+        benchmarkInput.llmProcessingMode
+      )
+
       if (
-        benchmarkInput.llmProcessingMode === "openai_batch" &&
-        modelPreset.provider !== "openai"
+        requiredBatchProvider !== null &&
+        modelPreset.provider !== requiredBatchProvider
       ) {
         res.status(400).json({
-          error: "Batch processing can only use OpenAI model presets.",
+          error: `Batch processing can only use ${formatBatchLlmProcessingModeProvider(
+            benchmarkInput.llmProcessingMode
+          )} model presets.`,
         })
         return
       }
@@ -8973,6 +10109,7 @@ async function main() {
     )
     startLlmRunQueue(queueConfig)
     startOpenAiBatchWorkers()
+    startAnthropicBatchWorkers()
   })
 }
 
@@ -9113,6 +10250,7 @@ function registerShutdownHandlers() {
     void (async () => {
       stopLlmRunQueue()
       stopOpenAiBatchWorkers()
+      stopAnthropicBatchWorkers()
       console.error(`Received ${signal}. Closing database pool...`)
       await closeDatabasePool()
       process.exit(0)

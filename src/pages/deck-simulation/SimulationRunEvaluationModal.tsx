@@ -10,11 +10,13 @@ import {
 
 import { Button } from "@/components/ui/button"
 import { loadApiHelpers } from "@/lib/api-lazy"
-import type {
-  CreateSimulationRunEvaluationResponse,
-  LlmProcessingMode,
-  SimulationRunEvaluation,
-  SimulationRunEvaluationsResponse,
+import {
+  getBatchLlmProcessingModeForProvider,
+  isBatchLlmProcessingMode,
+  type CreateSimulationRunEvaluationResponse,
+  type LlmProcessingMode,
+  type SimulationRunEvaluation,
+  type SimulationRunEvaluationsResponse,
 } from "@/lib/deck-types"
 import {
   getLlmModelPresetLabel,
@@ -22,7 +24,7 @@ import {
 } from "@/lib/llm-model-preset-types"
 import { FlexServiceTierSwitch } from "./SimulationSetupControls"
 
-type EvaluationProcessingChoice = "realtime" | "flex" | "openai_batch"
+type EvaluationProcessingChoice = "realtime" | "flex" | "batch"
 
 type EvaluationTargetRun = {
   llmRunId: string
@@ -73,7 +75,10 @@ export function SimulationRunEvaluationModal({
   const selectedModelPreset =
     modelPresets.find((preset) => preset.id === selectedModelPresetId) ?? null
   const canUseFlex = Boolean(selectedModelPreset?.supportsFlex)
-  const canUseBatch = selectedModelPreset?.provider === "openai"
+  const batchProcessingMode = getBatchLlmProcessingModeForProvider(
+    selectedModelPreset?.provider
+  )
+  const canUseBatch = batchProcessingMode !== null
   const hasActiveEvaluation = evaluations.some((evaluation) =>
     ACTIVE_EVALUATION_STATUSES.has(evaluation.status)
   )
@@ -133,7 +138,7 @@ export function SimulationRunEvaluationModal({
       setProcessingChoice("realtime")
     }
 
-    if (processingChoice === "openai_batch" && !canUseBatch) {
+    if (processingChoice === "batch" && !canUseBatch) {
       setProcessingChoice("realtime")
     }
   }, [canUseBatch, canUseFlex, processingChoice])
@@ -147,7 +152,9 @@ export function SimulationRunEvaluationModal({
     setError(null)
 
     const llmProcessingMode: LlmProcessingMode =
-      processingChoice === "openai_batch" ? "openai_batch" : "realtime"
+      processingChoice === "batch" && batchProcessingMode
+        ? batchProcessingMode
+        : "realtime"
 
     try {
       const { API_BASE_URL, apiFetch, readApiError } = await loadApiHelpers()
@@ -290,10 +297,10 @@ export function SimulationRunEvaluationModal({
                     onClick={() => setProcessingChoice("flex")}
                   />
                   <ProcessingChoiceButton
-                    checked={processingChoice === "openai_batch"}
+                    checked={processingChoice === "batch"}
                     disabled={isStarting || !canUseBatch}
                     label="Batch"
-                    onClick={() => setProcessingChoice("openai_batch")}
+                    onClick={() => setProcessingChoice("batch")}
                   />
                 </div>
                 {processingChoice === "flex" ? (
@@ -417,7 +424,7 @@ function EvaluationResultCard({
   const metadata = [
     `Attempt ${evaluation.attemptNumber}`,
     evaluation.llmModelPresetName ?? evaluation.model,
-    evaluation.processingMode === "openai_batch" ? "batch" : null,
+    isBatchLlmProcessingMode(evaluation.processingMode) ? "batch" : null,
     evaluation.serviceTier === "flex" ? "flex" : null,
     evaluation.estimatedPriceCents
       ? `${evaluation.estimatedPriceCents} cents`

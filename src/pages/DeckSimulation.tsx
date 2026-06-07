@@ -44,31 +44,32 @@ import { Button } from "@/components/ui/button"
 import { UsageLimitRows } from "@/components/UsageLimitRows"
 import { loadApiHelpers } from "@/lib/api-lazy"
 import { useOptionalBillingTier } from "@/lib/billing-tier-state"
-import type {
-  BenchmarkSimulationRunEvaluation,
-  CreateSimulationResponse,
-  CreateStartingHandResponse,
-  CreateTurnLlmRunResponse,
-  DeckCard,
-  PublicBenchmarkExportV1,
-  PublicBenchmarkFailedEvaluation,
-  PublicBenchmarkMetadata,
-  PublicBenchmarkResultDeckMetrics,
-  PublicBenchmarkResultsExportV2,
-  PublicBenchmarkSimulationIndexEntry,
-  PublicSimulationExportV1,
-  SavedSeed,
-  SavedSeedsResponse,
-  Simulation,
-  SimulationDebugLlmRun,
-  SimulationMcpFunctionCall,
-  SimulationResultsInfo,
-  SimulationResultsStreamEvent,
-  SimulationsResponse,
-  StartingHand,
-  StartingHandsResponse,
-  StopSimulationResponse,
-  UpdateSimulationResponse,
+import {
+  isBatchLlmProcessingMode,
+  type BenchmarkSimulationRunEvaluation,
+  type CreateSimulationResponse,
+  type CreateStartingHandResponse,
+  type CreateTurnLlmRunResponse,
+  type DeckCard,
+  type PublicBenchmarkExportV1,
+  type PublicBenchmarkFailedEvaluation,
+  type PublicBenchmarkMetadata,
+  type PublicBenchmarkResultDeckMetrics,
+  type PublicBenchmarkResultsExportV2,
+  type PublicBenchmarkSimulationIndexEntry,
+  type PublicSimulationExportV1,
+  type SavedSeed,
+  type SavedSeedsResponse,
+  type Simulation,
+  type SimulationDebugLlmRun,
+  type SimulationMcpFunctionCall,
+  type SimulationResultsInfo,
+  type SimulationResultsStreamEvent,
+  type SimulationsResponse,
+  type StartingHand,
+  type StartingHandsResponse,
+  type StopSimulationResponse,
+  type UpdateSimulationResponse,
 } from "@/lib/deck-types"
 import {
   getLlmModelPresetLabel,
@@ -4920,7 +4921,7 @@ function SimulationResultsPanel({
         canStopFutureTurns={false}
         canStopSimulation={false}
         finishedDurationText={finishedDurationText}
-        isBatchRun={run.processingMode === "openai_batch"}
+        isBatchRun={isBatchLlmProcessingMode(run.processingMode)}
         isPending={false}
         isFinishedSuccessfully={
           run.displayStatus === "completed" && runStatusMessage === null
@@ -4943,7 +4944,7 @@ function SimulationResultsPanel({
       run.llmModelPresetName ?? run.model,
       showRunCost ? getLlmRunEstimatedPriceText(run) : null,
       finishedDurationText ? `took ${finishedDurationText}` : null,
-      run.processingMode === "openai_batch" ? "batch" : null,
+      isBatchLlmProcessingMode(run.processingMode) ? "batch" : null,
       run.outdated ? "outdated" : null,
     ].filter(Boolean)
     const shouldShowRunMetadata = !run.isActive && runMetadata.length > 0
@@ -5003,7 +5004,7 @@ function SimulationResultsPanel({
               run.status !== "batch_submitted"
             }
             finishedDurationText={null}
-            isBatchRun={run.processingMode === "openai_batch"}
+            isBatchRun={isBatchLlmProcessingMode(run.processingMode)}
             isPending={
               run.status === "pending" || run.status === "batch_pending"
             }
@@ -6702,7 +6703,11 @@ function isPublicBenchmarkNumber(value: unknown) {
 }
 
 function isPublicBenchmarkLlmProcessingMode(value: unknown) {
-  return value === "realtime" || value === "openai_batch"
+  return (
+    value === "realtime" ||
+    value === "openai_batch" ||
+    value === "anthropic_batch"
+  )
 }
 
 function isPublicBenchmarkStatus(value: unknown) {
@@ -7057,6 +7062,10 @@ function formatPublicBenchmarkProcessingMode(
 ) {
   if (benchmark.llmProcessingMode === "openai_batch") {
     return "OpenAI Batch"
+  }
+
+  if (benchmark.llmProcessingMode === "anthropic_batch") {
+    return "Anthropic Batch"
   }
 
   return benchmark.useFlexServiceTier ? "Realtime Flex" : "Realtime"
