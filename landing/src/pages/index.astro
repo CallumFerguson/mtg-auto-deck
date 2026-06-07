@@ -36,6 +36,15 @@ const plans = [
     cta: "Start with Pro",
   },
 ]
+
+const articles = [
+  {
+    title: "MTG Bench : Testing how well LLMs can play magic",
+    href: "/articles/mtg-bench/",
+    image: "/benchmark-bars.svg",
+    date: "June 7, 2026",
+  },
+]
 ---
 
 <!doctype html>
@@ -111,6 +120,28 @@ const plans = [
                   {plan.cta}
                 </a>
               </article>
+            ))
+          }
+        </div>
+      </section>
+
+      <section
+        class="section articles-section"
+        id="articles"
+        aria-labelledby="articles-title"
+      >
+        <div class="section-header">
+          <p class="eyebrow">Articles</p>
+        </div>
+
+        <div class="articles-list">
+          {
+            articles.map((article) => (
+              <a class="article-card" href={article.href}>
+                <img src={article.image} alt="" loading="lazy" />
+                <h3>{article.title}</h3>
+                <p>{article.date}</p>
+              </a>
             ))
           }
         </div>
@@ -454,6 +485,63 @@ const plans = [
   .pricing-section {
     border-top: 1px solid var(--border);
     border-bottom: 1px solid var(--border);
+  }
+
+  .articles-section {
+    background: var(--bg-deep);
+  }
+
+  .articles-list {
+    display: grid;
+    gap: 1rem;
+    width: min(760px, 100%);
+    margin-top: 2.2rem;
+  }
+
+  .article-card {
+    display: grid;
+    gap: 1rem;
+    max-width: 24rem;
+    border-radius: 0.5rem;
+    transition:
+      transform 160ms ease,
+      color 160ms ease;
+  }
+
+  .article-card:hover {
+    transform: translateY(-1px);
+    color: var(--accent-strong);
+  }
+
+  .article-card img {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: var(--surface);
+    object-fit: cover;
+    object-position: top center;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.12);
+  }
+
+  .article-card h3 {
+    margin: 0;
+    max-width: 24rem;
+    color: var(--text);
+    font-size: 1.45rem;
+    font-weight: 900;
+    line-height: 1.18;
+  }
+
+  .article-card:hover h3 {
+    color: var(--accent-strong);
+  }
+
+  .article-card p {
+    margin: -0.4rem 0 0;
+    color: var(--subtle);
+    font-size: 0.92rem;
+    font-weight: 700;
   }
 
   .pricing-grid {
