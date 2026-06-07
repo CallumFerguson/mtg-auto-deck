@@ -1614,9 +1614,9 @@ function PublicBenchmarkResultsPanel({
                 )}
               />
               <PublicBenchmarkResultMetricCard
-                label="Cost / completed turn"
+                label="Cost / attempted run"
                 value={formatPublicBenchmarkResultCost(
-                  metrics.costPerCompletedTurn
+                  metrics.costPerAttemptedTurn
                 )}
               />
               <PublicBenchmarkResultMetricCard
