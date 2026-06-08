@@ -124,7 +124,64 @@ const date = "June 7, 2026"
     benchmarkId: string
     labelLineOne: string
     labelLineTwo: string
+    providerMatch: MtgBenchProviderMatch | null
     score: number | null
+  }
+
+  type MtgBenchProviderMatch = {
+    barColor: string
+    barTextColor: string
+    logoAlt: string
+    logoSrc: string
+  }
+
+  const mtgBenchProviderMatches: Record<string, MtgBenchProviderMatch> = {
+    alibaba: {
+      barColor: "#FF7018",
+      barTextColor: "#ffffff",
+      logoAlt: "Alibaba",
+      logoSrc: "/alibaba_small.svg",
+    },
+    anthropic: {
+      barColor: "#CC785C",
+      barTextColor: "#ffffff",
+      logoAlt: "Anthropic",
+      logoSrc: "/anthropic-1.svg",
+    },
+    deepseek: {
+      barColor: "#2243E6",
+      barTextColor: "#ffffff",
+      logoAlt: "DeepSeek",
+      logoSrc: "/deepseek_small.svg",
+    },
+    google: {
+      barColor: "#34A853",
+      barTextColor: "#ffffff",
+      logoAlt: "Google",
+      logoSrc: "/google_small.svg",
+    },
+    moonshotai: {
+      barColor: "#047AFE",
+      barTextColor: "#ffffff",
+      logoAlt: "Kimi",
+      logoSrc: "/kimi_small.png",
+    },
+    openai: {
+      barColor: "#1F1F1F",
+      barTextColor: "#ffffff",
+      logoAlt: "OpenAI",
+      logoSrc: "/openai_small.svg",
+    },
+    xai: {
+      barColor: "#736CD3",
+      barTextColor: "#ffffff",
+      logoAlt: "xAI",
+      logoSrc: "/xai.svg",
+    },
+  }
+  const mtgBenchProviderAliases: Record<string, string> = {
+    qwen: "alibaba",
+    "x-ai": "xai",
   }
 
   const mtgBenchResultsBaseUrl = "https://data.mtgautodeck.com/benchmarks"
@@ -225,6 +282,7 @@ const date = "June 7, 2026"
           benchmarkId: result.benchmarkId,
           labelLineOne: labelLines[0],
           labelLineTwo: labelLines[1],
+          providerMatch: getMtgBenchProviderMatch(result.data),
           score: getMtgBenchScore(result.data),
         }
       })
@@ -252,6 +310,7 @@ const date = "June 7, 2026"
         const column = document.createElement("div")
         const plot = document.createElement("div")
         const bar = document.createElement("div")
+        const logoSlot = document.createElement("div")
         const label = document.createElement("div")
         const labelText = document.createElement("div")
         const modelLabel = document.createElement("span")
@@ -262,11 +321,26 @@ const date = "June 7, 2026"
         plot.className = "benchmark-score-plot"
         bar.className = "benchmark-score-bar"
         bar.style.height = `${Math.max(0, Math.min(score, 100))}%`
+        if (scoreBar.providerMatch) {
+          bar.style.backgroundColor = scoreBar.providerMatch.barColor
+          bar.style.color = scoreBar.providerMatch.barTextColor
+        }
         bar.textContent = formatMtgBenchBarScore(scoreBar.score)
         bar.setAttribute(
           "aria-label",
           `MTG Auto Deck score ${formatMtgBenchBarScore(scoreBar.score)}`
         )
+        logoSlot.className = "benchmark-score-logo-slot"
+        if (scoreBar.providerMatch) {
+          const logo = document.createElement("img")
+
+          logo.alt = scoreBar.providerMatch.logoAlt
+          logo.className = "benchmark-score-logo"
+          logo.decoding = "async"
+          logo.loading = "lazy"
+          logo.src = scoreBar.providerMatch.logoSrc
+          logoSlot.append(logo)
+        }
         label.className = "benchmark-score-label"
         labelText.className = "benchmark-score-label-text"
         modelLabel.textContent = scoreBar.labelLineOne
@@ -275,7 +349,7 @@ const date = "June 7, 2026"
         labelText.append(modelLabel, reasoningEffortLabel)
         label.append(labelText)
         plot.append(bar)
-        column.append(plot, label)
+        column.append(plot, logoSlot, label)
 
         return column
       })
@@ -290,6 +364,46 @@ const date = "June 7, 2026"
     const score = data.resultMetrics.mtgAutoDeckScore
 
     return typeof score === "number" && Number.isFinite(score) ? score : null
+  }
+
+  function getMtgBenchProviderMatch(data: unknown) {
+    const providerKey = getMtgBenchProviderKey(data)
+
+    return providerKey ? (mtgBenchProviderMatches[providerKey] ?? null) : null
+  }
+
+  function getMtgBenchProviderKey(data: unknown) {
+    if (!isRecord(data) || !isRecord(data.benchmark)) {
+      return null
+    }
+
+    const provider = data.benchmark.llmModelPresetProvider
+
+    if (typeof provider !== "string") {
+      return null
+    }
+
+    const normalizedProvider = normalizeMtgBenchProviderKey(provider)
+
+    if (normalizedProvider !== "openrouter") {
+      return normalizedProvider
+    }
+
+    const model = data.benchmark.llmModelPresetModel
+
+    if (typeof model !== "string") {
+      return normalizedProvider
+    }
+
+    const modelProvider = model.trim().split("/")[0]
+
+    return normalizeMtgBenchProviderKey(modelProvider) || normalizedProvider
+  }
+
+  function normalizeMtgBenchProviderKey(provider: string) {
+    const normalizedProvider = provider.trim().toLowerCase()
+
+    return mtgBenchProviderAliases[normalizedProvider] ?? normalizedProvider
   }
 
   function getMtgBenchModelLabel(data: unknown) {
@@ -598,9 +712,10 @@ const date = "June 7, 2026"
 
   .benchmark-score-chart {
     --benchmark-label-space: 5.75rem;
+    --benchmark-logo-space: 1.7rem;
     position: relative;
     display: flex;
-    height: 21rem;
+    height: 22.5rem;
     align-items: stretch;
     gap: clamp(0.12rem, 1vw, 0.45rem);
     margin-top: 2.25rem;
@@ -618,7 +733,9 @@ const date = "June 7, 2026"
   .benchmark-score-chart::after {
     position: absolute;
     right: 0.55rem;
-    bottom: calc(0.8rem + var(--benchmark-label-space));
+    bottom: calc(
+      0.8rem + var(--benchmark-label-space) + var(--benchmark-logo-space)
+    );
     left: 0.55rem;
     height: 1px;
     background: var(--border-strong);
@@ -628,7 +745,9 @@ const date = "June 7, 2026"
   :global(.benchmark-score-column) {
     display: grid;
     flex: 1 1 0;
-    grid-template-rows: minmax(0, 1fr) var(--benchmark-label-space);
+    grid-template-rows:
+      minmax(0, 1fr) var(--benchmark-logo-space)
+      var(--benchmark-label-space);
     min-width: 0;
   }
 
@@ -659,6 +778,21 @@ const date = "June 7, 2026"
     overflow: hidden;
     text-align: center;
     white-space: nowrap;
+  }
+
+  :global(.benchmark-score-logo-slot) {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: center;
+    padding-top: 0.25rem;
+  }
+
+  :global(.benchmark-score-logo) {
+    display: block;
+    width: min(1.2rem, 100%);
+    height: 1.2rem;
+    object-fit: contain;
   }
 
   :global(.benchmark-score-label) {
