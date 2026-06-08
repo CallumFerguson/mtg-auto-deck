@@ -11,6 +11,7 @@ import {
   type ReactNode,
   type UIEvent,
 } from "react"
+import { createPortal } from "react-dom"
 import ReactMarkdown from "react-markdown"
 import { useNavigate } from "react-router-dom"
 import tapIconUrl from "mana-font/svg/tap.svg"
@@ -1696,6 +1697,10 @@ function PublicBenchmarkFailedRunSummary({
   )
 }
 
+const PUBLIC_BENCHMARK_METRIC_TOOLTIP_GAP_PX = 8
+const PUBLIC_BENCHMARK_METRIC_TOOLTIP_MARGIN_PX = 16
+const PUBLIC_BENCHMARK_METRIC_TOOLTIP_WIDTH_PX = 256
+
 function PublicBenchmarkResultMetricCard({
   infoTooltip = null,
   label,
@@ -1719,24 +1724,161 @@ function PublicBenchmarkResultMetricCard({
       <p className="mt-1 flex items-center gap-2 text-2xl font-semibold tracking-normal text-foreground tabular-nums">
         <span>{value}</span>
         {infoTooltip ? (
-          <span
-            aria-label={infoTooltip}
-            className="group relative inline-flex size-5 items-center justify-center rounded-full border border-border bg-muted/20 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground focus-visible:bg-muted/40 focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
-            role="img"
-            tabIndex={0}
-          >
-            <Info className="size-3.5" aria-hidden />
-            <span
-              aria-hidden
-              className="pointer-events-none absolute right-0 bottom-full z-20 mb-2 w-64 max-w-[calc(100vw-2rem)] rounded-md border border-border bg-popover px-2.5 py-1.5 text-left text-xs leading-snug font-medium whitespace-normal text-popover-foreground opacity-0 shadow-xl shadow-black/35 transition-opacity duration-75 group-hover:opacity-100 group-focus-visible:opacity-100"
-            >
-              {infoTooltip}
-            </span>
-          </span>
+          <PublicBenchmarkMetricInfoTooltip tooltip={infoTooltip} />
         ) : null}
       </p>
     </div>
   )
+}
+
+function PublicBenchmarkMetricInfoTooltip({ tooltip }: { tooltip: string }) {
+  const [isTooltipVisible, setIsTooltipVisible] = useState(false)
+  const [tooltipPosition, setTooltipPosition] =
+    useState<PublicBenchmarkMetricTooltipPosition | null>(null)
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const tooltipRef = useRef<HTMLSpanElement | null>(null)
+
+  const showTooltip = useCallback(() => {
+    setTooltipPosition(null)
+    setIsTooltipVisible(true)
+  }, [])
+
+  const hideTooltip = useCallback(() => {
+    setIsTooltipVisible(false)
+    setTooltipPosition(null)
+  }, [])
+
+  const updateTooltipPosition = useCallback(() => {
+    const trigger = triggerRef.current
+    const tooltipElement = tooltipRef.current
+
+    if (!trigger || !tooltipElement || typeof window === "undefined") {
+      return
+    }
+
+    const triggerRect = trigger.getBoundingClientRect()
+    const tooltipRect = tooltipElement.getBoundingClientRect()
+    const tooltipWidth = getPublicBenchmarkMetricTooltipWidth()
+    const minLeft = PUBLIC_BENCHMARK_METRIC_TOOLTIP_MARGIN_PX
+    const maxLeft = Math.max(
+      minLeft,
+      window.innerWidth -
+        tooltipWidth -
+        PUBLIC_BENCHMARK_METRIC_TOOLTIP_MARGIN_PX
+    )
+    const preferredLeft =
+      triggerRect.left + triggerRect.width / 2 - tooltipWidth / 2
+    const aboveTop =
+      triggerRect.top -
+      tooltipRect.height -
+      PUBLIC_BENCHMARK_METRIC_TOOLTIP_GAP_PX
+    const belowTop = triggerRect.bottom + PUBLIC_BENCHMARK_METRIC_TOOLTIP_GAP_PX
+    const minTop = PUBLIC_BENCHMARK_METRIC_TOOLTIP_MARGIN_PX
+    const maxTop = Math.max(
+      minTop,
+      window.innerHeight -
+        tooltipRect.height -
+        PUBLIC_BENCHMARK_METRIC_TOOLTIP_MARGIN_PX
+    )
+    const preferredTop = aboveTop >= minTop ? aboveTop : belowTop
+    const nextPosition = {
+      left: Math.min(Math.max(preferredLeft, minLeft), maxLeft),
+      top: Math.min(Math.max(preferredTop, minTop), maxTop),
+      width: tooltipWidth,
+    }
+
+    setTooltipPosition((currentPosition) => {
+      if (
+        currentPosition &&
+        currentPosition.left === nextPosition.left &&
+        currentPosition.top === nextPosition.top &&
+        currentPosition.width === nextPosition.width
+      ) {
+        return currentPosition
+      }
+
+      return nextPosition
+    })
+  }, [])
+
+  useLayoutEffect(() => {
+    if (isTooltipVisible) {
+      updateTooltipPosition()
+    }
+  }, [isTooltipVisible, tooltip, updateTooltipPosition])
+
+  useEffect(() => {
+    if (!isTooltipVisible) {
+      return
+    }
+
+    window.addEventListener("resize", updateTooltipPosition)
+    window.addEventListener("scroll", updateTooltipPosition, true)
+
+    return () => {
+      window.removeEventListener("resize", updateTooltipPosition)
+      window.removeEventListener("scroll", updateTooltipPosition, true)
+    }
+  }, [isTooltipVisible, updateTooltipPosition])
+
+  const fallbackTooltipWidth =
+    typeof window === "undefined"
+      ? PUBLIC_BENCHMARK_METRIC_TOOLTIP_WIDTH_PX
+      : getPublicBenchmarkMetricTooltipWidth()
+
+  const tooltipPortal =
+    isTooltipVisible && typeof document !== "undefined"
+      ? createPortal(
+          <span
+            aria-hidden
+            ref={tooltipRef}
+            className="pointer-events-none fixed z-50 rounded-md border border-border bg-popover px-2.5 py-1.5 text-left text-xs leading-snug font-medium whitespace-normal text-popover-foreground opacity-100 shadow-xl shadow-black/35 transition-opacity duration-75"
+            style={{
+              left: tooltipPosition?.left ?? 0,
+              top: tooltipPosition?.top ?? 0,
+              visibility: tooltipPosition ? "visible" : "hidden",
+              width: tooltipPosition?.width ?? fallbackTooltipWidth,
+            }}
+          >
+            {tooltip}
+          </span>,
+          document.body
+        )
+      : null
+
+  return (
+    <>
+      <button
+        aria-label={tooltip}
+        className="inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-border bg-muted/20 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground focus-visible:bg-muted/40 focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
+        onBlur={hideTooltip}
+        onFocus={showTooltip}
+        onMouseEnter={showTooltip}
+        onMouseLeave={hideTooltip}
+        ref={triggerRef}
+        type="button"
+      >
+        <Info className="size-3.5" aria-hidden />
+      </button>
+      {tooltipPortal}
+    </>
+  )
+}
+
+function getPublicBenchmarkMetricTooltipWidth() {
+  return Math.min(
+    PUBLIC_BENCHMARK_METRIC_TOOLTIP_WIDTH_PX,
+    Math.max(
+      0,
+      window.innerWidth - PUBLIC_BENCHMARK_METRIC_TOOLTIP_MARGIN_PX * 2
+    )
+  )
+}
+
+type PublicBenchmarkMetricTooltipPosition = {
+  left: number
+  top: number
+  width: number
 }
 
 function PublicBenchmarkResultsDeckTable({
