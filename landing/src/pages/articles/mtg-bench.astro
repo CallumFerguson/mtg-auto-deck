@@ -55,7 +55,7 @@ const date = "June 7, 2026"
         <div
           class="benchmark-score-chart"
           data-mtg-bench-score-chart
-          role="img"
+          role="group"
           aria-label="MTG Auto Deck benchmark scores"
         ></div>
 
@@ -155,7 +155,7 @@ const date = "June 7, 2026"
       logoSrc: "/deepseek_small.svg",
     },
     google: {
-      barColor: "#34A853",
+      barColor: "#4890E5",
       barTextColor: "#ffffff",
       logoAlt: "Google",
       logoSrc: "/google_small.svg",
@@ -167,7 +167,7 @@ const date = "June 7, 2026"
       logoSrc: "/kimi_small.png",
     },
     openai: {
-      barColor: "#1F1F1F",
+      barColor: "#10A37F",
       barTextColor: "#ffffff",
       logoAlt: "OpenAI",
       logoSrc: "/openai_small.svg",
@@ -185,6 +185,8 @@ const date = "June 7, 2026"
   }
 
   const mtgBenchResultsBaseUrl = "https://data.mtgautodeck.com/benchmarks"
+  const mtgBenchPublicBenchmarkBaseUrl =
+    "https://app.mtgautodeck.com/public/benchmarks"
   const mtgBenchBenchmarkIds = [
     "23c6ab87-5419-4bfd-a281-740b2384a5b8",
     "3947a331-f7c9-4697-abda-a8b6ccf9a91f",
@@ -307,7 +309,7 @@ const date = "June 7, 2026"
 
     mtgBenchScoreChart.replaceChildren(
       ...scoreBars.map((scoreBar) => {
-        const column = document.createElement("div")
+        const column = document.createElement("a")
         const plot = document.createElement("div")
         const bar = document.createElement("div")
         const logoSlot = document.createElement("div")
@@ -316,8 +318,18 @@ const date = "June 7, 2026"
         const modelLabel = document.createElement("span")
         const reasoningEffortLabel = document.createElement("span")
         const score = scoreBar.score ?? 0
+        const scoreLabel = formatMtgBenchBarScore(scoreBar.score)
 
         column.className = "benchmark-score-column"
+        column.href = `${mtgBenchPublicBenchmarkBaseUrl}/${encodeURIComponent(
+          scoreBar.benchmarkId
+        )}`
+        column.rel = "noreferrer noopener"
+        column.target = "_blank"
+        column.setAttribute(
+          "aria-label",
+          `Open benchmark ${scoreBar.labelLineOne} ${scoreBar.labelLineTwo}, MTG Auto Deck score ${scoreLabel}`
+        )
         plot.className = "benchmark-score-plot"
         bar.className = "benchmark-score-bar"
         bar.style.height = `${Math.max(0, Math.min(score, 100))}%`
@@ -325,10 +337,10 @@ const date = "June 7, 2026"
           bar.style.backgroundColor = scoreBar.providerMatch.barColor
           bar.style.color = scoreBar.providerMatch.barTextColor
         }
-        bar.textContent = formatMtgBenchBarScore(scoreBar.score)
+        bar.textContent = scoreLabel
         bar.setAttribute(
           "aria-label",
-          `MTG Auto Deck score ${formatMtgBenchBarScore(scoreBar.score)}`
+          `MTG Auto Deck score ${scoreLabel}`
         )
         logoSlot.className = "benchmark-score-logo-slot"
         if (scoreBar.providerMatch) {
@@ -749,6 +761,20 @@ const date = "June 7, 2026"
       minmax(0, 1fr) var(--benchmark-logo-space)
       var(--benchmark-label-space);
     min-width: 0;
+    border-radius: 0.25rem;
+    color: inherit;
+    cursor: pointer;
+    text-decoration: none;
+    outline-offset: 0.18rem;
+  }
+
+  :global(.benchmark-score-column:hover .benchmark-score-bar),
+  :global(.benchmark-score-column:focus-visible .benchmark-score-bar) {
+    filter: brightness(1.08);
+  }
+
+  :global(.benchmark-score-column:focus-visible) {
+    outline: 2px solid var(--accent-strong);
   }
 
   :global(.benchmark-score-plot) {
