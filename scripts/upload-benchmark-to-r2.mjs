@@ -18,6 +18,7 @@ import { inflateRawSync } from "node:zlib"
 
 const DEFAULT_BUCKET = "mtg-auto-deck"
 const DEFAULT_CACHE_CONTROL = "public, max-age=3600"
+const DEFAULT_CONCURRENCY = 4
 const DEFAULT_PREFIX = "benchmarks"
 const JSON_CONTENT_TYPE = "application/json"
 const PROJECT_ROOT = path.resolve(
@@ -47,50 +48,73 @@ async function main() {
     return
   }
 
-  if (!options.zipPath) {
+  if (options.zipPaths.length === 0) {
     printUsage()
-    throw new Error("Pass the benchmark ZIP path.")
+    throw new Error("Pass at least one benchmark ZIP path.")
   }
 
   const bucket = options.bucket || DEFAULT_BUCKET
 
-  const zipPath = path.resolve(options.zipPath)
-  await access(zipPath, fsConstants.R_OK)
+  const zipPaths = options.zipPaths.map((zipPath) => path.resolve(zipPath))
+  await Promise.all(
+    zipPaths.map((zipPath) => access(zipPath, fsConstants.R_OK))
+  )
 
   const tempDirectory = await mkdtemp(
     path.join(tmpdir(), "mtg-auto-deck-benchmark-")
   )
 
   try {
-    console.log(`Extracting ${zipPath}`)
-    await extractZip(zipPath, tempDirectory)
+    const uploads = []
 
-    const files = await listJsonFiles(tempDirectory)
+    for (let index = 0; index < zipPaths.length; index += 1) {
+      const zipPath = zipPaths[index]
+      const extractDirectory = path.join(
+        tempDirectory,
+        `archive-${String(index + 1).padStart(4, "0")}`
+      )
 
-    if (files.length === 0) {
-      throw new Error("No JSON files were found in the benchmark ZIP.")
+      await mkdir(extractDirectory, { recursive: true })
+      console.log(
+        `Extracting ${zipPath}${zipPaths.length === 1 ? "" : ` (${index + 1}/${zipPaths.length})`}`
+      )
+      await extractZip(zipPath, extractDirectory)
+
+      const files = await listJsonFiles(extractDirectory)
+
+      if (files.length === 0) {
+        throw new Error(`No JSON files were found in ${zipPath}.`)
+      }
+
+      uploads.push(
+        ...files.map((file) => ({
+          file,
+          objectKey: joinObjectPath(
+            options.prefix,
+            toObjectPath(path.relative(extractDirectory, file))
+          ),
+        }))
+      )
     }
+
+    assertUniqueObjectKeys(uploads)
 
     console.log(
-      `${options.dryRun ? "Would upload" : "Uploading"} ${files.length} JSON file${
-        files.length === 1 ? "" : "s"
-      } to R2 bucket ${bucket}.`
+      `${options.dryRun ? "Would upload" : "Uploading"} ${uploads.length} JSON file${
+        uploads.length === 1 ? "" : "s"
+      } from ${zipPaths.length} benchmark ZIP${
+        zipPaths.length === 1 ? "" : "s"
+      } to R2 bucket ${bucket} with concurrency ${options.concurrency}.`
     )
 
-    for (const file of files) {
-      const relativePath = toObjectPath(path.relative(tempDirectory, file))
-      const objectKey = joinObjectPath(options.prefix, relativePath)
-
-      await putR2Object({
-        bucket,
-        cacheControl: options.cacheControl,
-        contentType: JSON_CONTENT_TYPE,
-        dryRun: options.dryRun,
-        file,
-        objectKey,
-        remote: !options.local,
-      })
-    }
+    await uploadFiles({
+      bucket,
+      cacheControl: options.cacheControl,
+      concurrency: options.concurrency,
+      dryRun: options.dryRun,
+      uploads,
+      remote: !options.local,
+    })
 
     console.log(
       `${options.dryRun ? "Dry run complete" : "Upload complete"} with Cache-Control: ${options.cacheControl}`
@@ -108,12 +132,13 @@ function parseArgs(args) {
   const options = {
     bucket: "",
     cacheControl: DEFAULT_CACHE_CONTROL,
+    concurrency: DEFAULT_CONCURRENCY,
     dryRun: false,
     help: false,
     keepTemp: false,
     local: false,
     prefix: DEFAULT_PREFIX,
-    zipPath: "",
+    zipPaths: [],
   }
 
   for (let index = 0; index < args.length; index += 1) {
@@ -149,6 +174,14 @@ function parseArgs(args) {
       continue
     }
 
+    if (arg === "--concurrency" || arg === "-j") {
+      options.concurrency = parseConcurrency(
+        readOptionValue(args, ++index, arg),
+        arg
+      )
+      continue
+    }
+
     if (arg === "--prefix" || arg === "-p") {
       options.prefix = normalizeObjectPathPrefix(
         readOptionValue(args, ++index, arg)
@@ -160,11 +193,7 @@ function parseArgs(args) {
       throw new Error(`Unknown option: ${arg}`)
     }
 
-    if (options.zipPath) {
-      throw new Error(`Unexpected extra argument: ${arg}`)
-    }
-
-    options.zipPath = arg
+    options.zipPaths.push(...parseZipPathArgument(arg))
   }
 
   return options
@@ -180,15 +209,74 @@ function readOptionValue(args, index, optionName) {
   return value
 }
 
+function parseConcurrency(value, optionName) {
+  const concurrency = Number(value)
+
+  if (!Number.isInteger(concurrency) || concurrency < 1) {
+    throw new Error(`${optionName} needs a positive integer.`)
+  }
+
+  return concurrency
+}
+
+function parseZipPathArgument(arg) {
+  const zipPaths = []
+  const quotedSegmentPattern = /"([^"]*)"/g
+  let cursor = 0
+  let match
+
+  while ((match = quotedSegmentPattern.exec(arg)) !== null) {
+    zipPaths.push(...splitConcatenatedZipPaths(arg.slice(cursor, match.index)))
+    zipPaths.push(...splitConcatenatedZipPaths(match[1]))
+    cursor = quotedSegmentPattern.lastIndex
+  }
+
+  zipPaths.push(...splitConcatenatedZipPaths(arg.slice(cursor)))
+
+  return zipPaths
+}
+
+function splitConcatenatedZipPaths(value) {
+  const normalized = cleanZipPathSegment(value)
+
+  if (!normalized) {
+    return []
+  }
+
+  const zipPaths = []
+  const nextWindowsPathPattern =
+    /\.zip(?=\s*"*(?:[a-zA-Z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+[\\/]))/gi
+  let cursor = 0
+  let match
+
+  while ((match = nextWindowsPathPattern.exec(normalized)) !== null) {
+    const endIndex = match.index + match[0].length
+    zipPaths.push(cleanZipPathSegment(normalized.slice(cursor, endIndex)))
+    cursor = endIndex
+  }
+
+  zipPaths.push(cleanZipPathSegment(normalized.slice(cursor)))
+
+  return zipPaths.filter(Boolean)
+}
+
+function cleanZipPathSegment(value) {
+  return value
+    .trim()
+    .replace(/^"+|"+$/g, "")
+    .trim()
+}
+
 function printUsage() {
   console.log(`
 Usage:
   npm run upload-benchmark -- <benchmark.zip> --bucket <r2-bucket>
-  npm run upload-benchmark -- <benchmark.zip>
+  npm run upload-benchmark -- <benchmark.zip> [benchmark.zip...]
 
 Options:
   -b, --bucket <name>           R2 bucket name. Defaults to "${DEFAULT_BUCKET}".
   -c, --cache-control <value>   Cache-Control header. Defaults to "${DEFAULT_CACHE_CONTROL}".
+  -j, --concurrency <count>     Parallel uploads to run. Defaults to ${DEFAULT_CONCURRENCY}.
   -p, --prefix <path>           Prefix to prepend to every object key. Defaults to "${DEFAULT_PREFIX}".
       --dry-run                 Print wrangler commands without uploading.
       --local                   Upload to Wrangler's local R2 store instead of remote Cloudflare R2.
@@ -197,7 +285,9 @@ Options:
 
 Examples:
   npm run upload-benchmark -- ./benchmark-abc.zip --bucket mtg-benchmarks
-  npm run upload-benchmark -- ./benchmark-abc.zip
+  npm run upload-benchmark -- ./benchmark-a.zip ./benchmark-b.zip
+  npm run upload-benchmark -- ./benchmark-abc.zip --concurrency 8
+  npm run upload-benchmark -- "C:\\Downloads\\benchmark-a.zip""C:\\Downloads\\benchmark-b.zip"
   npm run upload-benchmark -- ./benchmark-abc.zip --prefix public/benchmarks
   npm run upload-benchmark -- ./benchmark-abc.zip --bucket mtg-benchmarks --dry-run
 `)
@@ -357,6 +447,105 @@ async function listJsonFiles(directory) {
   return files.sort((left, right) =>
     toObjectPath(left).localeCompare(toObjectPath(right))
   )
+}
+
+function assertUniqueObjectKeys(uploads) {
+  const seenObjectKeys = new Set()
+  const duplicateObjectKeys = []
+
+  for (const { objectKey } of uploads) {
+    if (seenObjectKeys.has(objectKey)) {
+      duplicateObjectKeys.push(objectKey)
+      continue
+    }
+
+    seenObjectKeys.add(objectKey)
+  }
+
+  if (duplicateObjectKeys.length === 0) {
+    return
+  }
+
+  const uniqueDuplicateObjectKeys = Array.from(new Set(duplicateObjectKeys))
+  const lines = [
+    "Multiple selected ZIP files contain JSON files that would upload to the same R2 object key.",
+    ...uniqueDuplicateObjectKeys
+      .slice(0, 5)
+      .map((objectKey) => `- ${objectKey}`),
+  ]
+
+  if (uniqueDuplicateObjectKeys.length > 5) {
+    lines.push(`- ...and ${uniqueDuplicateObjectKeys.length - 5} more.`)
+  }
+
+  throw new Error(lines.join("\n"))
+}
+
+async function uploadFiles({
+  bucket,
+  cacheControl,
+  concurrency,
+  dryRun,
+  uploads,
+  remote,
+}) {
+  const errors = []
+  let nextIndex = 0
+
+  async function uploadNextFile() {
+    while (errors.length === 0) {
+      const upload = uploads[nextIndex]
+      nextIndex += 1
+
+      if (!upload) {
+        return
+      }
+
+      try {
+        await putR2Object({
+          bucket,
+          cacheControl,
+          contentType: JSON_CONTENT_TYPE,
+          dryRun,
+          file: upload.file,
+          objectKey: upload.objectKey,
+          remote,
+        })
+      } catch (error) {
+        errors.push({
+          error,
+          objectKey: upload.objectKey,
+        })
+      }
+    }
+  }
+
+  const workerCount = Math.min(concurrency, uploads.length)
+  await Promise.all(Array.from({ length: workerCount }, () => uploadNextFile()))
+
+  if (errors.length > 0) {
+    throw new Error(formatUploadErrors(errors))
+  }
+}
+
+function formatUploadErrors(errors) {
+  const lines = [
+    `${errors.length} upload${errors.length === 1 ? "" : "s"} failed.`,
+  ]
+
+  for (const { error, objectKey } of errors.slice(0, 5)) {
+    lines.push(`- ${objectKey}: ${formatErrorMessage(error)}`)
+  }
+
+  if (errors.length > 5) {
+    lines.push(`- ...and ${errors.length - 5} more.`)
+  }
+
+  return lines.join("\n")
+}
+
+function formatErrorMessage(error) {
+  return error instanceof Error ? error.message : String(error)
 }
 
 async function putR2Object({
