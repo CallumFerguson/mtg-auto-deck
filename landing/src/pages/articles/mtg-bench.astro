@@ -122,6 +122,8 @@ const date = "June 7, 2026"
 
   type MtgBenchScoreBar = {
     benchmarkId: string
+    labelLineOne: string
+    labelLineTwo: string
     score: number | null
   }
 
@@ -213,10 +215,19 @@ const date = "June 7, 2026"
 
   function buildMtgBenchScoreBars(results: readonly MtgBenchResultEntry[]) {
     return results
-      .map((result) => ({
-        benchmarkId: result.benchmarkId,
-        score: getMtgBenchScore(result.data),
-      }))
+      .map((result) => {
+        const labelLines = buildMtgBenchLabelLines(
+          getMtgBenchModelLabel(result.data),
+          getMtgBenchReasoningEffortLabel(result.data)
+        )
+
+        return {
+          benchmarkId: result.benchmarkId,
+          labelLineOne: labelLines[0],
+          labelLineTwo: labelLines[1],
+          score: getMtgBenchScore(result.data),
+        }
+      })
       .sort(compareMtgBenchScoreBars)
   }
 
@@ -238,9 +249,17 @@ const date = "June 7, 2026"
 
     mtgBenchScoreChart.replaceChildren(
       ...scoreBars.map((scoreBar) => {
+        const column = document.createElement("div")
+        const plot = document.createElement("div")
         const bar = document.createElement("div")
+        const label = document.createElement("div")
+        const labelText = document.createElement("div")
+        const modelLabel = document.createElement("span")
+        const reasoningEffortLabel = document.createElement("span")
         const score = scoreBar.score ?? 0
 
+        column.className = "benchmark-score-column"
+        plot.className = "benchmark-score-plot"
         bar.className = "benchmark-score-bar"
         bar.style.height = `${Math.max(0, Math.min(score, 100))}%`
         bar.textContent = formatMtgBenchBarScore(scoreBar.score)
@@ -248,8 +267,17 @@ const date = "June 7, 2026"
           "aria-label",
           `MTG Auto Deck score ${formatMtgBenchBarScore(scoreBar.score)}`
         )
+        label.className = "benchmark-score-label"
+        labelText.className = "benchmark-score-label-text"
+        modelLabel.textContent = scoreBar.labelLineOne
+        reasoningEffortLabel.textContent = scoreBar.labelLineTwo
 
-        return bar
+        labelText.append(modelLabel, reasoningEffortLabel)
+        label.append(labelText)
+        plot.append(bar)
+        column.append(plot, label)
+
+        return column
       })
     )
   }
@@ -262,6 +290,79 @@ const date = "June 7, 2026"
     const score = data.resultMetrics.mtgAutoDeckScore
 
     return typeof score === "number" && Number.isFinite(score) ? score : null
+  }
+
+  function getMtgBenchModelLabel(data: unknown) {
+    if (!isRecord(data) || !isRecord(data.benchmark)) {
+      return "-"
+    }
+
+    const model = data.benchmark.llmModelPresetModel
+
+    if (typeof model !== "string") {
+      return "-"
+    }
+
+    const trimmedModel = model.trim()
+
+    if (!trimmedModel) {
+      return "-"
+    }
+
+    const slashIndex = trimmedModel.indexOf("/")
+    const modelWithoutProvider =
+      slashIndex === -1 ? trimmedModel : trimmedModel.slice(slashIndex + 1)
+
+    return modelWithoutProvider.trim() || trimmedModel
+  }
+
+  function getMtgBenchReasoningEffortLabel(data: unknown) {
+    if (!isRecord(data) || !isRecord(data.benchmark)) {
+      return "-"
+    }
+
+    const reasoningEffort = data.benchmark.llmModelPresetReasoningEffort
+
+    return typeof reasoningEffort === "string" && reasoningEffort.trim()
+      ? reasoningEffort.trim().replaceAll("_", " ")
+      : "-"
+  }
+
+  function buildMtgBenchLabelLines(
+    modelLabel: string,
+    reasoningEffortLabel: string
+  ): [string, string] {
+    const modelSplit = getMtgBenchModelLabelSplit(modelLabel)
+
+    if (!modelSplit) {
+      return [modelLabel, reasoningEffortLabel]
+    }
+
+    return [
+      modelSplit[0],
+      [modelSplit[1], reasoningEffortLabel].filter(Boolean).join(" "),
+    ]
+  }
+
+  function getMtgBenchModelLabelSplit(modelLabel: string) {
+    if (modelLabel.length < 16) {
+      return null
+    }
+
+    const preferredDashIndex = modelLabel.lastIndexOf("-", 15)
+    const dashIndex =
+      preferredDashIndex === -1
+        ? modelLabel.indexOf("-")
+        : preferredDashIndex
+
+    if (dashIndex === -1 || dashIndex === modelLabel.length - 1) {
+      return null
+    }
+
+    return [
+      modelLabel.slice(0, dashIndex + 1),
+      modelLabel.slice(dashIndex + 1),
+    ] as const
   }
 
   function formatMtgBenchBarScore(score: number | null) {
@@ -496,10 +597,11 @@ const date = "June 7, 2026"
   }
 
   .benchmark-score-chart {
+    --benchmark-label-space: 5.75rem;
     position: relative;
     display: flex;
-    height: 15rem;
-    align-items: flex-end;
+    height: 21rem;
+    align-items: stretch;
     gap: clamp(0.12rem, 1vw, 0.45rem);
     margin-top: 2.25rem;
     overflow: hidden;
@@ -510,25 +612,40 @@ const date = "June 7, 2026"
       rgba(21, 31, 49, 0.76),
       rgba(5, 7, 13, 0.7)
     );
-    padding: 0.8rem 0.8rem calc(0.8rem + 1px);
+    padding: 0.8rem;
   }
 
   .benchmark-score-chart::after {
     position: absolute;
     right: 0.55rem;
-    bottom: 0.8rem;
+    bottom: calc(0.8rem + var(--benchmark-label-space));
     left: 0.55rem;
     height: 1px;
     background: var(--border-strong);
     content: "";
   }
 
+  :global(.benchmark-score-column) {
+    display: grid;
+    flex: 1 1 0;
+    grid-template-rows: minmax(0, 1fr) var(--benchmark-label-space);
+    min-width: 0;
+  }
+
+  :global(.benchmark-score-plot) {
+    display: flex;
+    min-height: 0;
+    align-items: flex-end;
+    padding-bottom: 1px;
+  }
+
   :global(.benchmark-score-bar) {
     position: relative;
     z-index: 1;
     display: flex;
-    flex: 1 1 0;
+    flex: 0 0 auto;
     min-width: 0;
+    width: 100%;
     min-height: 2.3rem;
     align-items: center;
     justify-content: center;
@@ -541,6 +658,32 @@ const date = "June 7, 2026"
     line-height: 1;
     overflow: hidden;
     text-align: center;
+    white-space: nowrap;
+  }
+
+  :global(.benchmark-score-label) {
+    position: relative;
+    min-width: 0;
+  }
+
+  :global(.benchmark-score-label-text) {
+    position: absolute;
+    top: 0.5rem;
+    left: calc(50% - 0.22rem);
+    width: 7.5rem;
+    transform: translateX(-100%) rotate(-60deg);
+    transform-origin: top right;
+    color: var(--muted);
+    font-size: 0.64rem;
+    font-weight: 800;
+    line-height: 1.12;
+    text-align: right;
+  }
+
+  :global(.benchmark-score-label-text span) {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
   }
 
