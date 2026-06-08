@@ -1,10 +1,15 @@
-import type {
-  BenchmarkEvaluationLatestEvaluationSnapshot,
-  BenchmarkEvaluationLatestRunSnapshot,
-  BenchmarkEvaluationResultMetrics,
-  BenchmarkEvaluationTargetRun,
+import {
+  getBenchmarkEvaluationTargetRunTerminalError,
+  type BenchmarkEvaluationLatestEvaluationSnapshot,
+  type BenchmarkEvaluationLatestRunSnapshot,
+  type BenchmarkEvaluationResultMetrics,
+  type BenchmarkEvaluationTargetRun,
+  type BenchmarkEvaluationTargetRunErrorKind,
+  type BenchmarkEvaluationRunPhase,
 } from "./benchmark-evaluations.js"
-import type { BenchmarkChildSimulation } from "./benchmarks-postgres.js"
+import type {
+  BenchmarkChildSimulation,
+} from "./benchmarks-postgres.js"
 import type { SimulationStatus } from "./simulations-postgres.js"
 
 export type BenchmarkExportSimulationIndexEntry = {
@@ -42,6 +47,25 @@ export type BenchmarkExportFailedEvaluation = BenchmarkExportRunEvaluation & {
   targetRunPhase: "opening_hand" | "turn"
   turnNumber: number | null
   resultLabel: string
+}
+
+export type BenchmarkExportErrorRun = {
+  simulationId: string
+  deckId: string
+  deckName: string
+  deckIndex: number
+  simulationIndex: number
+  seed: string
+  filePath: string
+  targetLlmRunId: string
+  targetRunPhase: "opening_hand" | "turn"
+  turnNumber: number | null
+  resultLabel: string
+  attemptNumber: number
+  runStatus: BenchmarkEvaluationLatestRunSnapshot["status"]
+  resultStatus: BenchmarkEvaluationLatestRunSnapshot["resultStatus"]
+  errorKind: BenchmarkEvaluationTargetRunErrorKind
+  errorMessage: string
 }
 
 export type BenchmarkResultsExportV2<TBenchmarkMetadata> = {
@@ -251,6 +275,52 @@ export function buildBenchmarkExportFailedEvaluations({
   return failedEvaluations.sort(compareBenchmarkExportFailedEvaluations)
 }
 
+export function buildBenchmarkExportErrorRuns({
+  latestRuns,
+  simulationFiles,
+}: {
+  latestRuns: readonly BenchmarkEvaluationLatestRunSnapshot[]
+  simulationFiles: readonly BenchmarkExportSimulationFileWithRuns[]
+}): BenchmarkExportErrorRun[] {
+  const simulationFileById = new Map(
+    simulationFiles.map((simulationFile) => [
+      simulationFile.childSimulation.simulationId,
+      simulationFile,
+    ])
+  )
+  const errorRuns: BenchmarkExportErrorRun[] = []
+
+  for (const run of latestRuns) {
+    const terminalError = getBenchmarkEvaluationTargetRunTerminalError(run)
+
+    if (!terminalError) {
+      continue
+    }
+
+    const simulationFile = simulationFileById.get(run.simulationId)
+
+    if (!simulationFile) {
+      continue
+    }
+
+    errorRuns.push({
+      ...buildBenchmarkExportRunContext({
+        simulationFile,
+        targetRunPhase: run.targetRunPhase,
+        turnNumber: run.turnNumber,
+        targetLlmRunId: run.targetLlmRunId,
+      }),
+      attemptNumber: run.attemptNumber,
+      runStatus: run.status,
+      resultStatus: run.resultStatus,
+      errorKind: terminalError.errorKind,
+      errorMessage: terminalError.errorMessage,
+    })
+  }
+
+  return errorRuns.sort(compareBenchmarkExportErrorRuns)
+}
+
 export function buildBenchmarkResultsExport<TBenchmarkMetadata>({
   benchmark,
   exportedAt,
@@ -294,6 +364,37 @@ export function buildBenchmarkSimulationIndexEntry({
   }
 }
 
+function buildBenchmarkExportRunContext({
+  simulationFile,
+  targetRunPhase,
+  turnNumber,
+  targetLlmRunId,
+}: {
+  simulationFile: BenchmarkExportSimulationFileWithRuns
+  targetRunPhase: BenchmarkEvaluationRunPhase
+  turnNumber: number | null
+  targetLlmRunId: string
+}) {
+  const { childSimulation, filePath } = simulationFile
+
+  return {
+    simulationId: childSimulation.simulationId,
+    deckId: childSimulation.deckId,
+    deckName: childSimulation.deckName,
+    deckIndex: childSimulation.deckIndex,
+    simulationIndex: childSimulation.simulationIndex,
+    seed: childSimulation.seed,
+    filePath,
+    targetLlmRunId,
+    targetRunPhase,
+    turnNumber,
+    resultLabel: getBenchmarkExportRunResultLabel({
+      targetRunPhase,
+      turnNumber,
+    }),
+  }
+}
+
 function buildBenchmarkExportFailedEvaluationContext({
   simulationFile,
   targetRunPhase,
@@ -305,31 +406,19 @@ function buildBenchmarkExportFailedEvaluationContext({
   turnNumber: number | null
   run: BenchmarkExportSimulationRun
 }): Omit<BenchmarkExportFailedEvaluation, keyof BenchmarkExportRunEvaluation> {
-  const { childSimulation, filePath } = simulationFile
-
-  return {
-    simulationId: childSimulation.simulationId,
-    deckId: childSimulation.deckId,
-    deckName: childSimulation.deckName,
-    deckIndex: childSimulation.deckIndex,
-    simulationIndex: childSimulation.simulationIndex,
-    seed: childSimulation.seed,
-    filePath,
+  return buildBenchmarkExportRunContext({
+    simulationFile,
     targetLlmRunId: run.llmRunId,
     targetRunPhase,
     turnNumber,
-    resultLabel: getBenchmarkExportRunResultLabel({
-      targetRunPhase,
-      turnNumber,
-    }),
-  }
+  })
 }
 
 function getBenchmarkExportRunResultLabel({
   targetRunPhase,
   turnNumber,
 }: {
-  targetRunPhase: BenchmarkExportFailedEvaluation["targetRunPhase"]
+  targetRunPhase: BenchmarkEvaluationRunPhase
   turnNumber: number | null
 }) {
   if (targetRunPhase === "opening_hand") {
@@ -427,6 +516,41 @@ function compareBenchmarkExportFailedEvaluations(
   }
 
   return (
+    compareBenchmarkExportRunContexts(first, second) ||
+    first.targetLlmRunId.localeCompare(second.targetLlmRunId)
+  )
+}
+
+function compareBenchmarkExportErrorRuns(
+  first: BenchmarkExportErrorRun,
+  second: BenchmarkExportErrorRun
+) {
+  return (
+    getBenchmarkExportErrorRunSortOrder(first.errorKind) -
+      getBenchmarkExportErrorRunSortOrder(second.errorKind) ||
+    compareBenchmarkExportRunContexts(first, second)
+  )
+}
+
+function compareBenchmarkExportRunContexts(
+  first: Pick<
+    BenchmarkExportFailedEvaluation,
+    | "deckIndex"
+    | "simulationIndex"
+    | "targetRunPhase"
+    | "turnNumber"
+    | "targetLlmRunId"
+  >,
+  second: Pick<
+    BenchmarkExportFailedEvaluation,
+    | "deckIndex"
+    | "simulationIndex"
+    | "targetRunPhase"
+    | "turnNumber"
+    | "targetLlmRunId"
+  >
+) {
+  return (
     first.deckIndex - second.deckIndex ||
     first.simulationIndex - second.simulationIndex ||
     getBenchmarkExportRunPhaseSortOrder(first.targetRunPhase) -
@@ -434,6 +558,12 @@ function compareBenchmarkExportFailedEvaluations(
     (first.turnNumber ?? 0) - (second.turnNumber ?? 0) ||
     first.targetLlmRunId.localeCompare(second.targetLlmRunId)
   )
+}
+
+function getBenchmarkExportErrorRunSortOrder(
+  errorKind: BenchmarkExportErrorRun["errorKind"]
+) {
+  return errorKind === "result_failed" ? 0 : 1
 }
 
 function compareNullableBenchmarkExportScores(

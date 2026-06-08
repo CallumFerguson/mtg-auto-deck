@@ -489,6 +489,7 @@ export async function listBenchmarkEvaluationLatestRunsForAdmin(
     target_llm_run_id: string
     target_run_phase: BenchmarkEvaluationRunPhase
     turn_number: number | null
+    attempt_number: number
     status: BenchmarkEvaluationLatestRunSnapshot["status"]
     failure_message: string | null
     result_status: BenchmarkEvaluationLatestRunSnapshot["resultStatus"]
@@ -508,6 +509,7 @@ export async function listBenchmarkEvaluationLatestRunsForAdmin(
           opening_run.llm_run_id AS target_llm_run_id,
           'opening_hand'::text AS target_run_phase,
           NULL::integer AS turn_number,
+          opening_run.attempt_number,
           llm_run.status,
           llm_run.failure_message,
           opening_run.result_status,
@@ -540,6 +542,7 @@ export async function listBenchmarkEvaluationLatestRunsForAdmin(
           turn_run.llm_run_id AS target_llm_run_id,
           'turn'::text AS target_run_phase,
           turn_run.turn_number,
+          turn_run.attempt_number,
           llm_run.status,
           llm_run.failure_message,
           turn_run.result_status,
@@ -580,6 +583,7 @@ export async function listBenchmarkEvaluationLatestRunsForAdmin(
     targetLlmRunId: row.target_llm_run_id,
     targetRunPhase: row.target_run_phase,
     turnNumber: row.turn_number,
+    attemptNumber: row.attempt_number,
     status: row.status,
     failureMessage: row.failure_message,
     resultStatus: row.result_status,

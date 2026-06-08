@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import {
   buildBenchmarkExportAverageEvaluationScoreBySimulation,
+  buildBenchmarkExportErrorRuns,
   buildBenchmarkExportFailedEvaluations,
   buildBenchmarkExportSimulationWithEvaluations,
   buildBenchmarkResultsExport,
@@ -738,6 +739,132 @@ test("builds an empty failed benchmark evaluations export when no evaluations fa
   assert.deepEqual(failedEvaluations, [])
 })
 
+test("builds benchmark error runs with result failures sorted first", () => {
+  const errorRuns = buildBenchmarkExportErrorRuns({
+    latestRuns: [
+      createLatestRun({
+        simulationId: "simulation-two",
+        targetLlmRunId: "turn-failed-run",
+        targetRunPhase: "turn",
+        turnNumber: 1,
+        attemptNumber: 3,
+        status: "failed",
+        failureMessage: "Provider request failed.",
+        resultStatus: "pending",
+        resultFailureMessage: null,
+        finalOutputText: null,
+        gameState: null,
+        turnActions: null,
+      }),
+      createLatestRun({
+        targetLlmRunId: "turn-invalid-output",
+        targetRunPhase: "turn",
+        turnNumber: 2,
+        attemptNumber: 2,
+        finalOutputText: "not json",
+      }),
+      createLatestRun({
+        simulationId: "simulation-two",
+        targetLlmRunId: "turn-result-failed",
+        targetRunPhase: "turn",
+        turnNumber: 2,
+        attemptNumber: 4,
+        resultStatus: "failed",
+        resultFailureMessage: "Turn output could not be applied.",
+        finalOutputText: createTurnCompletionText(),
+      }),
+    ],
+    simulationFiles: [
+      createBenchmarkSimulationFile({
+        childSimulation: createChildSimulation(),
+      }),
+      createBenchmarkSimulationFile({
+        childSimulation: createChildSimulation({
+          deckId: "deck-two",
+          deckIndex: 1,
+          deckName: "Deck Two",
+          simulationId: "simulation-two",
+          simulationIndex: 0,
+          seed: "seed-two",
+        }),
+        filePath: "benchmark-id/simulations/simulation-two.json",
+      }),
+    ],
+  })
+
+  assert.deepEqual(
+    errorRuns.map((run) => run.targetLlmRunId),
+    ["turn-result-failed", "turn-invalid-output", "turn-failed-run"]
+  )
+  assert.deepEqual(errorRuns[0], {
+    simulationId: "simulation-two",
+    deckId: "deck-two",
+    deckName: "Deck Two",
+    deckIndex: 1,
+    simulationIndex: 0,
+    seed: "seed-two",
+    filePath: "benchmark-id/simulations/simulation-two.json",
+    targetLlmRunId: "turn-result-failed",
+    targetRunPhase: "turn",
+    turnNumber: 2,
+    resultLabel: "Turn 2",
+    attemptNumber: 4,
+    runStatus: "completed",
+    resultStatus: "failed",
+    errorKind: "result_failed",
+    errorMessage: "Turn output could not be applied.",
+  })
+  assert.equal(errorRuns[1].errorKind, "invalid_output")
+  assert.equal(
+    errorRuns[1].errorMessage,
+    "Turn LLM completed response was not valid JSON."
+  )
+  assert.equal(errorRuns[2].errorKind, "llm_run_failed")
+  assert.equal(errorRuns[2].errorMessage, "Provider request failed.")
+})
+
+test("omits active, cancelled, successful, and unknown-simulation runs from error export", () => {
+  const errorRuns = buildBenchmarkExportErrorRuns({
+    latestRuns: [
+      createLatestRun({
+        targetLlmRunId: "active-run",
+        status: "streaming",
+      }),
+      createLatestRun({
+        targetLlmRunId: "cancelled-run",
+        status: "cancelled",
+      }),
+      createLatestRun({
+        targetLlmRunId: "successful-run",
+        finalOutputText: createTurnCompletionText(),
+      }),
+      createLatestRun({
+        simulationId: "missing-simulation",
+        targetLlmRunId: "missing-simulation-run",
+        status: "failed",
+        failureMessage: "This simulation was not exported.",
+      }),
+    ],
+    simulationFiles: [createBenchmarkSimulationFile()],
+  })
+
+  assert.deepEqual(errorRuns, [])
+})
+
+test("builds an empty benchmark error runs export when no runs error", () => {
+  const errorRuns = buildBenchmarkExportErrorRuns({
+    latestRuns: [
+      createLatestRun({
+        targetLlmRunId: "successful-run",
+        finalOutputText: createTurnCompletionText(),
+      }),
+    ],
+    simulationFiles: [createBenchmarkSimulationFile()],
+  })
+
+  assert.deepEqual(errorRuns, [])
+})
+
 function createTargetRun(
   overrides: Partial<BenchmarkEvaluationTargetRun> = {}
 ): BenchmarkEvaluationTargetRun {
@@ -839,6 +966,7 @@ function createLatestRun(
     targetLlmRunId: "target-run",
     targetRunPhase: "turn",
     turnNumber: 1,
+    attemptNumber: 1,
     status: "completed",
     failureMessage: null,
     resultStatus: "completed",

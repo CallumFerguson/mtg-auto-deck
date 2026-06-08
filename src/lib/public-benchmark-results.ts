@@ -8,6 +8,7 @@ import type {
 export type PublicBenchmarkSelectedPanel =
   | "results"
   | "simulation"
+  | "error-runs"
   | "failed-evaluations"
 
 export type PublicBenchmarkCostDiscountReason = "batch" | "flex"
@@ -19,6 +20,10 @@ export function getPublicBenchmarkSelectedPanelFromSearch(
 
   if (searchParams.get("view") === "failed-evaluations") {
     return "failed-evaluations"
+  }
+
+  if (searchParams.get("view") === "error-runs") {
+    return "error-runs"
   }
 
   const hasSimulationSelection =

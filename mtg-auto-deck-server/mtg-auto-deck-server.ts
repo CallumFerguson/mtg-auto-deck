@@ -59,6 +59,7 @@ import {
 } from "./benchmark-evaluations.js"
 import {
   buildBenchmarkExportAverageEvaluationScoreBySimulation,
+  buildBenchmarkExportErrorRuns,
   buildBenchmarkExportFailedEvaluations,
   buildBenchmarkExportSimulationWithEvaluations,
   buildBenchmarkResultsExport,
@@ -1001,6 +1002,10 @@ async function getAdminBenchmarkZipExport(
     latestEvaluations,
     simulationFiles: simulationFilesWithEvaluations,
   })
+  const errorRuns = buildBenchmarkExportErrorRuns({
+    latestRuns: latestEvaluationRuns,
+    simulationFiles: simulationFilesWithEvaluations,
+  })
   const benchmarkIndexMetadata = (() => {
     const { totalEstimatedCostUsd, ...metadata } = benchmark
 
@@ -1051,6 +1056,10 @@ async function getAdminBenchmarkZipExport(
         {
           path: `${benchmarkExportRootPath}/failed-evaluations.json`,
           value: failedEvaluations,
+        },
+        {
+          path: `${benchmarkExportRootPath}/error-runs.json`,
+          value: errorRuns,
         },
         ...simulationFilesWithEvaluations.map((simulationFile) => ({
           path: simulationFile.filePath,

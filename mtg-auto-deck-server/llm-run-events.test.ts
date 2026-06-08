@@ -4305,6 +4305,7 @@ function createBenchmarkEvaluationLatestRun(
     targetLlmRunId: "target-run-1",
     targetRunPhase,
     turnNumber: targetRunPhase === "turn" ? 1 : null,
+    attemptNumber: 1,
     status: "completed",
     failureMessage: null,
     resultStatus: "completed",

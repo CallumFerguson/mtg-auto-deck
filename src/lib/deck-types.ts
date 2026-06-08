@@ -365,6 +365,33 @@ export type PublicBenchmarkFailedEvaluation =
     resultLabel: string
   }
 
+export type PublicBenchmarkErrorRun = {
+  simulationId: string
+  deckId: string
+  deckName: string
+  deckIndex: number
+  simulationIndex: number
+  seed: string
+  filePath: string
+  targetLlmRunId: string
+  targetRunPhase: "opening_hand" | "turn"
+  turnNumber: number | null
+  resultLabel: string
+  attemptNumber: number
+  runStatus:
+    | "pending"
+    | "batch_pending"
+    | "batch_submitted"
+    | "streaming"
+    | "completed"
+    | "failed"
+    | "cancel_requested"
+    | "cancelled"
+  resultStatus: SimulationRunResultStatus
+  errorKind: "llm_run_failed" | "result_failed" | "invalid_output"
+  errorMessage: string
+}
+
 export type PublicBenchmarkResultDeckMetrics = {
   deckId: string
   deckName: string

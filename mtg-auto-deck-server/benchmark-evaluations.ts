@@ -30,6 +30,7 @@ export type BenchmarkEvaluationLatestRunSnapshot = {
   targetLlmRunId: string
   targetRunPhase: BenchmarkEvaluationRunPhase
   turnNumber: number | null
+  attemptNumber: number
   status: LlmRunStatus
   failureMessage: string | null
   resultStatus: SimulationRunResultStatus
@@ -40,6 +41,16 @@ export type BenchmarkEvaluationLatestRunSnapshot = {
   turnActions: unknown | null
   usage: unknown
   costUsd: number | null
+}
+
+export type BenchmarkEvaluationTargetRunErrorKind =
+  | "llm_run_failed"
+  | "result_failed"
+  | "invalid_output"
+
+export type BenchmarkEvaluationTargetRunTerminalError = {
+  errorKind: BenchmarkEvaluationTargetRunErrorKind
+  errorMessage: string
 }
 
 export type BenchmarkEvaluationTargetRun = {
@@ -174,6 +185,49 @@ export function getEligibleBenchmarkEvaluationTargetRuns(
     skippedRunCount: latestRuns.length - targetRuns.length,
     targetRuns,
   }
+}
+
+export function getBenchmarkEvaluationTargetRunTerminalError(
+  run: BenchmarkEvaluationLatestRunSnapshot
+): BenchmarkEvaluationTargetRunTerminalError | null {
+  if (run.status === "failed") {
+    return {
+      errorKind: "llm_run_failed",
+      errorMessage: run.failureMessage || "LLM run failed.",
+    }
+  }
+
+  if (run.status !== "completed") {
+    return null
+  }
+
+  if (run.failureMessage) {
+    return {
+      errorKind: "llm_run_failed",
+      errorMessage: run.failureMessage,
+    }
+  }
+
+  if (run.resultStatus === "failed") {
+    return {
+      errorKind: "result_failed",
+      errorMessage: run.resultFailureMessage || "Run result failed.",
+    }
+  }
+
+  if (run.resultStatus !== "completed") {
+    return null
+  }
+
+  const outputFailureMessage =
+    getBenchmarkEvaluationTargetRunOutputFailureMessage(run)
+
+  return outputFailureMessage
+    ? {
+        errorKind: "invalid_output",
+        errorMessage: outputFailureMessage,
+      }
+    : null
 }
 
 export function buildBenchmarkEvaluationSummary({
@@ -882,28 +936,36 @@ function isEligibleBenchmarkEvaluationTargetRun(
     return false
   }
 
+  return getBenchmarkEvaluationTargetRunOutputFailureMessage(run) === null
+}
+
+function getBenchmarkEvaluationTargetRunOutputFailureMessage(
+  run: BenchmarkEvaluationLatestRunSnapshot
+) {
   if (!run.finalOutputText?.trim()) {
-    return false
+    return "LLM run completed without final output text."
   }
 
   try {
     if (run.targetRunPhase === "opening_hand") {
       if (run.openingHandIsValid !== true) {
-        return false
+        return "Opening-hand run did not produce a valid opening hand."
       }
 
       parseOpeningHandCompletionFromResponseText(run.finalOutputText)
-      return true
+      return null
     }
 
     if (!isJsonObject(run.gameState) || !isJsonObject(run.turnActions)) {
-      return false
+      return "Turn run did not store parsed game state and turn actions."
     }
 
     parseTurnSimulationCompletionFromResponseText(run.finalOutputText)
-    return true
-  } catch {
-    return false
+    return null
+  } catch (error) {
+    return error instanceof Error
+      ? error.message
+      : "LLM run output could not be parsed."
   }
 }
 

@@ -70,6 +70,10 @@ test("selects public benchmark results by default", () => {
 
 test("selects failed runs or simulations from public benchmark search params", () => {
   assert.equal(
+    getPublicBenchmarkSelectedPanelFromSearch("?view=error-runs"),
+    "error-runs"
+  )
+  assert.equal(
     getPublicBenchmarkSelectedPanelFromSearch("?view=failed-evaluations"),
     "failed-evaluations"
   )

@@ -54,6 +54,7 @@ import {
   type CreateTurnLlmRunResponse,
   type DeckCard,
   type PublicBenchmarkExportV1,
+  type PublicBenchmarkErrorRun,
   type PublicBenchmarkFailedEvaluation,
   type PublicBenchmarkMetadata,
   type PublicBenchmarkResultDeckMetrics,
@@ -126,6 +127,8 @@ import {
   getSimulationResultToolReason,
 } from "@/lib/simulation-result-tool-labels"
 import {
+  getPublicBenchmarkErrorRunsJsonUrl,
+  getPublicBenchmarkErrorRunsLoadFailureMessage,
   getPublicBenchmarkIndexJsonUrl,
   getPublicBenchmarkFailedEvaluationsJsonUrl,
   getPublicBenchmarkFailedEvaluationsLoadFailureMessage,
@@ -945,6 +948,9 @@ export function PublicBenchmarkPage({
   const [failedEvaluations, setFailedEvaluations] = useState<
     PublicBenchmarkFailedEvaluation[] | null
   >(null)
+  const [errorRuns, setErrorRuns] = useState<
+    PublicBenchmarkErrorRun[] | null
+  >(null)
   const [benchmarkResults, setBenchmarkResults] =
     useState<PublicBenchmarkResultsExportV2 | null>(null)
   const [isLoadingBenchmarkResults, setIsLoadingBenchmarkResults] =
@@ -957,6 +963,10 @@ export function PublicBenchmarkPage({
   const [failedEvaluationsLoadError, setFailedEvaluationsLoadError] = useState<
     string | null
   >(null)
+  const [isLoadingErrorRuns, setIsLoadingErrorRuns] = useState(false)
+  const [errorRunsLoadError, setErrorRunsLoadError] = useState<string | null>(
+    null
+  )
   const [isLoadingSimulation, setIsLoadingSimulation] = useState(false)
   const [simulationLoadError, setSimulationLoadError] = useState<string | null>(
     null
@@ -994,6 +1004,9 @@ export function PublicBenchmarkPage({
     setFailedEvaluations(null)
     setFailedEvaluationsLoadError(null)
     setIsLoadingFailedEvaluations(false)
+    setErrorRuns(null)
+    setErrorRunsLoadError(null)
+    setIsLoadingErrorRuns(false)
 
     try {
       const response = await fetch(
@@ -1133,6 +1146,51 @@ export function PublicBenchmarkPage({
     }
   }, [benchmarkId, bundled])
 
+  const loadErrorRuns = useCallback(async () => {
+    setIsLoadingErrorRuns(true)
+    setErrorRunsLoadError(null)
+
+    try {
+      const response = await fetch(
+        getPublicBenchmarkErrorRunsJsonUrl({
+          benchmarkId,
+          bundled,
+        }),
+        {
+          credentials: "omit",
+        }
+      )
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          setErrorRuns([])
+          return
+        }
+
+        setErrorRunsLoadError("Public benchmark error runs could not be loaded.")
+        setErrorRuns(null)
+        return
+      }
+
+      const data = await response.json()
+
+      if (!isPublicBenchmarkErrorRunsExport(data)) {
+        setErrorRunsLoadError(
+          "Public benchmark error runs file is not in the expected format."
+        )
+        setErrorRuns(null)
+        return
+      }
+
+      setErrorRuns(data)
+    } catch (error) {
+      setErrorRunsLoadError(getPublicBenchmarkErrorRunsLoadFailureMessage(error))
+      setErrorRuns(null)
+    } finally {
+      setIsLoadingErrorRuns(false)
+    }
+  }, [benchmarkId, bundled])
+
   const loadSelectedSimulation = useCallback(async () => {
     const loadId = selectedSimulationLoadIdRef.current + 1
     selectedSimulationLoadIdRef.current = loadId
@@ -1220,7 +1278,13 @@ export function PublicBenchmarkPage({
 
     void loadBenchmarkResults()
     void loadFailedEvaluations()
-  }, [benchmarkIndex, loadBenchmarkResults, loadFailedEvaluations])
+    void loadErrorRuns()
+  }, [
+    benchmarkIndex,
+    loadBenchmarkResults,
+    loadFailedEvaluations,
+    loadErrorRuns,
+  ])
 
   useEffect(() => {
     function handlePopState() {
@@ -1289,6 +1353,17 @@ export function PublicBenchmarkPage({
     pushPublicBenchmarkFailedEvaluationsSearch()
   }
 
+  function handleSelectErrorRuns() {
+    if (selectedBenchmarkPanel === "error-runs") {
+      return
+    }
+
+    setSelectedBenchmarkPanel("error-runs")
+    setRequestedTimelineRunId("")
+    setRequestedTimelineTurn(null)
+    pushPublicBenchmarkErrorRunsSearch()
+  }
+
   function handleSelectBenchmarkResults() {
     if (selectedBenchmarkPanel === "results") {
       return
@@ -1303,8 +1378,7 @@ export function PublicBenchmarkPage({
   function handleJumpToFailedEvaluation(
     evaluation: PublicBenchmarkFailedEvaluation
   ) {
-    const turnNumber =
-      getPublicBenchmarkFailedEvaluationTimelineTurn(evaluation)
+    const turnNumber = getPublicBenchmarkRunTimelineTurn(evaluation)
 
     setSelectedBenchmarkPanel("simulation")
     setSelectedSimulationId(evaluation.simulationId)
@@ -1313,6 +1387,20 @@ export function PublicBenchmarkPage({
     pushPublicBenchmarkRunSearch({
       runId: evaluation.targetLlmRunId,
       simulationId: evaluation.simulationId,
+      turnNumber,
+    })
+  }
+
+  function handleJumpToErrorRun(errorRun: PublicBenchmarkErrorRun) {
+    const turnNumber = getPublicBenchmarkRunTimelineTurn(errorRun)
+
+    setSelectedBenchmarkPanel("simulation")
+    setSelectedSimulationId(errorRun.simulationId)
+    setRequestedTimelineTurn(turnNumber)
+    setRequestedTimelineRunId(errorRun.targetLlmRunId)
+    pushPublicBenchmarkRunSearch({
+      runId: errorRun.targetLlmRunId,
+      simulationId: errorRun.simulationId,
       turnNumber,
     })
   }
@@ -1403,6 +1491,29 @@ export function PublicBenchmarkPage({
                     </button>
                     <button
                       className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-medium transition-colors ${
+                        selectedBenchmarkPanel === "error-runs"
+                          ? "bg-accent text-accent-foreground"
+                          : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+                      }`}
+                      type="button"
+                      aria-pressed={selectedBenchmarkPanel === "error-runs"}
+                      onClick={handleSelectErrorRuns}
+                    >
+                      <span className="min-w-0 flex-1 truncate">
+                        Failed runs
+                      </span>
+                      {errorRuns ? (
+                        <span className="ml-2 shrink-0 rounded-full border border-border bg-background/35 px-2 py-0.5 text-xs text-muted-foreground">
+                          {errorRuns.length}
+                        </span>
+                      ) : isLoadingErrorRuns ? (
+                        <span className="ml-2 shrink-0 text-xs text-muted-foreground">
+                          ...
+                        </span>
+                      ) : null}
+                    </button>
+                    <button
+                      className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-medium transition-colors ${
                         selectedBenchmarkPanel === "failed-evaluations"
                           ? "bg-accent text-accent-foreground"
                           : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
@@ -1414,7 +1525,7 @@ export function PublicBenchmarkPage({
                       onClick={handleSelectFailedEvaluations}
                     >
                       <span className="min-w-0 flex-1 truncate">
-                        Failed runs
+                        Evaluation fails
                       </span>
                       {failedEvaluations ? (
                         <span className="ml-2 shrink-0 rounded-full border border-border bg-background/35 px-2 py-0.5 text-xs text-muted-foreground">
@@ -1478,12 +1589,23 @@ export function PublicBenchmarkPage({
               {selectedBenchmarkPanel === "results" ? (
                 <PublicBenchmarkResultsPanel
                   benchmarkResults={benchmarkResults}
+                  errorRunCount={errorRuns?.length ?? null}
                   failedEvaluationCount={failedEvaluations?.length ?? null}
+                  isLoadingErrorRuns={isLoadingErrorRuns}
                   isLoadingFailedEvaluations={isLoadingFailedEvaluations}
                   isLoading={isLoadingBenchmarkResults}
                   loadError={benchmarkResultsLoadError}
+                  onViewErrorRuns={handleSelectErrorRuns}
                   onViewFailedEvaluations={handleSelectFailedEvaluations}
                   onReload={() => void loadBenchmarkResults()}
+                />
+              ) : selectedBenchmarkPanel === "error-runs" ? (
+                <PublicBenchmarkErrorRunsPanel
+                  errorRuns={errorRuns}
+                  isLoading={isLoadingErrorRuns}
+                  loadError={errorRunsLoadError}
+                  onJumpToErrorRun={handleJumpToErrorRun}
+                  onReload={() => void loadErrorRuns()}
                 />
               ) : selectedBenchmarkPanel === "failed-evaluations" ? (
                 <PublicBenchmarkFailedEvaluationsPanel
@@ -1560,18 +1682,24 @@ export function PublicBenchmarkPage({
 
 function PublicBenchmarkResultsPanel({
   benchmarkResults,
+  errorRunCount,
   failedEvaluationCount,
+  isLoadingErrorRuns,
   isLoadingFailedEvaluations,
   isLoading,
   loadError,
+  onViewErrorRuns,
   onViewFailedEvaluations,
   onReload,
 }: {
   benchmarkResults: PublicBenchmarkResultsExportV2 | null
+  errorRunCount: number | null
   failedEvaluationCount: number | null
+  isLoadingErrorRuns: boolean
   isLoadingFailedEvaluations: boolean
   isLoading: boolean
   loadError: string | null
+  onViewErrorRuns: () => void
   onViewFailedEvaluations: () => void
   onReload: () => void
 }) {
@@ -1635,11 +1763,18 @@ function PublicBenchmarkResultsPanel({
               />
             </div>
 
-            <PublicBenchmarkFailedRunSummary
-              failedEvaluationCount={failedEvaluationCount}
-              isLoading={isLoadingFailedEvaluations}
-              onViewFailedEvaluations={onViewFailedEvaluations}
-            />
+            <div className="grid gap-3">
+              <PublicBenchmarkErrorRunSummary
+                errorRunCount={errorRunCount}
+                isLoading={isLoadingErrorRuns}
+                onViewErrorRuns={onViewErrorRuns}
+              />
+              <PublicBenchmarkFailedRunSummary
+                failedEvaluationCount={failedEvaluationCount}
+                isLoading={isLoadingFailedEvaluations}
+                onViewFailedEvaluations={onViewFailedEvaluations}
+              />
+            </div>
 
             <PublicBenchmarkResultsDeckTable
               costDiscountReason={costDiscountReason}
@@ -1668,16 +1803,18 @@ function PublicBenchmarkFailedRunSummary({
   const failedRunSummaryText =
     failedEvaluationCount === null
       ? isLoading
-        ? "Loading failed runs..."
-        : "Failed run count could not be loaded."
-      : `${formatPublicBenchmarkResultCount(failedEvaluationCount)} failed ${
-          failedEvaluationCount === 1 ? "run" : "runs"
-        }.`
+        ? "Loading evaluation fails..."
+        : "Evaluation fail count could not be loaded."
+      : `${formatPublicBenchmarkResultCount(
+          failedEvaluationCount
+        )} evaluation ${failedEvaluationCount === 1 ? "fail" : "fails"}.`
 
   return (
     <section className="flex flex-col gap-3 rounded-md border border-border bg-background/35 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="grid gap-1">
-        <h3 className="text-sm font-semibold text-foreground">Failed runs</h3>
+        <h3 className="text-sm font-semibold text-foreground">
+          Evaluation fails
+        </h3>
         <p className="text-sm text-muted-foreground">
           <span className="font-medium text-foreground tabular-nums">
             {failedRunSummaryText}
@@ -1689,6 +1826,47 @@ function PublicBenchmarkFailedRunSummary({
         type="button"
         className="inline-flex w-fit shrink-0 items-center gap-1 rounded-md border border-sky-300/35 bg-sky-400/10 px-2.5 py-1.5 text-xs font-medium text-sky-100 transition-colors hover:bg-sky-400/20 focus-visible:border-sky-300/50 focus-visible:ring-3 focus-visible:ring-sky-300/40 focus-visible:outline-none"
         onClick={onViewFailedEvaluations}
+      >
+        <Eye className="size-3.5" aria-hidden />
+        View evaluation fails
+      </button>
+    </section>
+  )
+}
+
+function PublicBenchmarkErrorRunSummary({
+  errorRunCount,
+  isLoading,
+  onViewErrorRuns,
+}: {
+  errorRunCount: number | null
+  isLoading: boolean
+  onViewErrorRuns: () => void
+}) {
+  const errorRunSummaryText =
+    errorRunCount === null
+      ? isLoading
+        ? "Loading failed runs..."
+        : "Failed run count could not be loaded."
+      : `${formatPublicBenchmarkResultCount(errorRunCount)} failed ${
+          errorRunCount === 1 ? "run" : "runs"
+        }.`
+
+  return (
+    <section className="flex flex-col gap-3 rounded-md border border-border bg-background/35 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="grid gap-1">
+        <h3 className="text-sm font-semibold text-foreground">Failed runs</h3>
+        <p className="text-sm text-muted-foreground">
+          <span className="font-medium text-foreground tabular-nums">
+            {errorRunSummaryText}
+          </span>{" "}
+          Technical, result, or parse failures.
+        </p>
+      </div>
+      <button
+        type="button"
+        className="inline-flex w-fit shrink-0 items-center gap-1 rounded-md border border-sky-300/35 bg-sky-400/10 px-2.5 py-1.5 text-xs font-medium text-sky-100 transition-colors hover:bg-sky-400/20 focus-visible:border-sky-300/50 focus-visible:ring-3 focus-visible:ring-sky-300/40 focus-visible:outline-none"
+        onClick={onViewErrorRuns}
       >
         <Eye className="size-3.5" aria-hidden />
         View failed runs
@@ -1960,6 +2138,111 @@ function PublicBenchmarkResultsDeckTable({
   )
 }
 
+function PublicBenchmarkErrorRunsPanel({
+  errorRuns,
+  isLoading,
+  loadError,
+  onJumpToErrorRun,
+  onReload,
+}: {
+  errorRuns: PublicBenchmarkErrorRun[] | null
+  isLoading: boolean
+  loadError: string | null
+  onJumpToErrorRun: (errorRun: PublicBenchmarkErrorRun) => void
+  onReload: () => void
+}) {
+  const sortedErrorRuns = useMemo(
+    () => (errorRuns ? sortPublicBenchmarkErrorRuns(errorRuns) : null),
+    [errorRuns]
+  )
+
+  return (
+    <div className="simulation-scrollbar h-full min-h-0 overflow-y-auto p-5">
+      <section className="mx-auto grid w-full max-w-5xl gap-4">
+        <div className="grid gap-1">
+          <h2 className="text-lg font-semibold text-foreground">Failed runs</h2>
+          <p className="text-sm text-muted-foreground">
+            Technical, result, and parse failures.
+          </p>
+        </div>
+
+        {loadError ? (
+          <div className="flex flex-col gap-3 rounded-md border border-border bg-background/35 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-destructive">{loadError}</p>
+            <Button type="button" variant="outline" onClick={onReload}>
+              <RefreshCw data-icon="inline-start" />
+              Try again
+            </Button>
+          </div>
+        ) : isLoading && errorRuns === null ? (
+          <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+            Loading failed runs...
+          </p>
+        ) : sortedErrorRuns && sortedErrorRuns.length > 0 ? (
+          <div className="grid gap-3">
+            {sortedErrorRuns.map((errorRun) => (
+              <PublicBenchmarkErrorRunCard
+                key={`${errorRun.simulationId}:${errorRun.targetLlmRunId}`}
+                errorRun={errorRun}
+                onJump={() => onJumpToErrorRun(errorRun)}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+            No technical, result, or parse failures were exported for this
+            benchmark.
+          </p>
+        )}
+      </section>
+    </div>
+  )
+}
+
+function PublicBenchmarkErrorRunCard({
+  errorRun,
+  onJump,
+}: {
+  errorRun: PublicBenchmarkErrorRun
+  onJump: () => void
+}) {
+  return (
+    <article className="grid gap-3 rounded-md border border-border bg-background/35 px-4 py-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-foreground">
+            {errorRun.deckName} / Sim {errorRun.simulationIndex} /{" "}
+            {errorRun.resultLabel}
+          </p>
+          <p className="mt-1 text-xs break-words text-muted-foreground">
+            {errorRun.simulationId}
+          </p>
+        </div>
+        <button
+          type="button"
+          className="inline-flex w-fit shrink-0 items-center gap-1 rounded-md border border-sky-300/35 bg-sky-400/10 px-2.5 py-1.5 text-xs font-medium text-sky-100 transition-colors hover:bg-sky-400/20 focus-visible:border-sky-300/50 focus-visible:ring-3 focus-visible:ring-sky-300/40 focus-visible:outline-none"
+          onClick={onJump}
+        >
+          <Eye className="size-3.5" aria-hidden />
+          View run
+        </button>
+      </div>
+      <PublicBenchmarkErrorRunErrorValue value={errorRun.errorMessage} />
+    </article>
+  )
+}
+
+function PublicBenchmarkErrorRunErrorValue({ value }: { value: string }) {
+  return (
+    <div className="grid gap-1 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2">
+      <p className="text-xs font-medium text-destructive">Error</p>
+      <p className="text-sm break-words whitespace-pre-wrap text-destructive">
+        {value.trim() || "Failed run did not include an error message."}
+      </p>
+    </div>
+  )
+}
+
 function PublicBenchmarkFailedEvaluationsPanel({
   failedEvaluations,
   isLoading,
@@ -1977,7 +2260,9 @@ function PublicBenchmarkFailedEvaluationsPanel({
     <div className="simulation-scrollbar h-full min-h-0 overflow-y-auto p-5">
       <section className="mx-auto grid w-full max-w-5xl gap-4">
         <div className="grid gap-1">
-          <h2 className="text-lg font-semibold text-foreground">Failed runs</h2>
+          <h2 className="text-lg font-semibold text-foreground">
+            Evaluation fails
+          </h2>
           <p className="text-sm text-muted-foreground">
             Legal or strategic failures sorted by score.
           </p>
@@ -1993,7 +2278,7 @@ function PublicBenchmarkFailedEvaluationsPanel({
           </div>
         ) : isLoading && failedEvaluations === null ? (
           <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
-            Loading failed evaluations...
+            Loading evaluation fails...
           </p>
         ) : failedEvaluations && failedEvaluations.length > 0 ? (
           <div className="grid gap-3">
@@ -6724,6 +7009,12 @@ function isPublicBenchmarkFailedEvaluationsExport(
   return Array.isArray(value) && value.every(isPublicBenchmarkFailedEvaluation)
 }
 
+function isPublicBenchmarkErrorRunsExport(
+  value: unknown
+): value is PublicBenchmarkErrorRun[] {
+  return Array.isArray(value) && value.every(isPublicBenchmarkErrorRun)
+}
+
 function isPublicBenchmarkFailedEvaluation(
   value: unknown
 ): value is PublicBenchmarkFailedEvaluation {
@@ -6755,6 +7046,39 @@ function isPublicBenchmarkFailedEvaluation(
     isNullableString(record.simulationQualityScoreReasoning) &&
     isStringArray(record.illegalActions) &&
     isStringArray(record.strategicMistakes)
+  )
+}
+
+function isPublicBenchmarkErrorRun(
+  value: unknown
+): value is PublicBenchmarkErrorRun {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false
+  }
+
+  const record = value as Record<string, unknown>
+
+  return (
+    typeof record.simulationId === "string" &&
+    typeof record.deckId === "string" &&
+    typeof record.deckName === "string" &&
+    Number.isInteger(record.deckIndex) &&
+    Number.isInteger(record.simulationIndex) &&
+    typeof record.seed === "string" &&
+    typeof record.filePath === "string" &&
+    typeof record.targetLlmRunId === "string" &&
+    (record.targetRunPhase === "opening_hand" ||
+      record.targetRunPhase === "turn") &&
+    (record.turnNumber === null ||
+      (typeof record.turnNumber === "number" &&
+        Number.isInteger(record.turnNumber) &&
+        record.turnNumber >= 0)) &&
+    typeof record.resultLabel === "string" &&
+    isPublicBenchmarkPositiveInteger(record.attemptNumber) &&
+    isPublicBenchmarkLlmRunStatus(record.runStatus) &&
+    isPublicBenchmarkRunResultStatus(record.resultStatus) &&
+    isPublicBenchmarkErrorRunKind(record.errorKind) &&
+    typeof record.errorMessage === "string"
   )
 }
 
@@ -6847,12 +7171,41 @@ function isPublicBenchmarkSimulationStatus(value: unknown) {
   )
 }
 
+function isPublicBenchmarkLlmRunStatus(value: unknown) {
+  return (
+    value === "pending" ||
+    value === "batch_pending" ||
+    value === "batch_submitted" ||
+    value === "streaming" ||
+    value === "completed" ||
+    value === "failed" ||
+    value === "cancel_requested" ||
+    value === "cancelled"
+  )
+}
+
+function isPublicBenchmarkRunResultStatus(value: unknown) {
+  return value === "pending" || value === "completed" || value === "failed"
+}
+
+function isPublicBenchmarkErrorRunKind(value: unknown) {
+  return (
+    value === "llm_run_failed" ||
+    value === "result_failed" ||
+    value === "invalid_output"
+  )
+}
+
 function isOptionalPublicBenchmarkNonnegativeInteger(value: unknown) {
   return value === undefined || isPublicBenchmarkNonnegativeInteger(value)
 }
 
 function isPublicBenchmarkNonnegativeInteger(value: unknown) {
   return typeof value === "number" && Number.isInteger(value) && value >= 0
+}
+
+function isPublicBenchmarkPositiveInteger(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0
 }
 
 function isOptionalNullablePublicBenchmarkNumber(value: unknown) {
@@ -7012,6 +7365,40 @@ function getSelectedPublicBenchmarkSimulationEntry(
   )
 }
 
+function sortPublicBenchmarkErrorRuns(
+  errorRuns: readonly PublicBenchmarkErrorRun[]
+) {
+  return [...errorRuns].sort(comparePublicBenchmarkErrorRuns)
+}
+
+function comparePublicBenchmarkErrorRuns(
+  first: PublicBenchmarkErrorRun,
+  second: PublicBenchmarkErrorRun
+) {
+  return (
+    getPublicBenchmarkErrorRunSortOrder(first.errorKind) -
+      getPublicBenchmarkErrorRunSortOrder(second.errorKind) ||
+    first.deckIndex - second.deckIndex ||
+    first.simulationIndex - second.simulationIndex ||
+    getPublicBenchmarkRunPhaseSortOrder(first.targetRunPhase) -
+      getPublicBenchmarkRunPhaseSortOrder(second.targetRunPhase) ||
+    (first.turnNumber ?? 0) - (second.turnNumber ?? 0) ||
+    first.targetLlmRunId.localeCompare(second.targetLlmRunId)
+  )
+}
+
+function getPublicBenchmarkErrorRunSortOrder(
+  errorKind: PublicBenchmarkErrorRun["errorKind"]
+) {
+  return errorKind === "result_failed" ? 0 : 1
+}
+
+function getPublicBenchmarkRunPhaseSortOrder(
+  phase: PublicBenchmarkErrorRun["targetRunPhase"]
+) {
+  return phase === "opening_hand" ? 0 : 1
+}
+
 function formatPublicBenchmarkSimulationLabel(
   simulation: PublicBenchmarkSimulationIndexEntry
 ) {
@@ -7081,6 +7468,16 @@ function pushPublicBenchmarkFailedEvaluationsSearch() {
   updateWindowHistoryUrl(url, "push")
 }
 
+function pushPublicBenchmarkErrorRunsSearch() {
+  const url = new URL(window.location.href)
+
+  url.searchParams.set("view", "error-runs")
+  url.searchParams.delete("simulation")
+  url.searchParams.delete("run")
+  url.searchParams.delete("turn")
+  updateWindowHistoryUrl(url, "push")
+}
+
 function pushPublicBenchmarkResultsSearch() {
   const url = new URL(window.location.href)
 
@@ -7122,12 +7519,11 @@ function updatePublicBenchmarkSimulationSearch(
   updateWindowHistoryUrl(url, mode)
 }
 
-function getPublicBenchmarkFailedEvaluationTimelineTurn(
-  evaluation: PublicBenchmarkFailedEvaluation
-) {
-  return evaluation.targetRunPhase === "opening_hand"
-    ? 0
-    : (evaluation.turnNumber ?? 0)
+function getPublicBenchmarkRunTimelineTurn(run: {
+  targetRunPhase: "opening_hand" | "turn"
+  turnNumber: number | null
+}) {
+  return run.targetRunPhase === "opening_hand" ? 0 : (run.turnNumber ?? 0)
 }
 
 function updateWindowHistoryUrl(url: URL, mode: "push" | "replace") {
