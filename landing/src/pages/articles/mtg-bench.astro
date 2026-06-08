@@ -58,21 +58,11 @@ const date = "June 7, 2026"
             <span>(higher is better)</span>
           </h2>
           <div
-            class="benchmark-score-chart benchmark-score-chart-loading"
+            class="benchmark-score-chart"
             data-mtg-bench-score-chart
             role="group"
             aria-label="MTG Auto Deck benchmark scores"
-            aria-busy="true"
-          >
-            <div
-              class="benchmark-score-loading"
-              role="status"
-              aria-live="polite"
-            >
-              <span class="benchmark-score-spinner" aria-hidden="true"></span>
-              <span>Loading benchmark results...</span>
-            </div>
-          </div>
+          ></div>
         </section>
 
         <section class="benchmark-chart-section">
@@ -81,21 +71,11 @@ const date = "June 7, 2026"
             <span>(lower is better)</span>
           </h2>
           <div
-            class="benchmark-score-chart benchmark-score-chart-loading"
+            class="benchmark-score-chart"
             data-mtg-bench-reasoning-chart
             role="group"
             aria-label="Reasoning tokens per turn by benchmark, lower is better"
-            aria-busy="true"
-          >
-            <div
-              class="benchmark-score-loading"
-              role="status"
-              aria-live="polite"
-            >
-              <span class="benchmark-score-spinner" aria-hidden="true"></span>
-              <span>Loading benchmark results...</span>
-            </div>
-          </div>
+          ></div>
         </section>
 
         <section class="benchmark-chart-section">
@@ -103,21 +83,11 @@ const date = "June 7, 2026"
             Cost per attempted turn vs score
           </h2>
           <div
-            class="benchmark-scatter-chart benchmark-score-chart-loading"
+            class="benchmark-scatter-chart"
             data-mtg-bench-cost-score-chart
             role="group"
             aria-label="Cost per attempted turn from $0.00 to $0.20 versus MTG Auto Deck score from 0 to 100"
-            aria-busy="true"
-          >
-            <div
-              class="benchmark-score-loading"
-              role="status"
-              aria-live="polite"
-            >
-              <span class="benchmark-score-spinner" aria-hidden="true"></span>
-              <span>Loading benchmark results...</span>
-            </div>
-          </div>
+          ></div>
         </section>
 
         <div class="article-body">
@@ -155,34 +125,37 @@ const date = "June 7, 2026"
 </html>
 
 <script>
+  import mtgBenchResultsData from "../../data/mtg-bench-results.json"
+
   type MtgBenchResultEntry = {
     benchmarkId: string
-    url: string
-    data: unknown
+    publicBenchmarkUrl: string
+    model: string | null
+    providerKey: string | null
+    reasoningEffort: string | null
+    mtgAutoDeckScore: number | null
+    reasoningTokensPerAttemptedTurn: number | null
+    displayedCostPerAttemptedTurn: number | null
   }
 
-  type MtgBenchResultsState =
-    | {
-        status: "loading"
-        benchmarkIds: string[]
-      }
-    | {
-        status: "loaded"
-        benchmarkIds: string[]
-        results: MtgBenchResultEntry[]
-        resultsByBenchmarkId: Record<string, MtgBenchResultEntry>
-        loadedAt: string
-      }
-    | {
-        status: "error"
-        benchmarkIds: string[]
-        error: {
-          message: string
-        }
-      }
+  type MtgBenchResultsData = {
+    schemaVersion: number
+    generatedAt: string
+    benchmarks: MtgBenchResultEntry[]
+  }
+
+  type MtgBenchResultsState = {
+    status: "loaded"
+    schemaVersion: number
+    benchmarkIds: string[]
+    results: MtgBenchResultEntry[]
+    resultsByBenchmarkId: Record<string, MtgBenchResultEntry>
+    loadedAt: string
+  }
 
   type MtgBenchMetricBar = {
     benchmarkId: string
+    publicBenchmarkUrl: string
     labelLineOne: string
     labelLineTwo: string
     metricAriaLabel: string
@@ -194,6 +167,7 @@ const date = "June 7, 2026"
 
   type MtgBenchScatterPoint = {
     benchmarkId: string
+    publicBenchmarkUrl: string
     costPerAttemptedTurn: number
     costLabel: string
     modelLabel: string
@@ -254,32 +228,18 @@ const date = "June 7, 2026"
       logoSrc: "/xai.svg",
     },
   }
-  const mtgBenchProviderAliases: Record<string, string> = {
-    qwen: "alibaba",
-    "x-ai": "xai",
-  }
-
-  const mtgBenchResultsBaseUrl = "https://data.mtgautodeck.com/benchmarks"
-  const mtgBenchPublicBenchmarkBaseUrl =
-    "https://app.mtgautodeck.com/public/benchmarks"
   const mtgBenchScatterMaxCostUsd = 0.2
   const mtgBenchScatterCostTicks = [0, 0.05, 0.1, 0.15, 0.2]
   const mtgBenchScatterScoreTicks = [0, 25, 50, 75, 100]
-  const mtgBenchBenchmarkIds = [
-    "23c6ab87-5419-4bfd-a281-740b2384a5b8",
-    "3947a331-f7c9-4697-abda-a8b6ccf9a91f",
-    "2f984f51-3a2f-45db-b87b-ed7edfea8027",
-    "79d1ed51-ca1d-4783-a71c-66e46af6e718",
-    "4bd9955b-ebe1-4fe1-bb87-52d5111c4025",
-    "6349dda2-4069-4825-971e-8c11234260c4",
-    "c289c85f-051f-43d2-a9d0-5cddabb0d8f4",
-    "b7403939-7686-4b2a-88ab-92208ff80220",
-    "0b5b448b-d276-461b-85ea-542593639e35",
-    "c36e6599-dccc-4e4d-86cd-3b5fc5b4497e",
-    "9c7fee4d-9408-4dca-b1e2-50879fa45a1e",
-    "dcc18bd8-339d-458a-a94d-28385ca525c7",
-    "ef00418d-ab60-4efb-94a1-2756ae2a6348",
-  ]
+  const mtgBenchResultsPayload =
+    mtgBenchResultsData as MtgBenchResultsData
+  const mtgBenchResults = mtgBenchResultsPayload.benchmarks
+  const mtgBenchBenchmarkIds = mtgBenchResults.map(
+    (result) => result.benchmarkId
+  )
+  const mtgBenchResultsByBenchmarkId = Object.fromEntries(
+    mtgBenchResults.map((result) => [result.benchmarkId, result])
+  ) as Record<string, MtgBenchResultEntry>
   const mtgBenchWindow = window as Window & {
     mtgBenchResults: MtgBenchResultsState
   }
@@ -294,101 +254,46 @@ const date = "June 7, 2026"
   )
 
   mtgBenchWindow.mtgBenchResults = {
-    status: "loading",
+    status: "loaded",
+    schemaVersion: mtgBenchResultsPayload.schemaVersion,
     benchmarkIds: [...mtgBenchBenchmarkIds],
+    results: mtgBenchResults,
+    resultsByBenchmarkId: mtgBenchResultsByBenchmarkId,
+    loadedAt: mtgBenchResultsPayload.generatedAt,
   }
 
-  void loadMtgBenchResults()
-
-  async function loadMtgBenchResults() {
-    try {
-      const results = await Promise.all(
-        mtgBenchBenchmarkIds.map(fetchMtgBenchResult)
-      )
-      const resultsByBenchmarkId = Object.fromEntries(
-        results.map((result) => [result.benchmarkId, result])
-      )
-
-      mtgBenchWindow.mtgBenchResults = {
-        status: "loaded",
-        benchmarkIds: [...mtgBenchBenchmarkIds],
-        results,
-        resultsByBenchmarkId,
-        loadedAt: new Date().toISOString(),
-      }
-      renderMtgBenchMetricChart(
-        mtgBenchScoreChart,
-        buildMtgBenchScoreBars(results)
-      )
-      renderMtgBenchMetricChart(
-        mtgBenchReasoningChart,
-        buildMtgBenchReasoningTokenBars(results)
-      )
-      renderMtgBenchScatterChart(
-        mtgBenchCostScoreChart,
-        buildMtgBenchCostScorePoints(results)
-      )
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Benchmark results could not be loaded."
-
-      mtgBenchWindow.mtgBenchResults = {
-        status: "error",
-        benchmarkIds: [...mtgBenchBenchmarkIds],
-        error: {
-          message,
-        },
-      }
-      renderMtgBenchMetricChart(mtgBenchScoreChart, [])
-      renderMtgBenchMetricChart(mtgBenchReasoningChart, [])
-      renderMtgBenchScatterChart(mtgBenchCostScoreChart, [])
-      window.alert("Benchmark results could not be loaded. Please try again.")
-    }
-  }
-
-  async function fetchMtgBenchResult(
-    benchmarkId: string
-  ): Promise<MtgBenchResultEntry> {
-    const url = `${mtgBenchResultsBaseUrl}/${encodeURIComponent(
-      benchmarkId
-    )}/results.json`
-    const response = await fetch(url)
-
-    if (!response.ok) {
-      throw new Error(
-        `Benchmark results request failed for ${benchmarkId}: ${response.status} ${response.statusText}`
-      )
-    }
-
-    return {
-      benchmarkId,
-      url,
-      data: await response.json(),
-    }
-  }
+  renderMtgBenchMetricChart(
+    mtgBenchScoreChart,
+    buildMtgBenchScoreBars(mtgBenchResults)
+  )
+  renderMtgBenchMetricChart(
+    mtgBenchReasoningChart,
+    buildMtgBenchReasoningTokenBars(mtgBenchResults)
+  )
+  renderMtgBenchScatterChart(
+    mtgBenchCostScoreChart,
+    buildMtgBenchCostScorePoints(mtgBenchResults)
+  )
 
   function buildMtgBenchScoreBars(results: readonly MtgBenchResultEntry[]) {
     return results
       .map((result) => {
         const labelLines = buildMtgBenchLabelLines(
-          getMtgBenchModelLabel(result.data),
-          getMtgBenchReasoningEffortLabel(result.data)
+          getMtgBenchModelLabel(result),
+          getMtgBenchReasoningEffortLabel(result)
         )
+        const score = getMtgBenchScore(result)
 
         return {
           benchmarkId: result.benchmarkId,
+          publicBenchmarkUrl: result.publicBenchmarkUrl,
           labelLineOne: labelLines[0],
           labelLineTwo: labelLines[1],
           metricAriaLabel: "MTG Auto Deck score, higher is better",
-          providerMatch: getMtgBenchProviderMatch(result.data),
-          value: getMtgBenchScore(result.data),
-          valueLabel: formatMtgBenchBarScore(getMtgBenchScore(result.data)),
-          heightPercent: Math.max(
-            0,
-            Math.min(getMtgBenchScore(result.data) ?? 0, 100)
-          ),
+          providerMatch: getMtgBenchProviderMatch(result),
+          value: score,
+          valueLabel: formatMtgBenchBarScore(score),
+          heightPercent: Math.max(0, Math.min(score ?? 0, 100)),
         }
       })
       .sort(compareMtgBenchScoreBars)
@@ -400,24 +305,25 @@ const date = "June 7, 2026"
     const maxReasoningTokens = Math.max(
       0,
       ...results
-        .map((result) => getMtgBenchReasoningTokensPerTurn(result.data))
+        .map((result) => getMtgBenchReasoningTokensPerTurn(result))
         .filter((value): value is number => value !== null)
     )
 
     return results
       .map((result) => {
-        const reasoningTokens = getMtgBenchReasoningTokensPerTurn(result.data)
+        const reasoningTokens = getMtgBenchReasoningTokensPerTurn(result)
         const labelLines = buildMtgBenchLabelLines(
-          getMtgBenchModelLabel(result.data),
-          getMtgBenchReasoningEffortLabel(result.data)
+          getMtgBenchModelLabel(result),
+          getMtgBenchReasoningEffortLabel(result)
         )
 
         return {
           benchmarkId: result.benchmarkId,
+          publicBenchmarkUrl: result.publicBenchmarkUrl,
           labelLineOne: labelLines[0],
           labelLineTwo: labelLines[1],
           metricAriaLabel: "Reasoning tokens per turn, lower is better",
-          providerMatch: getMtgBenchProviderMatch(result.data),
+          providerMatch: getMtgBenchProviderMatch(result),
           value: reasoningTokens,
           valueLabel: formatMtgBenchBarTokenRate(reasoningTokens),
           heightPercent:
@@ -433,8 +339,8 @@ const date = "June 7, 2026"
     results: readonly MtgBenchResultEntry[]
   ) {
     return results.flatMap((result) => {
-      const costPerAttemptedTurn = getMtgBenchCostPerAttemptedTurn(result.data)
-      const score = getMtgBenchScore(result.data)
+      const costPerAttemptedTurn = getMtgBenchCostPerAttemptedTurn(result)
+      const score = getMtgBenchScore(result)
 
       if (costPerAttemptedTurn === null || score === null) {
         return []
@@ -443,13 +349,14 @@ const date = "June 7, 2026"
       return [
         {
           benchmarkId: result.benchmarkId,
+          publicBenchmarkUrl: result.publicBenchmarkUrl,
           costPerAttemptedTurn,
           costLabel: formatMtgBenchScatterCostTick(costPerAttemptedTurn),
-          modelLabel: getMtgBenchModelLabel(result.data),
-          reasoningEffortLabel: getMtgBenchReasoningEffortLabel(result.data),
+          modelLabel: getMtgBenchModelLabel(result),
+          reasoningEffortLabel: getMtgBenchReasoningEffortLabel(result),
           score,
           scoreLabel: formatMtgBenchBarScore(score),
-          providerMatch: getMtgBenchProviderMatch(result.data),
+          providerMatch: getMtgBenchProviderMatch(result),
         },
       ]
     })
@@ -485,8 +392,6 @@ const date = "June 7, 2026"
       return
     }
 
-    chart.classList.remove("benchmark-score-chart-loading")
-    chart.removeAttribute("aria-busy")
     chart.replaceChildren(
       ...metricBars.map((metricBar) => {
         const column = document.createElement("a")
@@ -499,9 +404,7 @@ const date = "June 7, 2026"
         const reasoningEffortLabel = document.createElement("span")
 
         column.className = "benchmark-score-column"
-        column.href = `${mtgBenchPublicBenchmarkBaseUrl}/${encodeURIComponent(
-          metricBar.benchmarkId
-        )}`
+        column.href = metricBar.publicBenchmarkUrl
         column.rel = "noreferrer noopener"
         column.target = "_blank"
         column.setAttribute(
@@ -613,9 +516,7 @@ const date = "June 7, 2026"
         } else if (costPercent > 72) {
           dot.classList.add("benchmark-scatter-point-left")
         }
-        dot.href = `${mtgBenchPublicBenchmarkBaseUrl}/${encodeURIComponent(
-          point.benchmarkId
-        )}`
+        dot.href = point.publicBenchmarkUrl
         dot.rel = "noreferrer noopener"
         dot.target = "_blank"
         dot.setAttribute(
@@ -660,27 +561,17 @@ const date = "June 7, 2026"
     plot.append(pointLayer, ...yTickLabels, ...xTickLabels, xAxisLabel)
     layout.append(yAxisLabel, plot)
 
-    chart.classList.remove("benchmark-score-chart-loading")
-    chart.removeAttribute("aria-busy")
     chart.replaceChildren(layout)
   }
 
-  function getMtgBenchScore(data: unknown) {
-    if (!isRecord(data) || !isRecord(data.resultMetrics)) {
-      return null
-    }
-
-    const score = data.resultMetrics.mtgAutoDeckScore
+  function getMtgBenchScore(result: MtgBenchResultEntry) {
+    const score = result.mtgAutoDeckScore
 
     return typeof score === "number" && Number.isFinite(score) ? score : null
   }
 
-  function getMtgBenchReasoningTokensPerTurn(data: unknown) {
-    if (!isRecord(data) || !isRecord(data.resultMetrics)) {
-      return null
-    }
-
-    const reasoningTokens = data.resultMetrics.reasoningTokensPerAttemptedTurn
+  function getMtgBenchReasoningTokensPerTurn(result: MtgBenchResultEntry) {
+    const reasoningTokens = result.reasoningTokensPerAttemptedTurn
 
     return typeof reasoningTokens === "number" &&
       Number.isFinite(reasoningTokens)
@@ -688,12 +579,8 @@ const date = "June 7, 2026"
       : null
   }
 
-  function getMtgBenchCostPerAttemptedTurn(data: unknown) {
-    if (!isRecord(data) || !isRecord(data.resultMetrics)) {
-      return null
-    }
-
-    const costPerAttemptedTurn = data.resultMetrics.costPerAttemptedTurn
+  function getMtgBenchCostPerAttemptedTurn(result: MtgBenchResultEntry) {
+    const costPerAttemptedTurn = result.displayedCostPerAttemptedTurn
 
     if (
       typeof costPerAttemptedTurn !== "number" ||
@@ -702,74 +589,20 @@ const date = "June 7, 2026"
       return null
     }
 
-    return isMtgBenchDiscountedCost(data)
-      ? roundMtgBenchDisplayCost(costPerAttemptedTurn * 2)
-      : costPerAttemptedTurn
+    return costPerAttemptedTurn
   }
 
-  function isMtgBenchDiscountedCost(data: unknown) {
-    if (!isRecord(data) || !isRecord(data.benchmark)) {
-      return false
-    }
-
-    const llmProcessingMode = data.benchmark.llmProcessingMode
-
-    if (
-      typeof llmProcessingMode === "string" &&
-      llmProcessingMode !== "realtime"
-    ) {
-      return true
-    }
-
-    return data.benchmark.useFlexServiceTier === true
-  }
-
-  function getMtgBenchProviderMatch(data: unknown) {
-    const providerKey = getMtgBenchProviderKey(data)
+  function getMtgBenchProviderMatch(result: MtgBenchResultEntry) {
+    const providerKey =
+      typeof result.providerKey === "string"
+        ? result.providerKey.trim().toLowerCase()
+        : ""
 
     return providerKey ? (mtgBenchProviderMatches[providerKey] ?? null) : null
   }
 
-  function getMtgBenchProviderKey(data: unknown) {
-    if (!isRecord(data) || !isRecord(data.benchmark)) {
-      return null
-    }
-
-    const provider = data.benchmark.llmModelPresetProvider
-
-    if (typeof provider !== "string") {
-      return null
-    }
-
-    const normalizedProvider = normalizeMtgBenchProviderKey(provider)
-
-    if (normalizedProvider !== "openrouter") {
-      return normalizedProvider
-    }
-
-    const model = data.benchmark.llmModelPresetModel
-
-    if (typeof model !== "string") {
-      return normalizedProvider
-    }
-
-    const modelProvider = model.trim().split("/")[0]
-
-    return normalizeMtgBenchProviderKey(modelProvider) || normalizedProvider
-  }
-
-  function normalizeMtgBenchProviderKey(provider: string) {
-    const normalizedProvider = provider.trim().toLowerCase()
-
-    return mtgBenchProviderAliases[normalizedProvider] ?? normalizedProvider
-  }
-
-  function getMtgBenchModelLabel(data: unknown) {
-    if (!isRecord(data) || !isRecord(data.benchmark)) {
-      return "-"
-    }
-
-    const model = data.benchmark.llmModelPresetModel
+  function getMtgBenchModelLabel(result: MtgBenchResultEntry) {
+    const model = result.model
 
     if (typeof model !== "string") {
       return "-"
@@ -788,12 +621,8 @@ const date = "June 7, 2026"
     return modelWithoutProvider.trim() || trimmedModel
   }
 
-  function getMtgBenchReasoningEffortLabel(data: unknown) {
-    if (!isRecord(data) || !isRecord(data.benchmark)) {
-      return "-"
-    }
-
-    const reasoningEffort = data.benchmark.llmModelPresetReasoningEffort
+  function getMtgBenchReasoningEffortLabel(result: MtgBenchResultEntry) {
+    const reasoningEffort = result.reasoningEffort
 
     return typeof reasoningEffort === "string" && reasoningEffort.trim()
       ? reasoningEffort.trim().replaceAll("_", " ")
@@ -861,14 +690,6 @@ const date = "June 7, 2026"
 
   function formatMtgBenchScatterCostTick(costUsd: number) {
     return `$${costUsd.toFixed(2)}`
-  }
-
-  function roundMtgBenchDisplayCost(costUsd: number) {
-    return Math.round(costUsd * 1_000_000_000) / 1_000_000_000
-  }
-
-  function isRecord(value: unknown): value is Record<string, unknown> {
-    return Boolean(value) && typeof value === "object" && !Array.isArray(value)
   }
 </script>
 
@@ -1154,15 +975,6 @@ const date = "June 7, 2026"
     content: "";
   }
 
-  .benchmark-score-chart-loading {
-    align-items: center;
-    justify-content: center;
-  }
-
-  .benchmark-score-chart-loading::after {
-    content: none;
-  }
-
   .benchmark-scatter-chart {
     position: relative;
     display: flex;
@@ -1380,34 +1192,6 @@ const date = "June 7, 2026"
   :global(.benchmark-scatter-x-tick) {
     bottom: -1.35rem;
     transform: translateX(-50%);
-  }
-
-  :global(.benchmark-score-loading) {
-    position: relative;
-    z-index: 1;
-    display: flex;
-    align-items: center;
-    gap: 0.85rem;
-    color: var(--muted);
-    font-size: 0.95rem;
-    font-weight: 800;
-    text-align: center;
-  }
-
-  :global(.benchmark-score-spinner) {
-    width: 1.45rem;
-    height: 1.45rem;
-    flex: 0 0 auto;
-    border: 3px solid rgba(125, 211, 252, 0.22);
-    border-top-color: var(--accent-strong);
-    border-radius: 999px;
-    animation: benchmark-score-spin 800ms linear infinite;
-  }
-
-  @keyframes benchmark-score-spin {
-    to {
-      transform: rotate(360deg);
-    }
   }
 
   :global(.benchmark-score-column) {

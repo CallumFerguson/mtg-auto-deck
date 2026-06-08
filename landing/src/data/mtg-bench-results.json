@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-06-08T21:59:03.2960404Z",
+  "benchmarks": [
+    {
+      "benchmarkId": "23c6ab87-5419-4bfd-a281-740b2384a5b8",
+      "publicBenchmarkUrl": "https://app.mtgautodeck.com/public/benchmarks/23c6ab87-5419-4bfd-a281-740b2384a5b8",
+      "model": "gpt-5.4-nano",
+      "providerKey": "openai",
+      "reasoningEffort": "medium",
+      "mtgAutoDeckScore": 68.2,
+      "reasoningTokensPerAttemptedTurn": 5000.2,
+      "displayedCostPerAttemptedTurn": 0.008906628
+    },
+    {
+      "benchmarkId": "3947a331-f7c9-4697-abda-a8b6ccf9a91f",
+      "publicBenchmarkUrl": "https://app.mtgautodeck.com/public/benchmarks/3947a331-f7c9-4697-abda-a8b6ccf9a91f",
+      "model": "gpt-5.4-mini",
+      "providerKey": "openai",
+      "reasoningEffort": "medium",
+      "mtgAutoDeckScore": 60.1,
+      "reasoningTokensPerAttemptedTurn": 4884.4,
+      "displayedCostPerAttemptedTurn": 0.0292402
+    },
+    {
+      "benchmarkId": "2f984f51-3a2f-45db-b87b-ed7edfea8027",
+      "publicBenchmarkUrl": "https://app.mtgautodeck.com/public/benchmarks/2f984f51-3a2f-45db-b87b-ed7edfea8027",
+      "model": "gpt-5.4",
+      "providerKey": "openai",
+      "reasoningEffort": "medium",
+      "mtgAutoDeckScore": 88.6,
+      "reasoningTokensPerAttemptedTurn": 2691,
+      "displayedCostPerAttemptedTurn": 0.063301584
+    },
+    {
+      "benchmarkId": "79d1ed51-ca1d-4783-a71c-66e46af6e718",
+      "publicBenchmarkUrl": "https://app.mtgautodeck.com/public/benchmarks/79d1ed51-ca1d-4783-a71c-66e46af6e718",
+      "model": "gpt-5.5",
+      "providerKey": "openai",
+      "reasoningEffort": "low",
+      "mtgAutoDeckScore": 84.5,
+      "reasoningTokensPerAttemptedTurn": 419.1,
+      "displayedCostPerAttemptedTurn": 0.05797648
+    },
+    {
+      "benchmarkId": "4bd9955b-ebe1-4fe1-bb87-52d5111c4025",
+      "publicBenchmarkUrl": "https://app.mtgautodeck.com/public/benchmarks/4bd9955b-ebe1-4fe1-bb87-52d5111c4025",
+      "model": "gpt-5.5",
+      "providerKey": "openai",
+      "reasoningEffort": "medium",
+      "mtgAutoDeckScore": 95.4,
+      "reasoningTokensPerAttemptedTurn": 1604.6,
+      "displayedCostPerAttemptedTurn": 0.09638937
+    },
+    {
+      "benchmarkId": "6349dda2-4069-4825-971e-8c11234260c4",
+      "publicBenchmarkUrl": "https://app.mtgautodeck.com/public/benchmarks/6349dda2-4069-4825-971e-8c11234260c4",
+      "model": "claude-opus-4-8",
+      "providerKey": "anthropic",
+      "reasoningEffort": "low",
+      "mtgAutoDeckScore": 26.6,
+      "reasoningTokensPerAttemptedTurn": 1596.7,
+      "displayedCostPerAttemptedTurn": 0.175298306
+    },
+    {
+      "benchmarkId": "c289c85f-051f-43d2-a9d0-5cddabb0d8f4",
+      "publicBenchmarkUrl": "https://app.mtgautodeck.com/public/benchmarks/c289c85f-051f-43d2-a9d0-5cddabb0d8f4",
+      "model": "claude-opus-4-8",
+      "providerKey": "anthropic",
+      "reasoningEffort": "medium",
+      "mtgAutoDeckScore": 39.8,
+      "reasoningTokensPerAttemptedTurn": 2729.7,
+      "displayedCostPerAttemptedTurn": 0.190698374
+    },
+    {
+      "benchmarkId": "b7403939-7686-4b2a-88ab-92208ff80220",
+      "publicBenchmarkUrl": "https://app.mtgautodeck.com/public/benchmarks/b7403939-7686-4b2a-88ab-92208ff80220",
+      "model": "google/gemini-3.1-pro-preview",
+      "providerKey": "google",
+      "reasoningEffort": "medium",
+      "mtgAutoDeckScore": 79.6,
+      "reasoningTokensPerAttemptedTurn": 1724.4,
+      "displayedCostPerAttemptedTurn": 0.083696607
+    },
+    {
+      "benchmarkId": "0b5b448b-d276-461b-85ea-542593639e35",
+      "publicBenchmarkUrl": "https://app.mtgautodeck.com/public/benchmarks/0b5b448b-d276-461b-85ea-542593639e35",
+      "model": "google/gemini-3.5-flash",
+      "providerKey": "google",
+      "reasoningEffort": "medium",
+      "mtgAutoDeckScore": 85.7,
+      "reasoningTokensPerAttemptedTurn": 5080.3,
+      "displayedCostPerAttemptedTurn": 0.092845087
+    },
+    {
+      "benchmarkId": "c36e6599-dccc-4e4d-86cd-3b5fc5b4497e",
+      "publicBenchmarkUrl": "https://app.mtgautodeck.com/public/benchmarks/c36e6599-dccc-4e4d-86cd-3b5fc5b4497e",
+      "model": "x-ai/grok-4.3",
+      "providerKey": "xai",
+      "reasoningEffort": "medium",
+      "mtgAutoDeckScore": 59.7,
+      "reasoningTokensPerAttemptedTurn": 1988.8,
+      "displayedCostPerAttemptedTurn": 0.020383871
+    },
+    {
+      "benchmarkId": "9c7fee4d-9408-4dca-b1e2-50879fa45a1e",
+      "publicBenchmarkUrl": "https://app.mtgautodeck.com/public/benchmarks/9c7fee4d-9408-4dca-b1e2-50879fa45a1e",
+      "model": "deepseek/deepseek-v4-pro",
+      "providerKey": "deepseek",
+      "reasoningEffort": "high",
+      "mtgAutoDeckScore": 12.8,
+      "reasoningTokensPerAttemptedTurn": 1469.8,
+      "displayedCostPerAttemptedTurn": 0.004184916
+    },
+    {
+      "benchmarkId": "dcc18bd8-339d-458a-a94d-28385ca525c7",
+      "publicBenchmarkUrl": "https://app.mtgautodeck.com/public/benchmarks/dcc18bd8-339d-458a-a94d-28385ca525c7",
+      "model": "moonshotai/kimi-k2.6",
+      "providerKey": "moonshotai",
+      "reasoningEffort": "medium",
+      "mtgAutoDeckScore": 43,
+      "reasoningTokensPerAttemptedTurn": 6131.1,
+      "displayedCostPerAttemptedTurn": 0.03312871
+    },
+    {
+      "benchmarkId": "ef00418d-ab60-4efb-94a1-2756ae2a6348",
+      "publicBenchmarkUrl": "https://app.mtgautodeck.com/public/benchmarks/ef00418d-ab60-4efb-94a1-2756ae2a6348",
+      "model": "qwen/qwen3.7-max",
+      "providerKey": "alibaba",
+      "reasoningEffort": "medium",
+      "mtgAutoDeckScore": 60.9,
+      "reasoningTokensPerAttemptedTurn": 6614.2,
+      "displayedCostPerAttemptedTurn": 0.071499755
+    }
+  ]
+}
