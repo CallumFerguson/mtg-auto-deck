@@ -53,11 +53,17 @@ const date = "June 7, 2026"
         <p class="article-date">{date}</p>
 
         <div
-          class="benchmark-score-chart"
+          class="benchmark-score-chart benchmark-score-chart-loading"
           data-mtg-bench-score-chart
           role="group"
           aria-label="MTG Auto Deck benchmark scores"
-        ></div>
+          aria-busy="true"
+        >
+          <div class="benchmark-score-loading" role="status" aria-live="polite">
+            <span class="benchmark-score-spinner" aria-hidden="true"></span>
+            <span>Loading benchmark results...</span>
+          </div>
+        </div>
 
         <div class="article-body">
           <p>
@@ -307,6 +313,8 @@ const date = "June 7, 2026"
       return
     }
 
+    mtgBenchScoreChart.classList.remove("benchmark-score-chart-loading")
+    mtgBenchScoreChart.removeAttribute("aria-busy")
     mtgBenchScoreChart.replaceChildren(
       ...scoreBars.map((scoreBar) => {
         const column = document.createElement("a")
@@ -752,6 +760,43 @@ const date = "June 7, 2026"
     height: 1px;
     background: var(--border-strong);
     content: "";
+  }
+
+  .benchmark-score-chart-loading {
+    align-items: center;
+    justify-content: center;
+  }
+
+  .benchmark-score-chart-loading::after {
+    content: none;
+  }
+
+  :global(.benchmark-score-loading) {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    color: var(--muted);
+    font-size: 0.95rem;
+    font-weight: 800;
+    text-align: center;
+  }
+
+  :global(.benchmark-score-spinner) {
+    width: 1.45rem;
+    height: 1.45rem;
+    flex: 0 0 auto;
+    border: 3px solid rgba(125, 211, 252, 0.22);
+    border-top-color: var(--accent-strong);
+    border-radius: 999px;
+    animation: benchmark-score-spin 800ms linear infinite;
+  }
+
+  @keyframes benchmark-score-spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   :global(.benchmark-score-column) {
