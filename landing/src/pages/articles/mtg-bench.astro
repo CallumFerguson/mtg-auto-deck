@@ -136,7 +136,19 @@ const date = "June 7, 2026"
     mtgAutoDeckScore: number | null
     reasoningTokensPerAttemptedTurn: number | null
     displayedCostPerAttemptedTurn: number | null
+    scatterLabelPosition?: string | null
+    hideReasoningEffortOnScatterLabel?: boolean | null
   }
+
+  type MtgBenchScatterLabelPosition =
+    | "right"
+    | "left"
+    | "top"
+    | "bottom"
+    | "bottom-left"
+    | "bottom-right"
+    | "top-left"
+    | "top-right"
 
   type MtgBenchResultsData = {
     schemaVersion: number
@@ -172,6 +184,8 @@ const date = "June 7, 2026"
     costLabel: string
     modelLabel: string
     reasoningEffortLabel: string
+    labelPosition: MtgBenchScatterLabelPosition
+    hideReasoningEffortOnLabel: boolean
     score: number
     scoreLabel: string
     providerMatch: MtgBenchProviderMatch | null
@@ -231,6 +245,16 @@ const date = "June 7, 2026"
   const mtgBenchScatterMaxCostUsd = 0.2
   const mtgBenchScatterCostTicks = [0, 0.05, 0.1, 0.15, 0.2]
   const mtgBenchScatterScoreTicks = [0, 25, 50, 75, 100]
+  const mtgBenchScatterLabelPositions = new Set<string>([
+    "right",
+    "left",
+    "top",
+    "bottom",
+    "bottom-left",
+    "bottom-right",
+    "top-left",
+    "top-right",
+  ])
   const mtgBenchResultsPayload =
     mtgBenchResultsData as MtgBenchResultsData
   const mtgBenchResults = mtgBenchResultsPayload.benchmarks
@@ -354,6 +378,9 @@ const date = "June 7, 2026"
           costLabel: formatMtgBenchScatterCostTick(costPerAttemptedTurn),
           modelLabel: getMtgBenchModelLabel(result),
           reasoningEffortLabel: getMtgBenchReasoningEffortLabel(result),
+          labelPosition: getMtgBenchScatterLabelPosition(result),
+          hideReasoningEffortOnLabel:
+            getMtgBenchHideReasoningEffortOnScatterLabel(result),
           score,
           scoreLabel: formatMtgBenchBarScore(score),
           providerMatch: getMtgBenchProviderMatch(result),
@@ -502,6 +529,7 @@ const date = "June 7, 2026"
           point.costPerAttemptedTurn
         )
         const dot = document.createElement("a")
+        const pointLabel = document.createElement("span")
         const tooltip = document.createElement("span")
         const tooltipHeader = document.createElement("span")
         const tooltipTitle = document.createElement("span")
@@ -528,6 +556,10 @@ const date = "June 7, 2026"
         dot.style.backgroundColor =
           point.providerMatch?.barColor ?? "var(--accent-strong)"
 
+        pointLabel.className = `benchmark-scatter-point-label benchmark-scatter-point-label-${point.labelPosition}`
+        pointLabel.setAttribute("aria-hidden", "true")
+        pointLabel.textContent = getMtgBenchScatterPointLabel(point)
+
         tooltip.className = "benchmark-scatter-tooltip"
         tooltip.setAttribute("aria-hidden", "true")
         tooltipHeader.className = "benchmark-scatter-tooltip-header"
@@ -553,7 +585,7 @@ const date = "June 7, 2026"
         tooltipHeader.append(tooltipTitle)
         tooltipStats.append(scoreStat, costStat)
         tooltip.append(tooltipHeader, tooltipReasoning, tooltipStats)
-        dot.append(tooltip)
+        dot.append(pointLabel, tooltip)
 
         return dot
       })
@@ -590,6 +622,31 @@ const date = "June 7, 2026"
     }
 
     return costPerAttemptedTurn
+  }
+
+  function getMtgBenchScatterLabelPosition(
+    result: MtgBenchResultEntry
+  ): MtgBenchScatterLabelPosition {
+    const labelPosition =
+      typeof result.scatterLabelPosition === "string"
+        ? result.scatterLabelPosition.trim().toLowerCase()
+        : ""
+
+    return mtgBenchScatterLabelPositions.has(labelPosition)
+      ? (labelPosition as MtgBenchScatterLabelPosition)
+      : "right"
+  }
+
+  function getMtgBenchHideReasoningEffortOnScatterLabel(
+    result: MtgBenchResultEntry
+  ) {
+    return result.hideReasoningEffortOnScatterLabel === true
+  }
+
+  function getMtgBenchScatterPointLabel(point: MtgBenchScatterPoint) {
+    return point.hideReasoningEffortOnLabel
+      ? point.modelLabel
+      : `${point.modelLabel} (${point.reasoningEffortLabel})`
   }
 
   function getMtgBenchProviderMatch(result: MtgBenchResultEntry) {
@@ -1044,6 +1101,65 @@ const date = "June 7, 2026"
 
   :global(.benchmark-scatter-point:focus-visible) {
     outline: 2px solid var(--accent-strong);
+  }
+
+  :global(.benchmark-scatter-point-label) {
+    --benchmark-scatter-label-gap: 0.38rem;
+    position: absolute;
+    display: block;
+    width: max-content;
+    max-width: none;
+    color: var(--text);
+    font-size: 0.68rem;
+    font-weight: 800;
+    line-height: 1;
+    pointer-events: auto;
+    text-shadow: 0 1px 2px rgba(5, 7, 13, 0.9);
+    white-space: nowrap;
+  }
+
+  :global(.benchmark-scatter-point-label-right) {
+    top: 50%;
+    left: calc(100% + var(--benchmark-scatter-label-gap));
+    transform: translateY(-50%);
+  }
+
+  :global(.benchmark-scatter-point-label-left) {
+    top: 50%;
+    right: calc(100% + var(--benchmark-scatter-label-gap));
+    transform: translateY(-50%);
+  }
+
+  :global(.benchmark-scatter-point-label-top) {
+    bottom: calc(100% + var(--benchmark-scatter-label-gap));
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  :global(.benchmark-scatter-point-label-bottom) {
+    top: calc(100% + var(--benchmark-scatter-label-gap));
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  :global(.benchmark-scatter-point-label-bottom-left) {
+    top: calc(100% + var(--benchmark-scatter-label-gap));
+    right: calc(100% + var(--benchmark-scatter-label-gap));
+  }
+
+  :global(.benchmark-scatter-point-label-bottom-right) {
+    top: calc(100% + var(--benchmark-scatter-label-gap));
+    left: calc(100% + var(--benchmark-scatter-label-gap));
+  }
+
+  :global(.benchmark-scatter-point-label-top-left) {
+    right: calc(100% + var(--benchmark-scatter-label-gap));
+    bottom: calc(100% + var(--benchmark-scatter-label-gap));
+  }
+
+  :global(.benchmark-scatter-point-label-top-right) {
+    bottom: calc(100% + var(--benchmark-scatter-label-gap));
+    left: calc(100% + var(--benchmark-scatter-label-gap));
   }
 
   :global(.benchmark-scatter-tooltip) {

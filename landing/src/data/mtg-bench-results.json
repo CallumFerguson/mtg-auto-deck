@@ -10,7 +10,9 @@
       "reasoningEffort": "medium",
       "mtgAutoDeckScore": 68.2,
       "reasoningTokensPerAttemptedTurn": 5000.2,
-      "displayedCostPerAttemptedTurn": 0.008906628
+      "displayedCostPerAttemptedTurn": 0.008906628,
+      "scatterLabelPosition": "right",
+      "hideReasoningEffortOnScatterLabel": true
     },
     {
       "benchmarkId": "3947a331-f7c9-4697-abda-a8b6ccf9a91f",
@@ -20,7 +22,9 @@
       "reasoningEffort": "medium",
       "mtgAutoDeckScore": 60.1,
       "reasoningTokensPerAttemptedTurn": 4884.4,
-      "displayedCostPerAttemptedTurn": 0.0292402
+      "displayedCostPerAttemptedTurn": 0.0292402,
+      "scatterLabelPosition": "right",
+      "hideReasoningEffortOnScatterLabel": true
     },
     {
       "benchmarkId": "2f984f51-3a2f-45db-b87b-ed7edfea8027",
@@ -30,7 +34,9 @@
       "reasoningEffort": "medium",
       "mtgAutoDeckScore": 88.6,
       "reasoningTokensPerAttemptedTurn": 2691,
-      "displayedCostPerAttemptedTurn": 0.063301584
+      "displayedCostPerAttemptedTurn": 0.063301584,
+      "scatterLabelPosition": "top",
+      "hideReasoningEffortOnScatterLabel": true
     },
     {
       "benchmarkId": "79d1ed51-ca1d-4783-a71c-66e46af6e718",
@@ -40,7 +46,9 @@
       "reasoningEffort": "low",
       "mtgAutoDeckScore": 84.5,
       "reasoningTokensPerAttemptedTurn": 419.1,
-      "displayedCostPerAttemptedTurn": 0.05797648
+      "displayedCostPerAttemptedTurn": 0.05797648,
+      "scatterLabelPosition": "bottom",
+      "hideReasoningEffortOnScatterLabel": false
     },
     {
       "benchmarkId": "4bd9955b-ebe1-4fe1-bb87-52d5111c4025",
@@ -50,7 +58,9 @@
       "reasoningEffort": "medium",
       "mtgAutoDeckScore": 95.4,
       "reasoningTokensPerAttemptedTurn": 1604.6,
-      "displayedCostPerAttemptedTurn": 0.09638937
+      "displayedCostPerAttemptedTurn": 0.09638937,
+      "scatterLabelPosition": "right",
+      "hideReasoningEffortOnScatterLabel": false
     },
     {
       "benchmarkId": "6349dda2-4069-4825-971e-8c11234260c4",
@@ -60,7 +70,9 @@
       "reasoningEffort": "low",
       "mtgAutoDeckScore": 26.6,
       "reasoningTokensPerAttemptedTurn": 1596.7,
-      "displayedCostPerAttemptedTurn": 0.175298306
+      "displayedCostPerAttemptedTurn": 0.175298306,
+      "scatterLabelPosition": "left",
+      "hideReasoningEffortOnScatterLabel": false
     },
     {
       "benchmarkId": "c289c85f-051f-43d2-a9d0-5cddabb0d8f4",
@@ -70,7 +82,9 @@
       "reasoningEffort": "medium",
       "mtgAutoDeckScore": 39.8,
       "reasoningTokensPerAttemptedTurn": 2729.7,
-      "displayedCostPerAttemptedTurn": 0.190698374
+      "displayedCostPerAttemptedTurn": 0.190698374,
+      "scatterLabelPosition": "left",
+      "hideReasoningEffortOnScatterLabel": false
     },
     {
       "benchmarkId": "b7403939-7686-4b2a-88ab-92208ff80220",
@@ -80,7 +94,9 @@
       "reasoningEffort": "medium",
       "mtgAutoDeckScore": 79.6,
       "reasoningTokensPerAttemptedTurn": 1724.4,
-      "displayedCostPerAttemptedTurn": 0.083696607
+      "displayedCostPerAttemptedTurn": 0.083696607,
+      "scatterLabelPosition": "right",
+      "hideReasoningEffortOnScatterLabel": true
     },
     {
       "benchmarkId": "0b5b448b-d276-461b-85ea-542593639e35",
@@ -90,7 +106,9 @@
       "reasoningEffort": "medium",
       "mtgAutoDeckScore": 85.7,
       "reasoningTokensPerAttemptedTurn": 5080.3,
-      "displayedCostPerAttemptedTurn": 0.092845087
+      "displayedCostPerAttemptedTurn": 0.092845087,
+      "scatterLabelPosition": "right",
+      "hideReasoningEffortOnScatterLabel": true
     },
     {
       "benchmarkId": "c36e6599-dccc-4e4d-86cd-3b5fc5b4497e",
@@ -100,7 +118,9 @@
       "reasoningEffort": "medium",
       "mtgAutoDeckScore": 59.7,
       "reasoningTokensPerAttemptedTurn": 1988.8,
-      "displayedCostPerAttemptedTurn": 0.020383871
+      "displayedCostPerAttemptedTurn": 0.020383871,
+      "scatterLabelPosition": "bottom",
+      "hideReasoningEffortOnScatterLabel": true
     },
     {
       "benchmarkId": "9c7fee4d-9408-4dca-b1e2-50879fa45a1e",
@@ -110,7 +130,9 @@
       "reasoningEffort": "high",
       "mtgAutoDeckScore": 12.8,
       "reasoningTokensPerAttemptedTurn": 1469.8,
-      "displayedCostPerAttemptedTurn": 0.004184916
+      "displayedCostPerAttemptedTurn": 0.004184916,
+      "scatterLabelPosition": "right",
+      "hideReasoningEffortOnScatterLabel": true
     },
     {
       "benchmarkId": "dcc18bd8-339d-458a-a94d-28385ca525c7",
@@ -120,7 +142,9 @@
       "reasoningEffort": "medium",
       "mtgAutoDeckScore": 43,
       "reasoningTokensPerAttemptedTurn": 6131.1,
-      "displayedCostPerAttemptedTurn": 0.03312871
+      "displayedCostPerAttemptedTurn": 0.03312871,
+      "scatterLabelPosition": "right",
+      "hideReasoningEffortOnScatterLabel": true
     },
     {
       "benchmarkId": "ef00418d-ab60-4efb-94a1-2756ae2a6348",
@@ -130,7 +154,9 @@
       "reasoningEffort": "medium",
       "mtgAutoDeckScore": 60.9,
       "reasoningTokensPerAttemptedTurn": 6614.2,
-      "displayedCostPerAttemptedTurn": 0.071499755
+      "displayedCostPerAttemptedTurn": 0.071499755,
+      "scatterLabelPosition": "right",
+      "hideReasoningEffortOnScatterLabel": true
     }
   ]
 }
