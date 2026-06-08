@@ -58,11 +58,16 @@ const date = "June 7, 2026"
             <span>(higher is better)</span>
           </h2>
           <div
-            class="benchmark-score-chart"
-            data-mtg-bench-score-chart
-            role="group"
-            aria-label="MTG Auto Deck benchmark scores"
-          ></div>
+            class="benchmark-chart-viewport"
+            data-mtg-bench-chart-viewport
+          >
+            <div
+              class="benchmark-score-chart benchmark-chart-scale-frame"
+              data-mtg-bench-score-chart
+              role="group"
+              aria-label="MTG Auto Deck benchmark scores"
+            ></div>
+          </div>
         </section>
 
         <section class="benchmark-chart-section">
@@ -70,11 +75,16 @@ const date = "June 7, 2026"
             Cost vs Score
           </h2>
           <div
-            class="benchmark-scatter-chart"
-            data-mtg-bench-cost-score-chart
-            role="group"
-            aria-label="Cost per attempted turn from $0.00 to $0.20 versus Overall Score from 0 to 100"
-          ></div>
+            class="benchmark-chart-viewport"
+            data-mtg-bench-chart-viewport
+          >
+            <div
+              class="benchmark-scatter-chart benchmark-chart-scale-frame"
+              data-mtg-bench-cost-score-chart
+              role="group"
+              aria-label="Cost per attempted turn from $0.00 to $0.20 versus Overall Score from 0 to 100"
+            ></div>
+          </div>
         </section>
 
         <section class="benchmark-chart-section">
@@ -83,11 +93,16 @@ const date = "June 7, 2026"
             <span>(lower is better)</span>
           </h2>
           <div
-            class="benchmark-score-chart"
-            data-mtg-bench-reasoning-chart
-            role="group"
-            aria-label="Reasoning tokens per turn by benchmark, lower is better"
-          ></div>
+            class="benchmark-chart-viewport"
+            data-mtg-bench-chart-viewport
+          >
+            <div
+              class="benchmark-score-chart benchmark-chart-scale-frame"
+              data-mtg-bench-reasoning-chart
+              role="group"
+              aria-label="Reasoning tokens per turn by benchmark, lower is better"
+            ></div>
+          </div>
         </section>
 
         <div class="article-body">
@@ -275,6 +290,11 @@ const date = "June 7, 2026"
   const mtgBenchCostScoreChart = document.querySelector<HTMLElement>(
     "[data-mtg-bench-cost-score-chart]"
   )
+  const mtgBenchChartViewports = [
+    ...document.querySelectorAll<HTMLElement>(
+      "[data-mtg-bench-chart-viewport]"
+    ),
+  ]
 
   mtgBenchWindow.mtgBenchResults = {
     status: "loaded",
@@ -297,6 +317,7 @@ const date = "June 7, 2026"
     mtgBenchCostScoreChart,
     buildMtgBenchCostScorePoints(mtgBenchResults)
   )
+  setupMtgBenchChartViewports(mtgBenchChartViewports)
 
   function buildMtgBenchScoreBars(results: readonly MtgBenchResultEntry[]) {
     return results
@@ -595,6 +616,56 @@ const date = "June 7, 2026"
     chart.replaceChildren(layout)
   }
 
+  function setupMtgBenchChartViewports(
+    viewports: readonly HTMLElement[]
+  ) {
+    const updateViewport = (viewport: HTMLElement) => {
+      const chart = viewport.firstElementChild
+
+      if (!(chart instanceof HTMLElement)) {
+        return
+      }
+
+      const availableWidth = viewport.clientWidth
+      const chartWidth = chart.offsetWidth
+      const chartHeight = chart.offsetHeight
+
+      if (availableWidth <= 0 || chartWidth <= 0 || chartHeight <= 0) {
+        return
+      }
+
+      const chartScale = Math.min(1, availableWidth / chartWidth)
+
+      viewport.style.setProperty(
+        "--benchmark-chart-scale",
+        chartScale.toFixed(4)
+      )
+      viewport.style.setProperty(
+        "--benchmark-chart-scaled-height",
+        `${Math.ceil(chartHeight * chartScale)}px`
+      )
+    }
+    const updateViewports = () => {
+      viewports.forEach(updateViewport)
+    }
+
+    if (viewports.length === 0) {
+      return
+    }
+
+    requestAnimationFrame(updateViewports)
+    window.addEventListener("load", updateViewports, { once: true })
+
+    if ("ResizeObserver" in window) {
+      const resizeObserver = new ResizeObserver(updateViewports)
+
+      viewports.forEach((viewport) => resizeObserver.observe(viewport))
+      return
+    }
+
+    window.addEventListener("resize", updateViewports)
+  }
+
   function getMtgBenchScore(result: MtgBenchResultEntry) {
     const score = result.mtgAutoDeckScore
 
@@ -855,6 +926,7 @@ const date = "June 7, 2026"
   }
 
   .brand {
+    flex: 1 1 auto;
     gap: 0.7rem;
     min-width: 0;
     font-weight: 800;
@@ -866,17 +938,20 @@ const date = "June 7, 2026"
   }
 
   .brand span {
+    min-width: min-content;
     color: var(--accent-strong);
     font-size: 0.9rem;
     font-weight: 900;
     letter-spacing: 0.14em;
     text-transform: uppercase;
-    overflow-wrap: anywhere;
+    overflow-wrap: normal;
+    word-break: normal;
   }
 
   .nav-actions {
+    flex: 0 0 auto;
     gap: 0.75rem;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     justify-content: flex-end;
   }
 
@@ -1019,6 +1094,26 @@ const date = "June 7, 2026"
     font-weight: 700;
   }
 
+  .benchmark-chart-viewport {
+    --benchmark-chart-scale: 1;
+    --benchmark-chart-scaled-height: 22.5rem;
+    --benchmark-chart-width: 41.5rem;
+    position: relative;
+    width: 100%;
+    max-width: var(--benchmark-chart-width);
+    height: var(--benchmark-chart-scaled-height);
+    margin-inline: auto;
+    overflow: visible;
+  }
+
+  .benchmark-chart-scale-frame {
+    width: var(--benchmark-chart-width);
+    max-width: none;
+    transform: scale(var(--benchmark-chart-scale));
+    transform-origin: top left;
+    will-change: transform;
+  }
+
   .benchmark-score-chart {
     --benchmark-label-space: 5.75rem;
     --benchmark-logo-space: 1.7rem;
@@ -1026,7 +1121,7 @@ const date = "June 7, 2026"
     display: flex;
     height: 22.5rem;
     align-items: stretch;
-    gap: clamp(0.12rem, 1vw, 0.45rem);
+    gap: 0.45rem;
     margin-top: 2.25rem;
     overflow: hidden;
     border: 1px solid var(--border);
@@ -1489,7 +1584,6 @@ const date = "June 7, 2026"
     }
 
     .brand span {
-      max-width: 8.5rem;
       line-height: 1.1;
     }
 
@@ -1527,11 +1621,6 @@ const date = "June 7, 2026"
 
     .article-date {
       font-size: 0.9rem;
-    }
-
-    :global(.benchmark-score-bar) {
-      font-size: 0.66rem;
-      writing-mode: vertical-rl;
     }
   }
 </style>
