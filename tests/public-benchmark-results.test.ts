@@ -3,6 +3,9 @@ import test from "node:test"
 
 import type { PublicBenchmarkResultsExportV2 } from "../src/lib/deck-types.js"
 import {
+  getPublicBenchmarkCostDiscountReason,
+  getPublicBenchmarkCostDiscountTooltipText,
+  getPublicBenchmarkDisplayedCost,
   getPublicBenchmarkSelectedPanelFromSearch,
   isPublicBenchmarkResultsExportV2,
 } from "../src/lib/public-benchmark-results.js"
@@ -81,6 +84,59 @@ test("selects failed runs or simulations from public benchmark search params", (
   assert.equal(
     getPublicBenchmarkSelectedPanelFromSearch("?turn=2"),
     "simulation"
+  )
+})
+
+test("doubles public benchmark displayed costs for discounted processing", () => {
+  const resultsExport = createResultsExport()
+  const realtimeReason = getPublicBenchmarkCostDiscountReason(
+    resultsExport.benchmark
+  )
+
+  assert.equal(realtimeReason, null)
+  assert.equal(
+    getPublicBenchmarkDisplayedCost(
+      resultsExport.resultMetrics.costPerAttemptedTurn,
+      realtimeReason
+    ),
+    0.011
+  )
+  assert.equal(getPublicBenchmarkCostDiscountTooltipText(realtimeReason), null)
+
+  const flexReason = getPublicBenchmarkCostDiscountReason({
+    ...resultsExport.benchmark,
+    useFlexServiceTier: true,
+  })
+
+  assert.equal(flexReason, "flex")
+  assert.equal(
+    getPublicBenchmarkDisplayedCost(
+      resultsExport.resultMetrics.costPerAttemptedTurn,
+      flexReason
+    ),
+    0.022
+  )
+  assert.equal(
+    getPublicBenchmarkCostDiscountTooltipText(flexReason),
+    "Actual cost was 50% less because flex processing was used."
+  )
+
+  const batchReason = getPublicBenchmarkCostDiscountReason({
+    ...resultsExport.benchmark,
+    llmProcessingMode: "openai_batch",
+  })
+
+  assert.equal(batchReason, "batch")
+  assert.equal(
+    getPublicBenchmarkDisplayedCost(
+      resultsExport.resultMetrics.decks[0].costPerAttemptedTurn,
+      batchReason
+    ),
+    0.022
+  )
+  assert.equal(
+    getPublicBenchmarkCostDiscountTooltipText(batchReason),
+    "Actual cost was 50% less because batch processing was used."
   )
 })
 

@@ -23,6 +23,7 @@ import {
   Gauge,
   Hand,
   Hourglass,
+  Info,
   LoaderCircle,
   MoreVertical,
   Moon,
@@ -136,6 +137,9 @@ import {
   getPublicSimulationLoadFailureMessage,
 } from "@/lib/public-simulation-url"
 import {
+  getPublicBenchmarkCostDiscountReason,
+  getPublicBenchmarkCostDiscountTooltipText,
+  getPublicBenchmarkDisplayedCost,
   getPublicBenchmarkSelectedPanelFromSearch,
   isPublicBenchmarkResultsExportV2,
   type PublicBenchmarkSelectedPanel,
@@ -1571,6 +1575,11 @@ function PublicBenchmarkResultsPanel({
   onReload: () => void
 }) {
   const metrics = benchmarkResults?.resultMetrics ?? null
+  const costDiscountReason = benchmarkResults
+    ? getPublicBenchmarkCostDiscountReason(benchmarkResults.benchmark)
+    : null
+  const costDiscountTooltipText =
+    getPublicBenchmarkCostDiscountTooltipText(costDiscountReason)
 
   return (
     <div className="simulation-scrollbar h-full min-h-0 overflow-y-auto p-5">
@@ -1608,10 +1617,14 @@ function PublicBenchmarkResultsPanel({
                 )}
               />
               <PublicBenchmarkResultMetricCard
-                label="Cost / attempted run"
+                label="Cost / attempted turn"
                 value={formatPublicBenchmarkResultCost(
-                  metrics.costPerAttemptedTurn
+                  getPublicBenchmarkDisplayedCost(
+                    metrics.costPerAttemptedTurn,
+                    costDiscountReason
+                  )
                 )}
+                infoTooltip={costDiscountTooltipText}
               />
               <PublicBenchmarkResultMetricCard
                 label="Reasoning tokens / turn"
@@ -1627,7 +1640,10 @@ function PublicBenchmarkResultsPanel({
               onViewFailedEvaluations={onViewFailedEvaluations}
             />
 
-            <PublicBenchmarkResultsDeckTable decks={metrics.decks} />
+            <PublicBenchmarkResultsDeckTable
+              costDiscountReason={costDiscountReason}
+              decks={metrics.decks}
+            />
           </>
         ) : (
           <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
@@ -1681,10 +1697,12 @@ function PublicBenchmarkFailedRunSummary({
 }
 
 function PublicBenchmarkResultMetricCard({
+  infoTooltip = null,
   label,
   tone = "default",
   value,
 }: {
+  infoTooltip?: string | null
   label: string
   tone?: "default" | "primary"
   value: string
@@ -1698,16 +1716,34 @@ function PublicBenchmarkResultMetricCard({
       }`}
     >
       <p className="text-xs font-medium text-muted-foreground">{label}</p>
-      <p className="mt-1 text-2xl font-semibold tracking-normal text-foreground tabular-nums">
-        {value}
+      <p className="mt-1 flex items-center gap-2 text-2xl font-semibold tracking-normal text-foreground tabular-nums">
+        <span>{value}</span>
+        {infoTooltip ? (
+          <span
+            aria-label={infoTooltip}
+            className="group relative inline-flex size-5 items-center justify-center rounded-full border border-border bg-muted/20 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground focus-visible:bg-muted/40 focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
+            role="img"
+            tabIndex={0}
+          >
+            <Info className="size-3.5" aria-hidden />
+            <span
+              aria-hidden
+              className="pointer-events-none absolute right-0 bottom-full z-20 mb-2 w-64 max-w-[calc(100vw-2rem)] rounded-md border border-border bg-popover px-2.5 py-1.5 text-left text-xs leading-snug font-medium whitespace-normal text-popover-foreground opacity-0 shadow-xl shadow-black/35 transition-opacity duration-75 group-hover:opacity-100 group-focus-visible:opacity-100"
+            >
+              {infoTooltip}
+            </span>
+          </span>
+        ) : null}
       </p>
     </div>
   )
 }
 
 function PublicBenchmarkResultsDeckTable({
+  costDiscountReason,
   decks,
 }: {
+  costDiscountReason: ReturnType<typeof getPublicBenchmarkCostDiscountReason>
   decks: PublicBenchmarkResultDeckMetrics[]
 }) {
   if (decks.length === 0) {
@@ -1760,7 +1796,12 @@ function PublicBenchmarkResultsDeckTable({
                     {formatPublicBenchmarkResultPercent(deck.legalPassRate)}
                   </td>
                   <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
-                    {formatPublicBenchmarkResultCost(deck.costPerAttemptedTurn)}
+                    {formatPublicBenchmarkResultCost(
+                      getPublicBenchmarkDisplayedCost(
+                        deck.costPerAttemptedTurn,
+                        costDiscountReason
+                      )
+                    )}
                   </td>
                   <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
                     {formatPublicBenchmarkResultTokenRate(

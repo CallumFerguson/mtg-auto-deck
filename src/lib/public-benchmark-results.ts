@@ -10,6 +10,8 @@ export type PublicBenchmarkSelectedPanel =
   | "simulation"
   | "failed-evaluations"
 
+export type PublicBenchmarkCostDiscountReason = "batch" | "flex"
+
 export function getPublicBenchmarkSelectedPanelFromSearch(
   search: string
 ): PublicBenchmarkSelectedPanel {
@@ -25,6 +27,38 @@ export function getPublicBenchmarkSelectedPanelFromSearch(
     Boolean(searchParams.get("turn")?.trim())
 
   return hasSimulationSelection ? "simulation" : "results"
+}
+
+export function getPublicBenchmarkCostDiscountReason(
+  benchmark: Pick<
+    PublicBenchmarkMetadata,
+    "llmProcessingMode" | "useFlexServiceTier"
+  >
+): PublicBenchmarkCostDiscountReason | null {
+  if (benchmark.llmProcessingMode !== "realtime") {
+    return "batch"
+  }
+
+  return benchmark.useFlexServiceTier ? "flex" : null
+}
+
+export function getPublicBenchmarkDisplayedCost(
+  costUsd: number | null,
+  discountReason: PublicBenchmarkCostDiscountReason | null
+) {
+  if (costUsd === null) {
+    return null
+  }
+
+  return discountReason ? roundPublicBenchmarkDisplayCost(costUsd * 2) : costUsd
+}
+
+export function getPublicBenchmarkCostDiscountTooltipText(
+  discountReason: PublicBenchmarkCostDiscountReason | null
+) {
+  return discountReason
+    ? `Actual cost was 50% less because ${discountReason} processing was used.`
+    : null
 }
 
 export function isPublicBenchmarkResultsExportV2(
@@ -180,4 +214,8 @@ function isPublicBenchmarkStatus(value: unknown) {
     value === "completed" ||
     value === "failed"
   )
+}
+
+function roundPublicBenchmarkDisplayCost(costUsd: number) {
+  return Math.round(costUsd * 1_000_000_000) / 1_000_000_000
 }
