@@ -54,7 +54,7 @@ const date = "June 7, 2026"
 
         <section class="benchmark-chart-section">
           <h2 class="benchmark-chart-heading">
-            MTG Auto Deck score
+            Overall Score
             <span>(higher is better)</span>
           </h2>
           <div
@@ -86,7 +86,7 @@ const date = "June 7, 2026"
             class="benchmark-scatter-chart"
             data-mtg-bench-cost-score-chart
             role="group"
-            aria-label="Cost per attempted turn from $0.00 to $0.20 versus MTG Auto Deck score from 0 to 100"
+            aria-label="Cost per attempted turn from $0.00 to $0.20 versus Overall Score from 0 to 100"
           ></div>
         </section>
 
@@ -289,7 +289,7 @@ const date = "June 7, 2026"
           publicBenchmarkUrl: result.publicBenchmarkUrl,
           labelLineOne: labelLines[0],
           labelLineTwo: labelLines[1],
-          metricAriaLabel: "MTG Auto Deck score, higher is better",
+          metricAriaLabel: "Overall Score, higher is better",
           providerMatch: getMtgBenchProviderMatch(result),
           value: score,
           valueLabel: formatMtgBenchBarScore(score),
