@@ -86,6 +86,115 @@ const date = "June 7, 2026"
   </body>
 </html>
 
+<script>
+  type MtgBenchResultEntry = {
+    benchmarkId: string
+    url: string
+    data: unknown
+  }
+
+  type MtgBenchResultsState =
+    | {
+        status: "loading"
+        benchmarkIds: string[]
+      }
+    | {
+        status: "loaded"
+        benchmarkIds: string[]
+        results: MtgBenchResultEntry[]
+        resultsByBenchmarkId: Record<string, MtgBenchResultEntry>
+        loadedAt: string
+      }
+    | {
+        status: "error"
+        benchmarkIds: string[]
+        error: {
+          message: string
+        }
+      }
+
+  const mtgBenchResultsBaseUrl = "https://data.mtgautodeck.com/benchmarks"
+  const mtgBenchBenchmarkIds = [
+    "23c6ab87-5419-4bfd-a281-740b2384a5b8",
+    "3947a331-f7c9-4697-abda-a8b6ccf9a91f",
+    "2f984f51-3a2f-45db-b87b-ed7edfea8027",
+    "79d1ed51-ca1d-4783-a71c-66e46af6e718",
+    "4bd9955b-ebe1-4fe1-bb87-52d5111c4025",
+    "6349dda2-4069-4825-971e-8c11234260c4",
+    "c289c85f-051f-43d2-a9d0-5cddabb0d8f4",
+    "b7403939-7686-4b2a-88ab-92208ff80220",
+    "0b5b448b-d276-461b-85ea-542593639e35",
+    "c36e6599-dccc-4e4d-86cd-3b5fc5b4497e",
+    "9c7fee4d-9408-4dca-b1e2-50879fa45a1e",
+    "dcc18bd8-339d-458a-a94d-28385ca525c7",
+    "ef00418d-ab60-4efb-94a1-2756ae2a6348",
+  ]
+  const mtgBenchWindow = window as Window & {
+    mtgBenchResults: MtgBenchResultsState
+  }
+
+  mtgBenchWindow.mtgBenchResults = {
+    status: "loading",
+    benchmarkIds: [...mtgBenchBenchmarkIds],
+  }
+
+  void loadMtgBenchResults()
+
+  async function loadMtgBenchResults() {
+    try {
+      const results = await Promise.all(
+        mtgBenchBenchmarkIds.map(fetchMtgBenchResult)
+      )
+      const resultsByBenchmarkId = Object.fromEntries(
+        results.map((result) => [result.benchmarkId, result])
+      )
+
+      mtgBenchWindow.mtgBenchResults = {
+        status: "loaded",
+        benchmarkIds: [...mtgBenchBenchmarkIds],
+        results,
+        resultsByBenchmarkId,
+        loadedAt: new Date().toISOString(),
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Benchmark results could not be loaded."
+
+      mtgBenchWindow.mtgBenchResults = {
+        status: "error",
+        benchmarkIds: [...mtgBenchBenchmarkIds],
+        error: {
+          message,
+        },
+      }
+      window.alert("Benchmark results could not be loaded. Please try again.")
+    }
+  }
+
+  async function fetchMtgBenchResult(
+    benchmarkId: string
+  ): Promise<MtgBenchResultEntry> {
+    const url = `${mtgBenchResultsBaseUrl}/${encodeURIComponent(
+      benchmarkId
+    )}/results.json`
+    const response = await fetch(url)
+
+    if (!response.ok) {
+      throw new Error(
+        `Benchmark results request failed for ${benchmarkId}: ${response.status} ${response.statusText}`
+      )
+    }
+
+    return {
+      benchmarkId,
+      url,
+      data: await response.json(),
+    }
+  }
+</script>
+
 <style>
   :root {
     color-scheme: dark;
