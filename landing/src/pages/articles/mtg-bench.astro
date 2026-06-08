@@ -67,6 +67,18 @@ const date = "June 7, 2026"
 
         <section class="benchmark-chart-section">
           <h2 class="benchmark-chart-heading">
+            Cost vs Score
+          </h2>
+          <div
+            class="benchmark-scatter-chart"
+            data-mtg-bench-cost-score-chart
+            role="group"
+            aria-label="Cost per attempted turn from $0.00 to $0.20 versus Overall Score from 0 to 100"
+          ></div>
+        </section>
+
+        <section class="benchmark-chart-section">
+          <h2 class="benchmark-chart-heading">
             Reasoning tokens per turn
             <span>(lower is better)</span>
           </h2>
@@ -78,36 +90,23 @@ const date = "June 7, 2026"
           ></div>
         </section>
 
-        <section class="benchmark-chart-section">
-          <h2 class="benchmark-chart-heading">
-            Cost per attempted turn vs score
-          </h2>
-          <div
-            class="benchmark-scatter-chart"
-            data-mtg-bench-cost-score-chart
-            role="group"
-            aria-label="Cost per attempted turn from $0.00 to $0.20 versus Overall Score from 0 to 100"
-          ></div>
-        </section>
-
         <div class="article-body">
-          <p>
-            Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse
-            potenti. Integer vitae neque vel justo placerat bibendum. Donec
-            dictum, sem sed efficitur gravida, justo lorem pulvinar tortor, at
-            viverra sapien augue nec lectus.
-          </p>
-          <p>
-            Praesent porttitor risus non lorem fermentum, sit amet dignissim
-            metus aliquam. Curabitur congue, nisl at finibus sodales, magna sem
-            tempor lacus, vitae pretium mi lectus in lorem. Sed at velit quis
-            urna luctus hendrerit.
-          </p>
-          <p>
-            Maecenas consequat, magna et aliquam faucibus, est erat faucibus
-            risus, non porta erat turpis sed ipsum. Aliquam erat volutpat. Duis
-            sit amet ipsum a sem ultricies posuere vitae in lacus.
-          </p>
+          <section class="article-body-section">
+            <h2>Overview</h2>
+            <p>placeholder. todo: add content</p>
+          </section>
+
+          <section class="article-body-section">
+            <h2>Why did Opus 4.8 perform poorly?</h2>
+            <p>
+              put explanation text here. Look at
+              <a
+                href="https://app.mtgautodeck.com/public/benchmarks/6349dda2-4069-4825-971e-8c11234260c4?simulation=14d0d2df-c5af-4c78-83ed-6131ff589b34&run=ad893839-5bbd-4695-8fe2-1a3e80d0dd8b&turn=1"
+                target="_blank"
+                rel="noreferrer noopener">this example</a
+              >.
+            </p>
+          </section>
         </div>
       </article>
     </main>
@@ -1447,8 +1446,21 @@ const date = "June 7, 2026"
 
   .article-body {
     display: grid;
-    gap: 1.15rem;
+    gap: 1.75rem;
     margin-top: 2.5rem;
+  }
+
+  .article-body-section {
+    display: grid;
+    gap: 0.65rem;
+  }
+
+  .article-body h2 {
+    margin: 0;
+    color: var(--text);
+    font-size: 1.18rem;
+    font-weight: 900;
+    line-height: 1.2;
   }
 
   .article-body p {
@@ -1456,6 +1468,19 @@ const date = "June 7, 2026"
     color: var(--muted);
     font-size: 1.02rem;
     line-height: 1.75;
+  }
+
+  .article-body a {
+    color: var(--accent-strong);
+    font-weight: 800;
+    text-decoration: underline;
+    text-decoration-color: rgba(125, 211, 252, 0.42);
+    text-underline-offset: 0.18em;
+  }
+
+  .article-body a:hover {
+    color: var(--text);
+    text-decoration-color: currentColor;
   }
 
   @media (max-width: 620px) {
