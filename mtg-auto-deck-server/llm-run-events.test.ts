@@ -3774,6 +3774,9 @@ test("summarizes latest benchmark evaluations only", () => {
         costPerCompletedTurn: null,
         costPerMtgAutoDeckScorePoint: null,
         reasoningTokensPerAttemptedTurn: null,
+        inputTokensPerAttemptedTurn: null,
+        cachedInputTokensPerAttemptedTurn: null,
+        cachedInputTokenPercent: null,
         totalTokensPerAttemptedTurn: null,
         decks: [],
       },
@@ -3850,6 +3853,14 @@ test("scores benchmark result metrics across every planned slot", () => {
       targetLlmRunId: "opening-run",
       targetRunPhase: "opening_hand",
       costUsd: 0.1,
+      usage: {
+        input_tokens: 999999,
+        input_tokens_details: {
+          cached_tokens: 999999,
+        },
+        output_tokens: 1,
+        total_tokens: 1000000,
+      },
     }),
     createBenchmarkEvaluationLatestRun({
       targetLlmRunId: "turn-1-run",
@@ -3857,12 +3868,15 @@ test("scores benchmark result metrics across every planned slot", () => {
       turnNumber: 1,
       costUsd: 0.2,
       usage: {
-        input_tokens: 100,
+        input_tokens: 10000,
+        input_tokens_details: {
+          cached_tokens: 9000,
+        },
         output_tokens: 50,
         output_tokens_details: {
           reasoning_tokens: 20,
         },
-        total_tokens: 150,
+        total_tokens: 10050,
       },
     }),
     createBenchmarkEvaluationLatestRun({
@@ -3873,12 +3887,15 @@ test("scores benchmark result metrics across every planned slot", () => {
       failureMessage: "Provider timed out.",
       costUsd: 0.3,
       usage: {
-        inputTokens: 100,
+        inputTokens: 10000,
+        inputTokensDetails: {
+          cachedTokens: 9000,
+        },
         outputTokens: 30,
         outputTokensDetails: {
           reasoningTokens: 10,
         },
-        totalTokens: 130,
+        totalTokens: 10030,
       },
     }),
   ]
@@ -3912,7 +3929,10 @@ test("scores benchmark result metrics across every planned slot", () => {
   assert.equal(metrics.costPerAttemptedTurn, 0.25)
   assert.equal(metrics.costPerCompletedTurn, 0.5)
   assert.equal(metrics.reasoningTokensPerAttemptedTurn, 15)
-  assert.equal(metrics.totalTokensPerAttemptedTurn, 140)
+  assert.equal(metrics.inputTokensPerAttemptedTurn, 10000)
+  assert.equal(metrics.cachedInputTokensPerAttemptedTurn, 9000)
+  assert.equal(metrics.cachedInputTokenPercent, 90)
+  assert.equal(metrics.totalTokensPerAttemptedTurn, 10040)
   assert.equal(metrics.decks[0]?.mtgAutoDeckScore, 28.6)
 })
 
@@ -3990,6 +4010,50 @@ test("applies benchmark score caps and zeroes incomplete evaluations", () => {
   assert.equal(metrics.strategicPassRate, 40)
 })
 
+test("calculates benchmark cached input percent from Anthropic-style usage", () => {
+  const plannedSimulations = [
+    createBenchmarkEvaluationPlannedSimulation({
+      deckId: "deck-1",
+      deckName: "Deck One",
+      simulationId: "simulation-1",
+    }),
+  ]
+  const latestRuns = [
+    createBenchmarkEvaluationLatestRun({
+      targetLlmRunId: "turn-1-run",
+      targetRunPhase: "turn",
+      turnNumber: 1,
+      usage: {
+        input_tokens: 1800,
+        cache_read_input_tokens: 41000,
+        cache_creation_input_tokens: 500,
+        output_tokens: 25,
+      },
+    }),
+    createBenchmarkEvaluationLatestRun({
+      targetLlmRunId: "turn-2-run",
+      targetRunPhase: "turn",
+      turnNumber: 2,
+      usage: {
+        input_tokens: 1880,
+        cache_read_input_tokens: 42320,
+        cache_creation_input_tokens: 500,
+        output_tokens: 25,
+      },
+    }),
+  ]
+  const metrics = buildBenchmarkEvaluationResultMetrics({
+    latestRuns,
+    plannedSimulations,
+    turnsToSimulate: 2,
+    latestEvaluations: [],
+  })
+
+  assert.equal(metrics.inputTokensPerAttemptedTurn, 44000)
+  assert.equal(metrics.cachedInputTokensPerAttemptedTurn, 41660)
+  assert.equal(metrics.cachedInputTokenPercent, 94.7)
+})
+
 test("extracts numeric LLM token usage counts across aliases", () => {
   assert.deepEqual(
     getLlmTokenUsageCounts({
@@ -4022,11 +4086,27 @@ test("extracts numeric LLM token usage counts across aliases", () => {
       },
     }),
     {
-      inputTokens: 50,
+      inputTokens: 58,
       cachedInputTokens: 8,
       outputTokens: 18,
       reasoningTokens: 12,
       totalTokens: 88,
+    }
+  )
+
+  assert.deepEqual(
+    getLlmTokenUsageCounts({
+      input_tokens: 2048,
+      cache_read_input_tokens: 1800,
+      cache_creation_input_tokens: 248,
+      output_tokens: 503,
+    }),
+    {
+      inputTokens: 4096,
+      cachedInputTokens: 1800,
+      outputTokens: 503,
+      reasoningTokens: 0,
+      totalTokens: 4599,
     }
   )
 })

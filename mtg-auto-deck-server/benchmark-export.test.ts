@@ -327,6 +327,9 @@ test("builds benchmark results export from planned-slot result metrics", () => {
         turnActions: createTurnActions(),
         usage: {
           input_tokens: 100,
+          input_tokens_details: {
+            cached_tokens: 80,
+          },
           output_tokens: 50,
           output_tokens_details: {
             reasoning_tokens: 30,
@@ -346,6 +349,9 @@ test("builds benchmark results export from planned-slot result metrics", () => {
         turnActions: null,
         usage: {
           input_tokens: 20,
+          input_tokens_details: {
+            cached_tokens: 10,
+          },
           output_tokens: 20,
           output_tokens_details: {
             reasoning_tokens: 10,
@@ -392,6 +398,12 @@ test("builds benchmark results export from planned-slot result metrics", () => {
     0.002097902
   )
   assert.equal(resultsExport.resultMetrics.reasoningTokensPerAttemptedTurn, 20)
+  assert.equal(resultsExport.resultMetrics.inputTokensPerAttemptedTurn, 60)
+  assert.equal(
+    resultsExport.resultMetrics.cachedInputTokensPerAttemptedTurn,
+    45
+  )
+  assert.equal(resultsExport.resultMetrics.cachedInputTokenPercent, 75)
   assert.equal(resultsExport.resultMetrics.totalTokensPerAttemptedTurn, 95)
   assert.deepEqual(resultsExport.resultMetrics.decks, [
     {

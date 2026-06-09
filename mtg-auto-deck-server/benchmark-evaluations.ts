@@ -115,6 +115,9 @@ export type BenchmarkEvaluationResultMetrics = {
   costPerCompletedTurn: number | null
   costPerMtgAutoDeckScorePoint: number | null
   reasoningTokensPerAttemptedTurn: number | null
+  inputTokensPerAttemptedTurn: number | null
+  cachedInputTokensPerAttemptedTurn: number | null
+  cachedInputTokenPercent: number | null
   totalTokensPerAttemptedTurn: number | null
   decks: BenchmarkEvaluationResultDeckMetrics[]
 }
@@ -405,6 +408,8 @@ export function buildBenchmarkEvaluationResultMetrics({
   let totalRunCostUsd = 0
   let turnRunCostUsd = 0
   let turnReasoningTokens = 0
+  let turnInputTokens = 0
+  let turnCachedInputTokens = 0
   let turnTotalTokens = 0
   const plannedRunIds = new Set<string>()
 
@@ -487,6 +492,8 @@ export function buildBenchmarkEvaluationResultMetrics({
       turnRunCostUsd += turnCostUsd
       deckMetrics.turnRunCostUsd += turnCostUsd
       turnReasoningTokens += tokenUsage.reasoningTokens
+      turnInputTokens += tokenUsage.inputTokens ?? 0
+      turnCachedInputTokens += tokenUsage.cachedInputTokens ?? 0
       turnTotalTokens += tokenUsage.totalTokens ?? 0
       deckMetrics.reasoningTokens += tokenUsage.reasoningTokens
       plannedRunIds.add(turnRun.targetLlmRunId)
@@ -550,6 +557,15 @@ export function buildBenchmarkEvaluationResultMetrics({
     ),
     reasoningTokensPerAttemptedTurn: roundNullableBenchmarkTokenRate(
       divide(turnReasoningTokens, attemptedTurnCount)
+    ),
+    inputTokensPerAttemptedTurn: roundNullableBenchmarkTokenRate(
+      divide(turnInputTokens, attemptedTurnCount)
+    ),
+    cachedInputTokensPerAttemptedTurn: roundNullableBenchmarkTokenRate(
+      divide(turnCachedInputTokens, attemptedTurnCount)
+    ),
+    cachedInputTokenPercent: roundNullableBenchmarkRate(
+      divideToPercent(turnCachedInputTokens, turnInputTokens)
     ),
     totalTokensPerAttemptedTurn: roundNullableBenchmarkTokenRate(
       divide(turnTotalTokens, attemptedTurnCount)

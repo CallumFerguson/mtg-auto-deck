@@ -15,13 +15,36 @@ export type LlmTokenUsageCounts = {
 
 export function getLlmTokenUsageCounts(usage: unknown): LlmTokenUsageCounts {
   const usageRecord = asRecord(usage)
-  const inputTokens = getNumberProperty(
+  const rawInputTokens = getNumberProperty(
     usageRecord,
     "input_tokens",
     "inputTokens",
     "prompt_tokens",
     "promptTokens"
   )
+  const cacheCreationInputTokens = getNumberProperty(
+    usageRecord,
+    "cache_creation_input_tokens",
+    "cacheCreationInputTokens"
+  )
+  const cacheReadInputTokens = getNumberProperty(
+    usageRecord,
+    "cache_read_input_tokens",
+    "cacheReadInputTokens"
+  )
+  const hasSeparateCacheInputTokens =
+    cacheCreationInputTokens !== null || cacheReadInputTokens !== null
+  const separateInputTokenCount =
+    (cacheCreationInputTokens ?? 0) + (cacheReadInputTokens ?? 0)
+  let inputTokens: number | null = null
+
+  if (rawInputTokens !== null) {
+    inputTokens =
+      rawInputTokens +
+      (hasSeparateCacheInputTokens ? separateInputTokenCount : 0)
+  } else if (hasSeparateCacheInputTokens) {
+    inputTokens = separateInputTokenCount
+  }
   const inputDetails = asRecord(
     getFirstDefinedProperty(usageRecord, [
       "input_tokens_details",
@@ -30,19 +53,17 @@ export function getLlmTokenUsageCounts(usage: unknown): LlmTokenUsageCounts {
       "promptTokensDetails",
     ])
   )
-  const cacheReadInputTokens = getNumberProperty(
-    usageRecord,
-    "cache_read_input_tokens",
-    "cacheReadInputTokens"
-  )
-  const cachedInputTokens =
-    cacheReadInputTokens ??
-    (inputTokens === null
+  const nestedCachedInputTokens =
+    rawInputTokens === null
       ? null
       : Math.min(
           getNumberProperty(inputDetails, "cached_tokens", "cachedTokens") ?? 0,
-          inputTokens
-        ))
+          rawInputTokens
+        )
+  const cachedInputTokens =
+    hasSeparateCacheInputTokens
+      ? Math.min(cacheReadInputTokens ?? 0, inputTokens ?? 0)
+      : nestedCachedInputTokens
   const rawOutputTokens = getNumberProperty(
     usageRecord,
     "output_tokens",
@@ -70,20 +91,11 @@ export function getLlmTokenUsageCounts(usage: unknown): LlmTokenUsageCounts {
     rawOutputTokens === null
       ? null
       : Math.max(rawOutputTokens - reasoningTokens, 0)
-  const cacheCreationInputTokens =
-    getNumberProperty(
-      usageRecord,
-      "cache_creation_input_tokens",
-      "cacheCreationInputTokens"
-    ) ?? 0
   const totalTokens =
     getNumberProperty(usageRecord, "total_tokens", "totalTokens") ??
     (inputTokens === null || rawOutputTokens === null
       ? null
-      : inputTokens +
-        cacheCreationInputTokens +
-        (cacheReadInputTokens ?? 0) +
-        rawOutputTokens)
+      : inputTokens + rawOutputTokens)
 
   return {
     inputTokens,

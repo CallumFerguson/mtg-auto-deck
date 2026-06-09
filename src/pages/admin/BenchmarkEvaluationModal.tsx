@@ -546,6 +546,24 @@ function BenchmarkEvaluationResultMetrics({
           icon={<BrainCircuit className="size-4 text-sky-300" aria-hidden />}
         />
         <BenchmarkEvaluationMetric
+          label="Input tokens / turn"
+          value={formatBenchmarkEvaluationTokenRate(
+            resultMetrics.inputTokensPerAttemptedTurn
+          )}
+        />
+        <BenchmarkEvaluationMetric
+          label="Cached input / turn"
+          value={formatBenchmarkEvaluationTokenRate(
+            resultMetrics.cachedInputTokensPerAttemptedTurn
+          )}
+        />
+        <BenchmarkEvaluationMetric
+          label="Cached input %"
+          value={formatBenchmarkEvaluationPercent(
+            resultMetrics.cachedInputTokenPercent
+          )}
+        />
+        <BenchmarkEvaluationMetric
           label="Total tokens / turn"
           value={formatBenchmarkEvaluationTokenRate(
             resultMetrics.totalTokensPerAttemptedTurn

@@ -145,6 +145,9 @@ export type AdminBenchmarkEvaluationResultMetrics = {
   costPerCompletedTurn: number | null
   costPerMtgAutoDeckScorePoint: number | null
   reasoningTokensPerAttemptedTurn: number | null
+  inputTokensPerAttemptedTurn: number | null
+  cachedInputTokensPerAttemptedTurn: number | null
+  cachedInputTokenPercent: number | null
   totalTokensPerAttemptedTurn: number | null
   decks: AdminBenchmarkEvaluationResultDeckMetrics[]
 }
