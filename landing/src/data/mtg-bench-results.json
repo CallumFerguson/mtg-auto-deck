@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-06-08T21:59:03.2960404Z",
+  "generatedAt": "2026-06-09T23:44:46.138Z",
   "benchmarks": [
     {
       "benchmarkId": "23c6ab87-5419-4bfd-a281-740b2384a5b8",
@@ -157,6 +157,18 @@
       "displayedCostPerAttemptedTurn": 0.071499755,
       "scatterLabelPosition": "right",
       "hideReasoningEffortOnScatterLabel": true
+    },
+    {
+      "benchmarkId": "aae3d1e9-9b36-4964-b9fc-818235ad85fd",
+      "publicBenchmarkUrl": "https://app.mtgautodeck.com/public/benchmarks/aae3d1e9-9b36-4964-b9fc-818235ad85fd",
+      "model": "claude-fable-5",
+      "providerKey": "anthropic",
+      "reasoningEffort": "low",
+      "mtgAutoDeckScore": 85,
+      "reasoningTokensPerAttemptedTurn": 726.7,
+      "displayedCostPerAttemptedTurn": 0.24497246,
+      "scatterLabelPosition": "left",
+      "hideReasoningEffortOnScatterLabel": false
     }
   ]
 }
