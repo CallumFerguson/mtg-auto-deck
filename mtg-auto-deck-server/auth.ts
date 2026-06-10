@@ -16,6 +16,10 @@ import {
   promoteAdminUserByEmail,
   AUTO_ADMIN_EMAIL_ENVIRONMENT_VARIABLE,
 } from "./admin-users-postgres.js"
+import {
+  createAutoVerifyNewUsersDatabaseHooks,
+  getAutoVerifyNewUsersEnabled,
+} from "./auto-verify-new-users-config.js"
 import { isStripeBillingEnabled } from "./billing-config.js"
 import {
   getBillingTierRank,
@@ -30,6 +34,7 @@ const STRIPE_API_VERSION = "2026-03-25.dahlia"
 const STRIPE_USER_CUSTOMER_TYPE = "user"
 const STRIPE_ORGANIZATION_CUSTOMER_TYPE = "organization"
 const ACTIVE_BILLING_SUBSCRIPTION_STATUSES = new Set(["active", "trialing"])
+const autoVerifyNewUsersEnabled = getAutoVerifyNewUsersEnabled()
 const stripeBillingEnabled = isStripeBillingEnabled()
 const stripeClient = stripeBillingEnabled
   ? new Stripe(getRequiredEnvironmentVariable("STRIPE_SECRET_KEY"), {
@@ -243,6 +248,9 @@ export const auth = betterAuth({
   appName: "MTG Auto Deck",
   baseURL: getRequiredEnvironmentVariable("BETTER_AUTH_URL"),
   database: getDatabasePool(),
+  databaseHooks: createAutoVerifyNewUsersDatabaseHooks(
+    autoVerifyNewUsersEnabled
+  ),
   emailAndPassword: {
     enabled: true,
     resetPasswordTokenExpiresIn: PASSWORD_RESET_TOKEN_EXPIRES_IN_SECONDS,
@@ -262,7 +270,7 @@ export const auth = betterAuth({
   },
   emailVerification: {
     autoSignInAfterVerification: true,
-    sendOnSignUp: true,
+    sendOnSignUp: !autoVerifyNewUsersEnabled,
     sendOnSignIn: true,
   },
   plugins: [
