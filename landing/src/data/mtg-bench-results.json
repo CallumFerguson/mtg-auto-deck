@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-06-09T23:44:46.138Z",
+  "generatedAt": "2026-06-10T00:57:15.923Z",
   "benchmarks": [
     {
       "benchmarkId": "23c6ab87-5419-4bfd-a281-740b2384a5b8",
@@ -167,6 +167,18 @@
       "mtgAutoDeckScore": 85,
       "reasoningTokensPerAttemptedTurn": 726.7,
       "displayedCostPerAttemptedTurn": 0.24497246,
+      "scatterLabelPosition": "left",
+      "hideReasoningEffortOnScatterLabel": false
+    },
+    {
+      "benchmarkId": "f360847d-fbb6-466e-8715-75d1928d6b0b",
+      "publicBenchmarkUrl": "https://app.mtgautodeck.com/public/benchmarks/f360847d-fbb6-466e-8715-75d1928d6b0b",
+      "model": "claude-fable-5",
+      "providerKey": "anthropic",
+      "reasoningEffort": "medium",
+      "mtgAutoDeckScore": 90.3,
+      "reasoningTokensPerAttemptedTurn": 1426.1,
+      "displayedCostPerAttemptedTurn": 0.298219592,
       "scatterLabelPosition": "left",
       "hideReasoningEffortOnScatterLabel": false
     }
