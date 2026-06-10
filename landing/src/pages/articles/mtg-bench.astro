@@ -108,32 +108,6 @@ const date = "June 7, 2026"
 
         <div class="article-body">
           <section class="article-body-section">
-            <h2>Overview</h2>
-            <p>
-              This project started as pasting a decklist into ChatGPT and asking it to
-              <a
-                href="https://mtg.fandom.com/wiki/Goldfishing"
-                target="_blank"
-                rel="noreferrer noopener">goldfish</a
-              >
-              (play against no opponents) the deck. Unsuprisingly, it could not do random actions fairly. It would always draw a perfect starting hand with the best cards.
-            </p>
-            <p>
-              But asking it to write a program any time it needs a source of randomness worked better than I expected.
-              It put all the cards into a list, then could randomize the list and pop elements off the list to draw cards. It could also handle every edge case, like
-              <a
-                href="https://scryfall.com/card/akh/4/approach-of-the-second-sun"
-                target="_blank"
-                rel="noreferrer noopener">putting a card seventh from the top</a
-              >
-              or rolling dice.
-            </p>
-            <p>
-              Writing a program for every deck interaction is slow, and it can still see the order of the cards. The obvious solution is to make a set of library interaction tools for the LLM to use.
-            </p>
-          </section>
-
-          <section class="article-body-section">
             <h2>How the benchmark works</h2>
             <p>
               The main idea is that if an LLM is smart enough to play good magic, then it is also smart enough to not need a rules engine.
