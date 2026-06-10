@@ -846,7 +846,7 @@ export function PublicSimulationPage({
   }, [loadPublicSimulation])
 
   return (
-    <main className="flex h-svh flex-col overflow-hidden bg-background text-foreground">
+    <main className="simulation-scroll-root flex h-svh flex-col overflow-hidden bg-background text-foreground">
       {hideHeader ? null : (
         <header className="shrink-0 border-b border-border px-4 py-4 sm:px-6 lg:px-8">
           <div className="mx-auto flex w-full max-w-7xl flex-col gap-2">
@@ -1511,7 +1511,7 @@ export function PublicBenchmarkPage({
   }
 
   return (
-    <main className="flex h-svh flex-col overflow-hidden bg-background text-foreground">
+    <main className="simulation-scroll-root flex h-svh flex-col overflow-hidden bg-background text-foreground">
       <section className="min-h-0 flex-1 overflow-hidden">
         {isLoadingBenchmark ? (
           <div className="mx-4 mt-6 rounded-lg border border-border bg-card/70 px-4 py-8 text-sm text-muted-foreground sm:mx-6 lg:mx-8">

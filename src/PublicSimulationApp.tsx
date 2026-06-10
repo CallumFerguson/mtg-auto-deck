@@ -1,3 +1,5 @@
+import { useEffect } from "react"
+
 import {
   PublicBenchmarkPage,
   PublicSimulationPage,
@@ -5,8 +7,19 @@ import {
 
 const PUBLIC_BENCHMARK_PATH_PREFIX = "/public/benchmarks/"
 const PUBLIC_SIMULATION_PATH_PREFIX = "/public/simulations/"
+const SIMULATION_SCROLL_ROOT_CLASS = "simulation-scroll-root"
 
 export function PublicSimulationApp() {
+  useEffect(() => {
+    document.documentElement.classList.add(SIMULATION_SCROLL_ROOT_CLASS)
+    document.body.classList.add(SIMULATION_SCROLL_ROOT_CLASS)
+
+    return () => {
+      document.documentElement.classList.remove(SIMULATION_SCROLL_ROOT_CLASS)
+      document.body.classList.remove(SIMULATION_SCROLL_ROOT_CLASS)
+    }
+  }, [])
+
   if (window.location.pathname.startsWith(PUBLIC_BENCHMARK_PATH_PREFIX)) {
     const benchmarkId = getPublicRouteIdFromPathname(
       window.location.pathname,
