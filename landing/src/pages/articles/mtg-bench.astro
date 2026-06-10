@@ -156,7 +156,7 @@ const date = "June 7, 2026"
               it can use multiple library tool calls.
             </p>
             <p>
-              Everything other than the library and actions like rolling a die is handled by the LLM. Legality checks and scoring for the benchmarks was all done with gpt-5.5 (medium).
+              Everything other than the library is managed by the LLM. Legality checks and scoring for the benchmarks was all done with gpt-5.5 (medium).
               From my testing, LLMs were much better at evaluating if a simulated turn was legal than they were at actually performing a legal turn simulation.
             </p>
           </section>
@@ -179,19 +179,32 @@ const date = "June 7, 2026"
           <section class="article-body-section">
             <h2>Input token caching</h2>
             <p>
-              In my opinion, cached input pricing does not make sense for agent loops. The pricing makes sense for large system prompts.
-              If many api calls start with the same system prompt, input caching gets you a discount for free, or for a small caching fee.
+              In my opinion, the way cached input tokens are charged does not make sense for agent loops. The pricing makes sense for independent requests.
+              If multiple independent api calls start with the same large system prompt, input caching gets you a discount for free, or for a small caching fee.
             </p>
             <p>
-              With an agent loop, however, after every tool call you are charged the cached input cost for all of the previous tokens even if the tool call only took a fraction of a second.
-              Consider two examples. Assume all input tokens are cached, and tool calls result in negligible token use.
+              With an agent loop, however, you are charged the cached input cost for a large system prompt after every tool call.
+              Consider an example. Assume the system prompt is already cached and tool calls result in negligible token use.
             </p>
-            <ol>
-              <li>Prompt=100 tokens. The agent loop immediately calls 10 tools, then reasons for 100k tokens, then outputs 100 tokens.</li>
-              <!-- add two bullet points here (not numbered) -->
-              <li>a</li>
-              <!-- add two bullet points here (not numbered) -->
-            </ol>
+            <ul>
+              <li>Large system prompt = 10k tokens</li>
+              <li>Agent calls 10 tool functions (not parallel)</li>
+              <li>Billed cached input tokens = 10k + 10k * 10 = 110k tokens</li>
+            </ul>
+            <p>
+              I don't think it makes sense to charge for the system prompt after every agent turn if the LLM is only pausing for a fraction of a second while waiting for a tool function result.
+              This is overlooking some details, like how it takes output tokens to call a tool, and the tool function result still needs to be processed as input tokens. But in my case,
+              the api cost is dominated by the large system prompt being charged as cached input tokens after every agent turn.
+            </p>
+            <p>
+              The pricing for an agent loop is understandable when your application code has the agent loop, and is making a new api call after each tool call.
+              But it makes even less sense when you provide a remote MCP server and do not handle the agent loop yourself. OpenAI handles it correctly.
+              A single api call to OpenAI with a remote MCP server will only ever charge you for the input prompt once. An Anthropic api call with remote MCP
+              server, however, works like the previous example.
+            </p>
+            <p>
+              Some real numbers, the gpt-5.5 (medium) benchmark had an average input tokens per magic turn of 11,386. The average for claude-fable-5 (medium) was 51,610.
+            </p>
           </section>
 
           <section class="article-body-section">
