@@ -5610,10 +5610,14 @@ function SimulationResultsPanel({
       0,
       Math.min(targetScrollLeft, maxScrollLeft)
     )
+    const shouldReduceMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)"
+    ).matches
 
     timelineScroller.scrollTo({
       left: clampedScrollLeft,
       top: timelineScroller.scrollTop,
+      behavior: shouldReduceMotion ? "auto" : "smooth",
     })
   }, [displayedTimelineSteps, selectedTimelineStepId])
 
