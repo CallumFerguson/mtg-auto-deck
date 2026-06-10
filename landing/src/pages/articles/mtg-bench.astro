@@ -7,6 +7,446 @@ const contactEmail = "support@mtgautodeck.com"
 const contactUrl = `mailto:${contactEmail}`
 const title = "MTG Bench: Testing how well LLMs can play magic"
 const date = "June 7, 2026"
+
+type BenchmarkScoreBar = {
+  href: string
+  ariaLabel: string
+  barStyle: string
+  value: string
+  logoSrc: string
+  logoAlt: string
+  labelLineOne: string
+  labelLineTwo: string
+}
+
+type BenchmarkScatterPoint = {
+  href: string
+  className: string
+  style: string
+  ariaLabel: string
+  labelPosition: string
+  modelLabel: string
+  reasoningEffortLabel: string
+  showReasoningEffortLabel: boolean
+  logoSrc: string
+  logoAlt: string
+  scoreLabel: string
+  costLabel: string
+}
+
+const benchmarkScoreBars: BenchmarkScoreBar[] = [
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/4bd9955b-ebe1-4fe1-bb87-52d5111c4025",
+    ariaLabel:
+      "Open benchmark gpt-5.5 medium, Overall Score, higher is better 95.4",
+    barStyle: "height: 95.4%; background-color: #10A37F; color: #ffffff",
+    value: "95.4",
+    logoSrc: "/openai_small.svg",
+    logoAlt: "OpenAI",
+    labelLineOne: "gpt-5.5",
+    labelLineTwo: "medium",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/f360847d-fbb6-466e-8715-75d1928d6b0b",
+    ariaLabel:
+      "Open benchmark claude-fable-5 medium, Overall Score, higher is better 90.3",
+    barStyle: "height: 90.3%; background-color: #CC785C; color: #ffffff",
+    value: "90.3",
+    logoSrc: "/anthropic-1.svg",
+    logoAlt: "Anthropic",
+    labelLineOne: "claude-fable-5",
+    labelLineTwo: "medium",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/2f984f51-3a2f-45db-b87b-ed7edfea8027",
+    ariaLabel:
+      "Open benchmark gpt-5.4 medium, Overall Score, higher is better 88.6",
+    barStyle: "height: 88.6%; background-color: #10A37F; color: #ffffff",
+    value: "88.6",
+    logoSrc: "/openai_small.svg",
+    logoAlt: "OpenAI",
+    labelLineOne: "gpt-5.4",
+    labelLineTwo: "medium",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/0b5b448b-d276-461b-85ea-542593639e35",
+    ariaLabel:
+      "Open benchmark gemini-3.5- flash medium, Overall Score, higher is better 85.7",
+    barStyle: "height: 85.7%; background-color: #4890E5; color: #ffffff",
+    value: "85.7",
+    logoSrc: "/google_small.svg",
+    logoAlt: "Google",
+    labelLineOne: "gemini-3.5-",
+    labelLineTwo: "flash medium",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/aae3d1e9-9b36-4964-b9fc-818235ad85fd",
+    ariaLabel:
+      "Open benchmark claude-fable-5 low, Overall Score, higher is better 85",
+    barStyle: "height: 85%; background-color: #CC785C; color: #ffffff",
+    value: "85",
+    logoSrc: "/anthropic-1.svg",
+    logoAlt: "Anthropic",
+    labelLineOne: "claude-fable-5",
+    labelLineTwo: "low",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/79d1ed51-ca1d-4783-a71c-66e46af6e718",
+    ariaLabel:
+      "Open benchmark gpt-5.5 low, Overall Score, higher is better 84.5",
+    barStyle: "height: 84.5%; background-color: #10A37F; color: #ffffff",
+    value: "84.5",
+    logoSrc: "/openai_small.svg",
+    logoAlt: "OpenAI",
+    labelLineOne: "gpt-5.5",
+    labelLineTwo: "low",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/b7403939-7686-4b2a-88ab-92208ff80220",
+    ariaLabel:
+      "Open benchmark gemini-3.1-pro- preview medium, Overall Score, higher is better 79.6",
+    barStyle: "height: 79.6%; background-color: #4890E5; color: #ffffff",
+    value: "79.6",
+    logoSrc: "/google_small.svg",
+    logoAlt: "Google",
+    labelLineOne: "gemini-3.1-pro-",
+    labelLineTwo: "preview medium",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/23c6ab87-5419-4bfd-a281-740b2384a5b8",
+    ariaLabel:
+      "Open benchmark gpt-5.4-nano medium, Overall Score, higher is better 68.2",
+    barStyle: "height: 68.2%; background-color: #10A37F; color: #ffffff",
+    value: "68.2",
+    logoSrc: "/openai_small.svg",
+    logoAlt: "OpenAI",
+    labelLineOne: "gpt-5.4-nano",
+    labelLineTwo: "medium",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/ef00418d-ab60-4efb-94a1-2756ae2a6348",
+    ariaLabel:
+      "Open benchmark qwen3.7-max medium, Overall Score, higher is better 60.9",
+    barStyle: "height: 60.9%; background-color: #FF7018; color: #ffffff",
+    value: "60.9",
+    logoSrc: "/alibaba_small.svg",
+    logoAlt: "Alibaba",
+    labelLineOne: "qwen3.7-max",
+    labelLineTwo: "medium",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/3947a331-f7c9-4697-abda-a8b6ccf9a91f",
+    ariaLabel:
+      "Open benchmark gpt-5.4-mini medium, Overall Score, higher is better 60.1",
+    barStyle: "height: 60.1%; background-color: #10A37F; color: #ffffff",
+    value: "60.1",
+    logoSrc: "/openai_small.svg",
+    logoAlt: "OpenAI",
+    labelLineOne: "gpt-5.4-mini",
+    labelLineTwo: "medium",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/c36e6599-dccc-4e4d-86cd-3b5fc5b4497e",
+    ariaLabel:
+      "Open benchmark grok-4.3 medium, Overall Score, higher is better 59.7",
+    barStyle: "height: 59.7%; background-color: #736CD3; color: #ffffff",
+    value: "59.7",
+    logoSrc: "/xai.svg",
+    logoAlt: "xAI",
+    labelLineOne: "grok-4.3",
+    labelLineTwo: "medium",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/dcc18bd8-339d-458a-a94d-28385ca525c7",
+    ariaLabel:
+      "Open benchmark kimi-k2.6 medium, Overall Score, higher is better 43",
+    barStyle: "height: 43%; background-color: #047AFE; color: #ffffff",
+    value: "43",
+    logoSrc: "/kimi_small.png",
+    logoAlt: "Kimi",
+    labelLineOne: "kimi-k2.6",
+    labelLineTwo: "medium",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/c289c85f-051f-43d2-a9d0-5cddabb0d8f4",
+    ariaLabel:
+      "Open benchmark claude-opus-4-8 medium, Overall Score, higher is better 39.8",
+    barStyle: "height: 39.8%; background-color: #CC785C; color: #ffffff",
+    value: "39.8",
+    logoSrc: "/anthropic-1.svg",
+    logoAlt: "Anthropic",
+    labelLineOne: "claude-opus-4-8",
+    labelLineTwo: "medium",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/6349dda2-4069-4825-971e-8c11234260c4",
+    ariaLabel:
+      "Open benchmark claude-opus-4-8 low, Overall Score, higher is better 26.6",
+    barStyle: "height: 26.6%; background-color: #CC785C; color: #ffffff",
+    value: "26.6",
+    logoSrc: "/anthropic-1.svg",
+    logoAlt: "Anthropic",
+    labelLineOne: "claude-opus-4-8",
+    labelLineTwo: "low",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/9c7fee4d-9408-4dca-b1e2-50879fa45a1e",
+    ariaLabel:
+      "Open benchmark deepseek-v4-pro high, Overall Score, higher is better 12.8",
+    barStyle: "height: 12.8%; background-color: #2243E6; color: #ffffff",
+    value: "12.8",
+    logoSrc: "/deepseek_small.svg",
+    logoAlt: "DeepSeek",
+    labelLineOne: "deepseek-v4-pro",
+    labelLineTwo: "high",
+  },
+]
+
+const benchmarkScatterPoints: BenchmarkScatterPoint[] = [
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/23c6ab87-5419-4bfd-a281-740b2384a5b8",
+    className: "benchmark-scatter-point benchmark-scatter-point-right",
+    style: "left: 2.969%; bottom: 68.2%; background-color: #10A37F",
+    ariaLabel:
+      "Open benchmark for gpt-5.4-nano, medium reasoning effort, score 68.2, cost per attempted turn $0.01",
+    labelPosition: "right",
+    modelLabel: "gpt-5.4-nano",
+    reasoningEffortLabel: "medium",
+    showReasoningEffortLabel: false,
+    logoSrc: "/openai_small.svg",
+    logoAlt: "OpenAI",
+    scoreLabel: "68.2",
+    costLabel: "$0.01",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/3947a331-f7c9-4697-abda-a8b6ccf9a91f",
+    className: "benchmark-scatter-point benchmark-scatter-point-right",
+    style: "left: 9.747%; bottom: 60.1%; background-color: #10A37F",
+    ariaLabel:
+      "Open benchmark for gpt-5.4-mini, medium reasoning effort, score 60.1, cost per attempted turn $0.03",
+    labelPosition: "right",
+    modelLabel: "gpt-5.4-mini",
+    reasoningEffortLabel: "medium",
+    showReasoningEffortLabel: false,
+    logoSrc: "/openai_small.svg",
+    logoAlt: "OpenAI",
+    scoreLabel: "60.1",
+    costLabel: "$0.03",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/2f984f51-3a2f-45db-b87b-ed7edfea8027",
+    className: "benchmark-scatter-point benchmark-scatter-point-right",
+    style: "left: 21.101%; bottom: 88.6%; background-color: #10A37F",
+    ariaLabel:
+      "Open benchmark for gpt-5.4, medium reasoning effort, score 88.6, cost per attempted turn $0.06",
+    labelPosition: "top",
+    modelLabel: "gpt-5.4",
+    reasoningEffortLabel: "medium",
+    showReasoningEffortLabel: false,
+    logoSrc: "/openai_small.svg",
+    logoAlt: "OpenAI",
+    scoreLabel: "88.6",
+    costLabel: "$0.06",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/79d1ed51-ca1d-4783-a71c-66e46af6e718",
+    className: "benchmark-scatter-point benchmark-scatter-point-right",
+    style: "left: 19.325%; bottom: 84.5%; background-color: #10A37F",
+    ariaLabel:
+      "Open benchmark for gpt-5.5, low reasoning effort, score 84.5, cost per attempted turn $0.06",
+    labelPosition: "bottom",
+    modelLabel: "gpt-5.5",
+    reasoningEffortLabel: "low",
+    showReasoningEffortLabel: true,
+    logoSrc: "/openai_small.svg",
+    logoAlt: "OpenAI",
+    scoreLabel: "84.5",
+    costLabel: "$0.06",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/4bd9955b-ebe1-4fe1-bb87-52d5111c4025",
+    className: "benchmark-scatter-point",
+    style: "left: 32.13%; bottom: 95.4%; background-color: #10A37F",
+    ariaLabel:
+      "Open benchmark for gpt-5.5, medium reasoning effort, score 95.4, cost per attempted turn $0.10",
+    labelPosition: "right",
+    modelLabel: "gpt-5.5",
+    reasoningEffortLabel: "medium",
+    showReasoningEffortLabel: true,
+    logoSrc: "/openai_small.svg",
+    logoAlt: "OpenAI",
+    scoreLabel: "95.4",
+    costLabel: "$0.10",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/6349dda2-4069-4825-971e-8c11234260c4",
+    className: "benchmark-scatter-point",
+    style: "left: 58.433%; bottom: 26.6%; background-color: #CC785C",
+    ariaLabel:
+      "Open benchmark for claude-opus-4-8, low reasoning effort, score 26.6, cost per attempted turn $0.18",
+    labelPosition: "left",
+    modelLabel: "claude-opus-4-8",
+    reasoningEffortLabel: "low",
+    showReasoningEffortLabel: true,
+    logoSrc: "/anthropic-1.svg",
+    logoAlt: "Anthropic",
+    scoreLabel: "26.6",
+    costLabel: "$0.18",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/c289c85f-051f-43d2-a9d0-5cddabb0d8f4",
+    className: "benchmark-scatter-point",
+    style: "left: 63.566%; bottom: 39.8%; background-color: #CC785C",
+    ariaLabel:
+      "Open benchmark for claude-opus-4-8, medium reasoning effort, score 39.8, cost per attempted turn $0.19",
+    labelPosition: "left",
+    modelLabel: "claude-opus-4-8",
+    reasoningEffortLabel: "medium",
+    showReasoningEffortLabel: true,
+    logoSrc: "/anthropic-1.svg",
+    logoAlt: "Anthropic",
+    scoreLabel: "39.8",
+    costLabel: "$0.19",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/b7403939-7686-4b2a-88ab-92208ff80220",
+    className: "benchmark-scatter-point benchmark-scatter-point-right",
+    style: "left: 27.899%; bottom: 79.6%; background-color: #4890E5",
+    ariaLabel:
+      "Open benchmark for gemini-3.1-pro-preview, medium reasoning effort, score 79.6, cost per attempted turn $0.08",
+    labelPosition: "right",
+    modelLabel: "gemini-3.1-pro-preview",
+    reasoningEffortLabel: "medium",
+    showReasoningEffortLabel: false,
+    logoSrc: "/google_small.svg",
+    logoAlt: "Google",
+    scoreLabel: "79.6",
+    costLabel: "$0.08",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/0b5b448b-d276-461b-85ea-542593639e35",
+    className: "benchmark-scatter-point",
+    style: "left: 30.948%; bottom: 85.7%; background-color: #4890E5",
+    ariaLabel:
+      "Open benchmark for gemini-3.5-flash, medium reasoning effort, score 85.7, cost per attempted turn $0.09",
+    labelPosition: "right",
+    modelLabel: "gemini-3.5-flash",
+    reasoningEffortLabel: "medium",
+    showReasoningEffortLabel: false,
+    logoSrc: "/google_small.svg",
+    logoAlt: "Google",
+    scoreLabel: "85.7",
+    costLabel: "$0.09",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/c36e6599-dccc-4e4d-86cd-3b5fc5b4497e",
+    className: "benchmark-scatter-point benchmark-scatter-point-right",
+    style: "left: 6.795%; bottom: 59.7%; background-color: #736CD3",
+    ariaLabel:
+      "Open benchmark for grok-4.3, medium reasoning effort, score 59.7, cost per attempted turn $0.02",
+    labelPosition: "bottom",
+    modelLabel: "grok-4.3",
+    reasoningEffortLabel: "medium",
+    showReasoningEffortLabel: false,
+    logoSrc: "/xai.svg",
+    logoAlt: "xAI",
+    scoreLabel: "59.7",
+    costLabel: "$0.02",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/9c7fee4d-9408-4dca-b1e2-50879fa45a1e",
+    className: "benchmark-scatter-point benchmark-scatter-point-right",
+    style: "left: 1.395%; bottom: 12.8%; background-color: #2243E6",
+    ariaLabel:
+      "Open benchmark for deepseek-v4-pro, high reasoning effort, score 12.8, cost per attempted turn $0.01",
+    labelPosition: "right",
+    modelLabel: "deepseek-v4-pro",
+    reasoningEffortLabel: "high",
+    showReasoningEffortLabel: false,
+    logoSrc: "/deepseek_small.svg",
+    logoAlt: "DeepSeek",
+    scoreLabel: "12.8",
+    costLabel: "$0.01",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/dcc18bd8-339d-458a-a94d-28385ca525c7",
+    className: "benchmark-scatter-point benchmark-scatter-point-right",
+    style: "left: 11.043%; bottom: 43%; background-color: #047AFE",
+    ariaLabel:
+      "Open benchmark for kimi-k2.6, medium reasoning effort, score 43, cost per attempted turn $0.03",
+    labelPosition: "right",
+    modelLabel: "kimi-k2.6",
+    reasoningEffortLabel: "medium",
+    showReasoningEffortLabel: false,
+    logoSrc: "/kimi_small.png",
+    logoAlt: "Kimi",
+    scoreLabel: "43",
+    costLabel: "$0.03",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/ef00418d-ab60-4efb-94a1-2756ae2a6348",
+    className: "benchmark-scatter-point benchmark-scatter-point-right",
+    style: "left: 23.833%; bottom: 60.9%; background-color: #FF7018",
+    ariaLabel:
+      "Open benchmark for qwen3.7-max, medium reasoning effort, score 60.9, cost per attempted turn $0.07",
+    labelPosition: "right",
+    modelLabel: "qwen3.7-max",
+    reasoningEffortLabel: "medium",
+    showReasoningEffortLabel: false,
+    logoSrc: "/alibaba_small.svg",
+    logoAlt: "Alibaba",
+    scoreLabel: "60.9",
+    costLabel: "$0.07",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/aae3d1e9-9b36-4964-b9fc-818235ad85fd",
+    className: "benchmark-scatter-point benchmark-scatter-point-left",
+    style: "left: 81.657%; bottom: 85%; background-color: #CC785C",
+    ariaLabel:
+      "Open benchmark for claude-fable-5, low reasoning effort, score 85, cost per attempted turn $0.24",
+    labelPosition: "left",
+    modelLabel: "claude-fable-5",
+    reasoningEffortLabel: "low",
+    showReasoningEffortLabel: true,
+    logoSrc: "/anthropic-1.svg",
+    logoAlt: "Anthropic",
+    scoreLabel: "85",
+    costLabel: "$0.24",
+  },
+  {
+    href: "https://app.mtgautodeck.com/public/benchmarks/f360847d-fbb6-466e-8715-75d1928d6b0b",
+    className: "benchmark-scatter-point benchmark-scatter-point-left",
+    style: "left: 99.407%; bottom: 90.3%; background-color: #CC785C",
+    ariaLabel:
+      "Open benchmark for claude-fable-5, medium reasoning effort, score 90.3, cost per attempted turn $0.30",
+    labelPosition: "left",
+    modelLabel: "claude-fable-5",
+    reasoningEffortLabel: "medium",
+    showReasoningEffortLabel: true,
+    logoSrc: "/anthropic-1.svg",
+    logoAlt: "Anthropic",
+    scoreLabel: "90.3",
+    costLabel: "$0.30",
+  },
+]
+
+const benchmarkScatterScoreTicks = [
+  { label: "0", style: "bottom: 0%" },
+  { label: "25", style: "bottom: 25%" },
+  { label: "50", style: "bottom: 50%" },
+  { label: "75", style: "bottom: 75%" },
+  { label: "100", style: "bottom: 100%" },
+]
+
+const benchmarkScatterCostTicks = [
+  { label: "$0.00", style: "left: 0%" },
+  { label: "$0.05", style: "left: 16.667%" },
+  { label: "$0.10", style: "left: 33.333%" },
+  { label: "$0.15", style: "left: 50%" },
+  { label: "$0.20", style: "left: 66.667%" },
+  { label: "$0.25", style: "left: 83.333%" },
+  { label: "$0.30", style: "left: 100%" },
+]
 ---
 
 <!doctype html>
@@ -63,10 +503,46 @@ const date = "June 7, 2026"
           >
             <div
               class="benchmark-score-chart benchmark-chart-scale-frame"
-              data-mtg-bench-score-chart
               role="group"
               aria-label="MTG Auto Deck benchmark scores"
-            ></div>
+            >
+              {
+                benchmarkScoreBars.map((bar) => (
+                  <a
+                    class="benchmark-score-column"
+                    href={bar.href}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    aria-label={bar.ariaLabel}
+                  >
+                    <div class="benchmark-score-plot">
+                      <div
+                        class="benchmark-score-bar"
+                        style={bar.barStyle}
+                        aria-label={`Overall Score, higher is better ${bar.value}`}
+                      >
+                        {bar.value}
+                      </div>
+                    </div>
+                    <div class="benchmark-score-logo-slot">
+                      <img
+                        class="benchmark-score-logo"
+                        src={bar.logoSrc}
+                        alt={bar.logoAlt}
+                        loading="lazy"
+                        decoding="async"
+                      />
+                    </div>
+                    <div class="benchmark-score-label">
+                      <div class="benchmark-score-label-text">
+                        <span>{bar.labelLineOne}</span>
+                        <span>{bar.labelLineTwo}</span>
+                      </div>
+                    </div>
+                  </a>
+                ))
+              }
+            </div>
           </div>
         </section>
 
@@ -80,10 +556,93 @@ const date = "June 7, 2026"
           >
             <div
               class="benchmark-scatter-chart benchmark-chart-scale-frame"
-              data-mtg-bench-cost-score-chart
               role="group"
               aria-label="Cost per attempted turn from $0.00 to $0.30 versus Overall Score from 0 to 100"
-            ></div>
+            >
+              <div class="benchmark-scatter-layout">
+                <span class="benchmark-scatter-axis-title benchmark-scatter-y-title"
+                  >Score</span
+                >
+                <div class="benchmark-scatter-plot">
+                  <div class="benchmark-scatter-point-layer">
+                    {
+                      benchmarkScatterPoints.map((point) => (
+                        <a
+                          class={point.className}
+                          href={point.href}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          style={point.style}
+                          aria-label={point.ariaLabel}
+                        >
+                          <span
+                            class={`benchmark-scatter-point-label benchmark-scatter-point-label-${point.labelPosition}`}
+                            aria-hidden="true"
+                          >
+                            <span class="benchmark-scatter-point-label-model">
+                              {point.modelLabel}
+                            </span>
+                            {point.showReasoningEffortLabel ? (
+                              <span class="benchmark-scatter-point-label-reasoning">
+                                {" "}
+                                ({point.reasoningEffortLabel})
+                              </span>
+                            ) : null}
+                          </span>
+                          <span
+                            class="benchmark-scatter-tooltip"
+                            aria-hidden="true"
+                          >
+                            <span class="benchmark-scatter-tooltip-header">
+                              <img
+                                class="benchmark-scatter-tooltip-logo"
+                                src={point.logoSrc}
+                                alt={point.logoAlt}
+                                loading="lazy"
+                                decoding="async"
+                              />
+                              <span class="benchmark-scatter-tooltip-title">
+                                {point.modelLabel}
+                              </span>
+                            </span>
+                            <span class="benchmark-scatter-tooltip-muted">
+                              {point.reasoningEffortLabel}
+                            </span>
+                            <span class="benchmark-scatter-tooltip-stats">
+                              <span>Score {point.scoreLabel}</span>
+                              <span>Cost {point.costLabel}</span>
+                            </span>
+                          </span>
+                        </a>
+                      ))
+                    }
+                  </div>
+                  {
+                    benchmarkScatterScoreTicks.map((tick) => (
+                      <span
+                        class="benchmark-scatter-axis-label benchmark-scatter-y-tick"
+                        style={tick.style}
+                      >
+                        {tick.label}
+                      </span>
+                    ))
+                  }
+                  {
+                    benchmarkScatterCostTicks.map((tick) => (
+                      <span
+                        class="benchmark-scatter-axis-label benchmark-scatter-x-tick"
+                        style={tick.style}
+                      >
+                        {tick.label}
+                      </span>
+                    ))
+                  }
+                  <span class="benchmark-scatter-axis-title benchmark-scatter-x-title"
+                    >Cost per attempted turn (USD)</span
+                  >
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -285,487 +844,14 @@ const date = "June 7, 2026"
 </html>
 
 <script>
-  import mtgBenchResultsData from "../../data/mtg-bench-results.json"
-
-  type MtgBenchResultEntry = {
-    benchmarkId: string
-    publicBenchmarkUrl: string
-    model: string | null
-    providerKey: string | null
-    reasoningEffort: string | null
-    mtgAutoDeckScore: number | null
-    reasoningTokensPerAttemptedTurn: number | null
-    displayedCostPerAttemptedTurn: number | null
-    scatterLabelPosition?: string | null
-    hideReasoningEffortOnScatterLabel?: boolean | null
-  }
-
-  type MtgBenchScatterLabelPosition =
-    | "right"
-    | "left"
-    | "top"
-    | "bottom"
-    | "bottom-left"
-    | "bottom-right"
-    | "top-left"
-    | "top-right"
-
-  type MtgBenchResultsData = {
-    schemaVersion: number
-    generatedAt: string
-    benchmarks: MtgBenchResultEntry[]
-  }
-
-  type MtgBenchResultsState = {
-    status: "loaded"
-    schemaVersion: number
-    benchmarkIds: string[]
-    results: MtgBenchResultEntry[]
-    resultsByBenchmarkId: Record<string, MtgBenchResultEntry>
-    loadedAt: string
-  }
-
-  type MtgBenchMetricBar = {
-    benchmarkId: string
-    publicBenchmarkUrl: string
-    labelLineOne: string
-    labelLineTwo: string
-    metricAriaLabel: string
-    providerMatch: MtgBenchProviderMatch | null
-    value: number | null
-    valueLabel: string
-    heightPercent: number
-  }
-
-  type MtgBenchScatterPoint = {
-    benchmarkId: string
-    publicBenchmarkUrl: string
-    costPerAttemptedTurn: number
-    costLabel: string
-    modelLabel: string
-    reasoningEffortLabel: string
-    labelPosition: MtgBenchScatterLabelPosition
-    hideReasoningEffortOnLabel: boolean
-    score: number
-    scoreLabel: string
-    providerMatch: MtgBenchProviderMatch | null
-  }
-
-  type MtgBenchProviderMatch = {
-    barColor: string
-    barTextColor: string
-    logoAlt: string
-    logoSrc: string
-  }
-
-  const mtgBenchProviderMatches: Record<string, MtgBenchProviderMatch> = {
-    alibaba: {
-      barColor: "#FF7018",
-      barTextColor: "#ffffff",
-      logoAlt: "Alibaba",
-      logoSrc: "/alibaba_small.svg",
-    },
-    anthropic: {
-      barColor: "#CC785C",
-      barTextColor: "#ffffff",
-      logoAlt: "Anthropic",
-      logoSrc: "/anthropic-1.svg",
-    },
-    deepseek: {
-      barColor: "#2243E6",
-      barTextColor: "#ffffff",
-      logoAlt: "DeepSeek",
-      logoSrc: "/deepseek_small.svg",
-    },
-    google: {
-      barColor: "#4890E5",
-      barTextColor: "#ffffff",
-      logoAlt: "Google",
-      logoSrc: "/google_small.svg",
-    },
-    moonshotai: {
-      barColor: "#047AFE",
-      barTextColor: "#ffffff",
-      logoAlt: "Kimi",
-      logoSrc: "/kimi_small.png",
-    },
-    openai: {
-      barColor: "#10A37F",
-      barTextColor: "#ffffff",
-      logoAlt: "OpenAI",
-      logoSrc: "/openai_small.svg",
-    },
-    xai: {
-      barColor: "#736CD3",
-      barTextColor: "#ffffff",
-      logoAlt: "xAI",
-      logoSrc: "/xai.svg",
-    },
-  }
-  const mtgBenchScatterMaxCostUsd = 0.3
-  const mtgBenchScatterCostTicks = [0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3]
-  const mtgBenchScatterScoreTicks = [0, 25, 50, 75, 100]
-  const mtgBenchScatterLabelPositions = new Set<string>([
-    "right",
-    "left",
-    "top",
-    "bottom",
-    "bottom-left",
-    "bottom-right",
-    "top-left",
-    "top-right",
-  ])
-  const mtgBenchResultsPayload =
-    mtgBenchResultsData as MtgBenchResultsData
-  const mtgBenchResults = mtgBenchResultsPayload.benchmarks
-  const mtgBenchBenchmarkIds = mtgBenchResults.map(
-    (result) => result.benchmarkId
-  )
-  const mtgBenchResultsByBenchmarkId = Object.fromEntries(
-    mtgBenchResults.map((result) => [result.benchmarkId, result])
-  ) as Record<string, MtgBenchResultEntry>
-  const mtgBenchWindow = window as Window & {
-    mtgBenchResults: MtgBenchResultsState
-  }
-  const mtgBenchScoreChart = document.querySelector<HTMLElement>(
-    "[data-mtg-bench-score-chart]"
-  )
-  const mtgBenchReasoningChart = document.querySelector<HTMLElement>(
-    "[data-mtg-bench-reasoning-chart]"
-  )
-  const mtgBenchCostScoreChart = document.querySelector<HTMLElement>(
-    "[data-mtg-bench-cost-score-chart]"
-  )
   const mtgBenchChartViewports = [
-    ...document.querySelectorAll<HTMLElement>(
-      "[data-mtg-bench-chart-viewport]"
-    ),
+    ...document.querySelectorAll("[data-mtg-bench-chart-viewport]"),
   ]
 
-  mtgBenchWindow.mtgBenchResults = {
-    status: "loaded",
-    schemaVersion: mtgBenchResultsPayload.schemaVersion,
-    benchmarkIds: [...mtgBenchBenchmarkIds],
-    results: mtgBenchResults,
-    resultsByBenchmarkId: mtgBenchResultsByBenchmarkId,
-    loadedAt: mtgBenchResultsPayload.generatedAt,
-  }
-
-  renderMtgBenchMetricChart(
-    mtgBenchScoreChart,
-    buildMtgBenchScoreBars(mtgBenchResults)
-  )
-  renderMtgBenchMetricChart(
-    mtgBenchReasoningChart,
-    buildMtgBenchReasoningTokenBars(mtgBenchResults)
-  )
-  renderMtgBenchScatterChart(
-    mtgBenchCostScoreChart,
-    buildMtgBenchCostScorePoints(mtgBenchResults)
-  )
   setupMtgBenchChartViewports(mtgBenchChartViewports)
 
-  function buildMtgBenchScoreBars(results: readonly MtgBenchResultEntry[]) {
-    return results
-      .map((result) => {
-        const labelLines = buildMtgBenchLabelLines(
-          getMtgBenchModelLabel(result),
-          getMtgBenchReasoningEffortLabel(result)
-        )
-        const score = getMtgBenchScore(result)
-
-        return {
-          benchmarkId: result.benchmarkId,
-          publicBenchmarkUrl: result.publicBenchmarkUrl,
-          labelLineOne: labelLines[0],
-          labelLineTwo: labelLines[1],
-          metricAriaLabel: "Overall Score, higher is better",
-          providerMatch: getMtgBenchProviderMatch(result),
-          value: score,
-          valueLabel: formatMtgBenchBarScore(score),
-          heightPercent: Math.max(0, Math.min(score ?? 0, 100)),
-        }
-      })
-      .sort(compareMtgBenchScoreBars)
-  }
-
-  function buildMtgBenchReasoningTokenBars(
-    results: readonly MtgBenchResultEntry[]
-  ) {
-    const maxReasoningTokens = Math.max(
-      0,
-      ...results
-        .map((result) => getMtgBenchReasoningTokensPerTurn(result))
-        .filter((value): value is number => value !== null)
-    )
-
-    return results
-      .map((result) => {
-        const reasoningTokens = getMtgBenchReasoningTokensPerTurn(result)
-        const labelLines = buildMtgBenchLabelLines(
-          getMtgBenchModelLabel(result),
-          getMtgBenchReasoningEffortLabel(result)
-        )
-
-        return {
-          benchmarkId: result.benchmarkId,
-          publicBenchmarkUrl: result.publicBenchmarkUrl,
-          labelLineOne: labelLines[0],
-          labelLineTwo: labelLines[1],
-          metricAriaLabel: "Reasoning tokens per turn, lower is better",
-          providerMatch: getMtgBenchProviderMatch(result),
-          value: reasoningTokens,
-          valueLabel: formatMtgBenchBarTokenRate(reasoningTokens),
-          heightPercent:
-            maxReasoningTokens > 0 && reasoningTokens !== null
-              ? (reasoningTokens / maxReasoningTokens) * 100
-              : 0,
-        }
-      })
-      .sort(compareMtgBenchReasoningTokenBars)
-  }
-
-  function buildMtgBenchCostScorePoints(
-    results: readonly MtgBenchResultEntry[]
-  ) {
-    return results.flatMap((result) => {
-      const costPerAttemptedTurn = getMtgBenchCostPerAttemptedTurn(result)
-      const score = getMtgBenchScore(result)
-
-      if (costPerAttemptedTurn === null || score === null) {
-        return []
-      }
-
-      return [
-        {
-          benchmarkId: result.benchmarkId,
-          publicBenchmarkUrl: result.publicBenchmarkUrl,
-          costPerAttemptedTurn,
-          costLabel: formatMtgBenchScatterPointCost(costPerAttemptedTurn),
-          modelLabel: getMtgBenchModelLabel(result),
-          reasoningEffortLabel: getMtgBenchReasoningEffortLabel(result),
-          labelPosition: getMtgBenchScatterLabelPosition(result),
-          hideReasoningEffortOnLabel:
-            getMtgBenchHideReasoningEffortOnScatterLabel(result),
-          score,
-          scoreLabel: formatMtgBenchBarScore(score),
-          providerMatch: getMtgBenchProviderMatch(result),
-        },
-      ]
-    })
-  }
-
-  function compareMtgBenchScoreBars(
-    first: MtgBenchMetricBar,
-    second: MtgBenchMetricBar
-  ) {
-    const firstScore = first.value ?? Number.NEGATIVE_INFINITY
-    const secondScore = second.value ?? Number.NEGATIVE_INFINITY
-    const scoreCompare = secondScore - firstScore
-
-    return scoreCompare || first.benchmarkId.localeCompare(second.benchmarkId)
-  }
-
-  function compareMtgBenchReasoningTokenBars(
-    first: MtgBenchMetricBar,
-    second: MtgBenchMetricBar
-  ) {
-    const firstTokens = first.value ?? Number.POSITIVE_INFINITY
-    const secondTokens = second.value ?? Number.POSITIVE_INFINITY
-    const tokenCompare = firstTokens - secondTokens
-
-    return tokenCompare || first.benchmarkId.localeCompare(second.benchmarkId)
-  }
-
-  function renderMtgBenchMetricChart(
-    chart: HTMLElement | null,
-    metricBars: readonly MtgBenchMetricBar[]
-  ) {
-    if (!chart) {
-      return
-    }
-
-    chart.replaceChildren(
-      ...metricBars.map((metricBar) => {
-        const column = document.createElement("a")
-        const plot = document.createElement("div")
-        const bar = document.createElement("div")
-        const logoSlot = document.createElement("div")
-        const label = document.createElement("div")
-        const labelText = document.createElement("div")
-        const modelLabel = document.createElement("span")
-        const reasoningEffortLabel = document.createElement("span")
-
-        column.className = "benchmark-score-column"
-        column.href = metricBar.publicBenchmarkUrl
-        column.rel = "noreferrer noopener"
-        column.target = "_blank"
-        column.setAttribute(
-          "aria-label",
-          `Open benchmark ${metricBar.labelLineOne} ${metricBar.labelLineTwo}, ${metricBar.metricAriaLabel} ${metricBar.valueLabel}`
-        )
-        plot.className = "benchmark-score-plot"
-        bar.className = "benchmark-score-bar"
-        bar.style.height = `${Math.max(
-          0,
-          Math.min(metricBar.heightPercent, 100)
-        )}%`
-        if (metricBar.providerMatch) {
-          bar.style.backgroundColor = metricBar.providerMatch.barColor
-          bar.style.color = metricBar.providerMatch.barTextColor
-        }
-        bar.textContent = metricBar.valueLabel
-        bar.setAttribute(
-          "aria-label",
-          `${metricBar.metricAriaLabel} ${metricBar.valueLabel}`
-        )
-        logoSlot.className = "benchmark-score-logo-slot"
-        if (metricBar.providerMatch) {
-          const logo = document.createElement("img")
-
-          logo.alt = metricBar.providerMatch.logoAlt
-          logo.className = "benchmark-score-logo"
-          logo.decoding = "async"
-          logo.loading = "lazy"
-          logo.src = metricBar.providerMatch.logoSrc
-          logoSlot.append(logo)
-        }
-        label.className = "benchmark-score-label"
-        labelText.className = "benchmark-score-label-text"
-        modelLabel.textContent = metricBar.labelLineOne
-        reasoningEffortLabel.textContent = metricBar.labelLineTwo
-
-        labelText.append(modelLabel, reasoningEffortLabel)
-        label.append(labelText)
-        plot.append(bar)
-        column.append(plot, logoSlot, label)
-
-        return column
-      })
-    )
-  }
-
-  function renderMtgBenchScatterChart(
-    chart: HTMLElement | null,
-    points: readonly MtgBenchScatterPoint[]
-  ) {
-    if (!chart) {
-      return
-    }
-
-    const layout = document.createElement("div")
-    const plot = document.createElement("div")
-    const pointLayer = document.createElement("div")
-    const yAxisLabel = document.createElement("span")
-    const xAxisLabel = document.createElement("span")
-    const yTickLabels = mtgBenchScatterScoreTicks.map((tick) => {
-      const tickLabel = document.createElement("span")
-
-      tickLabel.className =
-        "benchmark-scatter-axis-label benchmark-scatter-y-tick"
-      tickLabel.style.bottom = `${getMtgBenchScatterScorePercent(tick)}%`
-      tickLabel.textContent = String(tick)
-
-      return tickLabel
-    })
-    const xTickLabels = mtgBenchScatterCostTicks.map((tick) => {
-      const tickLabel = document.createElement("span")
-
-      tickLabel.className =
-        "benchmark-scatter-axis-label benchmark-scatter-x-tick"
-      tickLabel.style.left = `${getMtgBenchScatterCostPercent(tick)}%`
-      tickLabel.textContent = formatMtgBenchScatterCostTick(tick)
-
-      return tickLabel
-    })
-
-    layout.className = "benchmark-scatter-layout"
-    plot.className = "benchmark-scatter-plot"
-    pointLayer.className = "benchmark-scatter-point-layer"
-    yAxisLabel.className =
-      "benchmark-scatter-axis-title benchmark-scatter-y-title"
-    xAxisLabel.className =
-      "benchmark-scatter-axis-title benchmark-scatter-x-title"
-    yAxisLabel.textContent = "Score"
-    xAxisLabel.textContent = "Cost per attempted turn (USD)"
-
-    pointLayer.append(
-      ...points.map((point) => {
-        const costPercent = getMtgBenchScatterCostPercent(
-          point.costPerAttemptedTurn
-        )
-        const dot = document.createElement("a")
-        const pointLabel = document.createElement("span")
-        const tooltip = document.createElement("span")
-        const tooltipHeader = document.createElement("span")
-        const tooltipTitle = document.createElement("span")
-        const tooltipReasoning = document.createElement("span")
-        const tooltipStats = document.createElement("span")
-        const scoreStat = document.createElement("span")
-        const costStat = document.createElement("span")
-
-        dot.className = "benchmark-scatter-point"
-        if (costPercent < 28) {
-          dot.classList.add("benchmark-scatter-point-right")
-        } else if (costPercent > 72) {
-          dot.classList.add("benchmark-scatter-point-left")
-        }
-        dot.href = point.publicBenchmarkUrl
-        dot.rel = "noreferrer noopener"
-        dot.target = "_blank"
-        dot.setAttribute(
-          "aria-label",
-          `Open benchmark for ${point.modelLabel}, ${point.reasoningEffortLabel} reasoning effort, score ${point.scoreLabel}, cost per attempted turn ${point.costLabel}`
-        )
-        dot.style.left = `${costPercent}%`
-        dot.style.bottom = `${getMtgBenchScatterScorePercent(point.score)}%`
-        dot.style.backgroundColor =
-          point.providerMatch?.barColor ?? "var(--accent-strong)"
-
-        pointLabel.className = `benchmark-scatter-point-label benchmark-scatter-point-label-${point.labelPosition}`
-        pointLabel.setAttribute("aria-hidden", "true")
-        renderMtgBenchScatterPointLabel(pointLabel, point)
-
-        tooltip.className = "benchmark-scatter-tooltip"
-        tooltip.setAttribute("aria-hidden", "true")
-        tooltipHeader.className = "benchmark-scatter-tooltip-header"
-        tooltipTitle.className = "benchmark-scatter-tooltip-title"
-        tooltipReasoning.className = "benchmark-scatter-tooltip-muted"
-        tooltipStats.className = "benchmark-scatter-tooltip-stats"
-        tooltipTitle.textContent = point.modelLabel
-        tooltipReasoning.textContent = point.reasoningEffortLabel
-        scoreStat.textContent = `Score ${point.scoreLabel}`
-        costStat.textContent = `Cost ${point.costLabel}`
-
-        if (point.providerMatch) {
-          const logo = document.createElement("img")
-
-          logo.alt = point.providerMatch.logoAlt
-          logo.className = "benchmark-scatter-tooltip-logo"
-          logo.decoding = "async"
-          logo.loading = "lazy"
-          logo.src = point.providerMatch.logoSrc
-          tooltipHeader.append(logo)
-        }
-
-        tooltipHeader.append(tooltipTitle)
-        tooltipStats.append(scoreStat, costStat)
-        tooltip.append(tooltipHeader, tooltipReasoning, tooltipStats)
-        dot.append(pointLabel, tooltip)
-
-        return dot
-      })
-    )
-    plot.append(pointLayer, ...yTickLabels, ...xTickLabels, xAxisLabel)
-    layout.append(yAxisLabel, plot)
-
-    chart.replaceChildren(layout)
-  }
-
-  function setupMtgBenchChartViewports(
-    viewports: readonly HTMLElement[]
-  ) {
-    const updateViewport = (viewport: HTMLElement) => {
+  function setupMtgBenchChartViewports(viewports) {
+    const updateViewport = (viewport) => {
       const chart = viewport.firstElementChild
 
       if (!(chart instanceof HTMLElement)) {
@@ -810,183 +896,6 @@ const date = "June 7, 2026"
     }
 
     window.addEventListener("resize", updateViewports)
-  }
-
-  function getMtgBenchScore(result: MtgBenchResultEntry) {
-    const score = result.mtgAutoDeckScore
-
-    return typeof score === "number" && Number.isFinite(score) ? score : null
-  }
-
-  function getMtgBenchReasoningTokensPerTurn(result: MtgBenchResultEntry) {
-    const reasoningTokens = result.reasoningTokensPerAttemptedTurn
-
-    return typeof reasoningTokens === "number" &&
-      Number.isFinite(reasoningTokens)
-      ? reasoningTokens
-      : null
-  }
-
-  function getMtgBenchCostPerAttemptedTurn(result: MtgBenchResultEntry) {
-    const costPerAttemptedTurn = result.displayedCostPerAttemptedTurn
-
-    if (
-      typeof costPerAttemptedTurn !== "number" ||
-      !Number.isFinite(costPerAttemptedTurn)
-    ) {
-      return null
-    }
-
-    return costPerAttemptedTurn
-  }
-
-  function getMtgBenchScatterLabelPosition(
-    result: MtgBenchResultEntry
-  ): MtgBenchScatterLabelPosition {
-    const labelPosition =
-      typeof result.scatterLabelPosition === "string"
-        ? result.scatterLabelPosition.trim().toLowerCase()
-        : ""
-
-    return mtgBenchScatterLabelPositions.has(labelPosition)
-      ? (labelPosition as MtgBenchScatterLabelPosition)
-      : "right"
-  }
-
-  function getMtgBenchHideReasoningEffortOnScatterLabel(
-    result: MtgBenchResultEntry
-  ) {
-    return result.hideReasoningEffortOnScatterLabel === true
-  }
-
-  function renderMtgBenchScatterPointLabel(
-    label: HTMLElement,
-    point: MtgBenchScatterPoint
-  ) {
-    const modelLabel = document.createElement("span")
-
-    modelLabel.className = "benchmark-scatter-point-label-model"
-    modelLabel.textContent = point.modelLabel
-    label.append(modelLabel)
-
-    if (point.hideReasoningEffortOnLabel) {
-      return
-    }
-
-    const reasoningEffortLabel = document.createElement("span")
-
-    reasoningEffortLabel.className =
-      "benchmark-scatter-point-label-reasoning"
-    reasoningEffortLabel.textContent = ` (${point.reasoningEffortLabel})`
-    label.append(reasoningEffortLabel)
-  }
-
-  function getMtgBenchProviderMatch(result: MtgBenchResultEntry) {
-    const providerKey =
-      typeof result.providerKey === "string"
-        ? result.providerKey.trim().toLowerCase()
-        : ""
-
-    return providerKey ? (mtgBenchProviderMatches[providerKey] ?? null) : null
-  }
-
-  function getMtgBenchModelLabel(result: MtgBenchResultEntry) {
-    const model = result.model
-
-    if (typeof model !== "string") {
-      return "-"
-    }
-
-    const trimmedModel = model.trim()
-
-    if (!trimmedModel) {
-      return "-"
-    }
-
-    const slashIndex = trimmedModel.indexOf("/")
-    const modelWithoutProvider =
-      slashIndex === -1 ? trimmedModel : trimmedModel.slice(slashIndex + 1)
-
-    return modelWithoutProvider.trim() || trimmedModel
-  }
-
-  function getMtgBenchReasoningEffortLabel(result: MtgBenchResultEntry) {
-    const reasoningEffort = result.reasoningEffort
-
-    return typeof reasoningEffort === "string" && reasoningEffort.trim()
-      ? reasoningEffort.trim().replaceAll("_", " ")
-      : "-"
-  }
-
-  function buildMtgBenchLabelLines(
-    modelLabel: string,
-    reasoningEffortLabel: string
-  ): [string, string] {
-    const modelSplit = getMtgBenchModelLabelSplit(modelLabel)
-
-    if (!modelSplit) {
-      return [modelLabel, reasoningEffortLabel]
-    }
-
-    return [
-      modelSplit[0],
-      [modelSplit[1], reasoningEffortLabel].filter(Boolean).join(" "),
-    ]
-  }
-
-  function getMtgBenchModelLabelSplit(modelLabel: string) {
-    if (modelLabel.length < 16) {
-      return null
-    }
-
-    const preferredDashIndex = modelLabel.lastIndexOf("-", 15)
-    const dashIndex =
-      preferredDashIndex === -1
-        ? modelLabel.indexOf("-")
-        : preferredDashIndex
-
-    if (dashIndex === -1 || dashIndex === modelLabel.length - 1) {
-      return null
-    }
-
-    return [
-      modelLabel.slice(0, dashIndex + 1),
-      modelLabel.slice(dashIndex + 1),
-    ] as const
-  }
-
-  function formatMtgBenchBarScore(score: number | null) {
-    return score === null ? "-" : score.toFixed(1).replace(/\.0$/u, "")
-  }
-
-  function formatMtgBenchBarTokenRate(tokenRate: number | null) {
-    return tokenRate === null ? "-" : `${(tokenRate / 1000).toFixed(1)}K`
-  }
-
-  function getMtgBenchScatterCostPercent(costPerAttemptedTurn: number) {
-    return clampMtgBenchPercent(
-      (costPerAttemptedTurn / mtgBenchScatterMaxCostUsd) * 100
-    )
-  }
-
-  function getMtgBenchScatterScorePercent(score: number) {
-    return clampMtgBenchPercent(score)
-  }
-
-  function clampMtgBenchPercent(percent: number) {
-    return Math.round(Math.max(0, Math.min(percent, 100)) * 1000) / 1000
-  }
-
-  function formatMtgBenchScatterCostTick(costUsd: number) {
-    return `$${costUsd.toFixed(2)}`
-  }
-
-  function formatMtgBenchScatterPointCost(costUsd: number) {
-    const roundedCostLabel = costUsd.toFixed(2)
-
-    return costUsd > 0 && roundedCostLabel === "0.00"
-      ? "$0.01"
-      : `$${roundedCostLabel}`
   }
 </script>
 
