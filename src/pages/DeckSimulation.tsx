@@ -57,7 +57,7 @@ import {
   type PublicBenchmarkErrorRun,
   type PublicBenchmarkFailedEvaluation,
   type PublicBenchmarkMetadata,
-  type PublicBenchmarkResultDeckMetrics,
+  type PublicBenchmarkResultMetrics,
   type PublicBenchmarkResultsExportV2,
   type PublicBenchmarkSimulationIndexEntry,
   type PublicSimulationExportV1,
@@ -1776,10 +1776,7 @@ function PublicBenchmarkResultsPanel({
               />
             </div>
 
-            <PublicBenchmarkResultsDeckTable
-              costDiscountReason={costDiscountReason}
-              decks={metrics.decks}
-            />
+            <PublicBenchmarkReasoningTokensTable metrics={metrics} />
           </>
         ) : (
           <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
@@ -2059,77 +2056,80 @@ type PublicBenchmarkMetricTooltipPosition = {
   width: number
 }
 
-function PublicBenchmarkResultsDeckTable({
-  costDiscountReason,
-  decks,
+function PublicBenchmarkReasoningTokensTable({
+  metrics,
 }: {
-  costDiscountReason: ReturnType<typeof getPublicBenchmarkCostDiscountReason>
-  decks: PublicBenchmarkResultDeckMetrics[]
+  metrics: PublicBenchmarkResultMetrics
 }) {
-  if (decks.length === 0) {
-    return (
-      <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
-        No per-deck result rows were exported.
-      </p>
-    )
-  }
+  const turnRows = metrics.reasoningTokensByTurn ?? []
+  const hasExportedBreakdown =
+    metrics.reasoningTokensPerAttemptedOpeningHand !== undefined ||
+    turnRows.length > 0
 
   return (
     <section className="grid gap-2">
-      <h3 className="text-sm font-semibold text-foreground">Decks</h3>
+      <h3 className="text-sm font-semibold text-foreground">
+        Reasoning Tokens
+      </h3>
       <div className="overflow-hidden rounded-md border border-border bg-background/35">
-        <div className="simulation-scrollbar overflow-x-auto">
-          <table className="w-full min-w-[40rem] text-sm">
+        <div className="simulation-scrollbar simulation-scrollbar-no-gutter overflow-x-auto">
+          <table className="w-full min-w-[32rem] text-sm">
             <thead className="border-b border-border bg-muted/25 text-xs text-muted-foreground uppercase">
               <tr>
-                <th className="px-3 py-2 text-left font-medium">Deck</th>
-                <th className="px-3 py-2 text-right font-medium">Score</th>
-                <th className="px-3 py-2 text-right font-medium">Legal</th>
+                <th className="px-3 py-2 text-left font-medium">Phase</th>
+                <th className="px-3 py-2 text-right font-medium">num runs</th>
                 <th className="px-3 py-2 text-right font-medium">
-                  Cost / turn
-                </th>
-                <th className="px-3 py-2 text-right font-medium">
-                  Reasoning / turn
+                  Avg reasoning tokens
                 </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/70">
-              {decks.map((deck) => (
-                <tr key={deck.deckId}>
-                  <td className="px-3 py-2">
-                    <div className="min-w-0">
-                      <p className="truncate font-medium text-foreground">
-                        {deck.deckName}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
+              {hasExportedBreakdown ? (
+                <>
+                  <tr>
+                    <td className="px-3 py-2 font-medium text-foreground">
+                      Opening hand
+                    </td>
+                    <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
+                      {formatPublicBenchmarkResultOptionalCount(
+                        metrics.attemptedOpeningHandCount
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
+                      {formatPublicBenchmarkResultTokenRate(
+                        metrics.reasoningTokensPerAttemptedOpeningHand ?? null
+                      )}
+                    </td>
+                  </tr>
+                  {turnRows.map((turn) => (
+                    <tr key={turn.turnNumber}>
+                      <td className="px-3 py-2 font-medium text-foreground">
+                        Turn {formatPublicBenchmarkResultCount(turn.turnNumber)}
+                      </td>
+                      <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
                         {formatPublicBenchmarkResultCount(
-                          deck.plannedSimulationCount
-                        )}{" "}
-                        simulations
-                      </p>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2 text-right font-medium text-foreground tabular-nums">
-                    {formatPublicBenchmarkResultScore(deck.mtgAutoDeckScore)}
-                  </td>
-                  <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
-                    {formatPublicBenchmarkResultPercent(deck.legalPassRate)}
-                  </td>
-                  <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
-                    {formatPublicBenchmarkResultCost(
-                      getPublicBenchmarkDisplayedCost(
-                        deck.costPerAttemptedTurn,
-                        costDiscountReason
-                      )
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
-                    {formatPublicBenchmarkResultTokenRate(
-                      deck.reasoningTokensPerAttemptedTurn
-                    )}
+                          turn.attemptedTurnCount
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
+                        {formatPublicBenchmarkResultTokenRate(
+                          turn.reasoningTokensPerAttemptedTurn
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </>
+              ) : (
+                <tr>
+                  <td
+                    className="px-3 py-3 text-sm text-muted-foreground"
+                    colSpan={3}
+                  >
+                    Reasoning token breakdown was not exported for this
+                    benchmark.
                   </td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </div>
@@ -7431,6 +7431,10 @@ function formatPublicBenchmarkResultCount(value: number) {
   return (
     Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0
   ).toLocaleString()
+}
+
+function formatPublicBenchmarkResultOptionalCount(value: number | undefined) {
+  return typeof value === "number" ? formatPublicBenchmarkResultCount(value) : "-"
 }
 
 function formatPublicBenchmarkResultScore(value: number | null) {

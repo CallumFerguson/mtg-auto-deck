@@ -405,8 +405,15 @@ export type PublicBenchmarkResultDeckMetrics = {
   reasoningTokensPerAttemptedTurn: number | null
 }
 
+export type PublicBenchmarkReasoningTokensByTurn = {
+  turnNumber: number
+  attemptedTurnCount: number
+  reasoningTokensPerAttemptedTurn: number | null
+}
+
 export type PublicBenchmarkResultMetrics = {
   plannedOpeningHandCount: number
+  attemptedOpeningHandCount?: number
   plannedTurnCount: number
   attemptedTurnCount: number
   completedTurnCount: number
@@ -421,7 +428,9 @@ export type PublicBenchmarkResultMetrics = {
   costPerAttemptedTurn: number | null
   costPerCompletedTurn: number | null
   costPerMtgAutoDeckScorePoint: number | null
+  reasoningTokensPerAttemptedOpeningHand?: number | null
   reasoningTokensPerAttemptedTurn: number | null
+  reasoningTokensByTurn?: PublicBenchmarkReasoningTokensByTurn[]
   totalTokensPerAttemptedTurn: number | null
   decks: PublicBenchmarkResultDeckMetrics[]
 }

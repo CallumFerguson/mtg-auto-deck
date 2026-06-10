@@ -94,6 +94,9 @@ export function isPublicBenchmarkResultMetrics(
 
   return (
     isPublicBenchmarkNonnegativeInteger(record.plannedOpeningHandCount) &&
+    isOptionalPublicBenchmarkNonnegativeInteger(
+      record.attemptedOpeningHandCount
+    ) &&
     isPublicBenchmarkNonnegativeInteger(record.plannedTurnCount) &&
     isPublicBenchmarkNonnegativeInteger(record.attemptedTurnCount) &&
     isPublicBenchmarkNonnegativeInteger(record.completedTurnCount) &&
@@ -108,7 +111,13 @@ export function isPublicBenchmarkResultMetrics(
     isNullablePublicBenchmarkNumber(record.costPerAttemptedTurn) &&
     isNullablePublicBenchmarkNumber(record.costPerCompletedTurn) &&
     isNullablePublicBenchmarkNumber(record.costPerMtgAutoDeckScorePoint) &&
+    isOptionalNullablePublicBenchmarkNumber(
+      record.reasoningTokensPerAttemptedOpeningHand
+    ) &&
     isNullablePublicBenchmarkNumber(record.reasoningTokensPerAttemptedTurn) &&
+    isOptionalPublicBenchmarkReasoningTokensByTurn(
+      record.reasoningTokensByTurn
+    ) &&
     isNullablePublicBenchmarkNumber(record.totalTokensPerAttemptedTurn) &&
     Array.isArray(record.decks) &&
     record.decks.every(isPublicBenchmarkResultDeckMetrics)
@@ -134,6 +143,28 @@ export function isPublicBenchmarkResultDeckMetrics(
     isNullablePublicBenchmarkNumber(record.legalPassRate) &&
     isNullablePublicBenchmarkNumber(record.strategicPassRate) &&
     isNullablePublicBenchmarkNumber(record.costPerAttemptedTurn) &&
+    isNullablePublicBenchmarkNumber(record.reasoningTokensPerAttemptedTurn)
+  )
+}
+
+function isOptionalPublicBenchmarkReasoningTokensByTurn(value: unknown) {
+  return (
+    value === undefined ||
+    (Array.isArray(value) &&
+      value.every(isPublicBenchmarkReasoningTokensByTurn))
+  )
+}
+
+function isPublicBenchmarkReasoningTokensByTurn(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false
+  }
+
+  const record = value as Record<string, unknown>
+
+  return (
+    isPublicBenchmarkNonnegativeInteger(record.turnNumber) &&
+    isPublicBenchmarkNonnegativeInteger(record.attemptedTurnCount) &&
     isNullablePublicBenchmarkNumber(record.reasoningTokensPerAttemptedTurn)
   )
 }
@@ -192,12 +223,20 @@ function isPublicBenchmarkNonnegativeInteger(value: unknown) {
   return typeof value === "number" && Number.isInteger(value) && value >= 0
 }
 
+function isOptionalPublicBenchmarkNonnegativeInteger(value: unknown) {
+  return value === undefined || isPublicBenchmarkNonnegativeInteger(value)
+}
+
 function isNullableString(value: unknown) {
   return value === null || typeof value === "string"
 }
 
 function isNullablePublicBenchmarkNumber(value: unknown) {
   return value === null || isPublicBenchmarkNumber(value)
+}
+
+function isOptionalNullablePublicBenchmarkNumber(value: unknown) {
+  return value === undefined || isNullablePublicBenchmarkNumber(value)
 }
 
 function isPublicBenchmarkNumber(value: unknown) {

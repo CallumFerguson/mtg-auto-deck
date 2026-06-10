@@ -14,6 +14,16 @@ test("validates public benchmark results exports", () => {
   assert.equal(isPublicBenchmarkResultsExportV2(createResultsExport()), true)
 })
 
+test("validates older public benchmark results without reasoning breakdown", () => {
+  const legacyResultsExport = createResultsExport()
+
+  delete legacyResultsExport.resultMetrics.attemptedOpeningHandCount
+  delete legacyResultsExport.resultMetrics.reasoningTokensPerAttemptedOpeningHand
+  delete legacyResultsExport.resultMetrics.reasoningTokensByTurn
+
+  assert.equal(isPublicBenchmarkResultsExportV2(legacyResultsExport), true)
+})
+
 test("rejects malformed public benchmark results exports", () => {
   const malformedMissingMetrics = {
     ...createResultsExport(),
@@ -36,6 +46,19 @@ test("rejects malformed public benchmark results exports", () => {
   }
   const legacyScoreKey = ["mtg", "Gold", "fish", "Score"].join("")
   const legacyCostKey = ["cost", "Per", "Gold", "fish", "Point"].join("")
+  const malformedReasoningTokensByTurn = {
+    ...createResultsExport(),
+    resultMetrics: {
+      ...createResultsExport().resultMetrics,
+      reasoningTokensByTurn: [
+        {
+          turnNumber: 1,
+          attemptedTurnCount: 1,
+          reasoningTokensPerAttemptedTurn: "1024",
+        },
+      ],
+    },
+  }
   const legacyResultsExport = {
     ...createResultsExport(),
     schemaVersion: 1,
@@ -57,6 +80,10 @@ test("rejects malformed public benchmark results exports", () => {
 
   assert.equal(isPublicBenchmarkResultsExportV2(malformedMissingMetrics), false)
   assert.equal(isPublicBenchmarkResultsExportV2(malformedDeckMetrics), false)
+  assert.equal(
+    isPublicBenchmarkResultsExportV2(malformedReasoningTokensByTurn),
+    false
+  )
   assert.equal(isPublicBenchmarkResultsExportV2(legacyResultsExport), false)
 })
 
@@ -183,6 +210,7 @@ function createResultsExport(): PublicBenchmarkResultsExportV2 {
     },
     resultMetrics: {
       plannedOpeningHandCount: 1,
+      attemptedOpeningHandCount: 1,
       plannedTurnCount: 5,
       attemptedTurnCount: 2,
       completedTurnCount: 1,
@@ -197,7 +225,25 @@ function createResultsExport(): PublicBenchmarkResultsExportV2 {
       costPerAttemptedTurn: 0.011,
       costPerCompletedTurn: 0.022,
       costPerMtgAutoDeckScorePoint: 0.0016,
+      reasoningTokensPerAttemptedOpeningHand: 512.25,
       reasoningTokensPerAttemptedTurn: 1024.5,
+      reasoningTokensByTurn: [
+        {
+          turnNumber: 1,
+          attemptedTurnCount: 1,
+          reasoningTokensPerAttemptedTurn: 900,
+        },
+        {
+          turnNumber: 2,
+          attemptedTurnCount: 1,
+          reasoningTokensPerAttemptedTurn: 1149,
+        },
+        {
+          turnNumber: 3,
+          attemptedTurnCount: 0,
+          reasoningTokensPerAttemptedTurn: null,
+        },
+      ],
       totalTokensPerAttemptedTurn: 4096,
       decks: [
         {
