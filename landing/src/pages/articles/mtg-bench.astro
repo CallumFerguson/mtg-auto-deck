@@ -170,11 +170,28 @@ const date = "June 7, 2026"
               The main reason is that OpenAI and Anthropic allow you to provide a remote MCP server url in an api request.
               This means that OpenAI or Anthropic handle the agent loop. This has two major benifits.
             </p>
+            <ol>
+              <li>Since it is one api call, you don't pay for the cached input token cost after each tool use (at least with OpenAI. more on that later)</li>
+              <li>You can use the batch api for 50% savings without having to submit a new batch after every tool call</li>
+            </ol>
           </section>
 
           <section class="article-body-section">
-            <h2>asdf</h2>
-            <p>a</p>
+            <h2>Input token caching</h2>
+            <p>
+              In my opinion, cached input pricing does not make sense for agent loops. The pricing makes sense for large system prompts.
+              If many api calls start with the same system prompt, input caching gets you a discount for free, or for a small caching fee.
+            </p>
+            <p>
+              With an agent loop, however, after every tool call you are charged the cached input cost for all of the previous tokens even if the tool call only took a fraction of a second.
+              Consider two examples. Assume all input tokens are cached, and tool calls result in negligible token use.
+            </p>
+            <ol>
+              <li>Prompt=100 tokens. The agent loop immediately calls 10 tools, then reasons for 100k tokens, then outputs 100 tokens.</li>
+              <!-- add two bullet points here (not numbered) -->
+              <li>a</li>
+              <!-- add two bullet points here (not numbered) -->
+            </ol>
           </section>
 
           <section class="article-body-section">
@@ -1644,6 +1661,23 @@ const date = "June 7, 2026"
     color: var(--muted);
     font-size: 1.02rem;
     line-height: 1.75;
+  }
+
+  .article-body ol,
+  .article-body ul {
+    margin: 0;
+    padding-inline-start: 1.45rem;
+    color: var(--muted);
+    font-size: 1.02rem;
+    line-height: 1.75;
+  }
+
+  .article-body li {
+    padding-inline-start: 0.15rem;
+  }
+
+  .article-body li + li {
+    margin-top: 0.1rem;
   }
 
   .article-body a {
