@@ -16,6 +16,7 @@ import {
   promoteAdminUserByEmail,
   AUTO_ADMIN_EMAIL_ENVIRONMENT_VARIABLE,
 } from "./admin-users-postgres.js"
+import { isStripeBillingEnabled } from "./billing-config.js"
 import {
   getBillingTierRank,
   getHighestBillingTier,
@@ -29,12 +30,18 @@ const STRIPE_API_VERSION = "2026-03-25.dahlia"
 const STRIPE_USER_CUSTOMER_TYPE = "user"
 const STRIPE_ORGANIZATION_CUSTOMER_TYPE = "organization"
 const ACTIVE_BILLING_SUBSCRIPTION_STATUSES = new Set(["active", "trialing"])
-const stripeClient = new Stripe(
-  getRequiredEnvironmentVariable("STRIPE_SECRET_KEY"),
-  {
-    apiVersion: STRIPE_API_VERSION,
+const stripeBillingEnabled = isStripeBillingEnabled()
+const stripeClient = stripeBillingEnabled
+  ? new Stripe(getRequiredEnvironmentVariable("STRIPE_SECRET_KEY"), {
+      apiVersion: STRIPE_API_VERSION,
+    })
+  : null
+
+export class StripeBillingDisabledError extends Error {
+  constructor() {
+    super("Stripe billing is disabled.")
   }
-)
+}
 
 const staleStripeCustomerRepairPlugin = {
   id: "stale-stripe-customer-repair",
@@ -213,6 +220,25 @@ const starterDeckCopyPlugin = {
   },
 } satisfies BetterAuthPlugin
 
+const stripeAuthPlugins: BetterAuthPlugin[] =
+  stripeBillingEnabled && stripeClient
+    ? [
+        staleStripeCustomerRepairPlugin,
+        stripe({
+          createCustomerOnSignUp: true,
+          stripeClient,
+          stripeWebhookSecret: getRequiredEnvironmentVariable(
+            "STRIPE_WEBHOOK_SECRET"
+          ),
+          subscription: {
+            enabled: true,
+            plans: getStripeSubscriptionPlans,
+            requireEmailVerification: true,
+          },
+        }),
+      ]
+    : []
+
 export const auth = betterAuth({
   appName: "MTG Auto Deck",
   baseURL: getRequiredEnvironmentVariable("BETTER_AUTH_URL"),
@@ -261,19 +287,7 @@ export const auth = betterAuth({
       adminRoles: ["admin"],
       defaultRole: "user",
     }),
-    staleStripeCustomerRepairPlugin,
-    stripe({
-      createCustomerOnSignUp: true,
-      stripeClient,
-      stripeWebhookSecret: getRequiredEnvironmentVariable(
-        "STRIPE_WEBHOOK_SECRET"
-      ),
-      subscription: {
-        enabled: true,
-        plans: getStripeSubscriptionPlans,
-        requireEmailVerification: true,
-      },
-    }),
+    ...stripeAuthPlugins,
     impersonationAuditLogPlugin,
     configuredAutoAdminPromotionPlugin,
     starterDeckCopyPlugin,
@@ -320,6 +334,10 @@ export async function refreshStripeBillingForUser({
   email: string
   id: string
 }) {
+  if (!stripeBillingEnabled) {
+    throw new StripeBillingDisabledError()
+  }
+
   const context = await auth.$context
   const user = await context.adapter.findOne<StripeBillingUser>({
     model: "user",
@@ -498,9 +516,19 @@ type LocalSubscription = {
   stripeSubscriptionId?: string | null
 }
 
+function getRequiredStripeClient() {
+  if (!stripeClient) {
+    throw new StripeBillingDisabledError()
+  }
+
+  return stripeClient
+}
+
 async function retrieveActiveStripeCustomer(stripeCustomerId: string) {
+  const stripe = getRequiredStripeClient()
+
   try {
-    const customer = await stripeClient.customers.retrieve(stripeCustomerId)
+    const customer = await stripe.customers.retrieve(stripeCustomerId)
 
     return isDeletedStripeCustomer(customer) ? null : customer
   } catch (error) {
@@ -525,8 +553,10 @@ async function findStripeCustomersByEmail(
   email: string,
   onSearchFallback: () => void
 ) {
+  const stripe = getRequiredStripeClient()
+
   try {
-    const searchResult = await stripeClient.customers.search({
+    const searchResult = await stripe.customers.search({
       query: `email:"${escapeStripeSearchValue(email)}" AND -metadata["customerType"]:"${STRIPE_ORGANIZATION_CUSTOMER_TYPE}"`,
       limit: 100,
     })
@@ -538,7 +568,7 @@ async function findStripeCustomersByEmail(
 
   const customers: Stripe.Customer[] = []
 
-  for await (const customer of stripeClient.customers.list({
+  for await (const customer of stripe.customers.list({
     email,
     limit: 100,
   })) {
@@ -551,7 +581,9 @@ async function findStripeCustomersByEmail(
 }
 
 async function createStripeCustomerForUser(user: StripeBillingUser) {
-  return await stripeClient.customers.create({
+  const stripe = getRequiredStripeClient()
+
+  return await stripe.customers.create({
     email: user.email,
     name: user.name ?? user.email,
     metadata: {
@@ -630,9 +662,10 @@ async function createStripeCustomerSnapshot(
 }
 
 async function listStripeSubscriptionsForCustomer(stripeCustomerId: string) {
+  const stripe = getRequiredStripeClient()
   const subscriptions: Stripe.Subscription[] = []
 
-  for await (const subscription of stripeClient.subscriptions.list({
+  for await (const subscription of stripe.subscriptions.list({
     customer: stripeCustomerId,
     limit: 100,
     status: "all",

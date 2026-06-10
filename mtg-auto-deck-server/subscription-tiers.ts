@@ -1,4 +1,5 @@
 import type { StripePlan } from "@better-auth/stripe"
+import { isStripeBillingEnabled } from "./billing-config.js"
 
 export const BILLING_TIER_LIMITS = {
   free: {
@@ -48,16 +49,28 @@ const BILLING_TIER_RANKS = {
   super_max: 3,
 } as const satisfies Record<BillingTier, number>
 
-export function getStripeSubscriptionPlans(): StripePlan[] {
+export function getStripeSubscriptionPlans(
+  environment: Record<string, string | undefined> = process.env
+): StripePlan[] {
+  if (!isStripeBillingEnabled(environment)) {
+    return []
+  }
+
   return [
     {
       name: "plus",
-      priceId: getRequiredBillingEnvironmentVariable("STRIPE_PLUS_PRICE_ID"),
+      priceId: getRequiredBillingEnvironmentVariable(
+        "STRIPE_PLUS_PRICE_ID",
+        environment
+      ),
       limits: BILLING_TIER_LIMITS.plus,
     },
     {
       name: "pro",
-      priceId: getRequiredBillingEnvironmentVariable("STRIPE_PRO_PRICE_ID"),
+      priceId: getRequiredBillingEnvironmentVariable(
+        "STRIPE_PRO_PRICE_ID",
+        environment
+      ),
       limits: BILLING_TIER_LIMITS.pro,
     },
   ]
@@ -100,8 +113,11 @@ export function isAdminGrantBillingTier(
   return value === "plus" || value === "pro" || value === "super_max"
 }
 
-function getRequiredBillingEnvironmentVariable(environmentVariable: string) {
-  const value = process.env[environmentVariable]?.trim()
+function getRequiredBillingEnvironmentVariable(
+  environmentVariable: string,
+  environment: Record<string, string | undefined>
+) {
+  const value = environment[environmentVariable]?.trim()
 
   if (!value) {
     throw new Error(

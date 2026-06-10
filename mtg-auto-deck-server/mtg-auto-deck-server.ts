@@ -29,7 +29,9 @@ import {
   hasValidEmailVerificationOtp,
   isPasswordResetTokenValid,
   refreshStripeBillingForUser,
+  StripeBillingDisabledError,
 } from "./auth.js"
+import { isStripeBillingEnabled } from "./billing-config.js"
 import {
   ensureAdminSubscriptionTierGrantsSchema,
   getUserBillingTierSummary,
@@ -8218,6 +8220,13 @@ async function main() {
     try {
       res.status(200).json(await refreshStripeBillingForUser(user))
     } catch (error) {
+      if (error instanceof StripeBillingDisabledError) {
+        res.status(503).json({
+          error: "Stripe billing is disabled.",
+        })
+        return
+      }
+
       console.error("Failed to refresh billing:", error)
       res.status(500).json({
         error: "Billing could not be refreshed.",
@@ -8229,11 +8238,17 @@ async function main() {
     const user = getAuthenticatedUser(req)
 
     try {
+      const billingTierSummary = await getUserBillingTierSummary(
+        { query: queryDatabase },
+        user.id
+      )
+
       res
         .status(200)
-        .json(
-          await getUserBillingTierSummary({ query: queryDatabase }, user.id)
-        )
+        .json({
+          ...billingTierSummary,
+          stripeBillingEnabled: isStripeBillingEnabled(),
+        })
     } catch (error) {
       console.error("Failed to load billing tier:", error)
       res.status(500).json({

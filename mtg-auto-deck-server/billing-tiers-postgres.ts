@@ -1,5 +1,6 @@
 import type { QueryResultRow } from "pg"
 
+import { isStripeBillingEnabled } from "./billing-config.js"
 import {
   getHighestBillingTier,
   isAdminGrantBillingTier,
@@ -204,8 +205,48 @@ export async function revokeAdminSubscriptionTierGrant(
 
 export function buildUserBillingTierSummaryQuery(
   ownerUserId: string,
-  now: Date
+  now: Date,
+  stripeBillingEnabled = isStripeBillingEnabled()
 ) {
+  if (!stripeBillingEnabled) {
+    return {
+      text: `
+        WITH active_admin_grant AS (
+          SELECT
+            id,
+            tier,
+            expires_at,
+            created_at,
+            granted_by_admin_user_id
+          FROM admin_subscription_tier_grants
+          WHERE user_id = $1
+            AND revoked_at IS NULL
+            AND expires_at > $2
+          ORDER BY
+            CASE tier
+              WHEN 'super_max' THEN 3
+              WHEN 'pro' THEN 2
+              WHEN 'plus' THEN 1
+              ELSE 0
+            END DESC,
+            expires_at DESC,
+            created_at DESC
+          LIMIT 1
+        )
+        SELECT
+          'free' AS stripe_tier,
+          active_admin_grant.id AS admin_grant_id,
+          active_admin_grant.tier AS admin_grant_tier,
+          active_admin_grant.expires_at AS admin_grant_expires_at,
+          active_admin_grant.created_at AS admin_grant_granted_at,
+          active_admin_grant.granted_by_admin_user_id AS admin_grant_granted_by_admin_user_id
+        FROM (SELECT 1) singleton
+        LEFT JOIN active_admin_grant ON true
+      `,
+      values: [ownerUserId, now],
+    }
+  }
+
   return {
     text: `
       WITH stripe_tier AS (

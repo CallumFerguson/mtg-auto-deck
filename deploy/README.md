@@ -154,8 +154,9 @@ Postgres                 -> same Droplet, localhost only
    ```
 
    This snippet only shows the deployment-specific values. Fill in every other
-   required variable from the example file too, including auth, billing, email,
-   and LLM provider settings.
+   required variable from the example file too, including auth, email, and LLM
+   provider settings. If `USE_STRIPE` remains enabled, fill in the Stripe
+   billing settings too.
    Generate `BETTER_AUTH_SECRET` with:
 
    ```sh
@@ -170,8 +171,9 @@ Postgres                 -> same Droplet, localhost only
 
 7. Configure external services.
 
-   Configure Stripe before starting the service because the server requires
-   `STRIPE_WEBHOOK_SECRET` at startup. In Stripe, point the auth webhook at:
+   If `USE_STRIPE` is enabled, configure Stripe before starting the service
+   because the server requires `STRIPE_WEBHOOK_SECRET` at startup. In Stripe,
+   point the auth webhook at:
 
    ```text
    https://api.example.com/api/auth/stripe/webhook

@@ -13,6 +13,7 @@ export type BillingTierContextValue = {
   hasLoadedBillingTier: boolean
   isBillingTierLoading: boolean
   refreshBillingTier: () => Promise<BillingTier | null>
+  stripeBillingEnabled: boolean
   stripeBillingTier: BillingTier
 }
 

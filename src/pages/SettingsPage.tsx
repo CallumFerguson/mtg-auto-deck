@@ -79,13 +79,19 @@ export function SettingsPage({
     billingTierError,
     hasLoadedBillingTier,
     refreshBillingTier,
+    stripeBillingEnabled,
     stripeBillingTier,
   } = useBillingTier()
   const { refreshUsageLimits } = useUsageLimits()
   const isBillingRefreshDisabled =
-    isImpersonating || isRefreshingBilling || pendingBillingAction !== null
+    !stripeBillingEnabled ||
+    isImpersonating ||
+    isRefreshingBilling ||
+    pendingBillingAction !== null
   const stripeBillingTierLabel =
-    !hasLoadedBillingTier && !billingTierError
+    !stripeBillingEnabled
+      ? "Disabled"
+      : !hasLoadedBillingTier && !billingTierError
       ? "Loading..."
       : !hasLoadedBillingTier && billingTierError
         ? "Unavailable"
@@ -125,6 +131,10 @@ export function SettingsPage({
   }
 
   async function handleStartSubscription(plan: "plus" | "pro") {
+    if (!stripeBillingEnabled) {
+      return
+    }
+
     setPendingBillingAction(plan)
     setBillingActionError(null)
     setBillingNotice(null)
@@ -158,12 +168,20 @@ export function SettingsPage({
   }
 
   function handleOpenUpgradeModal() {
+    if (!stripeBillingEnabled) {
+      return
+    }
+
     setBillingActionError(null)
     setBillingNotice(null)
     setIsUpgradeModalOpen(true)
   }
 
   async function handleManageSubscription() {
+    if (!stripeBillingEnabled) {
+      return
+    }
+
     setPendingBillingAction("portal")
     setBillingActionError(null)
     setBillingNotice(null)
@@ -197,6 +215,10 @@ export function SettingsPage({
   }
 
   async function handleRefreshBilling() {
+    if (!stripeBillingEnabled) {
+      return
+    }
+
     setIsRefreshingBilling(true)
     setBillingActionError(null)
     setBillingNotice(null)
@@ -322,20 +344,24 @@ export function SettingsPage({
                       </span>
                     </p>
                   </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="mt-0.5"
-                    aria-label="Refresh billing"
-                    title="Refresh billing"
-                    onClick={handleRefreshBilling}
-                    disabled={isBillingRefreshDisabled}
-                  >
-                    <RefreshCw
-                      className={isRefreshingBilling ? "animate-spin" : undefined}
-                    />
-                  </Button>
+                  {stripeBillingEnabled ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="mt-0.5"
+                      aria-label="Refresh billing"
+                      title="Refresh billing"
+                      onClick={handleRefreshBilling}
+                      disabled={isBillingRefreshDisabled}
+                    >
+                      <RefreshCw
+                        className={
+                          isRefreshingBilling ? "animate-spin" : undefined
+                        }
+                      />
+                    </Button>
+                  ) : null}
                 </div>
               </div>
 
@@ -347,6 +373,7 @@ export function SettingsPage({
                 onManageSubscription={handleManageSubscription}
                 onOpenUpgradeModal={handleOpenUpgradeModal}
                 pendingBillingAction={pendingBillingAction}
+                stripeBillingEnabled={stripeBillingEnabled}
               />
             </div>
 
@@ -494,6 +521,7 @@ function BillingActions({
   onManageSubscription,
   onOpenUpgradeModal,
   pendingBillingAction,
+  stripeBillingEnabled,
 }: {
   billingTier: BillingTier
   isBillingTierReady: boolean
@@ -502,12 +530,18 @@ function BillingActions({
   onManageSubscription: () => void
   onOpenUpgradeModal: () => void
   pendingBillingAction: PendingBillingAction
+  stripeBillingEnabled: boolean
 }) {
   const isDisabled =
     !isBillingTierReady ||
+    !stripeBillingEnabled ||
     isImpersonating ||
     isRefreshingBilling ||
     pendingBillingAction !== null
+
+  if (!stripeBillingEnabled) {
+    return null
+  }
 
   if (isPaidBillingTier(billingTier)) {
     return (

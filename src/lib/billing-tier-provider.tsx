@@ -37,6 +37,7 @@ export function BillingTierProvider({
   const [hasLoadedBillingTier, setHasLoadedBillingTier] = useState(false)
   const [isBillingTierLoading, setIsBillingTierLoading] = useState(false)
   const [pollingRequestCount, setPollingRequestCount] = useState(0)
+  const [stripeBillingEnabled, setStripeBillingEnabled] = useState(true)
   const [stripeBillingTier, setStripeBillingTier] =
     useState<BillingTier>("free")
 
@@ -48,6 +49,7 @@ export function BillingTierProvider({
     setHasLoadedBillingTier(false)
     setIsBillingTierLoading(false)
     prefetchedUserIdRef.current = null
+    setStripeBillingEnabled(true)
     setStripeBillingTier("free")
   }, [userId])
 
@@ -61,6 +63,7 @@ export function BillingTierProvider({
       setBillingTierError(null)
       setHasLoadedBillingTier(false)
       setIsBillingTierLoading(false)
+      setStripeBillingEnabled(true)
       setStripeBillingTier("free")
       return "free"
     }
@@ -86,6 +89,7 @@ export function BillingTierProvider({
         setBillingTier(summary.effectiveTier)
         setBillingTierError(null)
         setHasLoadedBillingTier(true)
+        setStripeBillingEnabled(summary.stripeBillingEnabled)
         setStripeBillingTier(summary.stripeTier)
       }
 
@@ -148,6 +152,7 @@ export function BillingTierProvider({
       hasLoadedBillingTier,
       isBillingTierLoading,
       refreshBillingTier,
+      stripeBillingEnabled,
       stripeBillingTier,
     }),
     [
@@ -158,6 +163,7 @@ export function BillingTierProvider({
       hasLoadedBillingTier,
       isBillingTierLoading,
       refreshBillingTier,
+      stripeBillingEnabled,
       stripeBillingTier,
     ]
   )

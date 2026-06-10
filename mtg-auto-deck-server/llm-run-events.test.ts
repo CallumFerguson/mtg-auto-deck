@@ -116,6 +116,7 @@ import {
   getHighestBillingTier,
   getStripeSubscriptionPlans,
 } from "./subscription-tiers.js"
+import { isStripeBillingEnabled } from "./billing-config.js"
 import {
   buildUsageWindowSpentUsdQuery,
   getPreferredUsageCostUsd,
@@ -1141,31 +1142,32 @@ test("defines Super Max as the highest admin-only billing tier", () => {
   assert.equal(getHighestBillingTier(["pro", "super_max"]), "super_max")
 })
 
+test("defaults Stripe billing on unless explicitly disabled", () => {
+  assert.equal(isStripeBillingEnabled({}), true)
+  assert.equal(isStripeBillingEnabled({ USE_STRIPE: "true" }), true)
+  assert.equal(isStripeBillingEnabled({ USE_STRIPE: "yes" }), true)
+  assert.equal(isStripeBillingEnabled({ USE_STRIPE: " false " }), false)
+  assert.equal(isStripeBillingEnabled({ USE_STRIPE: "0" }), false)
+  assert.equal(isStripeBillingEnabled({ USE_STRIPE: "no" }), false)
+  assert.equal(isStripeBillingEnabled({ USE_STRIPE: "off" }), false)
+})
+
 test("keeps Super Max out of Stripe subscription plans", () => {
-  const previousPlusPriceId = process.env.STRIPE_PLUS_PRICE_ID
-  const previousProPriceId = process.env.STRIPE_PRO_PRICE_ID
+  assert.deepEqual(
+    getStripeSubscriptionPlans({
+      STRIPE_PLUS_PRICE_ID: "price_plus",
+      STRIPE_PRO_PRICE_ID: "price_pro",
+    }).map((plan) => plan.name),
+    ["plus", "pro"]
+  )
+})
 
-  process.env.STRIPE_PLUS_PRICE_ID = "price_plus"
-  process.env.STRIPE_PRO_PRICE_ID = "price_pro"
-
-  try {
-    assert.deepEqual(
-      getStripeSubscriptionPlans().map((plan) => plan.name),
-      ["plus", "pro"]
-    )
-  } finally {
-    if (previousPlusPriceId === undefined) {
-      delete process.env.STRIPE_PLUS_PRICE_ID
-    } else {
-      process.env.STRIPE_PLUS_PRICE_ID = previousPlusPriceId
-    }
-
-    if (previousProPriceId === undefined) {
-      delete process.env.STRIPE_PRO_PRICE_ID
-    } else {
-      process.env.STRIPE_PRO_PRICE_ID = previousProPriceId
-    }
-  }
+test("skips Stripe subscription plan env requirements when disabled", () => {
+  assert.deepEqual(getStripeSubscriptionPlans({ USE_STRIPE: "false" }), [])
+  assert.throws(
+    () => getStripeSubscriptionPlans({}),
+    /Missing billing environment variable: STRIPE_PLUS_PRICE_ID/
+  )
 })
 
 test("resolves first-spend usage window reset behavior", () => {
@@ -1301,6 +1303,22 @@ test("builds admin user LLM cost aggregate query", () => {
   )
 })
 
+test("builds admin user query without Stripe subscriptions when disabled", () => {
+  const now = new Date("2026-05-16T10:30:00.000Z")
+  const query = buildListAdminUsersQuery(now, false)
+  const normalizedSql = query.text.replace(/\s+/g, " ")
+
+  assert.deepEqual(query.values, [
+    new Date("2026-05-16T09:30:00.000Z"),
+    now,
+  ])
+  assert.doesNotMatch(normalizedSql, /FROM "subscription"/)
+  assert.doesNotMatch(normalizedSql, /active_subscription/)
+  assert.match(normalizedSql, /active_admin_grants AS/)
+  assert.match(normalizedSql, /expires_at > \$2/)
+  assert.match(normalizedSql, /WHEN active_admin_grants\.tier = 'super_max'/)
+})
+
 test("builds admin user email verification update query", () => {
   const verifyQuery = buildUpdateAdminUserEmailVerificationQuery({
     emailVerified: true,
@@ -1347,6 +1365,20 @@ test("builds billing tier summary query with active admin grants", () => {
   assert.match(normalizedSql, /FROM admin_subscription_tier_grants/)
   assert.match(normalizedSql, /revoked_at IS NULL/)
   assert.match(normalizedSql, /expires_at > \$3/)
+  assert.match(normalizedSql, /WHEN 'super_max' THEN 3/)
+})
+
+test("builds billing tier summary query without Stripe subscriptions when disabled", () => {
+  const now = new Date("2026-05-16T10:30:00.000Z")
+  const query = buildUserBillingTierSummaryQuery("user-1", now, false)
+  const normalizedSql = query.text.replace(/\s+/g, " ")
+
+  assert.deepEqual(query.values, ["user-1", now])
+  assert.doesNotMatch(normalizedSql, /FROM "subscription"/)
+  assert.match(normalizedSql, /'free' AS stripe_tier/)
+  assert.match(normalizedSql, /FROM admin_subscription_tier_grants/)
+  assert.match(normalizedSql, /revoked_at IS NULL/)
+  assert.match(normalizedSql, /expires_at > \$2/)
   assert.match(normalizedSql, /WHEN 'super_max' THEN 3/)
 })
 
@@ -2371,6 +2403,20 @@ test("builds LLM run owner concurrency SQL from effective billing tier", () => {
   assert.match(normalizedSql, /THEN \$5::integer/)
   assert.match(normalizedSql, /lower\(active_subscription\.plan\) = 'pro'/)
   assert.match(normalizedSql, /lower\(active_subscription\.plan\) = 'plus'/)
+})
+
+test("builds LLM run owner concurrency SQL without Stripe when disabled", () => {
+  const normalizedSql = getLlmRunOwnerConcurrencyLimitSql(false).replace(
+    /\s+/g,
+    " "
+  )
+
+  assert.match(normalizedSql, /FROM admin_subscription_tier_grants/)
+  assert.match(normalizedSql, /active_admin_grant\.tier = 'super_max'/)
+  assert.match(normalizedSql, /active_admin_grant\.tier = 'pro'/)
+  assert.match(normalizedSql, /active_admin_grant\.tier = 'plus'/)
+  assert.doesNotMatch(normalizedSql, /FROM "subscription"/)
+  assert.doesNotMatch(normalizedSql, /active_subscription/)
 })
 
 test("builds batch pending run query without queue concurrency gates", () => {

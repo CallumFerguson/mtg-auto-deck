@@ -1,4 +1,5 @@
 import { queryDatabase, withDatabaseTransaction } from "./db.js"
+import { isStripeBillingEnabled } from "./billing-config.js"
 import {
   ACTIVE_BILLING_SUBSCRIPTION_STATUSES,
   type ActiveAdminSubscriptionTierGrant,
@@ -219,8 +220,38 @@ export async function promoteAdminUserByEmail(
   })
 }
 
-export function buildListAdminUsersQuery(now: Date) {
+export function buildListAdminUsersQuery(
+  now: Date,
+  stripeBillingEnabled = isStripeBillingEnabled()
+) {
   const recentStartedAt = new Date(now.getTime() - 60 * 60 * 1000)
+  const stripeTierCte = stripeBillingEnabled
+    ? `
+      active_stripe_tiers AS (
+        SELECT DISTINCT ON ("referenceId")
+          "referenceId" AS owner_user_id,
+          lower(plan) AS stripe_tier
+        FROM "subscription"
+        WHERE status = ANY($2::text[])
+          AND lower(plan) IN ('plus', 'pro')
+        ORDER BY
+          "referenceId" ASC,
+          CASE lower(plan)
+            WHEN 'pro' THEN 2
+            WHEN 'plus' THEN 1
+            ELSE 0
+          END DESC
+      ),
+    `
+    : `
+      active_stripe_tiers AS (
+        SELECT
+          NULL::text AS owner_user_id,
+          NULL::text AS stripe_tier
+        WHERE false
+      ),
+    `
+  const nowParameterIndex = stripeBillingEnabled ? 3 : 2
 
   return {
     text: `
@@ -247,21 +278,7 @@ export function buildListAdminUsersQuery(now: Date) {
         FROM priced_llm_runs
         GROUP BY owner_user_id
       ),
-      active_stripe_tiers AS (
-        SELECT DISTINCT ON ("referenceId")
-          "referenceId" AS owner_user_id,
-          lower(plan) AS stripe_tier
-        FROM "subscription"
-        WHERE status = ANY($2::text[])
-          AND lower(plan) IN ('plus', 'pro')
-        ORDER BY
-          "referenceId" ASC,
-          CASE lower(plan)
-            WHEN 'pro' THEN 2
-            WHEN 'plus' THEN 1
-            ELSE 0
-          END DESC
-      ),
+      ${stripeTierCte}
       active_admin_grants AS (
         SELECT DISTINCT ON (user_id)
           user_id,
@@ -272,7 +289,7 @@ export function buildListAdminUsersQuery(now: Date) {
           granted_by_admin_user_id
         FROM admin_subscription_tier_grants
         WHERE revoked_at IS NULL
-          AND expires_at > $3
+          AND expires_at > $${nowParameterIndex}
         ORDER BY
           user_id ASC,
           CASE tier
@@ -321,7 +338,9 @@ export function buildListAdminUsersQuery(now: Date) {
         COALESCE(user_llm_costs.total_llm_run_cost_usd, 0) DESC,
         lower(app_user.email) ASC
     `,
-    values: [recentStartedAt, ACTIVE_BILLING_SUBSCRIPTION_STATUSES, now],
+    values: stripeBillingEnabled
+      ? [recentStartedAt, ACTIVE_BILLING_SUBSCRIPTION_STATUSES, now]
+      : [recentStartedAt, now],
   }
 }
 

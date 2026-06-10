@@ -13,6 +13,7 @@ export type ActiveAdminSubscriptionTierGrant = {
 export type BillingTierSummary = {
   adminGrant: ActiveAdminSubscriptionTierGrant | null
   effectiveTier: BillingTier
+  stripeBillingEnabled: boolean
   stripeTier: BillingTier
 }
 

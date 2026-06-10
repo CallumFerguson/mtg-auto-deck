@@ -61,6 +61,7 @@ export function AccountMenu({
     billingTierError,
     hasLoadedBillingTier,
     isBillingTierLoading,
+    stripeBillingEnabled,
   } = useBillingTier()
   const billingTierLabel =
     !hasLoadedBillingTier && !billingTierError
@@ -70,6 +71,7 @@ export function AccountMenu({
         : `${BILLING_TIER_LABELS[billingTier]} tier`
   const shouldShowUsageUpgradeAction =
     !isImpersonating &&
+    stripeBillingEnabled &&
     hasLoadedBillingTier &&
     (billingTier === "free" || billingTier === "plus")
 
@@ -77,6 +79,7 @@ export function AccountMenu({
   useUsageLimitsPolling(isOpen)
 
   const isUpgradeButtonDisabled =
+    !stripeBillingEnabled ||
     pendingBillingAction !== null ||
     (!hasLoadedBillingTier && isBillingTierLoading)
 
@@ -102,6 +105,10 @@ export function AccountMenu({
   }
 
   async function handleStartSubscription(plan: "plus" | "pro") {
+    if (!stripeBillingEnabled) {
+      return
+    }
+
     setPendingBillingAction(plan)
     setBillingActionError(null)
 
@@ -134,6 +141,10 @@ export function AccountMenu({
   }
 
   const handleOpenBillingPortal = useCallback(async () => {
+    if (!stripeBillingEnabled) {
+      return
+    }
+
     setPendingBillingAction("portal")
     setBillingActionError(null)
 
@@ -163,7 +174,7 @@ export function AccountMenu({
     } finally {
       setPendingBillingAction(null)
     }
-  }, [])
+  }, [stripeBillingEnabled])
 
   const handleUpgradeForMoreUsage = useCallback(() => {
     if (!shouldShowUsageUpgradeAction || isUpgradeButtonDisabled) {

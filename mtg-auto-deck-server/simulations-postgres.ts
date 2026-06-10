@@ -1,4 +1,5 @@
 import { queryDatabase, withDatabaseTransaction } from "./db.js"
+import { isStripeBillingEnabled } from "./billing-config.js"
 import {
   applyLlmRunEstimatedCostServiceTierDiscount,
   estimatePartialLlmRunCostUsd,
@@ -4522,17 +4523,11 @@ function getRequiredJsonbQueryValue(value: unknown | null | undefined) {
 
 const LLM_RUN_QUEUE_ADVISORY_LOCK_ID = 836_417_052
 
-export function getLlmRunOwnerConcurrencyLimitSql() {
-  return `(
-    CASE
-      WHEN EXISTS (
-        SELECT 1
-        FROM admin_subscription_tier_grants active_admin_grant
-        WHERE active_admin_grant.user_id = llm_run.owner_user_id
-          AND active_admin_grant.revoked_at IS NULL
-          AND active_admin_grant.expires_at > now()
-          AND active_admin_grant.tier = 'super_max'
-      ) THEN $5::integer
+export function getLlmRunOwnerConcurrencyLimitSql(
+  stripeBillingEnabled = isStripeBillingEnabled()
+) {
+  const proStripeTierSql = stripeBillingEnabled
+    ? `
       WHEN EXISTS (
         SELECT 1
         FROM "subscription" active_subscription
@@ -4547,6 +4542,19 @@ export function getLlmRunOwnerConcurrencyLimitSql() {
           AND active_admin_grant.expires_at > now()
           AND active_admin_grant.tier = 'pro'
       ) THEN $4::integer
+    `
+    : `
+      WHEN EXISTS (
+        SELECT 1
+        FROM admin_subscription_tier_grants active_admin_grant
+        WHERE active_admin_grant.user_id = llm_run.owner_user_id
+          AND active_admin_grant.revoked_at IS NULL
+          AND active_admin_grant.expires_at > now()
+          AND active_admin_grant.tier = 'pro'
+      ) THEN $4::integer
+    `
+  const plusStripeTierSql = stripeBillingEnabled
+    ? `
       WHEN EXISTS (
         SELECT 1
         FROM "subscription" active_subscription
@@ -4561,6 +4569,30 @@ export function getLlmRunOwnerConcurrencyLimitSql() {
           AND active_admin_grant.expires_at > now()
           AND active_admin_grant.tier = 'plus'
       ) THEN $3::integer
+    `
+    : `
+      WHEN EXISTS (
+        SELECT 1
+        FROM admin_subscription_tier_grants active_admin_grant
+        WHERE active_admin_grant.user_id = llm_run.owner_user_id
+          AND active_admin_grant.revoked_at IS NULL
+          AND active_admin_grant.expires_at > now()
+          AND active_admin_grant.tier = 'plus'
+      ) THEN $3::integer
+    `
+
+  return `(
+    CASE
+      WHEN EXISTS (
+        SELECT 1
+        FROM admin_subscription_tier_grants active_admin_grant
+        WHERE active_admin_grant.user_id = llm_run.owner_user_id
+          AND active_admin_grant.revoked_at IS NULL
+          AND active_admin_grant.expires_at > now()
+          AND active_admin_grant.tier = 'super_max'
+      ) THEN $5::integer
+      ${proStripeTierSql}
+      ${plusStripeTierSql}
       ELSE $2::integer
     END
   )`
