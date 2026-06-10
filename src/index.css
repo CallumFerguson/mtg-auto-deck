@@ -281,6 +281,10 @@
     background: oklch(0.172 0 0);
   }
 
+  .public-benchmark-sidebar-overlay-panel {
+    animation: public-benchmark-sidebar-overlay-panel-enter 180ms ease-out both;
+  }
+
   .simulation-result-reveal {
     opacity: 0;
     transform: translateY(-0.35rem);
@@ -362,6 +366,16 @@
     }
   }
 
+  @keyframes public-benchmark-sidebar-overlay-panel-enter {
+    from {
+      transform: translateX(-100%);
+    }
+
+    to {
+      transform: translateX(0);
+    }
+  }
+
   @keyframes simulation-game-state-card-exit {
     from {
       opacity: 1;
@@ -425,6 +439,7 @@
     .simulation-game-state-card-untapping,
     .simulation-game-state-card-tap-overlay-enter,
     .simulation-game-state-card-tap-overlay-exit,
+    .public-benchmark-sidebar-overlay-panel,
     .simulation-result-reveal-visible {
       animation: none;
     }

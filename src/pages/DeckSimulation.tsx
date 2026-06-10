@@ -28,6 +28,8 @@ import {
   LoaderCircle,
   MoreVertical,
   Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
   Play,
   Plus,
   RefreshCw,
@@ -917,6 +919,9 @@ export function PublicSimulationPage({
   )
 }
 
+const PUBLIC_BENCHMARK_DESKTOP_SIDEBAR_ID = "public-benchmark-desktop-sidebar"
+const PUBLIC_BENCHMARK_MOBILE_SIDEBAR_ID = "public-benchmark-mobile-sidebar"
+
 export function PublicBenchmarkPage({
   benchmarkId,
   bundled = false,
@@ -948,9 +953,9 @@ export function PublicBenchmarkPage({
   const [failedEvaluations, setFailedEvaluations] = useState<
     PublicBenchmarkFailedEvaluation[] | null
   >(null)
-  const [errorRuns, setErrorRuns] = useState<
-    PublicBenchmarkErrorRun[] | null
-  >(null)
+  const [errorRuns, setErrorRuns] = useState<PublicBenchmarkErrorRun[] | null>(
+    null
+  )
   const [benchmarkResults, setBenchmarkResults] =
     useState<PublicBenchmarkResultsExportV2 | null>(null)
   const [isLoadingBenchmarkResults, setIsLoadingBenchmarkResults] =
@@ -971,7 +976,14 @@ export function PublicBenchmarkPage({
   const [simulationLoadError, setSimulationLoadError] = useState<string | null>(
     null
   )
+  const [isBenchmarkSidebarCollapsed, setIsBenchmarkSidebarCollapsed] =
+    useState(false)
+  const [isBenchmarkSidebarOverlayOpen, setIsBenchmarkSidebarOverlayOpen] =
+    useState(false)
   const selectedSimulationLoadIdRef = useRef(0)
+  const benchmarkSidebarOpenButtonRef = useRef<HTMLButtonElement | null>(null)
+  const benchmarkSidebarCloseButtonRef = useRef<HTMLButtonElement | null>(null)
+  const wasBenchmarkSidebarOverlayOpenRef = useRef(false)
 
   const sortedSimulations = useMemo(
     () =>
@@ -1167,7 +1179,9 @@ export function PublicBenchmarkPage({
           return
         }
 
-        setErrorRunsLoadError("Public benchmark error runs could not be loaded.")
+        setErrorRunsLoadError(
+          "Public benchmark error runs could not be loaded."
+        )
         setErrorRuns(null)
         return
       }
@@ -1184,7 +1198,9 @@ export function PublicBenchmarkPage({
 
       setErrorRuns(data)
     } catch (error) {
-      setErrorRunsLoadError(getPublicBenchmarkErrorRunsLoadFailureMessage(error))
+      setErrorRunsLoadError(
+        getPublicBenchmarkErrorRunsLoadFailureMessage(error)
+      )
       setErrorRuns(null)
     } finally {
       setIsLoadingErrorRuns(false)
@@ -1308,6 +1324,61 @@ export function PublicBenchmarkPage({
   }, [])
 
   useEffect(() => {
+    const desktopMediaQuery = window.matchMedia("(min-width: 1024px)")
+
+    function closeOverlayOnDesktop() {
+      if (desktopMediaQuery.matches) {
+        setIsBenchmarkSidebarOverlayOpen(false)
+      }
+    }
+
+    closeOverlayOnDesktop()
+    desktopMediaQuery.addEventListener("change", closeOverlayOnDesktop)
+
+    return () => {
+      desktopMediaQuery.removeEventListener("change", closeOverlayOnDesktop)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!isBenchmarkSidebarOverlayOpen) {
+      return
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsBenchmarkSidebarOverlayOpen(false)
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [isBenchmarkSidebarOverlayOpen])
+
+  useEffect(() => {
+    if (isBenchmarkSidebarOverlayOpen) {
+      wasBenchmarkSidebarOverlayOpenRef.current = true
+      window.requestAnimationFrame(() => {
+        benchmarkSidebarCloseButtonRef.current?.focus()
+      })
+      return
+    }
+
+    if (!wasBenchmarkSidebarOverlayOpenRef.current) {
+      return
+    }
+
+    wasBenchmarkSidebarOverlayOpenRef.current = false
+
+    if (benchmarkSidebarOpenButtonRef.current?.offsetParent !== null) {
+      benchmarkSidebarOpenButtonRef.current?.focus()
+    }
+  }, [isBenchmarkSidebarOverlayOpen])
+
+  useEffect(() => {
     if (selectedBenchmarkPanel !== "simulation") {
       return
     }
@@ -1417,32 +1488,28 @@ export function PublicBenchmarkPage({
     )
   }
 
-  const benchmark = benchmarkIndex?.benchmark ?? null
+  function handleBenchmarkSidebarOverlaySelectBenchmarkResults() {
+    handleSelectBenchmarkResults()
+    setIsBenchmarkSidebarOverlayOpen(false)
+  }
+
+  function handleBenchmarkSidebarOverlaySelectErrorRuns() {
+    handleSelectErrorRuns()
+    setIsBenchmarkSidebarOverlayOpen(false)
+  }
+
+  function handleBenchmarkSidebarOverlaySelectFailedEvaluations() {
+    handleSelectFailedEvaluations()
+    setIsBenchmarkSidebarOverlayOpen(false)
+  }
+
+  function handleBenchmarkSidebarOverlaySelectSimulation(simulationId: string) {
+    handleSelectSimulation(simulationId)
+    setIsBenchmarkSidebarOverlayOpen(false)
+  }
 
   return (
     <main className="flex h-svh flex-col overflow-hidden bg-background text-foreground">
-      <header className="shrink-0 border-b border-border px-4 py-4 sm:px-6 lg:px-8">
-        <div className="mx-auto flex w-full max-w-7xl flex-col gap-3">
-          <div className="min-w-0 space-y-2">
-            <p className="text-sm font-medium tracking-[0.18em] text-sky-300 uppercase">
-              Benchmark
-            </p>
-            <div className="grid gap-1">
-              <h1 className="text-2xl font-semibold text-foreground sm:text-3xl">
-                {benchmark
-                  ? getPublicBenchmarkModelTitle(benchmark)
-                  : "Benchmark"}
-              </h1>
-              {benchmark ? (
-                <p className="text-sm break-words text-muted-foreground">
-                  {getPublicBenchmarkDetailsText(benchmark)}
-                </p>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      </header>
-
       <section className="min-h-0 flex-1 overflow-hidden">
         {isLoadingBenchmark ? (
           <div className="mx-4 mt-6 rounded-lg border border-border bg-card/70 px-4 py-8 text-sm text-muted-foreground sm:mx-6 lg:mx-8">
@@ -1461,226 +1528,386 @@ export function PublicBenchmarkPage({
             No simulations were exported for this benchmark.
           </div>
         ) : benchmarkIndex ? (
-          <div className="grid h-full min-h-0 min-w-[52rem] grid-cols-[16rem_minmax(0,1fr)] overflow-hidden">
-            <aside className="simulation-sidebar-surface min-h-0 min-w-0 border-r border-border">
-              <nav
-                className="simulation-scrollbar h-full overflow-y-auto"
-                aria-label="Benchmark simulations"
+          <>
+            <div
+              className={`flex h-full min-h-0 min-w-0 flex-col overflow-hidden lg:grid ${
+                isBenchmarkSidebarCollapsed
+                  ? "lg:grid-cols-[3.25rem_minmax(0,1fr)]"
+                  : "lg:grid-cols-[16rem_minmax(0,1fr)]"
+              }`}
+            >
+              <aside
+                className="simulation-sidebar-surface hidden min-h-0 min-w-0 border-r border-border lg:flex lg:flex-col"
+                id={PUBLIC_BENCHMARK_DESKTOP_SIDEBAR_ID}
               >
-                <div className="px-2 py-2">
-                  <section className="grid gap-1">
-                    <button
-                      className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-medium transition-colors ${
-                        selectedBenchmarkPanel === "results"
-                          ? "bg-accent text-accent-foreground"
-                          : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
-                      }`}
-                      type="button"
-                      aria-pressed={selectedBenchmarkPanel === "results"}
-                      onClick={handleSelectBenchmarkResults}
-                    >
-                      <span className="min-w-0 flex-1 truncate">Results</span>
-                      <span className="ml-2 shrink-0 rounded-full border border-border bg-background/35 px-2 py-0.5 text-xs text-muted-foreground">
-                        score
-                      </span>
-                      {isLoadingBenchmarkResults ? (
-                        <span className="ml-2 shrink-0 text-xs text-muted-foreground">
-                          ...
-                        </span>
-                      ) : null}
-                    </button>
-                    <button
-                      className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-medium transition-colors ${
-                        selectedBenchmarkPanel === "error-runs"
-                          ? "bg-accent text-accent-foreground"
-                          : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
-                      }`}
-                      type="button"
-                      aria-pressed={selectedBenchmarkPanel === "error-runs"}
-                      onClick={handleSelectErrorRuns}
-                    >
-                      <span className="min-w-0 flex-1 truncate">
-                        Failed runs
-                      </span>
-                      {errorRuns ? (
-                        <span className="ml-2 shrink-0 rounded-full border border-border bg-background/35 px-2 py-0.5 text-xs text-muted-foreground">
-                          {errorRuns.length}
-                        </span>
-                      ) : isLoadingErrorRuns ? (
-                        <span className="ml-2 shrink-0 text-xs text-muted-foreground">
-                          ...
-                        </span>
-                      ) : null}
-                    </button>
-                    <button
-                      className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-medium transition-colors ${
-                        selectedBenchmarkPanel === "failed-evaluations"
-                          ? "bg-accent text-accent-foreground"
-                          : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
-                      }`}
-                      type="button"
-                      aria-pressed={
-                        selectedBenchmarkPanel === "failed-evaluations"
-                      }
-                      onClick={handleSelectFailedEvaluations}
-                    >
-                      <span className="min-w-0 flex-1 truncate">
-                        Evaluation fails
-                      </span>
-                      {failedEvaluations ? (
-                        <span className="ml-2 shrink-0 rounded-full border border-border bg-background/35 px-2 py-0.5 text-xs text-muted-foreground">
-                          {failedEvaluations.length}
-                        </span>
-                      ) : isLoadingFailedEvaluations ? (
-                        <span className="ml-2 shrink-0 text-xs text-muted-foreground">
-                          ...
-                        </span>
-                      ) : null}
-                    </button>
-                  </section>
-                  {simulationGroups.map((group) => (
-                    <section className="grid gap-1" key={group.deckId}>
-                      <h2
-                        className="truncate px-2 pt-3 pb-1 text-xs font-bold tracking-[0.12em] text-foreground uppercase"
-                        title={group.deckName}
-                      >
-                        {group.deckName}
-                      </h2>
-                      <ul className="grid gap-1">
-                        {group.simulations.map((simulation) => {
-                          const isSelected =
-                            selectedBenchmarkPanel === "simulation" &&
-                            selectedSimulationEntry?.simulationId ===
-                              simulation.simulationId
-
-                          return (
-                            <li key={simulation.simulationId}>
-                              <button
-                                className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-medium transition-colors ${
-                                  isSelected
-                                    ? "bg-accent text-accent-foreground"
-                                    : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
-                                }`}
-                                type="button"
-                                aria-pressed={isSelected}
-                                onClick={() =>
-                                  handleSelectSimulation(
-                                    simulation.simulationId
-                                  )
-                                }
-                              >
-                                <span className="truncate">
-                                  {formatPublicBenchmarkSimulationLabel(
-                                    simulation
-                                  )}
-                                </span>
-                              </button>
-                            </li>
-                          )
-                        })}
-                      </ul>
-                    </section>
-                  ))}
-                </div>
-              </nav>
-            </aside>
-
-            <section className="h-full min-h-0 min-w-0 overflow-hidden">
-              {selectedBenchmarkPanel === "results" ? (
-                <PublicBenchmarkResultsPanel
-                  benchmarkResults={benchmarkResults}
-                  errorRunCount={errorRuns?.length ?? null}
-                  failedEvaluationCount={failedEvaluations?.length ?? null}
-                  isLoadingErrorRuns={isLoadingErrorRuns}
-                  isLoadingFailedEvaluations={isLoadingFailedEvaluations}
-                  isLoading={isLoadingBenchmarkResults}
-                  loadError={benchmarkResultsLoadError}
-                  onViewErrorRuns={handleSelectErrorRuns}
-                  onViewFailedEvaluations={handleSelectFailedEvaluations}
-                  onReload={() => void loadBenchmarkResults()}
-                />
-              ) : selectedBenchmarkPanel === "error-runs" ? (
-                <PublicBenchmarkErrorRunsPanel
-                  errorRuns={errorRuns}
-                  isLoading={isLoadingErrorRuns}
-                  loadError={errorRunsLoadError}
-                  onJumpToErrorRun={handleJumpToErrorRun}
-                  onReload={() => void loadErrorRuns()}
-                />
-              ) : selectedBenchmarkPanel === "failed-evaluations" ? (
-                <PublicBenchmarkFailedEvaluationsPanel
-                  failedEvaluations={failedEvaluations}
-                  isLoading={isLoadingFailedEvaluations}
-                  loadError={failedEvaluationsLoadError}
-                  onJumpToEvaluation={handleJumpToFailedEvaluation}
-                  onReload={() => void loadFailedEvaluations()}
-                />
-              ) : isLoadingSimulation ? (
-                <div className="simulation-scrollbar h-full min-h-0 overflow-y-auto p-5">
-                  <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
-                    Loading public benchmark simulation...
-                  </p>
-                </div>
-              ) : simulationLoadError ? (
-                <div className="simulation-scrollbar h-full min-h-0 overflow-y-auto p-5">
-                  <div className="flex flex-col gap-3 rounded-md border border-border bg-background/35 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="text-sm text-destructive">
-                      {simulationLoadError}
-                    </p>
+                {isBenchmarkSidebarCollapsed ? (
+                  <div className="flex h-full flex-col items-center px-2 py-2">
                     <Button
                       type="button"
-                      variant="outline"
-                      onClick={() => void loadSelectedSimulation()}
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-controls={PUBLIC_BENCHMARK_DESKTOP_SIDEBAR_ID}
+                      aria-expanded={false}
+                      aria-label="Expand benchmark navigation"
+                      title="Expand benchmark navigation"
+                      onClick={() => setIsBenchmarkSidebarCollapsed(false)}
                     >
-                      <RefreshCw data-icon="inline-start" />
-                      Try again
+                      <PanelLeftOpen />
                     </Button>
                   </div>
+                ) : (
+                  <>
+                    <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-2">
+                      <a
+                        className="min-w-0 truncate px-1 text-xs font-bold tracking-[0.12em] text-foreground uppercase transition-colors hover:text-sky-300 focus-visible:text-sky-300 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
+                        href="https://mtgautodeck.com"
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        MTG Auto Deck
+                      </a>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-controls={PUBLIC_BENCHMARK_DESKTOP_SIDEBAR_ID}
+                        aria-expanded={true}
+                        aria-label="Collapse benchmark navigation"
+                        title="Collapse benchmark navigation"
+                        onClick={() => setIsBenchmarkSidebarCollapsed(true)}
+                      >
+                        <PanelLeftClose />
+                      </Button>
+                    </div>
+                    <PublicBenchmarkSidebarNav
+                      errorRunCount={errorRuns?.length ?? null}
+                      failedEvaluationCount={failedEvaluations?.length ?? null}
+                      isLoadingBenchmarkResults={isLoadingBenchmarkResults}
+                      isLoadingErrorRuns={isLoadingErrorRuns}
+                      isLoadingFailedEvaluations={isLoadingFailedEvaluations}
+                      selectedBenchmarkPanel={selectedBenchmarkPanel}
+                      selectedSimulationEntry={selectedSimulationEntry}
+                      simulationGroups={simulationGroups}
+                      onSelectBenchmarkResults={handleSelectBenchmarkResults}
+                      onSelectErrorRuns={handleSelectErrorRuns}
+                      onSelectFailedEvaluations={handleSelectFailedEvaluations}
+                      onSelectSimulation={handleSelectSimulation}
+                    />
+                  </>
+                )}
+              </aside>
+
+              <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
+                <div className="flex shrink-0 items-center border-b border-border bg-background/95 px-3 py-2 lg:hidden">
+                  <Button
+                    ref={benchmarkSidebarOpenButtonRef}
+                    type="button"
+                    variant="outline"
+                    size="icon-sm"
+                    aria-controls={PUBLIC_BENCHMARK_MOBILE_SIDEBAR_ID}
+                    aria-expanded={isBenchmarkSidebarOverlayOpen}
+                    aria-label="Open benchmark navigation"
+                    title="Open benchmark navigation"
+                    onClick={() => setIsBenchmarkSidebarOverlayOpen(true)}
+                  >
+                    <PanelLeftOpen />
+                  </Button>
                 </div>
-              ) : publicSimulation ? (
-                <SimulationDetails
-                  canUpgradeUsage={false}
-                  cards={publicSimulation.deck.cards}
-                  commanders={publicSimulation.deck.commanders}
-                  defaultTimelineSelection="opening_hand"
-                  deckId={publicSimulation.deck.id}
-                  initialResultsInfo={publicSimulation.results}
-                  isAdmin={false}
-                  isLoadingStartingHand={false}
-                  modelPresets={[]}
-                  onOpenDetails={() => {}}
-                  onSimulationUpdated={(simulation) =>
-                    setPublicSimulation((currentSimulation) =>
-                      currentSimulation
-                        ? {
-                            ...currentSimulation,
-                            simulation,
-                          }
-                        : currentSimulation
-                    )
-                  }
-                  onUpgradeUsage={() => {}}
-                  onTimelineTurnSelected={handleTimelineTurnSelected}
-                  readOnly={true}
-                  requestedTimelineRunId={requestedTimelineRunId}
-                  requestedTimelineTurn={requestedTimelineTurn}
-                  showBenchmarkEvaluations={true}
-                  showRunCost={false}
-                  shouldStreamResults={false}
-                  simulation={publicSimulation.simulation}
-                  startingHand={publicSimulation.startingHand}
-                  startingHandLoadError={null}
-                />
-              ) : null}
-            </section>
-          </div>
+
+                <div className="min-h-0 flex-1 overflow-hidden">
+                  {selectedBenchmarkPanel === "results" ? (
+                    <PublicBenchmarkResultsPanel
+                      benchmark={benchmarkIndex.benchmark}
+                      benchmarkResults={benchmarkResults}
+                      errorRunCount={errorRuns?.length ?? null}
+                      failedEvaluationCount={failedEvaluations?.length ?? null}
+                      isLoadingErrorRuns={isLoadingErrorRuns}
+                      isLoadingFailedEvaluations={isLoadingFailedEvaluations}
+                      isLoading={isLoadingBenchmarkResults}
+                      loadError={benchmarkResultsLoadError}
+                      onViewErrorRuns={handleSelectErrorRuns}
+                      onViewFailedEvaluations={handleSelectFailedEvaluations}
+                      onReload={() => void loadBenchmarkResults()}
+                    />
+                  ) : selectedBenchmarkPanel === "error-runs" ? (
+                    <PublicBenchmarkErrorRunsPanel
+                      errorRuns={errorRuns}
+                      isLoading={isLoadingErrorRuns}
+                      loadError={errorRunsLoadError}
+                      onJumpToErrorRun={handleJumpToErrorRun}
+                      onReload={() => void loadErrorRuns()}
+                    />
+                  ) : selectedBenchmarkPanel === "failed-evaluations" ? (
+                    <PublicBenchmarkFailedEvaluationsPanel
+                      failedEvaluations={failedEvaluations}
+                      isLoading={isLoadingFailedEvaluations}
+                      loadError={failedEvaluationsLoadError}
+                      onJumpToEvaluation={handleJumpToFailedEvaluation}
+                      onReload={() => void loadFailedEvaluations()}
+                    />
+                  ) : isLoadingSimulation ? (
+                    <div className="simulation-scrollbar h-full min-h-0 overflow-y-auto p-5">
+                      <p className="rounded-md border border-border bg-background/35 px-3 py-2 text-sm text-muted-foreground">
+                        Loading public benchmark simulation...
+                      </p>
+                    </div>
+                  ) : simulationLoadError ? (
+                    <div className="simulation-scrollbar h-full min-h-0 overflow-y-auto p-5">
+                      <div className="flex flex-col gap-3 rounded-md border border-border bg-background/35 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-sm text-destructive">
+                          {simulationLoadError}
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => void loadSelectedSimulation()}
+                        >
+                          <RefreshCw data-icon="inline-start" />
+                          Try again
+                        </Button>
+                      </div>
+                    </div>
+                  ) : publicSimulation ? (
+                    <SimulationDetails
+                      canUpgradeUsage={false}
+                      cards={publicSimulation.deck.cards}
+                      commanders={publicSimulation.deck.commanders}
+                      defaultTimelineSelection="opening_hand"
+                      deckId={publicSimulation.deck.id}
+                      initialResultsInfo={publicSimulation.results}
+                      isAdmin={false}
+                      isLoadingStartingHand={false}
+                      modelPresets={[]}
+                      onOpenDetails={() => {}}
+                      onSimulationUpdated={(simulation) =>
+                        setPublicSimulation((currentSimulation) =>
+                          currentSimulation
+                            ? {
+                                ...currentSimulation,
+                                simulation,
+                              }
+                            : currentSimulation
+                        )
+                      }
+                      onUpgradeUsage={() => {}}
+                      onTimelineTurnSelected={handleTimelineTurnSelected}
+                      readOnly={true}
+                      requestedTimelineRunId={requestedTimelineRunId}
+                      requestedTimelineTurn={requestedTimelineTurn}
+                      showBenchmarkEvaluations={true}
+                      showRunCost={false}
+                      shouldStreamResults={false}
+                      simulation={publicSimulation.simulation}
+                      startingHand={publicSimulation.startingHand}
+                      startingHandLoadError={null}
+                    />
+                  ) : null}
+                </div>
+              </section>
+            </div>
+
+            {isBenchmarkSidebarOverlayOpen ? (
+              <div
+                className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm lg:hidden"
+                role="presentation"
+                onMouseDown={() => setIsBenchmarkSidebarOverlayOpen(false)}
+              >
+                <section
+                  aria-label="Benchmark navigation"
+                  aria-modal="true"
+                  className="public-benchmark-sidebar-overlay-panel simulation-sidebar-surface flex h-svh w-[min(20rem,calc(100vw-3rem))] max-w-full flex-col border-r border-border shadow-2xl shadow-black/50"
+                  id={PUBLIC_BENCHMARK_MOBILE_SIDEBAR_ID}
+                  role="dialog"
+                  onMouseDown={(event) => event.stopPropagation()}
+                >
+                  <header className="flex h-14 shrink-0 items-center justify-end border-b border-border px-3">
+                    <Button
+                      ref={benchmarkSidebarCloseButtonRef}
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Close benchmark navigation"
+                      title="Close benchmark navigation"
+                      onClick={() => setIsBenchmarkSidebarOverlayOpen(false)}
+                    >
+                      <X />
+                    </Button>
+                  </header>
+                  <PublicBenchmarkSidebarNav
+                    errorRunCount={errorRuns?.length ?? null}
+                    failedEvaluationCount={failedEvaluations?.length ?? null}
+                    isLoadingBenchmarkResults={isLoadingBenchmarkResults}
+                    isLoadingErrorRuns={isLoadingErrorRuns}
+                    isLoadingFailedEvaluations={isLoadingFailedEvaluations}
+                    selectedBenchmarkPanel={selectedBenchmarkPanel}
+                    selectedSimulationEntry={selectedSimulationEntry}
+                    simulationGroups={simulationGroups}
+                    onSelectBenchmarkResults={
+                      handleBenchmarkSidebarOverlaySelectBenchmarkResults
+                    }
+                    onSelectErrorRuns={
+                      handleBenchmarkSidebarOverlaySelectErrorRuns
+                    }
+                    onSelectFailedEvaluations={
+                      handleBenchmarkSidebarOverlaySelectFailedEvaluations
+                    }
+                    onSelectSimulation={
+                      handleBenchmarkSidebarOverlaySelectSimulation
+                    }
+                  />
+                </section>
+              </div>
+            ) : null}
+          </>
         ) : null}
       </section>
     </main>
   )
 }
 
+function PublicBenchmarkSidebarNav({
+  errorRunCount,
+  failedEvaluationCount,
+  isLoadingBenchmarkResults,
+  isLoadingErrorRuns,
+  isLoadingFailedEvaluations,
+  selectedBenchmarkPanel,
+  selectedSimulationEntry,
+  simulationGroups,
+  onSelectBenchmarkResults,
+  onSelectErrorRuns,
+  onSelectFailedEvaluations,
+  onSelectSimulation,
+}: {
+  errorRunCount: number | null
+  failedEvaluationCount: number | null
+  isLoadingBenchmarkResults: boolean
+  isLoadingErrorRuns: boolean
+  isLoadingFailedEvaluations: boolean
+  selectedBenchmarkPanel: PublicBenchmarkSelectedPanel
+  selectedSimulationEntry: PublicBenchmarkSimulationIndexEntry | null
+  simulationGroups: readonly PublicBenchmarkSimulationGroup[]
+  onSelectBenchmarkResults: () => void
+  onSelectErrorRuns: () => void
+  onSelectFailedEvaluations: () => void
+  onSelectSimulation: (simulationId: string) => void
+}) {
+  return (
+    <nav
+      className="simulation-scrollbar min-h-0 flex-1 overflow-y-auto"
+      aria-label="Benchmark simulations"
+    >
+      <div className="px-2 py-2">
+        <section className="grid gap-1">
+          <button
+            className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-medium transition-colors ${
+              selectedBenchmarkPanel === "results"
+                ? "bg-accent text-accent-foreground"
+                : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+            }`}
+            type="button"
+            aria-pressed={selectedBenchmarkPanel === "results"}
+            onClick={onSelectBenchmarkResults}
+          >
+            <span className="min-w-0 flex-1 truncate">Results</span>
+            <span className="ml-2 shrink-0 rounded-full border border-border bg-background/35 px-2 py-0.5 text-xs text-muted-foreground">
+              score
+            </span>
+            {isLoadingBenchmarkResults ? (
+              <span className="ml-2 shrink-0 text-xs text-muted-foreground">
+                ...
+              </span>
+            ) : null}
+          </button>
+          <button
+            className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-medium transition-colors ${
+              selectedBenchmarkPanel === "error-runs"
+                ? "bg-accent text-accent-foreground"
+                : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+            }`}
+            type="button"
+            aria-pressed={selectedBenchmarkPanel === "error-runs"}
+            onClick={onSelectErrorRuns}
+          >
+            <span className="min-w-0 flex-1 truncate">Failed runs</span>
+            {errorRunCount !== null ? (
+              <span className="ml-2 shrink-0 rounded-full border border-border bg-background/35 px-2 py-0.5 text-xs text-muted-foreground">
+                {errorRunCount}
+              </span>
+            ) : isLoadingErrorRuns ? (
+              <span className="ml-2 shrink-0 text-xs text-muted-foreground">
+                ...
+              </span>
+            ) : null}
+          </button>
+          <button
+            className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-medium transition-colors ${
+              selectedBenchmarkPanel === "failed-evaluations"
+                ? "bg-accent text-accent-foreground"
+                : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+            }`}
+            type="button"
+            aria-pressed={selectedBenchmarkPanel === "failed-evaluations"}
+            onClick={onSelectFailedEvaluations}
+          >
+            <span className="min-w-0 flex-1 truncate">Evaluation fails</span>
+            {failedEvaluationCount !== null ? (
+              <span className="ml-2 shrink-0 rounded-full border border-border bg-background/35 px-2 py-0.5 text-xs text-muted-foreground">
+                {failedEvaluationCount}
+              </span>
+            ) : isLoadingFailedEvaluations ? (
+              <span className="ml-2 shrink-0 text-xs text-muted-foreground">
+                ...
+              </span>
+            ) : null}
+          </button>
+        </section>
+        {simulationGroups.map((group) => (
+          <section className="grid gap-1" key={group.deckId}>
+            <h2
+              className="truncate px-2 pt-3 pb-1 text-xs font-bold tracking-[0.12em] text-foreground uppercase"
+              title={group.deckName}
+            >
+              {group.deckName}
+            </h2>
+            <ul className="grid gap-1">
+              {group.simulations.map((simulation) => {
+                const isSelected =
+                  selectedBenchmarkPanel === "simulation" &&
+                  selectedSimulationEntry?.simulationId ===
+                    simulation.simulationId
+
+                return (
+                  <li key={simulation.simulationId}>
+                    <button
+                      className={`flex h-11 w-full items-center rounded-md px-3 text-left text-sm font-medium transition-colors ${
+                        isSelected
+                          ? "bg-accent text-accent-foreground"
+                          : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+                      }`}
+                      type="button"
+                      aria-pressed={isSelected}
+                      onClick={() =>
+                        onSelectSimulation(simulation.simulationId)
+                      }
+                    >
+                      <span className="truncate">
+                        {formatPublicBenchmarkSimulationLabel(simulation)}
+                      </span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          </section>
+        ))}
+      </div>
+    </nav>
+  )
+}
+
 function PublicBenchmarkResultsPanel({
+  benchmark,
   benchmarkResults,
   errorRunCount,
   failedEvaluationCount,
@@ -1692,6 +1919,7 @@ function PublicBenchmarkResultsPanel({
   onViewFailedEvaluations,
   onReload,
 }: {
+  benchmark: PublicBenchmarkMetadata
   benchmarkResults: PublicBenchmarkResultsExportV2 | null
   errorRunCount: number | null
   failedEvaluationCount: number | null
@@ -1713,6 +1941,18 @@ function PublicBenchmarkResultsPanel({
   return (
     <div className="simulation-scrollbar h-full min-h-0 overflow-y-auto p-5">
       <section className="mx-auto grid w-full max-w-6xl gap-4">
+        <div className="grid gap-1">
+          <p className="text-sm font-medium tracking-[0.18em] text-sky-300 uppercase">
+            Benchmark
+          </p>
+          <h1 className="text-2xl font-semibold text-foreground sm:text-3xl">
+            {getPublicBenchmarkModelTitle(benchmark)}
+          </h1>
+          <p className="text-sm break-words text-muted-foreground">
+            {getPublicBenchmarkDetailsText(benchmark)}
+          </p>
+        </div>
+
         <div className="grid gap-1">
           <h2 className="text-lg font-semibold text-foreground">Results</h2>
         </div>
@@ -7434,7 +7674,9 @@ function formatPublicBenchmarkResultCount(value: number) {
 }
 
 function formatPublicBenchmarkResultOptionalCount(value: number | undefined) {
-  return typeof value === "number" ? formatPublicBenchmarkResultCount(value) : "-"
+  return typeof value === "number"
+    ? formatPublicBenchmarkResultCount(value)
+    : "-"
 }
 
 function formatPublicBenchmarkResultScore(value: number | null) {
