@@ -90,6 +90,13 @@ const date = "June 7, 2026"
 
         <div class="article-body">
           <section class="article-body-section">
+            <h2>Results</h2>
+            <p>
+              Click on the benchmark results in the charts above to view all the simulations and failures for each benchmark.
+            </p>
+          </section>
+
+          <section class="article-body-section">
             <h2>How the benchmark works</h2>
             <p>
               The main idea is that if an LLM is smart enough to play good magic, then it is also smart enough to not need a rules engine.
@@ -164,9 +171,27 @@ const date = "June 7, 2026"
           </section>
 
           <section class="article-body-section">
-            <h2>Title</h2>
+            <h2>Over eager tool calling</h2>
             <p>
-              Put explanation text here.
+              This benchmark punishes models that are too eager to call tools more than most benchmarks.
+              In many cases, tool calls are only retrieving information, so if a model calls too many tools, the only downside
+              is wasted input tokens and context window for the tool results. Even if the tool mutates state, it can usually
+              be undone so the final result is correct.
+            </p>
+            <p>
+              This is not the case when simulation magic. If you draw a card, then realize that was a mistake, you can't just put it back.
+              Even if you do return the card to the deck, you now know what that card is, so the simulation is illegal.
+            </p>
+            <p>
+              A common failure mode was the model starting a tool call, then realizing it was a mistake and having no way to correct it.
+              All MCP functions have a required reason field. If you look at
+              <a
+                href="https://app.mtgautodeck.com/public/benchmarks/6349dda2-4069-4825-971e-8c11234260c4?simulation=14d0d2df-c5af-4c78-83ed-6131ff589b34&run=ad893839-5bbd-4695-8fe2-1a3e80d0dd8b&turn=1"
+                target="_blank"
+                rel="noreferrer noopener">this example from Opus 4.8</a
+              >,
+              you can see that it draws a card for turn with reason "Draw for turn", then returns the card to the deck with reason "No-op check not needed; cancel".
+              It then proceeds to return a card named "x" to the deck with reason "noop", then again with reason "stop".
             </p>
           </section>
 
