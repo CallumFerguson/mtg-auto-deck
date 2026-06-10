@@ -3759,6 +3759,7 @@ test("summarizes latest benchmark evaluations only", () => {
       totalEvaluationCostUsd: 0.18,
       resultMetrics: {
         plannedOpeningHandCount: 0,
+        attemptedOpeningHandCount: 0,
         plannedTurnCount: 0,
         attemptedTurnCount: 0,
         completedTurnCount: 0,
@@ -3773,7 +3774,9 @@ test("summarizes latest benchmark evaluations only", () => {
         costPerAttemptedTurn: null,
         costPerCompletedTurn: null,
         costPerMtgAutoDeckScorePoint: null,
+        reasoningTokensPerAttemptedOpeningHand: null,
         reasoningTokensPerAttemptedTurn: null,
+        reasoningTokensByTurn: [],
         inputTokensPerAttemptedTurn: null,
         cachedInputTokensPerAttemptedTurn: null,
         cachedInputTokenPercent: null,
@@ -3858,7 +3861,10 @@ test("scores benchmark result metrics across every planned slot", () => {
         input_tokens_details: {
           cached_tokens: 999999,
         },
-        output_tokens: 1,
+        output_tokens: 41,
+        output_tokens_details: {
+          reasoning_tokens: 40,
+        },
         total_tokens: 1000000,
       },
     }),
@@ -3916,6 +3922,7 @@ test("scores benchmark result metrics across every planned slot", () => {
   })
 
   assert.equal(metrics.plannedOpeningHandCount, 1)
+  assert.equal(metrics.attemptedOpeningHandCount, 1)
   assert.equal(metrics.plannedTurnCount, 5)
   assert.equal(metrics.attemptedTurnCount, 2)
   assert.equal(metrics.completedTurnCount, 1)
@@ -3928,7 +3935,35 @@ test("scores benchmark result metrics across every planned slot", () => {
   assert.equal(metrics.totalRunCostUsd, 0.6)
   assert.equal(metrics.costPerAttemptedTurn, 0.25)
   assert.equal(metrics.costPerCompletedTurn, 0.5)
+  assert.equal(metrics.reasoningTokensPerAttemptedOpeningHand, 40)
   assert.equal(metrics.reasoningTokensPerAttemptedTurn, 15)
+  assert.deepEqual(metrics.reasoningTokensByTurn, [
+    {
+      turnNumber: 1,
+      attemptedTurnCount: 1,
+      reasoningTokensPerAttemptedTurn: 20,
+    },
+    {
+      turnNumber: 2,
+      attemptedTurnCount: 1,
+      reasoningTokensPerAttemptedTurn: 10,
+    },
+    {
+      turnNumber: 3,
+      attemptedTurnCount: 0,
+      reasoningTokensPerAttemptedTurn: null,
+    },
+    {
+      turnNumber: 4,
+      attemptedTurnCount: 0,
+      reasoningTokensPerAttemptedTurn: null,
+    },
+    {
+      turnNumber: 5,
+      attemptedTurnCount: 0,
+      reasoningTokensPerAttemptedTurn: null,
+    },
+  ])
   assert.equal(metrics.inputTokensPerAttemptedTurn, 10000)
   assert.equal(metrics.cachedInputTokensPerAttemptedTurn, 9000)
   assert.equal(metrics.cachedInputTokenPercent, 90)

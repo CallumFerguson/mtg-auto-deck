@@ -98,8 +98,15 @@ export type BenchmarkEvaluationResultDeckMetrics = {
   reasoningTokensPerAttemptedTurn: number | null
 }
 
+export type BenchmarkEvaluationReasoningTokensByTurn = {
+  turnNumber: number
+  attemptedTurnCount: number
+  reasoningTokensPerAttemptedTurn: number | null
+}
+
 export type BenchmarkEvaluationResultMetrics = {
   plannedOpeningHandCount: number
+  attemptedOpeningHandCount: number
   plannedTurnCount: number
   attemptedTurnCount: number
   completedTurnCount: number
@@ -114,7 +121,9 @@ export type BenchmarkEvaluationResultMetrics = {
   costPerAttemptedTurn: number | null
   costPerCompletedTurn: number | null
   costPerMtgAutoDeckScorePoint: number | null
+  reasoningTokensPerAttemptedOpeningHand: number | null
   reasoningTokensPerAttemptedTurn: number | null
+  reasoningTokensByTurn: BenchmarkEvaluationReasoningTokensByTurn[]
   inputTokensPerAttemptedTurn: number | null
   cachedInputTokensPerAttemptedTurn: number | null
   cachedInputTokenPercent: number | null
@@ -396,9 +405,18 @@ export function buildBenchmarkEvaluationResultMetrics({
   }
 
   const deckMetricsById = new Map<string, BenchmarkEvaluationDeckAccumulator>()
+  const turnReasoningTokenAccumulators = Array.from(
+    { length: normalizedTurnsToSimulate },
+    (_, index) => ({
+      turnNumber: index + 1,
+      attemptedTurnCount: 0,
+      reasoningTokens: 0,
+    })
+  )
   const openingHandScores: number[] = []
   const turnScores: number[] = []
   let plannedOpeningHandCount = 0
+  let attemptedOpeningHandCount = 0
   let plannedTurnCount = 0
   let attemptedTurnCount = 0
   let completedTurnCount = 0
@@ -406,6 +424,7 @@ export function buildBenchmarkEvaluationResultMetrics({
   let legalPassCount = 0
   let strategicPassCount = 0
   let totalRunCostUsd = 0
+  let openingHandReasoningTokens = 0
   let turnRunCostUsd = 0
   let turnReasoningTokens = 0
   let turnInputTokens = 0
@@ -444,6 +463,10 @@ export function buildBenchmarkEvaluationResultMetrics({
     })
 
     if (openingRun) {
+      const openingHandTokenUsage = getLlmTokenUsageCounts(openingRun.usage)
+
+      attemptedOpeningHandCount += 1
+      openingHandReasoningTokens += openingHandTokenUsage.reasoningTokens
       totalRunCostUsd += getBenchmarkRunCostUsd(openingRun)
       plannedRunIds.add(openingRun.targetLlmRunId)
     }
@@ -492,6 +515,14 @@ export function buildBenchmarkEvaluationResultMetrics({
       turnRunCostUsd += turnCostUsd
       deckMetrics.turnRunCostUsd += turnCostUsd
       turnReasoningTokens += tokenUsage.reasoningTokens
+      const turnReasoningTokenAccumulator =
+        turnReasoningTokenAccumulators[turnNumber - 1]
+
+      if (turnReasoningTokenAccumulator) {
+        turnReasoningTokenAccumulator.attemptedTurnCount += 1
+        turnReasoningTokenAccumulator.reasoningTokens +=
+          tokenUsage.reasoningTokens
+      }
       turnInputTokens += tokenUsage.inputTokens ?? 0
       turnCachedInputTokens += tokenUsage.cachedInputTokens ?? 0
       turnTotalTokens += tokenUsage.totalTokens ?? 0
@@ -527,6 +558,7 @@ export function buildBenchmarkEvaluationResultMetrics({
 
   return {
     plannedOpeningHandCount,
+    attemptedOpeningHandCount,
     plannedTurnCount,
     attemptedTurnCount,
     completedTurnCount,
@@ -555,8 +587,20 @@ export function buildBenchmarkEvaluationResultMetrics({
     costPerMtgAutoDeckScorePoint: roundNullableBenchmarkCost(
       divide(totalRunCostUsd, mtgAutoDeckScore ?? 0)
     ),
+    reasoningTokensPerAttemptedOpeningHand: roundNullableBenchmarkTokenRate(
+      divide(openingHandReasoningTokens, attemptedOpeningHandCount)
+    ),
     reasoningTokensPerAttemptedTurn: roundNullableBenchmarkTokenRate(
       divide(turnReasoningTokens, attemptedTurnCount)
+    ),
+    reasoningTokensByTurn: turnReasoningTokenAccumulators.map(
+      ({ attemptedTurnCount, reasoningTokens, turnNumber }) => ({
+        turnNumber,
+        attemptedTurnCount,
+        reasoningTokensPerAttemptedTurn: roundNullableBenchmarkTokenRate(
+          divide(reasoningTokens, attemptedTurnCount)
+        ),
+      })
     ),
     inputTokensPerAttemptedTurn: roundNullableBenchmarkTokenRate(
       divide(turnInputTokens, attemptedTurnCount)

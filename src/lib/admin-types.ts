@@ -130,6 +130,7 @@ export type AdminBenchmarkEvaluationSummary = {
 
 export type AdminBenchmarkEvaluationResultMetrics = {
   plannedOpeningHandCount: number
+  attemptedOpeningHandCount: number
   plannedTurnCount: number
   attemptedTurnCount: number
   completedTurnCount: number
@@ -144,12 +145,20 @@ export type AdminBenchmarkEvaluationResultMetrics = {
   costPerAttemptedTurn: number | null
   costPerCompletedTurn: number | null
   costPerMtgAutoDeckScorePoint: number | null
+  reasoningTokensPerAttemptedOpeningHand: number | null
   reasoningTokensPerAttemptedTurn: number | null
+  reasoningTokensByTurn: AdminBenchmarkEvaluationReasoningTokensByTurn[]
   inputTokensPerAttemptedTurn: number | null
   cachedInputTokensPerAttemptedTurn: number | null
   cachedInputTokenPercent: number | null
   totalTokensPerAttemptedTurn: number | null
   decks: AdminBenchmarkEvaluationResultDeckMetrics[]
+}
+
+export type AdminBenchmarkEvaluationReasoningTokensByTurn = {
+  turnNumber: number
+  attemptedTurnCount: number
+  reasoningTokensPerAttemptedTurn: number | null
 }
 
 export type AdminBenchmarkEvaluationResultDeckMetrics = {

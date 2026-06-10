@@ -539,6 +539,12 @@ function BenchmarkEvaluationResultMetrics({
           )}
         />
         <BenchmarkEvaluationMetric
+          label="Reasoning tokens / opening hand"
+          value={formatBenchmarkEvaluationTokenRate(
+            resultMetrics.reasoningTokensPerAttemptedOpeningHand
+          )}
+        />
+        <BenchmarkEvaluationMetric
           label="Reasoning tokens / turn"
           value={formatBenchmarkEvaluationTokenRate(
             resultMetrics.reasoningTokensPerAttemptedTurn
@@ -577,7 +583,58 @@ function BenchmarkEvaluationResultMetrics({
         />
       </div>
 
+      <BenchmarkEvaluationReasoningTokensByTurnTable
+        turns={resultMetrics.reasoningTokensByTurn}
+      />
       <BenchmarkEvaluationDeckMetricsTable decks={resultMetrics.decks} />
+    </section>
+  )
+}
+
+function BenchmarkEvaluationReasoningTokensByTurnTable({
+  turns,
+}: {
+  turns: AdminBenchmarkEvaluationResultMetrics["reasoningTokensByTurn"]
+}) {
+  if (turns.length === 0) {
+    return null
+  }
+
+  return (
+    <section className="grid gap-2" aria-label="Reasoning tokens by turn">
+      <h4 className="text-xs font-semibold text-muted-foreground uppercase">
+        Reasoning tokens by turn
+      </h4>
+      <div className="overflow-x-auto rounded-md border border-border bg-black/20">
+        <table className="min-w-[440px] text-left text-sm">
+          <thead className="border-b border-border bg-background/45 text-xs text-muted-foreground uppercase">
+            <tr>
+              <th className="px-3 py-2 font-medium">Turn</th>
+              <th className="px-3 py-2 text-right font-medium">Attempted</th>
+              <th className="px-3 py-2 text-right font-medium">
+                Reasoning / turn
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {turns.map((turn) => (
+              <tr key={turn.turnNumber}>
+                <td className="px-3 py-2 font-medium text-foreground">
+                  Turn {formatBenchmarkEvaluationInteger(turn.turnNumber)}
+                </td>
+                <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
+                  {formatBenchmarkEvaluationInteger(turn.attemptedTurnCount)}
+                </td>
+                <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
+                  {formatBenchmarkEvaluationTokenRate(
+                    turn.reasoningTokensPerAttemptedTurn
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </section>
   )
 }

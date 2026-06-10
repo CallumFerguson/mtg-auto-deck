@@ -316,6 +316,12 @@ test("builds benchmark results export from planned-slot result metrics", () => {
         openingHandIsValid: true,
         gameState: null,
         turnActions: null,
+        usage: {
+          output_tokens: 20,
+          output_tokens_details: {
+            reasoning_tokens: 12,
+          },
+        },
         costUsd: 0.01,
       }),
       createLatestRun({
@@ -380,6 +386,7 @@ test("builds benchmark results export from planned-slot result metrics", () => {
   })
   assert.equal(resultsExport.exportedAt, "2026-06-04T12:00:00.000Z")
   assert.equal(resultsExport.resultMetrics.plannedOpeningHandCount, 1)
+  assert.equal(resultsExport.resultMetrics.attemptedOpeningHandCount, 1)
   assert.equal(resultsExport.resultMetrics.plannedTurnCount, 5)
   assert.equal(resultsExport.resultMetrics.attemptedTurnCount, 2)
   assert.equal(resultsExport.resultMetrics.completedTurnCount, 1)
@@ -397,7 +404,38 @@ test("builds benchmark results export from planned-slot result metrics", () => {
     resultsExport.resultMetrics.costPerMtgAutoDeckScorePoint,
     0.002097902
   )
+  assert.equal(
+    resultsExport.resultMetrics.reasoningTokensPerAttemptedOpeningHand,
+    12
+  )
   assert.equal(resultsExport.resultMetrics.reasoningTokensPerAttemptedTurn, 20)
+  assert.deepEqual(resultsExport.resultMetrics.reasoningTokensByTurn, [
+    {
+      turnNumber: 1,
+      attemptedTurnCount: 1,
+      reasoningTokensPerAttemptedTurn: 30,
+    },
+    {
+      turnNumber: 2,
+      attemptedTurnCount: 1,
+      reasoningTokensPerAttemptedTurn: 10,
+    },
+    {
+      turnNumber: 3,
+      attemptedTurnCount: 0,
+      reasoningTokensPerAttemptedTurn: null,
+    },
+    {
+      turnNumber: 4,
+      attemptedTurnCount: 0,
+      reasoningTokensPerAttemptedTurn: null,
+    },
+    {
+      turnNumber: 5,
+      attemptedTurnCount: 0,
+      reasoningTokensPerAttemptedTurn: null,
+    },
+  ])
   assert.equal(resultsExport.resultMetrics.inputTokensPerAttemptedTurn, 60)
   assert.equal(
     resultsExport.resultMetrics.cachedInputTokensPerAttemptedTurn,
