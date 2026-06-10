@@ -109,11 +109,91 @@ const date = "June 7, 2026"
         <div class="article-body">
           <section class="article-body-section">
             <h2>Overview</h2>
-            <p>A brief overview before I get into the most interesting results, the opus 4.8 and fabel 5 results.</p>
+            <p>
+              This project started as pasting a decklist into ChatGPT and asking it to
+              <a
+                href="https://mtg.fandom.com/wiki/Goldfishing"
+                target="_blank"
+                rel="noreferrer noopener">goldfish</a
+              >
+              (play against no opponents) the deck. Unsuprisingly, it could not do random actions fairly. It would always draw a perfect starting hand with the best cards.
+            </p>
+            <p>
+              But asking it to write a program any time it needs a source of randomness worked better than I expected.
+              It put all the cards into a list, then could randomize the list and pop elements off the list to draw cards. It could also handle every edge case, like
+              <a
+                href="https://scryfall.com/card/akh/4/approach-of-the-second-sun"
+                target="_blank"
+                rel="noreferrer noopener">putting a card seventh from the top</a
+              >
+              or rolling dice.
+            </p>
+            <p>
+              Writing a program for every deck interaction is slow, and it can still see the order of the cards. The obvious solution is to make a set of library interaction tools for the LLM to use.
+            </p>
           </section>
 
           <section class="article-body-section">
-            <h2>Why did Opus 4.8 perform poorly?</h2>
+            <h2>How the benchmark works</h2>
+            <p>
+              The main idea is that if an LLM is smart enough to play good magic, then it is also smart enough to not need a rules engine.
+              A rules engine that enforces legal actions would improve the performance floor, but I don't think it would improve the overall quality of the simulation.
+            </p>
+            <p>
+              Each LLM call has access to an MCP server with primitive library operations. It can do things like draw a card from the top of the deck, return card to bottom of deck, and shuffle.
+              To simulate more advanced operations, like
+              <a
+                href="https://mtg.fandom.com/wiki/Scry"
+                target="_blank"
+                rel="noreferrer noopener">scry</a
+              >
+              or
+              <a
+                href="https://mtg.fandom.com/wiki/Surveil"
+                target="_blank"
+                rel="noreferrer noopener">surveil</a
+              >,
+              it can use multiple library tool calls.
+            </p>
+            <p>
+              Everything other than the library and actions like rolling a die is handled by the LLM. Legality checks and scoring for the benchmarks was all done with gpt-5.5 (medium).
+              From my testing, LLMs were much better at evaluating if a simulated turn was legal than they were at actually performing a legal turn simulation.
+            </p>
+          </section>
+
+          <section class="article-body-section">
+            <h2>Why I choose to use an MCP server</h2>
+            <p>
+              I have full control over all of the data and the LLM api calls, so why use MCP instead of basic function/tool calling?
+            </p>
+            <p>
+              The main reason is that OpenAI and Anthropic allow you to provide a remote MCP server url in an api request.
+              This means that OpenAI or Anthropic handle the agent loop. This has two major benifits.
+            </p>
+          </section>
+
+          <section class="article-body-section">
+            <h2>asdf</h2>
+            <p>a</p>
+          </section>
+
+          <section class="article-body-section">
+            <h2>asdf</h2>
+            <p>a</p>
+          </section>
+
+          <section class="article-body-section">
+            <h2>asdf</h2>
+            <p>a</p>
+          </section>
+
+          <section class="article-body-section">
+            <h2>asdf</h2>
+            <p>a</p>
+          </section>
+
+          <section class="article-body-section">
+            <h2>Why Opus 4.8 performed poorly</h2>
             <p>
               put explanation text here. Look at
               <a
