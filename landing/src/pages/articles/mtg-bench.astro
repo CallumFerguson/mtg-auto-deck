@@ -88,24 +88,6 @@ const date = "June 7, 2026"
           </div>
         </section>
 
-        <section class="benchmark-chart-section">
-          <h2 class="benchmark-chart-heading">
-            Reasoning tokens per turn
-            <span>(lower is better) - click on bar to view simulations</span>
-          </h2>
-          <div
-            class="benchmark-chart-viewport"
-            data-mtg-bench-chart-viewport
-          >
-            <div
-              class="benchmark-score-chart benchmark-chart-scale-frame"
-              data-mtg-bench-reasoning-chart
-              role="group"
-              aria-label="Reasoning tokens per turn by benchmark, lower is better"
-            ></div>
-          </div>
-        </section>
-
         <div class="article-body">
           <section class="article-body-section">
             <h2>How the benchmark works</h2>
@@ -182,18 +164,24 @@ const date = "June 7, 2026"
           </section>
 
           <section class="article-body-section">
-            <h2>asdf</h2>
-            <p>a</p>
+            <h2>Title</h2>
+            <p>
+              Put explanation text here.
+            </p>
           </section>
 
           <section class="article-body-section">
-            <h2>asdf</h2>
-            <p>a</p>
+            <h2>Title</h2>
+            <p>
+              Put explanation text here.
+            </p>
           </section>
 
           <section class="article-body-section">
-            <h2>asdf</h2>
-            <p>a</p>
+            <h2>Title</h2>
+            <p>
+              Put explanation text here.
+            </p>
           </section>
 
           <section class="article-body-section">
@@ -207,6 +195,31 @@ const date = "June 7, 2026"
               >.
             </p>
           </section>
+
+          <!-- <section class="benchmark-chart-section">
+            <h2 class="benchmark-chart-heading">
+              Reasoning tokens per turn
+              <span>(lower is better) - click on bar to view simulations</span>
+            </h2>
+            <div
+              class="benchmark-chart-viewport"
+              data-mtg-bench-chart-viewport
+            >
+              <div
+                class="benchmark-score-chart benchmark-chart-scale-frame"
+                data-mtg-bench-reasoning-chart
+                role="group"
+                aria-label="Reasoning tokens per turn by benchmark, lower is better"
+              ></div>
+            </div>
+          </section>
+
+          <section class="article-body-section">
+            <h2>Token efficiency</h2>
+            <p>
+              Token efficiency explanation.
+            </p>
+          </section> -->
         </div>
       </article>
     </main>
@@ -1641,6 +1654,19 @@ const date = "June 7, 2026"
     font-size: 1.18rem;
     font-weight: 900;
     line-height: 1.2;
+  }
+
+  .article-body > .benchmark-chart-section {
+    margin-top: 0.35rem;
+  }
+
+  .article-body > .benchmark-chart-section .benchmark-chart-heading {
+    margin-bottom: 0.55rem;
+    font-size: 1.18rem;
+  }
+
+  .article-body > .benchmark-chart-section .benchmark-chart-heading span {
+    font-size: 0.92rem;
   }
 
   .article-body p {
