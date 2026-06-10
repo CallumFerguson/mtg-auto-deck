@@ -2312,14 +2312,18 @@ function PublicBenchmarkReasoningTokensTable({
         Reasoning Tokens
       </h3>
       <div className="overflow-hidden rounded-md border border-border bg-background/35">
-        <div className="simulation-scrollbar simulation-scrollbar-no-gutter overflow-x-auto">
-          <table className="w-full min-w-[32rem] text-sm">
+        <div className="min-w-0">
+          <table className="w-full table-fixed text-xs sm:text-sm">
             <thead className="border-b border-border bg-muted/25 text-xs text-muted-foreground uppercase">
               <tr>
-                <th className="px-3 py-2 text-left font-medium">Phase</th>
-                <th className="px-3 py-2 text-right font-medium">num runs</th>
-                <th className="px-3 py-2 text-right font-medium">
-                  Avg reasoning tokens
+                <th className="w-[38%] px-2 py-2 text-left font-medium sm:px-3">
+                  Phase
+                </th>
+                <th className="w-[22%] px-2 py-2 text-right font-medium sm:px-3">
+                  Runs
+                </th>
+                <th className="w-[40%] px-2 py-2 text-right font-medium sm:px-3">
+                  Avg tokens
                 </th>
               </tr>
             </thead>
@@ -2327,15 +2331,15 @@ function PublicBenchmarkReasoningTokensTable({
               {hasExportedBreakdown ? (
                 <>
                   <tr>
-                    <td className="px-3 py-2 font-medium text-foreground">
+                    <td className="px-2 py-2 font-medium break-words text-foreground sm:px-3">
                       Opening hand
                     </td>
-                    <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
+                    <td className="px-2 py-2 text-right text-muted-foreground tabular-nums sm:px-3">
                       {formatPublicBenchmarkResultOptionalCount(
                         metrics.attemptedOpeningHandCount
                       )}
                     </td>
-                    <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
+                    <td className="px-2 py-2 text-right text-muted-foreground tabular-nums sm:px-3">
                       {formatPublicBenchmarkResultTokenRate(
                         metrics.reasoningTokensPerAttemptedOpeningHand ?? null
                       )}
@@ -2343,15 +2347,15 @@ function PublicBenchmarkReasoningTokensTable({
                   </tr>
                   {turnRows.map((turn) => (
                     <tr key={turn.turnNumber}>
-                      <td className="px-3 py-2 font-medium text-foreground">
+                      <td className="px-2 py-2 font-medium break-words text-foreground sm:px-3">
                         Turn {formatPublicBenchmarkResultCount(turn.turnNumber)}
                       </td>
-                      <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
+                      <td className="px-2 py-2 text-right text-muted-foreground tabular-nums sm:px-3">
                         {formatPublicBenchmarkResultCount(
                           turn.attemptedTurnCount
                         )}
                       </td>
-                      <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
+                      <td className="px-2 py-2 text-right text-muted-foreground tabular-nums sm:px-3">
                         {formatPublicBenchmarkResultTokenRate(
                           turn.reasoningTokensPerAttemptedTurn
                         )}
@@ -2362,7 +2366,7 @@ function PublicBenchmarkReasoningTokensTable({
               ) : (
                 <tr>
                   <td
-                    className="px-3 py-3 text-sm text-muted-foreground"
+                    className="px-2 py-3 text-sm text-muted-foreground sm:px-3"
                     colSpan={3}
                   >
                     Reasoning token breakdown was not exported for this
