@@ -91,8 +91,49 @@ const date = "June 7, 2026"
           <section class="article-body-section">
             <h2>Results</h2>
             <p>
-              Click on the benchmark results in the charts above to view all the simulations and failures for each benchmark.
+              Click on the charts above to view each benchmark's simulations.
             </p>
+            <h3>Example successes</h3>
+            <ol>
+              <li>
+                <a
+                href="https://app.mtgautodeck.com/public/benchmarks/f360847d-fbb6-466e-8715-75d1928d6b0b?simulation=8d5f2c18-0428-4555-81f4-3dc4948b8a4a&turn=1"
+                target="_blank"
+                rel="noreferrer noopener">Fable 5 plays a scry land and looks at the top card of the deck</a
+              >
+              </li>
+              <li>
+                <a
+                href="https://app.mtgautodeck.com/public/benchmarks/0b5b448b-d276-461b-85ea-542593639e35?simulation=4918197c-8310-48e2-afb7-3266318b16f2&turn=5"
+                target="_blank"
+                rel="noreferrer noopener">Gemini 3.5 flash performs complex turn with scry, discover, and tutor effects</a
+              >
+              </li>
+            </ol>
+            <h3>Example failures</h3>
+            <ol>
+              <li>
+                <a
+                href="https://app.mtgautodeck.com/public/benchmarks/6349dda2-4069-4825-971e-8c11234260c4?simulation=4f815543-1abd-4cc7-9be1-efe1194a80fd&run=f7c47fe5-6a86-4991-96c5-73719cd1baa8&turn=1"
+                target="_blank"
+                rel="noreferrer noopener">Opus 4.8 erroneously returns a card to the deck then self reports the mistake</a
+              >
+              </li>
+              <li>
+                <a
+                href="https://app.mtgautodeck.com/public/benchmarks/79d1ed51-ca1d-4783-a71c-66e46af6e718?simulation=65b815bd-d3b0-4295-b01a-50eb5e8b4c91&run=b834f6e6-0796-47b6-9525-203aa3e83d63&turn=5"
+                target="_blank"
+                rel="noreferrer noopener">Gpt 5.5 forgets to return cards exiled with discover to the deck and self reports the mistake</a
+              >
+              </li>
+              <li>
+                <a
+                href="https://app.mtgautodeck.com/public/benchmarks/f360847d-fbb6-466e-8715-75d1928d6b0b?simulation=23dd7ee6-ea30-413c-b9c2-a88b1ca0e3ad&run=96b43eba-a442-4872-a390-1c5c86a5b5c0&turn=5"
+                target="_blank"
+                rel="noreferrer noopener">Fabel 5 makes a tool mistake, then silently tries to restart the turn (caught by evaluation later)</a
+              >
+              </li>
+            </ol>
           </section>
 
           <section class="article-body-section">
@@ -222,7 +263,7 @@ const date = "June 7, 2026"
               tools. And it is too expensive to run dozens of simulations in parallel and give you a summary.
             </p>
             <p>
-              As cheaper and better LLMs get released, I think there is some version of this app that would be useful. I can imagine running hundreds
+              As better cheaper LLMs get released, I think there is some version of this app that would be useful. I can imagine running hundreds
               of simulations, then giving statistical results about which cards are good and bad. Or automatically optimizing a deck by swapping out
               cards for you.
             </p>
@@ -1686,6 +1727,14 @@ const date = "June 7, 2026"
     font-size: 1.18rem;
     font-weight: 900;
     line-height: 1.2;
+  }
+
+  .article-body h3 {
+    margin: 0.2rem 0 0;
+    color: var(--text);
+    font-size: 1rem;
+    font-weight: 800;
+    line-height: 1.25;
   }
 
   .article-body > .benchmark-chart-section {
