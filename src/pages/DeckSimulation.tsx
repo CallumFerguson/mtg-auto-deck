@@ -221,6 +221,8 @@ type SimulationTimelineTurnSearchUpdateOptions = {
   historyMode?: "push" | "replace"
 }
 
+type SimulationResultsMobilePane = "results" | "game_state"
+
 const MIN_TURNS_TO_SIMULATE = 0
 const MAX_TURNS_TO_SIMULATE = 8
 const TURNS_TO_SIMULATE_STEP = 1
@@ -4841,25 +4843,74 @@ function SimulationResultsShell({
   header?: ReactNode
   skipGameStateAnimationKey?: number
 }) {
+  const [mobilePane, setMobilePane] =
+    useState<SimulationResultsMobilePane>("results")
+  const isResultsPaneActive = mobilePane === "results"
+  const isGameStatePaneActive = mobilePane === "game_state"
+
   return (
     <div className="flex h-full min-h-0 min-w-0 overflow-hidden">
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {header}
-        <div className="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,2fr)_minmax(0,3fr)] grid-rows-1 overflow-hidden">
+        <div className="shrink-0 border-b border-border bg-background px-3 py-2 lg:hidden">
+          <div className="grid w-full grid-cols-2 rounded-lg border border-border bg-card/70 p-1">
+            <SimulationResultsMobilePaneTab
+              isActive={isResultsPaneActive}
+              onClick={() => setMobilePane("results")}
+            >
+              Results
+            </SimulationResultsMobilePaneTab>
+            <SimulationResultsMobilePaneTab
+              isActive={isGameStatePaneActive}
+              onClick={() => setMobilePane("game_state")}
+            >
+              Game state
+            </SimulationResultsMobilePaneTab>
+          </div>
+        </div>
+        <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 grid-rows-1 overflow-hidden lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
           <section
-            className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden bg-background"
+            className={`min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden bg-background lg:flex ${
+              isResultsPaneActive ? "flex" : "hidden"
+            }`}
             aria-label="Simulation results"
           >
             {children}
           </section>
           <SimulationGameStatePane
             cardLookup={cardLookup}
+            className={isGameStatePaneActive ? "block" : "hidden"}
             gameState={gameState}
             skipAnimationKey={skipGameStateAnimationKey}
           />
         </div>
       </div>
     </div>
+  )
+}
+
+function SimulationResultsMobilePaneTab({
+  children,
+  isActive,
+  onClick,
+}: {
+  children: ReactNode
+  isActive: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      aria-pressed={isActive}
+      className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+        isActive
+          ? "bg-accent text-accent-foreground"
+          : "text-muted-foreground hover:bg-muted/45 hover:text-foreground"
+      }`}
+      type="button"
+      onClick={onClick}
+    >
+      {children}
+    </button>
   )
 }
 
@@ -8062,10 +8113,12 @@ function SimulationTurnActionsSurface({
 
 function SimulationGameStatePane({
   cardLookup,
+  className = "",
   gameState,
   skipAnimationKey,
 }: {
   cardLookup: SimulationCardLookup
+  className?: string
   gameState: SimulationGameStateDisplay | null
   skipAnimationKey: number
 }) {
@@ -8076,7 +8129,7 @@ function SimulationGameStatePane({
 
   return (
     <aside
-      className="simulation-scrollbar min-h-0 min-w-0 overflow-y-auto border-l border-border bg-background/70"
+      className={`simulation-scrollbar min-h-0 min-w-0 overflow-y-auto border-t border-border bg-background/70 lg:block lg:border-t-0 lg:border-l ${className}`}
       aria-label="Game state"
     >
       <section className="grid gap-4 p-5">
