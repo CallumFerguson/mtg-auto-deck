@@ -5937,7 +5937,7 @@ function SimulationResultsPanel({
     }
 
     return (
-      <header className="relative w-full shrink-0 bg-background px-5 py-3">
+      <header className="relative w-full shrink-0 bg-background py-3">
         <div className="w-full">
           <div
             ref={timelineScrollerRef}
