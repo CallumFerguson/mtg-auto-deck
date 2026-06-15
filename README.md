@@ -1,6 +1,12 @@
 # MTG Auto Deck
 
-[Try it for free here](https://mtgautodeck.com/)
+## Benchmark
+
+[View benchmarks here](https://mtgautodeck.com/articles/mtg-bench)
+
+![Bar graph](docs/bar-graph.png)
+
+![Scatter plot](docs/scatter-plot.png)
 
 ## Screenshots
 
