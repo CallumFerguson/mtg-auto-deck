@@ -1006,9 +1006,13 @@ function validateReasoningEffortForProvider(
     return
   }
 
-  if (reasoningEffort === "max") {
+  if (
+    reasoningEffort === "max" &&
+    provider !== "openai" &&
+    provider !== "openrouter"
+  ) {
     throw new LlmModelPresetValidationError(
-      "Max reasoning effort can only be used for Anthropic model presets."
+      "Max reasoning effort can only be used for OpenAI, OpenRouter, or Anthropic model presets."
     )
   }
 }

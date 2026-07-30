@@ -181,8 +181,12 @@ const ANTHROPIC_REASONING_EFFORT_OPTIONS: readonly ReasoningEffort[] = [
 ]
 
 function getReasoningEffortOptions(provider: LlmProvider) {
-  return provider === "anthropic"
-    ? ANTHROPIC_REASONING_EFFORT_OPTIONS
+  if (provider === "anthropic") {
+    return ANTHROPIC_REASONING_EFFORT_OPTIONS
+  }
+
+  return provider === "openai" || provider === "openrouter"
+    ? REASONING_EFFORT_OPTIONS
     : REASONING_EFFORT_OPTIONS.filter((effort) => effort !== "max")
 }
 

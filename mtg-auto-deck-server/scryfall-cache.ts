@@ -11,6 +11,8 @@ import { dirname, join } from "node:path"
 import { Readable } from "node:stream"
 import { pipeline } from "node:stream/promises"
 import { fileURLToPath } from "node:url"
+import { createGunzip } from "node:zlib"
+import { createJsonLinesToJsonArrayTransform } from "./json-lines.js"
 import { importScryfallOracleCardsToPostgres } from "./scryfall-postgres.js"
 
 const SERVER_NAME = "mtg-auto-deck-server"
@@ -43,6 +45,7 @@ type ScryfallBulkDataCatalog = {
 type ScryfallBulkDataItem = {
   type?: string
   download_uri?: string
+  jsonl_download_uri?: string
   updated_at?: string
 }
 
@@ -141,13 +144,15 @@ async function downloadScryfallOracleCards() {
   const oracleCardsBulkItem = getScryfallOracleCardsBulkItem(bulkDataCatalog)
   const downloadedAt = new Date().toISOString()
 
-  if (!oracleCardsBulkItem.download_uri) {
+  const download = getScryfallOracleCardsDownload(oracleCardsBulkItem)
+
+  if (!download) {
     throw new Error(
-      "Scryfall oracle_cards bulk item did not include download_uri."
+      "Scryfall oracle_cards bulk item did not include download_uri or jsonl_download_uri."
     )
   }
 
-  const response = await fetch(oracleCardsBulkItem.download_uri, {
+  const response = await fetch(download.uri, {
     headers: getScryfallRequestHeaders(),
   })
 
@@ -161,10 +166,19 @@ async function downloadScryfallOracleCards() {
     throw new Error("Scryfall oracle_cards download response had no body.")
   }
 
-  await pipeline(
-    Readable.fromWeb(response.body),
-    createWriteStream(SCRYFALL_ORACLE_CARDS_TEMP_PATH)
-  )
+  const responseStream = Readable.fromWeb(response.body)
+  const outputStream = createWriteStream(SCRYFALL_ORACLE_CARDS_TEMP_PATH)
+
+  if (download.format === "json-lines-gzip") {
+    await pipeline(
+      responseStream,
+      createGunzip(),
+      createJsonLinesToJsonArrayTransform(),
+      outputStream
+    )
+  } else {
+    await pipeline(responseStream, outputStream)
+  }
   await rename(SCRYFALL_ORACLE_CARDS_TEMP_PATH, SCRYFALL_ORACLE_CARDS_PATH)
   await writeScryfallOracleCardsMetadata(
     bulkDataCatalog,
@@ -195,6 +209,24 @@ async function downloadScryfallOracleCards() {
   console.error(
     `Downloaded and imported Scryfall oracle_cards data from ${SCRYFALL_ORACLE_CARDS_PATH}`
   )
+}
+
+function getScryfallOracleCardsDownload(item: ScryfallBulkDataItem) {
+  if (item.download_uri) {
+    return {
+      uri: item.download_uri,
+      format: "json-array" as const,
+    }
+  }
+
+  if (item.jsonl_download_uri) {
+    return {
+      uri: item.jsonl_download_uri,
+      format: "json-lines-gzip" as const,
+    }
+  }
+
+  return null
 }
 
 async function importCachedScryfallOracleCardsToPostgres(

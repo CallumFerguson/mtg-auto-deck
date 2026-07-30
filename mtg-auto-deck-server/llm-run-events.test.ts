@@ -245,6 +245,15 @@ test("builds OpenRouter reasoning options with summaries when enabled", () => {
   })
 })
 
+test("passes max reasoning effort through OpenAI and OpenRouter request options", () => {
+  assert.deepEqual(buildProviderReasoningOptions("max", false), {
+    effort: "max",
+  })
+  assert.deepEqual(buildOpenRouterReasoningOptions("max", false), {
+    effort: "max",
+  })
+})
+
 test("parses completed simulation run evaluation JSON", () => {
   assert.deepEqual(
     parseSimulationRunEvaluationCompletionFromResponseText(
@@ -2557,7 +2566,7 @@ test("validates Anthropic LLM config requirements with shared MCP URLs", () => {
   assert.equal(turnConfig.serviceTier, null)
 })
 
-test("validates Anthropic model preset provider constraints", () => {
+test("validates provider-specific model preset reasoning constraints", () => {
   const query = buildCreateLlmModelPresetInsertQuery({
     name: "Claude",
     provider: "anthropic",
@@ -2578,6 +2587,38 @@ test("validates Anthropic model preset provider constraints", () => {
   assert.equal(query.values[3], "max")
   assert.equal(query.values[5], false)
   assert.equal(query.values[10], 3.75)
+
+  const openAiQuery = buildCreateLlmModelPresetInsertQuery({
+    name: null,
+    provider: "openai",
+    model: "gpt-5.6",
+    reasoningEffort: "max",
+    openrouterModelProvider: null,
+    supportsFlex: false,
+    isFreeTier: false,
+    inputTokenCostUsdPerMillion: null,
+    cachedInputTokenCostUsdPerMillion: null,
+    outputTokenCostUsdPerMillion: null,
+    isEnabled: true,
+    isDefault: false,
+  })
+  const openRouterQuery = buildCreateLlmModelPresetInsertQuery({
+    name: null,
+    provider: "openrouter",
+    model: "openai/gpt-5.6",
+    reasoningEffort: "max",
+    openrouterModelProvider: "openai",
+    supportsFlex: false,
+    isFreeTier: false,
+    inputTokenCostUsdPerMillion: null,
+    cachedInputTokenCostUsdPerMillion: null,
+    outputTokenCostUsdPerMillion: null,
+    isEnabled: true,
+    isDefault: false,
+  })
+
+  assert.equal(openAiQuery.values[3], "max")
+  assert.equal(openRouterQuery.values[3], "max")
   assert.throws(
     () =>
       buildCreateLlmModelPresetInsertQuery({
@@ -2600,8 +2641,8 @@ test("validates Anthropic model preset provider constraints", () => {
     () =>
       buildCreateLlmModelPresetInsertQuery({
         name: null,
-        provider: "openai",
-        model: "gpt-5.4-mini",
+        provider: "llamacpp",
+        model: "local-model",
         reasoningEffort: "max",
         openrouterModelProvider: null,
         supportsFlex: false,
@@ -2612,7 +2653,7 @@ test("validates Anthropic model preset provider constraints", () => {
         isEnabled: true,
         isDefault: false,
       }),
-    /Max reasoning effort can only be used for Anthropic model presets\./
+    /Max reasoning effort can only be used for OpenAI, OpenRouter, or Anthropic model presets\./
   )
   assert.throws(
     () =>
